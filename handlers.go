@@ -21,7 +21,12 @@ func listOrders(c *gin.Context) {
 
 func createOrder(c *gin.Context) {
 	var o Order
-	c.BindJSON(&o)
+	err := c.BindJSON(&o)
+
+	if err != nil {
+		panic(err.Error())
+	}
+
 	DB.Create(&o)
 	c.JSON(http.StatusOK, o)
 }
@@ -59,4 +64,8 @@ func createInvoice(c *gin.Context) {
 	c.BindJSON(&i)
 	DB.Create(&i)
 	c.JSON(http.StatusOK, i)
+}
+
+func optionsHandler(c *gin.Context) {
+	c.JSON(http.StatusNoContent, nil)
 }

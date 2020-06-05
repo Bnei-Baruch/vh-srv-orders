@@ -3,7 +3,6 @@ package main
 import (
 	"log"
 
-	"github.com/gin-contrib/cors"
 	"github.com/joho/godotenv"
 )
 
@@ -19,7 +18,6 @@ func main() {
 
 	//Setup router and run on PORT
 	r := initRouter()
-	r.Use(cors.Default())
 	log.Println("Service is up on port", Conf["PORT"])
 	r.Run(Conf["PORT"])
 

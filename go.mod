@@ -15,6 +15,7 @@ require (
 	github.com/denisenkom/go-mssqldb v0.0.0-20200428022330-06a60b6afbbc // indirect
 	github.com/envoyproxy/go-control-plane v0.9.5 // indirect
 	github.com/gin-contrib/cors v1.3.1
+	github.com/gin-contrib/location v0.0.1
 	github.com/gin-gonic/gin v1.6.3
 	github.com/go-gl/glfw/v3.3/glfw v0.0.0-20200420212212-258d9bec320e // indirect
 	github.com/go-sql-driver/mysql v1.5.0 // indirect
@@ -28,6 +29,8 @@ require (
 	github.com/kr/text v0.2.0 // indirect
 	github.com/lib/pq v1.5.2 // indirect
 	github.com/mattn/go-sqlite3 v2.0.3+incompatible // indirect
+	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
+	github.com/modern-go/reflect2 v1.0.1 // indirect
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/rogpeppe/go-internal v1.6.0 // indirect
 	github.com/stretchr/objx v0.2.0 // indirect

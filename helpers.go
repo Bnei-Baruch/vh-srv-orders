@@ -41,8 +41,8 @@ func generateInvoice(p Payment) Invoice {
 		Postcode:  "W38 7EC",
 		Country:   "UK",
 
-		PreferedLanguage: "EN",
-		PaymentID:        p.ID,
+		OrderLanguage: "EN",
+		PaymentID:     p.ID,
 	}
 	return i
 }

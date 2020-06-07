@@ -10,7 +10,6 @@ import (
 )
 
 func TestDefaultEntryPoint(t *testing.T) {
-	initDB("mockdb")
 	r := initRouter()
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/orders/", nil)
@@ -22,7 +21,6 @@ func TestDefaultEntryPoint(t *testing.T) {
 }
 
 func TestDBCreateOrder(t *testing.T) {
-	initDB("mockdb")
 	o := generateOrders()
 	DB.Create(&o)
 	if DB.NewRecord(o) {
@@ -31,7 +29,6 @@ func TestDBCreateOrder(t *testing.T) {
 }
 
 func TestDBCreateOrderPaymentInvoice(t *testing.T) {
-	initDB("mockdb")
 	o := generateOrders()
 	DB.Create(&o)
 	if DB.NewRecord(o) {
@@ -52,5 +49,6 @@ func TestDBCreateOrderPaymentInvoice(t *testing.T) {
 func TestMain(m *testing.M) {
 	gin.SetMode(gin.TestMode)
 	initConf()
+	initDB("mockdb")
 	os.Exit(m.Run())
 }

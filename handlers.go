@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -20,21 +21,37 @@ func listOrders(c *gin.Context) {
 }
 
 func createOrder(c *gin.Context) {
-	var o Order
-	err := c.BindJSON(&o)
+	var req RequestOrder
+	err := c.BindJSON(&req)
 
 	if err != nil {
-		panic(err.Error())
+		log.Println("Err:", err)
+		c.JSON(http.StatusBadRequest, gin.H{"Error": err})
+		return
 	}
 
-	DB.Create(&o)
-	c.JSON(http.StatusOK, o)
+	o := Order{
+		Type:          req.Type,
+		ProductType:   req.ProductType,
+		RecuringFreq:  req.RecurringFreq,
+		Organization:  req.Organization,
+		Amount:        req.Amount,
+		Currency:      req.Currency,
+		Status:        "pending",
+		OrderLanguage: req.OrderLanguage,
+	}
+
+	fmt.Println(req)
+	fmt.Println(o)
+
+	//	DB.Create(&o)
+	c.JSON(http.StatusOK, req)
 }
 
 func createOrderAndPay(c *gin.Context) {
-	var o Order
-	c.BindJSON(&o)
-	DB.Create(&o)
+	var req RequestOrder
+	c.BindJSON(&req)
+	//DB.Create(&req)
 
 	var httpclient = &http.Client{Timeout: 10 * time.Second}
 	url := "https://checkout.kbb1.com/payments/new"

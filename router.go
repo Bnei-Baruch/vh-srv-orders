@@ -21,6 +21,18 @@ func initRouter() *gin.Engine {
 		orders.POST("/newandpay", createOrderAndPay)
 	}
 
+	accounts := r.Group("/accounts")
+	{
+		accounts.GET("/list", listAll)
+		accounts.GET("/ping", pingAccounts)
+		accounts.POST("/ping", echoAccounts)
+		accounts.POST("/new", new)
+		accounts.POST("/update/:id", update)
+		accounts.GET("/findByEmail/:email", findByEmail)
+		accounts.GET("/find/:id", find)
+		accounts.POST("/delete/:id", delete)
+	}
+
 	return r
 }
 

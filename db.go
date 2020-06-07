@@ -28,6 +28,7 @@ func initDB(dbtype string) {
 	DB.AutoMigrate(&Order{})
 	DB.AutoMigrate(&Payment{})
 	DB.AutoMigrate(&Invoice{})
+	DB.AutoMigrate(&Account{})
 }
 
 func connectSqlite() {

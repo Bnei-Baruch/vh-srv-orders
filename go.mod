@@ -9,7 +9,7 @@ require (
 	dmitri.shuralyov.com/gpu/mtl v0.0.0-20191203043605-d42048ed14fd // indirect
 	github.com/BurntSushi/xgb v0.0.0-20200324125942-20f126ea2843 // indirect
 	github.com/arthurgustin/godepth v0.0.0-20171011130725-f5fe4679cd33 // indirect
-	github.com/brianvoe/gofakeit/v5 v5.6.2 // indirect
+	github.com/brianvoe/gofakeit/v5 v5.6.2
 	github.com/cncf/udpa/go v0.0.0-20200508205342-3b31d022a144 // indirect
 	github.com/creack/pty v1.1.11 // indirect
 	github.com/denisenkom/go-mssqldb v0.0.0-20200428022330-06a60b6afbbc // indirect

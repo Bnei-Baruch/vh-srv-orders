@@ -3,9 +3,10 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
-	"time"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
@@ -20,7 +21,7 @@ func listOrders(c *gin.Context) {
 	}
 }
 
-func createOrder(c *gin.Context) {
+func handleCreateOrder(c *gin.Context) {
 	var req RequestOrder
 	err := c.BindJSON(&req)
 
@@ -30,46 +31,108 @@ func createOrder(c *gin.Context) {
 		return
 	}
 
-	o := Order{
-		Type:          req.Type,
-		ProductType:   req.ProductType,
-		RecuringFreq:  req.RecurringFreq,
-		Organization:  req.Organization,
-		Amount:        req.Amount,
-		Currency:      req.Currency,
-		Status:        "pending",
-		OrderLanguage: req.OrderLanguage,
-	}
-
-	fmt.Println(req)
-	fmt.Println(o)
-
-	//	DB.Create(&o)
-	c.JSON(http.StatusOK, req)
-}
-
-func createOrderAndPay(c *gin.Context) {
-	var req RequestOrder
-	c.BindJSON(&req)
-	//DB.Create(&req)
-
-	var httpclient = &http.Client{Timeout: 10 * time.Second}
-	url := "https://checkout.kbb1.com/payments/new"
-	r, err := httpclient.Get(url)
+	ord, err := createOrder(req)
 
 	if err != nil {
-		panic(err.Error())
+		c.JSON(http.StatusInternalServerError, gin.H{"Error": err})
+	} else {
+		c.JSON(http.StatusOK, ord)
 	}
-
-	defer r.Body.Close()
-
-	var res interface{}
-	json.NewDecoder(r.Body).Decode(res)
-
-	c.JSON(http.StatusOK, res)
 }
 
-func createPayment(c *gin.Context) {
+func handleCreateOrderAndPay(c *gin.Context) {
+	var req RequestOrder
+	err := c.BindJSON(&req)
+
+	if err != nil {
+		log.Println("Err:", err)
+		c.JSON(http.StatusBadRequest, gin.H{"Error": err})
+		return
+	}
+
+	ord, err := createOrder(req)
+
+	p, err := createPayment(req, ord)
+	paramx := "memb-" + strconv.FormatUint(uint64(p.ID), 10) + "-TB"
+	ordkey := "ord-" + strconv.FormatUint(uint64(ord.ID), 10) + "-TB"
+
+	extPay := RequestPayment{
+		UserKey: ordkey,
+
+		GoodURL:   req.SuccessURL,
+		ErrorURL:  req.ErrorURL,
+		CancelURL: req.CancelURL,
+
+		Name:         req.FirstName + " " + req.LastName,
+		Price:        req.Amount,
+		Currency:     req.Currency,
+		Email:        req.Email,
+		Phone:        "+NA",
+		Street:       req.Street,
+		City:         req.City,
+		Country:      "Undef",
+		Participans:  "1",
+		Details:      "Membership",
+		SKU:          req.SKU,
+		VAT:          "f",
+		Installments: 1,
+		Language:     req.OrderLanguage,
+		Reference:    paramx,
+		Organization: "ben2",
+	}
+
+	payload, err := json.Marshal(extPay)
+	resp, err := postJSON("POST", "https://checkout.kbb1.com/token/new", payload)
+	//resp, err := postJSON("POST", "https://checkout.kbb1.com/payments/new", payload)
+	defer resp.Body.Close()
+	fmt.Println("response Status:", resp.Status)
+	fmt.Println("response Headers:", resp.Header)
+	body, _ := ioutil.ReadAll(resp.Body)
+	parsableBody := string(body)
+	//actualURL := strings.Split(parsableBody, "'")[1]
+
+	fmt.Println("response URL:", parsableBody)
+	var i interface{}
+	json.Unmarshal(body, &i)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"Error": err})
+	} else {
+		//c.JSON(http.StatusOK, gin.H{"url": actualURL})
+		c.JSON(http.StatusOK, i)
+	}
+}
+
+func handlePaid(c *gin.Context) {
+	var rp RequestPaid
+	err := c.BindJSON(&rp)
+
+	if err != nil {
+		log.Println("Err:", err)
+		c.JSON(http.StatusBadRequest, gin.H{"Error": err})
+		return
+	}
+
+	p, err := updatePayment(rp)
+
+	if err != nil {
+		//createOrphanPayment(rp)
+		// TODO : ask grisha to return more info on error
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"Error": err})
+		return
+	}
+
+	updateOrderAfterPayment(p)
+	c.JSON(http.StatusOK, nil)
+	return
+}
+
+func handleReccuringsProcess(c *gin.Context) {
+	// getOrdersToProcess
+	// for each orderToProcess processPayment and update Order Status
+}
+
+func handleCreatePayment(c *gin.Context) {
 	var p Payment
 	c.BindJSON(&p)
 	DB.Create(&p)

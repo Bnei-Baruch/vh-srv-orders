@@ -17,7 +17,6 @@ lint:
 	
 build:
 	@go build . 
-	@mkdir bin 
 	@mv $(BUILD_NAME) bin	
 	@cp .env bin
 

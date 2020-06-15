@@ -1,0 +1,16 @@
+#Stored in /etc/systemd/system/orders.service
+[Unit]
+StopWhenUnneeded=false
+
+[Install]
+WantedBy=multi-user.target
+
+[Service]
+ExecStart=/usr/local/bin/orders
+WorkingDirectory=/home/yakov/app/services/orders/bin/
+User=yakov
+Restart=always
+RestartSec=5
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=%n

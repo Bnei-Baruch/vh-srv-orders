@@ -32,3 +32,12 @@ dbdown:
 
 install: 
 	@cp  $(BIN_DIR)/$(BUILD_NAME) $(INSTAL_DIR)
+
+config:
+	@echo "todo : add service config here"
+
+update:
+	@sudo systemctl stop orders.service
+	@cp  $(BIN_DIR)/$(BUILD_NAME) $(INSTAL_DIR)
+	@sudo systemctl start orders.service
+

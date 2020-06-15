@@ -123,6 +123,7 @@ func handlePaid(c *gin.Context) {
 	}
 
 	updateOrderAfterPayment(p)
+
 	c.JSON(http.StatusOK, nil)
 	return
 }

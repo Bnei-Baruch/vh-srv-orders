@@ -9,11 +9,12 @@ func countAccounts() int64 {
 // CreateOrUpdateAccount account
 func CreateOrUpdateAccount(a Account) uint {
 	var b Account
-	DB.Where("UserKey = ? and AccountType = ?", a.UserKey, a.AccountType).First(&b)
-	if b.ID == 0 {
-		DB.Create(&a)
-		return a.ID
-	}
+	DB.Where(&Account{UserKey: a.UserKey, AccountType: a.AccountType}).FirstOrCreate(&b)
+
+	// if ).RecordNotFound() {
+	// 	DB.Create(&a)
+	// 	return a.ID
+	// }
 	DB.Model(&b).Updates(a)
 	return b.ID
 }

@@ -84,18 +84,17 @@ func updatePayment(req RequestPaid) (Payment, error) {
 		return p, errors.New(req.Error)
 	}
 
-	orderid, err := strconv.ParseUint(strings.Split(req.UserKey, "-")[1], 10, 64)
+	orderid, err := strconv.ParseUint(strings.Split(req.UserKey, "-")[1], 10, 0)
 	if err != nil {
 		return p, err
 	}
-	paymentid, err := strconv.ParseUint(strings.Split(req.ParamX, "-")[1], 10, 64)
+	paymentid, err := strconv.ParseUint(strings.Split(req.ParamX, "-")[1], 10, 0)
 	if err != nil {
 		return p, err
 	}
 
 	// Get payment
-	DB.Where("OrderID = ? and ID = ?", orderid, paymentid).First(&p)
-	if p.ID == 0 {
+	if DB.Where(&Payment{OrderID: uint(orderid), ID: uint(paymentid)}).First(&p).RecordNotFound() {
 		return p, errors.New("Cannot find related Order for Payment")
 	}
 
@@ -109,6 +108,7 @@ func updatePayment(req RequestPaid) (Payment, error) {
 		p.Success = req.Success
 		p.PelecardToken = req.Token
 		p.TransactionID = req.TransactionID
+		p.CCBrand = req.CCBrand
 		p.CardHebrewName = req.CardHebrewName
 		p.CCAbroadCard = req.CCAbroadCard
 		p.CCCompanyClearer = req.CCCompanyClearer
@@ -120,7 +120,9 @@ func updatePayment(req RequestPaid) (Payment, error) {
 		p.DebitTotal = req.DebitTotal
 		p.DebitType = req.DebitType
 		p.FirstPaymentTotal = req.FirstPaymentTotal
-		p.JParam = req.TotalPayments
+		p.FixedPaymentTotal = req.FixedPaymentTotal
+		p.TotalPayments = req.TotalPayments
+		p.JParam = req.JParam
 		p.TransactionInitTime = req.TransactionInitTime
 		p.TransactionUpdateTime = req.TransactionUpdateTime
 		p.VoucherID = req.VoucherID

@@ -3,6 +3,7 @@ PKGS := $(shell go list ./... | grep -v /vendor)
 BIN_DIR := ./bin
 GOLINT := $(GOPATH)/bin/golint
 BUILD_NAME := orders
+INSTAL_DIR := /usr/local/bin/
 
 
 all: test build
@@ -27,4 +28,6 @@ dbup:
 
 dbdown:
 	@docker-compose -f postgre.yml down
-	
+
+install: 
+	@cp  $(BIN_DIR)/$(BUILD_NAME) $(INSTAL_DIR)

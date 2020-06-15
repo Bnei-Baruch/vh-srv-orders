@@ -53,8 +53,8 @@ func handleCreateOrderAndPay(c *gin.Context) {
 	ord, err := createOrder(req)
 
 	p, err := createPayment(req, ord)
-	paramx := "memb-" + strconv.FormatUint(uint64(p.ID), 10) + "-TB"
-	ordkey := "ord-" + strconv.FormatUint(uint64(ord.ID), 10) + "-TB"
+	paramx := "mb-" + strconv.FormatUint(uint64(p.ID), 10) + Conf["SUFX"]
+	ordkey := "ord-" + strconv.FormatUint(uint64(ord.ID), 10) + Conf["SUFX"]
 
 	extPay := RequestPayment{
 		UserKey: ordkey,

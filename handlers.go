@@ -56,12 +56,15 @@ func handleCreateOrderAndPay(c *gin.Context) {
 	paramx := "mb-" + strconv.FormatUint(uint64(p.ID), 10) + Conf["SUFX"]
 	ordkey := "ord-" + strconv.FormatUint(uint64(ord.ID), 10) + Conf["SUFX"]
 
+	errorurl := req.ErrorURL + "/" + ordkey + "/" + paramx
+	cancelurl := req.CancelURL + "/" + ordkey + "/" + paramx
+
 	extPay := RequestPayment{
 		UserKey: ordkey,
 
 		GoodURL:   req.SuccessURL,
-		ErrorURL:  req.ErrorURL,
-		CancelURL: req.CancelURL,
+		ErrorURL:  errorurl,
+		CancelURL: cancelurl,
 
 		Name:         req.FirstName + " " + req.LastName,
 		Price:        req.Amount,

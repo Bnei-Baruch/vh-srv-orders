@@ -30,6 +30,14 @@ dbup:
 dbdown:
 	@docker-compose -f postgre.yml down
 
+dbimport:
+	@docker stop bborders_go_dev
+	@docker rm bborders_go_dev
+	@docker-compose -f postgre.yml up -d 
+	@sleep 10
+	@docker exec -i bborders_go_dev psql -U gorm gorm < ./data/import.pgsql
+
+
 install: 
 	@cp  $(BIN_DIR)/$(BUILD_NAME) $(INSTAL_DIR)
 

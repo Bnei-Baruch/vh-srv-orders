@@ -16,10 +16,11 @@ func initRouter() *gin.Engine {
 	orders := r.Group("/orders")
 	{
 		orders.GET("/", listOrders)
-		//orders.OPTIONS("/new", optionsHandler)
 		orders.POST("/new", handleCreateOrder)
 		orders.POST("/paid", handlePaid)
 		orders.POST("/newandpay", handleCreateOrderAndPay)
+		orders.POST("/renew/:id", handleRenew)
+		orders.GET("/count/:filter", handleCount)
 	}
 
 	accounts := r.Group("/accounts")

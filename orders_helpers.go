@@ -9,9 +9,15 @@ import (
 	"time"
 )
 
-func countsOrders() int64 {
+func countsAllOrders() int64 {
 	var result int64
 	DB.Model(&Order{}).Count(&result)
+	return result
+}
+
+func countsFilteredOrders(filter string) int64 {
+	var result int64
+	DB.Model(&Order{}).Where("\"Status\" = ?", filter).Count(&result)
 	return result
 }
 

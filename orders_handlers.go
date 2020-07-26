@@ -21,6 +21,25 @@ func listOrders(c *gin.Context) {
 	}
 }
 
+func handleCount(c *gin.Context) {
+	var total int64
+	filter := string(c.Params.ByName("filter"))
+	switch filter {
+	case "all":
+		total = countsAllOrders()
+	case "paid":
+		total = countsFilteredOrders(filter)
+	case "failed":
+		total = countsFilteredOrders(filter)
+	case "pending":
+		total = countsFilteredOrders(filter)
+	default:
+		total = countsAllOrders()
+	}
+
+	c.JSON(http.StatusOK, gin.H{filter: total})
+}
+
 func handleCreateOrder(c *gin.Context) {
 	var req RequestOrder
 	err := c.BindJSON(&req)
@@ -152,4 +171,9 @@ func createInvoice(c *gin.Context) {
 
 func optionsHandler(c *gin.Context) {
 	c.JSON(http.StatusNoContent, nil)
+}
+
+func handleRenew(c *gin.Context) {
+	c.JSON(http.StatusOK, nil)
+	return
 }

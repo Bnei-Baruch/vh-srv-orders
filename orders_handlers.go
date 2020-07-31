@@ -40,6 +40,21 @@ func handleCount(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{filter: total})
 }
 
+func handlePelecardStatus(c *gin.Context) {
+	status := string(c.Params.ByName("status"))
+	switch status {
+	case "good":
+		c.String(http.StatusOK, "Good")
+	case "error":
+		c.String(http.StatusOK, "Error")
+	case "cancel":
+		c.String(http.StatusOK, "Canceled")
+	default:
+		c.String(http.StatusNotFound, "Status: %v", status)
+	}
+
+}
+
 func handleCreateOrder(c *gin.Context) {
 	var req RequestOrder
 	err := c.BindJSON(&req)
@@ -150,6 +165,19 @@ func handlePaid(c *gin.Context) {
 	return
 }
 
+func handleUpdateOrderStatus(c *gin.Context) {
+	status := string(c.Params.ByName("status"))
+	id := string(c.Params.ByName("id"))
+	oid, _ := strconv.ParseUint(id, 10, 64)
+
+	o := getOrderByID(uint(oid))
+	o.Status = status
+	DB.Model(&o).Updates(o)
+
+	c.JSON(http.StatusOK, o)
+	return
+}
+
 func handleReccuringsProcess(c *gin.Context) {
 	// getOrdersToProcess
 	// for each orderToProcess processPayment and update Order Status
@@ -174,6 +202,43 @@ func optionsHandler(c *gin.Context) {
 }
 
 func handleRenew(c *gin.Context) {
+	month := string(c.Params.ByName("month"))
+	m, err := strconv.ParseInt(month, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusNotAcceptable, gin.H{"error": "wrong type"})
+	}
+	count := findOrdersToRenew(int(m))
+	c.JSON(http.StatusOK, gin.H{"count": count})
+	return
+}
+
+func handleAnnotate(c *gin.Context) {
+	note := string(c.Params.ByName("note"))
+	id := string(c.Params.ByName("id"))
+	oid, _ := strconv.ParseUint(id, 10, 64)
+
+	addNoteToOrder(uint(oid), note)
 	c.JSON(http.StatusOK, nil)
+}
+
+func handleFlag(c *gin.Context) {
+	flag := string(c.Params.ByName("flag"))
+	switch flag {
+	case "duplicates":
+		count := flagDuplicateOrders(flag)
+		c.JSON(http.StatusOK, gin.H{"count": count})
+		return
+	default:
+		c.JSON(http.StatusNotFound, gin.H{"error": "flag unknown"})
+		return
+	}
+}
+
+func handleTest(c *gin.Context) {
+	// renewOrder(4)
+	// c.JSON(http.StatusOK, gin.H{"count": 0})
+	count := findOrdersToRenew(6)
+	fmt.Println(count)
+	c.JSON(http.StatusOK, gin.H{"count": count})
 	return
 }

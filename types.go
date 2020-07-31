@@ -20,9 +20,12 @@ type Order struct {
 
 	Amount        float32   `json:"Amount" gorm:"Column:Amount;type:varchar(85)" fake:"skip"`
 	Currency      string    `json:"Currency"  gorm:"Column:Currency;type:varchar(10)" fake:"{skip}"`
+	SKU           string    `json:"SKU"  gorm:"Column:SKU;type:varchar(30)" fake:"{skip}"`
 	Status        string    `json:"Status,omitempty" gorm:"Column:Status;type:varchar(85)" fake:"skip"`
 	OrderLanguage string    `json:"OrderLanguage,omitempty" gorm:"Column:OrderLanguage;type:varchar(10)" fake:"skip"`
 	PaymentDate   time.Time `json:"-" gorm:"Column:PaymentDate" fake:"skip"`
+	Note          string    `json:"-" gorm:"Column:Note;type:varchar(200)" fake:"skip"`
+	Flag          string    `json:"-" gorm:"Column:Flag;type:varchar(200)" fake:"skip"`
 
 	Payments []Payment `json:"Payments" gorm:"foreignkey:OrderID" fake:"{skip}"`
 }
@@ -41,6 +44,7 @@ type Payment struct {
 	OrderID       uint   `json:"OrderID" gorm:"Column:OrderID" fake:"{skip}" fake:"{skip}"`
 
 	ParamX          string `json:"​additional_details_param_x" gorm:"Column:ParamX" fake:"{skip}"`
+	Ordkey          string `json:"user_key" gorm:"Column:Ordkey" fake:"{skip}"`
 	AuthNo          string `json:"authNo" gorm:"Column:AuthNo" fake:"{skip}"`
 	ConfirmationKey string `json:"confirmation_key" gorm:"ConfirmationKey"`
 	Success         string `json:"success" gorm:"Success"`
@@ -150,6 +154,7 @@ type Account struct {
 	PaymentCardID       string `json:"PaymentCardID,omitempty" gorm:"Column:PaymentCardID;type:varchar(100)" fake:"skip"`
 	PaymentCardExpMonth int    `json:"PaymentCardExpMonth,omitempty" gorm:"Column:PaymentCardExpMonth;type:int" fake:"skip"`
 	PaymentCardExpYear  int    `json:"PaymentCardExpYear,omitempty" gorm:"Column:PaymentCardExpYear;type:int" fake:"skip"`
+	AuthNo              string `json:"authNo" gorm:"Column:AuthNo" fake:"{skip}"`
 	UserKey             string `json:"UserKCID,omitempty" gorm:"Column:UserKey;type:varchar(85)" fake:"skip"`
 }
 

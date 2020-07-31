@@ -2,7 +2,11 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io/ioutil"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -81,6 +85,26 @@ func createPayment(req RequestOrder, o Order) (Payment, error) {
 	DB.Create(&p)
 	return p, nil
 
+}
+
+func createPendingPayment(sum float32, oid uint) (Payment, error) {
+
+	p := Payment{
+		Amount:        sum,
+		PaymentType:   "pelecard",
+		OrderID:       oid,
+		PaymentStatus: "pending",
+	}
+
+	DB.Create(&p)
+
+	paramx := "mb-" + strconv.FormatUint(uint64(p.ID), 10) + Conf["SUFX"]
+	ordkey := "ord-" + strconv.FormatUint(uint64(oid), 10) + Conf["SUFX"]
+
+	p.ParamX = paramx
+	p.Ordkey = ordkey
+	DB.Model(&p).Updates(p)
+	return p, nil
 }
 
 func updatePayment(req RequestPaid) (Payment, error) {
@@ -243,4 +267,213 @@ func generateInvoice(p Payment) Invoice {
 		PaymentID:     p.ID,
 	}
 	return i
+}
+
+// Renewal function
+
+//Get Order
+func getOrderByID(orderID uint) Order {
+	var o Order
+	result := DB.Where(&Order{ID: orderID}).First(&o)
+
+	if result.Error != nil {
+		log.Printf("\n## ERROR - NO ORDER %v\n", orderID)
+	}
+
+	return o
+}
+
+//Get Payment
+func getPaymentForOrderID(orderID uint) Payment {
+	var p Payment
+	result := DB.Where(&Payment{OrderID: orderID, PaymentStatus: "success"}).First(&p)
+
+	if result.Error != nil {
+		log.Printf("\n## ERROR - NO PAYMENT for ORDER %v\n", orderID)
+	}
+	return p
+}
+
+// Get Account
+func getAccountForOrderID(orderID uint) Account {
+	var a Account
+	o := getOrderByID(orderID)
+	result := DB.Where(&Account{ID: o.AccountID}).First(&a)
+	if result.Error != nil {
+		log.Printf("\n## ERROR - NO ACCOUNT for ORDER %v\n", orderID)
+	}
+	return a
+}
+
+func createRequestPayByToken(a Account, o Order, p Payment) (RequestPayment, Payment) {
+	newp, _ := createPendingPayment(o.Amount, o.ID)
+	newp.PelecardToken = p.PelecardToken
+	newp.AuthNo = p.AuthNo
+
+	extPay := RequestPayment{
+		UserKey: newp.Ordkey,
+
+		GoodURL:    "http://ec41a043fda1.ngrok.io/pelecard/good",
+		ErrorURL:   "http://ec41a043fda1.ngrok.io/pelecard/error",
+		CancelURL:  "http://ec41a043fda1.ngrok.io/pelecard/cancel",
+		ApprovalNo: p.AuthNo,
+		Token:      p.PelecardToken,
+
+		Name:         a.FirstName + " " + a.LastName,
+		Price:        o.Amount,
+		Currency:     o.Currency,
+		Email:        a.Email,
+		Phone:        "+NA",
+		Street:       a.Street,
+		City:         a.City,
+		Country:      "Undef",
+		Participans:  "1",
+		Details:      "Membership",
+		SKU:          "40037",
+		VAT:          "f",
+		Installments: 1,
+		Language:     o.OrderLanguage,
+		Reference:    newp.ParamX,
+		Organization: "ben2",
+	}
+
+	return extPay, newp
+}
+
+func renewPaymentByToken(extPay RequestPayment) (interface{}, error) {
+	payload, _ := json.Marshal(extPay)
+	resp, err := postJSON("POST", "https://checkout.kbb1.com/token/charge", payload)
+	defer resp.Body.Close()
+	fmt.Println("response Status:", resp.Status)
+	fmt.Println("response Headers:", resp.Header)
+	body, _ := ioutil.ReadAll(resp.Body)
+	parsableBody := string(body)
+	//actualURL := strings.Split(parsableBody, "'")[1]
+
+	fmt.Println("response URL:", parsableBody)
+	var i interface{}
+	json.Unmarshal(body, &i)
+	fmt.Println(i)
+	return i, err
+}
+
+func renewOrder(orderID uint) string {
+	/*
+			get account by order
+			if no token in account
+			get payment for order
+			extract token
+			make payment by token
+			if payment successfull (handled in /pelecard good then ... )
+			TODO update account with token
+			TODO update order
+
+		var a Account
+
+	*/
+	o := getOrderByID(orderID)
+	p := getPaymentForOrderID(orderID)
+	a := getAccountForOrderID(orderID)
+
+	// if a.PaymentToken == "" {
+	// 	fmt.Printf("##\nTOKEN IS NULL \n##\n")
+	// 	a.PaymentToken = p.PelecardToken
+	// 	// add other parameter
+	// 	// parse payment card stuff (split and convert to int)
+	// 	DB.Model(&a).Updates(a)
+	// }
+
+	pr, newp := createRequestPayByToken(a, o, p)
+	resp, err := renewPaymentByToken(pr)
+	if err != nil {
+		newp.PaymentStatus = "failed"
+		newp.Success = "0"
+	}
+	answers := resp.(map[string]interface{})
+	if answers["status"].(string) == "success" {
+		newp.PaymentStatus = "success"
+		newp.Success = "1"
+	} else {
+		newp.PaymentStatus = "failed"
+		newp.Success = "0"
+	}
+	DB.Model(&newp).Updates(newp)
+	updateOrderAfterPayment(newp)
+	return newp.Success
+}
+
+func findOrdersToRenew(month int) int {
+	rows, err := DB.Raw("Select ID from orders Where \"Status\" = 'paid' and \"Type\" = 'recurring' and \"Flag\" is null and date_part('month', \"PaymentDate\") = ? order by id asc ", month).Rows() // (*sql.Rows, error)
+	if err != nil {
+		return -1
+	}
+	defer rows.Close()
+	var count int
+	var id int
+	count = 0
+	for rows.Next() {
+		rows.Scan(&id)
+		status := renewOrder(uint(id))
+		//status := "1"
+		if status == "1" {
+			count++
+		} else {
+			log.Printf("## Error with %v", id)
+		}
+	}
+	return count
+}
+
+func flagDuplicateOrders(ProductType string) int {
+	req := `select "AccountID" as id, count(*) as "duplicate" 
+from orders where "Status" = 'paid' 
+group by "AccountID" 
+having count(*) > 1
+order by duplicate desc`
+
+	rows, err := DB.Raw(req).Rows() // (*sql.Rows, error)
+	if err != nil {
+		return -1
+	}
+	defer rows.Close()
+	var count int
+	var id int
+	count = 0
+	var b int
+	for rows.Next() {
+		rows.Scan(&id, &b)
+		flagOrdersByAccountID(id, "duplicate")
+		count++
+	}
+	return count
+}
+
+func addNoteToOrder(oid uint, note string) {
+	o := getOrderByID(uint(oid))
+	o.Note = note
+	DB.Model(&o).Updates(o)
+}
+func addFlagToOrder(oid uint, flag string) {
+	o := getOrderByID(uint(oid))
+	o.Flag = flag
+	DB.Model(&o).Updates(o)
+}
+
+func flagOrdersByAccountID(aid int, flag string) int {
+	req := `select id from orders where "AccountID" = ? and "Status" = 'paid'`
+	rows, err := DB.Raw(req, aid).Rows() // (*sql.Rows, error)
+	if err != nil {
+		return -1
+	}
+	defer rows.Close()
+	var count int
+	var id int
+	count = 0
+	for rows.Next() {
+		rows.Scan(&id)
+		addFlagToOrder(uint(id), flag)
+		count++
+	}
+	return count
+
 }

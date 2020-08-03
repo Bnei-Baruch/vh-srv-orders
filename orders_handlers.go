@@ -40,6 +40,35 @@ func handleCount(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{filter: total})
 }
 
+func handleCountByMonth(c *gin.Context) {
+	var total int64
+	filter := string(c.Params.ByName("filter"))
+	month := string(c.Params.ByName("month"))
+	//TODO check value of filter and month
+	total = countsAllOrdersByMonth(filter, month)
+	c.JSON(http.StatusOK, gin.H{
+		filter:  total,
+		"month": month,
+	})
+}
+
+func handleCountByMonthAndCurrency(c *gin.Context) {
+	var total int64
+	var sum float32
+	sum = 0
+	filter := string(c.Params.ByName("filter"))
+	month := string(c.Params.ByName("month"))
+	currency := string(c.Params.ByName("currency"))
+	//TODO check value of filter and month
+	total, sum = countsAllOrdersByMonthAndCurrency(filter, month, currency)
+	c.JSON(http.StatusOK, gin.H{
+		filter:     total,
+		"month":    month,
+		"currency": currency,
+		"sum":      sum,
+	})
+}
+
 func handlePelecardStatus(c *gin.Context) {
 	status := string(c.Params.ByName("status"))
 	switch status {

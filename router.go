@@ -53,6 +53,7 @@ func initRouter() *gin.Engine {
 		accounts.POST("/update/:id", update)
 		accounts.GET("/findByEmail/:email", findByEmail)
 		accounts.GET("/find/:id", find)
+		accounts.GET("/count", handleCountAccounts)
 		accounts.POST("/delete/:id", delete)
 	}
 

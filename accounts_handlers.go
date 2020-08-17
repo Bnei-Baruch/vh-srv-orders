@@ -77,3 +77,8 @@ func delete(c *gin.Context) {
 	fmt.Println(d)
 	c.JSON(200, gin.H{"id #" + id: "deleted"})
 }
+
+func handleCountAccounts(c *gin.Context) {
+	total := countAccounts()
+	c.JSON(200, gin.H{"total": total})
+}

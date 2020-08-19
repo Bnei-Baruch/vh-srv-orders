@@ -28,3 +28,10 @@ Select count(*)
 from orders
 Where "Status" = 'paid' and date_part('month', "PaymentDate") = 6
 
+
+-- All failed transaction
+select a."FirstName", a."LastName", p."ParamX", p."CCNumber", p."CCExpDate"
+from accounts as a, payments as p, orders as o 
+where p."PaymentStatus" = 'failed'
+and p."OrderID" = o.id
+and o."AccountID" = a.id 

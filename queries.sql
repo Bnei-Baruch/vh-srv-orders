@@ -35,3 +35,38 @@ from accounts as a, payments as p, orders as o
 where p."PaymentStatus" = 'failed'
 and p."OrderID" = o.id
 and o."AccountID" = a.id 
+
+
+-- Orders from Account by Email
+select * from orders
+where "AccountID" in (select id from accounts as a where a."Email" = 'rakelaisra66@gmail.com' )
+
+
+-- Mails for order of a certain sum
+select a."Email"  
+from orders as o, accounts as a  
+where o."Status"= 'paid' and o."Amount"= '100' and o."Currency" = 'USD'
+and o."AccountID" = a.id
+
+
+-- Blabla query subscriptions stuff for frontend
+select 
+o.id, 
+o.created_at, 
+o."Amount",
+o."Currency",
+o."PaymentDate", 
+o."Status",
+o."Flag", 
+o."Note",
+a."FirstName", a."LastName",
+a."Email", a."Country", 
+o."OrderLanguage" 
+from orders as o, accounts as a 
+where o."AccountID" = a.id
+and o."Status" <> 'pending'
+
+
+
+
+

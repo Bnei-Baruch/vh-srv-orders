@@ -11,7 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func listOrders(c *gin.Context) {
+func handleOrdersList(c *gin.Context) {
 	var o []Order
 	if err := DB.Find(&o).Error; err != nil {
 		c.AbortWithStatus(404)
@@ -21,7 +21,7 @@ func listOrders(c *gin.Context) {
 	}
 }
 
-func handleCount(c *gin.Context) {
+func handleOrdersCount(c *gin.Context) {
 	var total int64
 	filter := string(c.Params.ByName("filter"))
 	switch filter {
@@ -40,7 +40,7 @@ func handleCount(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{filter: total})
 }
 
-func handleCountByMonth(c *gin.Context) {
+func handleOrdersCountByMonth(c *gin.Context) {
 	var total int64
 	filter := string(c.Params.ByName("filter"))
 	month := string(c.Params.ByName("month"))
@@ -52,7 +52,7 @@ func handleCountByMonth(c *gin.Context) {
 	})
 }
 
-func handleCountByMonthAndCurrency(c *gin.Context) {
+func handleOrdersCountByMonthAndCurrency(c *gin.Context) {
 	var total int64
 	var sum float32
 	sum = 0
@@ -69,22 +69,8 @@ func handleCountByMonthAndCurrency(c *gin.Context) {
 	})
 }
 
-func handlePelecardStatus(c *gin.Context) {
-	status := string(c.Params.ByName("status"))
-	switch status {
-	case "good":
-		c.String(http.StatusOK, "Good")
-	case "error":
-		c.String(http.StatusOK, "Error")
-	case "cancel":
-		c.String(http.StatusOK, "Canceled")
-	default:
-		c.String(http.StatusNotFound, "Status: %v", status)
-	}
-
-}
-
-func handleCreateOrder(c *gin.Context) {
+//TODO: Rewrite and merge with new & pay
+func handleOrdersCreate(c *gin.Context) {
 	var req RequestOrder
 	err := c.BindJSON(&req)
 
@@ -169,7 +155,7 @@ func handleCreateOrderAndPay(c *gin.Context) {
 	}
 }
 
-func handlePaid(c *gin.Context) {
+func handleOrdersPaid(c *gin.Context) {
 	var rp RequestPaid
 	err := c.BindJSON(&rp)
 
@@ -194,7 +180,7 @@ func handlePaid(c *gin.Context) {
 	return
 }
 
-func handleUpdateOrderStatus(c *gin.Context) {
+func handleOrdersUpdateStatus(c *gin.Context) {
 	status := string(c.Params.ByName("status"))
 	id := string(c.Params.ByName("id"))
 	oid, _ := strconv.ParseUint(id, 10, 64)
@@ -207,11 +193,6 @@ func handleUpdateOrderStatus(c *gin.Context) {
 	return
 }
 
-func handleReccuringsProcess(c *gin.Context) {
-	// getOrdersToProcess
-	// for each orderToProcess processPayment and update Order Status
-}
-
 func handleCreatePayment(c *gin.Context) {
 	var p Payment
 	c.BindJSON(&p)
@@ -219,18 +200,7 @@ func handleCreatePayment(c *gin.Context) {
 	c.JSON(http.StatusOK, p)
 }
 
-func createInvoice(c *gin.Context) {
-	var i Invoice
-	c.BindJSON(&i)
-	DB.Create(&i)
-	c.JSON(http.StatusOK, i)
-}
-
-func optionsHandler(c *gin.Context) {
-	c.JSON(http.StatusNoContent, nil)
-}
-
-func handleRenew(c *gin.Context) {
+func handleOrdersRenew(c *gin.Context) {
 	month := string(c.Params.ByName("month"))
 	m, err := strconv.ParseInt(month, 10, 64)
 	if err != nil {
@@ -241,7 +211,7 @@ func handleRenew(c *gin.Context) {
 	return
 }
 
-func handleAnnotate(c *gin.Context) {
+func handleOrdersAnnotate(c *gin.Context) {
 	note := string(c.Params.ByName("note"))
 	id := string(c.Params.ByName("id"))
 	oid, _ := strconv.ParseUint(id, 10, 64)
@@ -250,7 +220,7 @@ func handleAnnotate(c *gin.Context) {
 	c.JSON(http.StatusOK, nil)
 }
 
-func handleFlag(c *gin.Context) {
+func handleOrdersFlag(c *gin.Context) {
 	flag := string(c.Params.ByName("flag"))
 	switch flag {
 	case "duplicates":
@@ -263,11 +233,11 @@ func handleFlag(c *gin.Context) {
 	}
 }
 
-func handleTest(c *gin.Context) {
-	// renewOrder(4)
-	// c.JSON(http.StatusOK, gin.H{"count": 0})
-	count := findOrdersToRenew(6)
-	fmt.Println(count)
-	c.JSON(http.StatusOK, gin.H{"count": count})
+func handleOrdersTest(c *gin.Context) {
+	renewOrder(4)
+	c.JSON(http.StatusOK, gin.H{"count": 0})
+	//count := findOrdersToRenew(6)
+	//fmt.Println(count)
+	//c.JSON(http.StatusOK, gin.H{"count": count})
 	return
 }

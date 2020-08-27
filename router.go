@@ -15,33 +15,24 @@ func initRouter() *gin.Engine {
 	r.Use(CORSMiddleware())
 	orders := r.Group("/orders")
 	{
-		orders.GET("/", listOrders)
-		orders.POST("/new", handleCreateOrder)
-		orders.POST("/paid", handlePaid)
+		orders.GET("/", handleOrdersList)
+		orders.POST("/new", handleOrdersCreate)
+		orders.POST("/paid", handleOrdersPaid)
 		orders.POST("/newandpay", handleCreateOrderAndPay)
-		orders.POST("/renew/:month", handleRenew)
-		orders.GET("/count/:filter", handleCount)
-		orders.GET("/count/:filter/:month", handleCountByMonth)
-		orders.GET("/count/:filter/:month/:currency", handleCountByMonthAndCurrency)
-		orders.GET("/update/:id/:status", handleUpdateOrderStatus)
-		orders.POST("/note/:id/:note", handleAnnotate)
-		orders.POST("/flag/:flag", handleFlag)
+		orders.POST("/renew/:month", handleOrdersRenew)
+		orders.GET("/count/:filter", handleOrdersCount)
+		orders.GET("/count/:filter/:month", handleOrdersCountByMonth)
+		orders.GET("/count/:filter/:month/:currency", handleOrdersCountByMonthAndCurrency)
+		orders.GET("/update/:id/:status", handleOrdersUpdateStatus)
+		orders.POST("/note/:id/:note", handleOrdersAnnotate)
+		orders.POST("/flag/:flag", handleOrdersFlag)
+		orders.GET("/test", handleOrdersTest)
 	}
 
 	payments := r.Group("/payments")
 	{
 		payments.GET("/count/:filter/:month", handlePaymentCountByMonth)
 		payments.GET("/count/:filter/:month/:currency", handlePaymentCountByMonthAndCurrency)
-	}
-
-	test := r.Group("/test")
-	{
-		test.GET("/", handleTest)
-	}
-
-	pelecard := r.Group("/pelecard")
-	{
-		pelecard.GET("/:status", handlePelecardStatus)
 	}
 
 	accounts := r.Group("/accounts")

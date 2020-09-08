@@ -31,8 +31,8 @@ func initRouter() *gin.Engine {
 
 	payments := r.Group("/payments")
 	{
-		payments.GET("/count/:filter/:month", handlePaymentCountByMonth)
-		payments.GET("/count/:filter/:month/:currency", handlePaymentCountByMonthAndCurrency)
+		payments.GET("/count/:filter/:month", handlePaymentsCountByMonth)
+		payments.GET("/count/:filter/:month/:currency", handlePaymentsCountByMonthAndCurrency)
 	}
 
 	accounts := r.Group("/accounts")

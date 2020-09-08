@@ -6,7 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func handlePaymentCountByMonth(c *gin.Context) {
+func handlePaymentsCountByMonth(c *gin.Context) {
 	var total int64
 	filter := string(c.Params.ByName("filter"))
 	month := string(c.Params.ByName("month"))
@@ -18,7 +18,7 @@ func handlePaymentCountByMonth(c *gin.Context) {
 	})
 }
 
-func handlePaymentCountByMonthAndCurrency(c *gin.Context) {
+func handlePaymentsCountByMonthAndCurrency(c *gin.Context) {
 	var total int64
 	var sum float32
 	sum = 0

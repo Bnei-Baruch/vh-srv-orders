@@ -390,6 +390,8 @@ func renewOrder(orderID uint) string {
 		newp.Success = "0"
 	}
 	answers := resp.(map[string]interface{})
+	data := answers["data"].(string)
+	fmt.Println(data)
 	if answers["status"].(string) == "success" {
 		newp.PaymentStatus = "success"
 		newp.Success = "1"
@@ -403,7 +405,15 @@ func renewOrder(orderID uint) string {
 }
 
 func findOrdersToRenew(month int) int {
-	rows, err := DB.Raw("Select ID from orders Where \"Status\" = 'paid' and \"Type\" = 'recurring' and \"Flag\" is null and date_part('month', \"PaymentDate\") = ? order by id asc ", month).Rows() // (*sql.Rows, error)
+	sqlQuery := `
+	Select ID from orders 
+	Where "Status" = 'paid' 
+	and "Type" = 'recurring' 
+	and "Flag" is null 
+	and date_part('month', "PaymentDate") = ? 
+	order by id asc 
+	`
+	rows, err := DB.Raw(sqlQuery, month).Rows() // (*sql.Rows, error)
 	if err != nil {
 		return -1
 	}

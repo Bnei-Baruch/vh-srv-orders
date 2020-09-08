@@ -11,6 +11,19 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+/**
+TODO: add update route (POST) taking a JSON
+TODO: change price and currency
+TODO: Add log of operations
+TODO: add field for end
+TODO: add route has active order for account - yes / no / data
+TODO: update muhlafim
+TODO: add invoice
+TODO: fix issues in DB
+TODO: add payment method
+TODO: clean data
+**/
+
 func handleOrdersList(c *gin.Context) {
 	var o []Order
 	if err := DB.Find(&o).Error; err != nil {

@@ -247,7 +247,21 @@ func handleOrdersFlag(c *gin.Context) {
 }
 
 func handleOrdersTest(c *gin.Context) {
-	renewOrder(4)
+	//renewOrder(4)
+
+	allAccountsToClean, _ := GetAllAccountsWithDuplicates("unused")
+
+	for _, atc := range allAccountsToClean {
+		someresult := getAllOrdersByAccounts(atc)
+		cancelDuplicateOrdersJune(someresult)
+	}
+
+	allAccountsToClean, _ = GetAllAccountsWithDuplicates("unused")
+	for _, atc := range allAccountsToClean {
+		someresult := getAllOrdersByAccounts(atc)
+		cancelDuplicateOrdersJuly(someresult)
+	}
+
 	c.JSON(http.StatusOK, gin.H{"count": 0})
 	//count := findOrdersToRenew(6)
 	//fmt.Println(count)

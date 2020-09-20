@@ -542,3 +542,81 @@ func countsAllOrdersByMonthAndCurrency(filter string, month string, currency str
 	return int64(count), sum
 
 }
+
+func getAllOrdersByAccounts(aid uint) []Order {
+	//TODO: refactor using ORM functions
+
+	var ordersDuplicate []Order
+	DB.Where(&Order{AccountID: aid, Status: "paid"}).Find(&ordersDuplicate)
+
+	return ordersDuplicate
+
+}
+
+func cancelDuplicateOrdersJune(duplicates []Order) {
+	totaldups := len(duplicates)
+	totaldupsinJune := 0
+
+	for _, d := range duplicates {
+		if int(d.CreatedAt.Month()) == 6 {
+			totaldupsinJune = totaldupsinJune + 1
+		}
+	}
+	fmt.Printf("Total duplicates orders in June is %v ", totaldupsinJune)
+
+	if totaldups-totaldupsinJune > 0 {
+		for _, d := range duplicates {
+			if int(d.CreatedAt.Month()) == 6 {
+				d.Flag = "fixed"
+				d.Status = "removed"
+				d.Note = "was a duplicate subscription"
+				DB.Save(d)
+			}
+		}
+		if totaldups == 2 {
+			for _, d := range duplicates {
+				if int(d.CreatedAt.Month()) != 6 {
+					d.Flag = ""
+					DB.Save(d)
+				}
+			}
+		}
+	}
+
+	return
+
+}
+
+func cancelDuplicateOrdersJuly(duplicates []Order) {
+	totaldups := len(duplicates)
+	totaldupsinJuly := 0
+
+	for _, d := range duplicates {
+		if int(d.CreatedAt.Month()) == 7 {
+			totaldupsinJuly = totaldupsinJuly + 1
+		}
+	}
+	fmt.Printf("Total duplicates orders in July is %v ", totaldupsinJuly)
+
+	if totaldups-totaldupsinJuly > 0 {
+		for _, d := range duplicates {
+			if int(d.CreatedAt.Month()) == 7 {
+				d.Flag = "fixed"
+				d.Status = "removed"
+				d.Note = "was a duplicate subscription"
+				DB.Save(d)
+			}
+		}
+		if totaldups == 2 {
+			for _, d := range duplicates {
+				if int(d.CreatedAt.Month()) != 7 {
+					d.Flag = ""
+					DB.Save(d)
+				}
+			}
+		}
+	}
+
+	return
+
+}

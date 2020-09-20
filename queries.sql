@@ -68,5 +68,11 @@ and o."Status" <> 'pending'
 
 
 
-
+-- Relevant info
+select a.id, a."FirstName", a."LastName",
+o."Amount", o."Currency", o."PaymentDate", o."Status", o."Flag"
+from accounts as a, 
+orders as o
+where a."Email" = '60emilia@gmail.com'
+and a.id = o."AccountID"
 

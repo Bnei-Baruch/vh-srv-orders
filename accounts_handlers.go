@@ -82,3 +82,9 @@ func handleCountAccounts(c *gin.Context) {
 	total := countAccounts()
 	c.JSON(200, gin.H{"total": total})
 }
+
+func handleAccountsTest(c *gin.Context) {
+	//flagDuplicateOrders("notinuse")
+	allaccounts, _ := GetAllAccountsWithDuplicates("plop")
+	fmt.Println(len(allaccounts))
+}

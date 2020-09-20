@@ -76,3 +76,9 @@ orders as o
 where a."Email" = '60emilia@gmail.com'
 and a.id = o."AccountID"
 
+
+
+update orders set "Flag"='' where id='2204'
+update orders set "Amount"='10', "Currency"='NIS' where id='3325'
+
+

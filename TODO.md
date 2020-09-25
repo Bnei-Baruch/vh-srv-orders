@@ -29,3 +29,10 @@ if hasDuplicate
 
  ## Check active orders not renewed 
  get all active order not renewed last month
+
+
+ ## new strategy idea :
+ - make all duplicate
+ - cancel all duplicate who have payment for this month
+for each id in orders do 
+update orders set "Flag" = '', "Status" = 'cancelled', "Note" = 'was duplicate' where AccountID

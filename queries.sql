@@ -82,3 +82,8 @@ update orders set "Flag"='' where id='2204'
 update orders set "Amount"='10', "Currency"='NIS' where id='3325'
 
 
+Select a."Email", o.id, o."Amount", o."Currency", o."PaymentDate"
+from accounts as a, orders as o 
+Where "Flag" = 'duplicate'
+and a.id = o."AccountID"
+and date_part('month', "PaymentDate") = 6

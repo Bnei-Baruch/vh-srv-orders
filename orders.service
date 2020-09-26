@@ -1,5 +1,5 @@
 #Stored in /etc/systemd/system/orders.service
-#Stat with : sudo systemctl start orders.service
+#Start with : sudo systemctl start orders.service
 #sudo journalctl -f -u orders.service
 #TODO : add to make install
 [Unit]

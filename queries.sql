@@ -20,8 +20,20 @@ where "duplicate" > 1
 
 -- All accounts who paid more than once
 select "AccountID", count(*) as "duplicate" 
-from orders where "Status" = 'paid' 
+from orders where "Status" = 'paid'
 group by "AccountID" ORDER BY "duplicate" DESC
+
+
+-- All accounts who paid more than once for a given month
+select "AccountID", count(*) as "duplicate" 
+from orders where "Status" = 'paid' and date_part('month', "PaymentDate") = 6
+group by "AccountID" ORDER BY "duplicate" DESC
+
+/* select "AccountID", count(*) as "duplicate" 
+from orders where "Status" = 'paid' and date_part('month', "PaymentDate") = 8
+group by "AccountID" 
+having count(*) > 1
+ORDER BY "duplicate" DESC */
 
 -- All Orders from June
 Select count(*)

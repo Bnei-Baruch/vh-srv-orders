@@ -409,7 +409,7 @@ func findOrdersToRenew(month int) int {
 	Select ID from orders 
 	Where "Status" = 'paid' 
 	and "Type" = 'recurring' 
-	and "Flag" is null 
+	and "Flag" <> 'duplicate'
 	and date_part('month', "PaymentDate") = ? 
 	order by id asc 
 	`

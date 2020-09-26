@@ -390,11 +390,13 @@ func renewOrder(orderID uint) string {
 		newp.Success = "0"
 	}
 	answers := resp.(map[string]interface{})
-	data := answers["data"].(string)
-	fmt.Println(data)
+	// data := answers["data"].(string)
+	// fmt.Println(data)
 	if answers["status"].(string) == "success" {
 		newp.PaymentStatus = "success"
 		newp.Success = "1"
+		data := answers["data"].(string)
+		fmt.Println(data)
 	} else {
 		newp.PaymentStatus = "failed"
 		newp.Success = "0"

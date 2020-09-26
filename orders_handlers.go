@@ -247,19 +247,7 @@ func handleOrdersFlag(c *gin.Context) {
 }
 
 func handleOrdersTest(c *gin.Context) {
-	//renewOrder(4)
-	// val, _ := strconv.ParseUint(string(c.Params.ByName("val")), 10, 64)
-	val := string(c.Params.ByName("val"))
-
-	// cleanDuplicates(uint(aid), "9")
-
-	dups, _ := GetAccountsWithDuplicatesByMonth(val)
-
-	for _, d := range dups {
-		cleanDuplicates(d, val)
-	}
-
-	c.JSON(http.StatusOK, gin.H{"cleaned": len(dups)})
+	renewOrder(4936)
 
 	//c.JSON(http.StatusOK, gin.H{"account": val})
 	//count := findOrdersToRenew(6)

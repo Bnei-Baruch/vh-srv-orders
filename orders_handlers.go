@@ -248,23 +248,33 @@ func handleOrdersFlag(c *gin.Context) {
 
 func handleOrdersTest(c *gin.Context) {
 	//renewOrder(4)
+	// val, _ := strconv.ParseUint(string(c.Params.ByName("val")), 10, 64)
+	val := string(c.Params.ByName("val"))
 
-	allAccountsToClean, _ := GetAllAccountsWithDuplicates("unused")
+	// cleanDuplicates(uint(aid), "9")
 
-	for _, atc := range allAccountsToClean {
-		someresult := getAllOrdersByAccounts(atc)
-		cancelDuplicateOrdersJune(someresult)
+	dups, _ := GetAccountsWithDuplicatesByMonth(val)
+
+	for _, d := range dups {
+		cleanDuplicates(d, val)
 	}
 
-	allAccountsToClean, _ = GetAllAccountsWithDuplicates("unused")
-	for _, atc := range allAccountsToClean {
-		someresult := getAllOrdersByAccounts(atc)
-		cancelDuplicateOrdersJuly(someresult)
-	}
+	c.JSON(http.StatusOK, gin.H{"cleaned": len(dups)})
 
-	c.JSON(http.StatusOK, gin.H{"count": 0})
+	//c.JSON(http.StatusOK, gin.H{"account": val})
 	//count := findOrdersToRenew(6)
 	//fmt.Println(count)
 	//c.JSON(http.StatusOK, gin.H{"count": count})
 	return
+}
+
+func handleOrdersClean(c *gin.Context) {
+	month := string(c.Params.ByName("month"))
+	dups, _ := GetAccountsWithDuplicatesByMonth(month)
+
+	for _, d := range dups {
+		cleanDuplicates(d, month)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"cleaned": len(dups)})
 }

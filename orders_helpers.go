@@ -553,70 +553,19 @@ func getAllOrdersByAccounts(aid uint) []Order {
 
 }
 
-func cancelDuplicateOrdersJune(duplicates []Order) {
-	totaldups := len(duplicates)
-	totaldupsinJune := 0
+func cleanDuplicates(aid uint, month string) {
+	// Remove payment
+	req1 := `update orders 
+	set "Status"='removed'
+	where "AccountID"= ? and date_part('month', "PaymentDate") < ?
+	`
+	DB.Exec(req1, aid, month)
 
-	for _, d := range duplicates {
-		if int(d.CreatedAt.Month()) == 6 {
-			totaldupsinJune = totaldupsinJune + 1
-		}
-	}
-	fmt.Printf("Total duplicates orders in June is %v ", totaldupsinJune)
-
-	if totaldups-totaldupsinJune > 0 {
-		for _, d := range duplicates {
-			if int(d.CreatedAt.Month()) == 6 {
-				d.Flag = "fixed"
-				d.Status = "removed"
-				d.Note = "was a duplicate subscription"
-				DB.Save(d)
-			}
-		}
-		if totaldups == 2 {
-			for _, d := range duplicates {
-				if int(d.CreatedAt.Month()) != 6 {
-					d.Flag = ""
-					DB.Save(d)
-				}
-			}
-		}
-	}
-
-	return
-
-}
-
-func cancelDuplicateOrdersJuly(duplicates []Order) {
-	totaldups := len(duplicates)
-	totaldupsinJuly := 0
-
-	for _, d := range duplicates {
-		if int(d.CreatedAt.Month()) == 7 {
-			totaldupsinJuly = totaldupsinJuly + 1
-		}
-	}
-	fmt.Printf("Total duplicates orders in July is %v ", totaldupsinJuly)
-
-	if totaldups-totaldupsinJuly > 0 {
-		for _, d := range duplicates {
-			if int(d.CreatedAt.Month()) == 7 {
-				d.Flag = "fixed"
-				d.Status = "removed"
-				d.Note = "was a duplicate subscription"
-				DB.Save(d)
-			}
-		}
-		if totaldups == 2 {
-			for _, d := range duplicates {
-				if int(d.CreatedAt.Month()) != 7 {
-					d.Flag = ""
-					DB.Save(d)
-				}
-			}
-		}
-	}
-
-	return
+	// Remove duplicate status
+	req2 := `update orders 
+	set "Flag"=''
+	where "AccountID"= ? 
+	`
+	DB.Exec(req2, aid)
 
 }

@@ -52,3 +52,34 @@ func GetAllAccountsWithDuplicates(filter string) ([]uint, error) {
 
 	return accountsWithDuplicate, nil
 }
+
+//GetAccountsWithDuplicatesByMonth returns array of duplicate accounts
+func GetAccountsWithDuplicatesByMonth(month string) ([]uint, error) {
+	req := `
+	-- All accounts who paid more than once
+	select distinct "AccountID"
+	from orders where "Status" = 'paid' 
+	and "Flag" = 'duplicate'
+	and date_part('month', "PaymentDate") = ?
+	`
+
+	rows, err := DB.Raw(req, month).Rows()
+	if err != nil {
+		return []uint{0}, err
+	}
+
+	defer rows.Close()
+
+	var accountsWithDuplicate []uint
+	var aid uint
+	count := 0
+
+	for rows.Next() {
+		rows.Scan(&aid)
+		accountsWithDuplicate = append(accountsWithDuplicate, aid)
+		count++
+	}
+	fmt.Println(count)
+
+	return accountsWithDuplicate, nil
+}

@@ -87,3 +87,10 @@ from accounts as a, orders as o
 Where "Flag" = 'duplicate'
 and a.id = o."AccountID"
 and date_part('month', "PaymentDate") = 6
+
+
+	-- All accounts who paid more than once
+	select distinct "AccountID"
+	from orders where "Status" = 'paid' 
+	and "Flag" = 'duplicate'
+	and date_part('month', "PaymentDate") = ?

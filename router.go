@@ -26,7 +26,8 @@ func initRouter() *gin.Engine {
 		orders.GET("/update/:id/:status", handleOrdersUpdateStatus)
 		orders.POST("/note/:id/:note", handleOrdersAnnotate)
 		orders.POST("/flag/:flag", handleOrdersFlag)
-		orders.GET("/test", handleOrdersTest)
+		orders.POST("/clean/:month", handleOrdersClean)
+		orders.GET("/test/:val", handleOrdersTest)
 	}
 
 	payments := r.Group("/payments")
@@ -46,6 +47,7 @@ func initRouter() *gin.Engine {
 		accounts.GET("/find/:id", find)
 		accounts.GET("/count", handleCountAccounts)
 		accounts.POST("/delete/:id", delete)
+		accounts.GET("/test", handleAccountsTest)
 	}
 
 	return r

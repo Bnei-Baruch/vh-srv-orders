@@ -542,3 +542,30 @@ func countsAllOrdersByMonthAndCurrency(filter string, month string, currency str
 	return int64(count), sum
 
 }
+
+func getAllOrdersByAccounts(aid uint) []Order {
+	//TODO: refactor using ORM functions
+
+	var ordersDuplicate []Order
+	DB.Where(&Order{AccountID: aid, Status: "paid"}).Find(&ordersDuplicate)
+
+	return ordersDuplicate
+
+}
+
+func cleanDuplicates(aid uint, month string) {
+	// Remove payment
+	req1 := `update orders 
+	set "Status"='removed'
+	where "AccountID"= ? and date_part('month', "PaymentDate") < ?
+	`
+	DB.Exec(req1, aid, month)
+
+	// Remove duplicate status
+	req2 := `update orders 
+	set "Flag"=''
+	where "AccountID"= ? 
+	`
+	DB.Exec(req2, aid)
+
+}

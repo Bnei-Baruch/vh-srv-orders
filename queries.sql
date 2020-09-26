@@ -68,5 +68,29 @@ and o."Status" <> 'pending'
 
 
 
+-- Relevant info
+select a.id, a."FirstName", a."LastName",
+o."Amount", o."Currency", o."PaymentDate", o."Status", o."Flag"
+from accounts as a, 
+orders as o
+where a."Email" = '60emilia@gmail.com'
+and a.id = o."AccountID"
 
 
+
+update orders set "Flag"='' where id='2204'
+update orders set "Amount"='10', "Currency"='NIS' where id='3325'
+
+
+Select a."Email", o.id, o."Amount", o."Currency", o."PaymentDate"
+from accounts as a, orders as o 
+Where "Flag" = 'duplicate'
+and a.id = o."AccountID"
+and date_part('month', "PaymentDate") = 6
+
+
+	-- All accounts who paid more than once
+	select distinct "AccountID"
+	from orders where "Status" = 'paid' 
+	and "Flag" = 'duplicate'
+	and date_part('month', "PaymentDate") = ?

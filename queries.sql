@@ -35,6 +35,12 @@ group by "AccountID"
 having count(*) > 1
 ORDER BY "duplicate" DESC */
 
+update orders set "Flag" = 'duplicate'
+where "AccountID" in (select "AccountID"
+from orders where "Status" = 'paid' and date_part('month', "PaymentDate") = 8
+group by "AccountID" 
+having count(*) > 1) and date_part('month', "PaymentDate") = 8
+
 -- All Orders from June
 Select count(*)
 from orders

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -19,7 +20,8 @@ func handleAdminSubscriptions(c *gin.Context) {
 	o."PaymentDate",
 	o."Status",
 	o."Flag",
-	a."FirstName", a."LastName",
+	a."FirstName", 
+	a."LastName",
 	o."OrderLanguage"
 	from orders as o, accounts as a
 	where o."AccountID" = a.id
@@ -29,8 +31,8 @@ func handleAdminSubscriptions(c *gin.Context) {
 	`
 
 	type result struct {
-		o Order
-		a Account
+		OrderInfo   Order
+		AccountInfo Account
 	}
 	rows, err := DB.Raw(req).Rows() // (*sql.Rows, error)
 
@@ -44,20 +46,23 @@ func handleAdminSubscriptions(c *gin.Context) {
 	var allRes []result
 
 	for rows.Next() {
-		rows.Scan(&res.o.ID,
-			&res.o.CreatedAt,
-			&res.o.Amount,
-			&res.o.Currency,
-			&res.o.PaymentDate,
-			&res.o.Status,
-			&res.o.Flag,
-			&res.a.FirstName, &res.a.LastName,
-			&res.o.OrderLanguage)
+		rows.Scan(&res.OrderInfo.ID,
+			&res.OrderInfo.CreatedAt,
+			&res.OrderInfo.Amount,
+			&res.OrderInfo.Currency,
+			&res.OrderInfo.PaymentDate,
+			&res.OrderInfo.Status,
+			&res.OrderInfo.Flag,
+			&res.AccountInfo.FirstName,
+			&res.AccountInfo.LastName,
+			&res.OrderInfo.OrderLanguage)
 
 		allRes = append(allRes, res)
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": allRes})
+	fmt.Println(allRes)
+
+	c.JSON(http.StatusOK, allRes)
 }
 
 func handleAdminSubscriptionByID(c *gin.Context) {

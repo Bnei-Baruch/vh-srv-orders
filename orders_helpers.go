@@ -410,8 +410,8 @@ func findOrdersToRenew(month int) int {
 	sqlQuery := `
 	Select ID from orders 
 	Where "Status" = 'paid' 
-	and "Type" = 'recurring' 
-	and "Flag" <> 'duplicate'
+	and "Type" = 'recurring'
+	and (("Flag" is Null) or ("Flag" <> 'duplicate')) 
 	and date_part('month', "PaymentDate") = ? 
 	order by id asc 
 	`

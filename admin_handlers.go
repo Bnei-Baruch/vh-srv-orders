@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -60,11 +59,11 @@ func handleAdminSubscriptions(c *gin.Context) {
 		allRes = append(allRes, res)
 	}
 
-	fmt.Println(allRes)
-
 	c.JSON(http.StatusOK, allRes)
 }
 
 func handleAdminSubscriptionByID(c *gin.Context) {
+	//	id := string(c.Params.ByName("id"))
+
 	c.JSON(http.StatusOK, nil)
 }

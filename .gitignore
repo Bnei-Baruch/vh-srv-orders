@@ -131,4 +131,4 @@ bin/*
 !bin
 .env
 data/*
-!data 
+!data/.gitkeep

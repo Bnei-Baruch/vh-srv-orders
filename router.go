@@ -20,6 +20,7 @@ func initRouter() *gin.Engine {
 		orders.POST("/paid", handleOrdersPaid)
 		orders.POST("/newandpay", handleCreateOrderAndPay)
 		orders.POST("/renew/:month", handleOrdersRenew)
+		orders.POST("/renewbyid/:id", handleOrdersRenewByID)
 		orders.GET("/count/:filter", handleOrdersCount)
 		orders.GET("/count/:filter/:month", handleOrdersCountByMonth)
 		orders.GET("/count/:filter/:month/:currency", handleOrdersCountByMonthAndCurrency)

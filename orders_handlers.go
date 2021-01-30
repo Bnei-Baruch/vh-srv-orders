@@ -213,6 +213,17 @@ func handleCreatePayment(c *gin.Context) {
 	c.JSON(http.StatusOK, p)
 }
 
+func handleOrdersRenewByID(c *gin.Context) {
+	month := string(c.Params.ByName("id"))
+	oid, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusNotAcceptable, gin.H{"error": "wrong type"})
+	}
+	renewedStatus := renewOrder(oid)
+	c.JSON(http.StatusOK, gin.H{"renewedStatus": renewedStatus})
+	return
+}
+
 func handleOrdersRenew(c *gin.Context) {
 	month := string(c.Params.ByName("month"))
 	m, err := strconv.ParseInt(month, 10, 64)

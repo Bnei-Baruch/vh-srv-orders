@@ -14,7 +14,7 @@ publish:
     - docker:19.03.12-dind
   script:
     - docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY
-    - docker build -t --build-arg PG_HOST=$DEV_PG_HOST --build-arg PG_USER=$DEV_PG_USER --build-arg PG_PWD=$DEV_PG_PWD $IMAGE .
+    - docker build -t $IMAGE --build-arg PG_HOST=$DEV_PG_HOST --build-arg PG_USER=$DEV_PG_USER --build-arg PG_PWD=$DEV_PG_PWD .
     - docker push $IMAGE
   only:
     - development

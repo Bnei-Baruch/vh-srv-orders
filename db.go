@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 
 	"github.com/jinzhu/gorm"
 	_ "github.com/jinzhu/gorm/dialects/postgres"
@@ -51,12 +52,19 @@ func connectMockdb() {
 
 func connectPostgreSQL() {
 	connec := fmt.Sprintf("host=%s port=%s user=%s dbname=%s password=%s sslmode=%s",
-		Conf["PG_HOST"],
-		Conf["PG_PORT"],
-		Conf["PG_USER"],
-		Conf["PG_DBNAME"],
-		Conf["PG_PWD"],
-		Conf["PG_SSLMODE"])
+		os.Getenv("PG_HOST"),
+		os.Getenv("PG_PORT"),
+		os.Getenv("PG_USER"),
+		os.Getenv("PG_DBNAME"),
+		os.Getenv("PG_PWD"),
+		os.Getenv("PG_SSLMODE"),
+	)
+	//Conf["PG_HOST"],
+	//Conf["PG_PORT"],
+	//Conf["PG_USER"],
+	//Conf["PG_DBNAME"],
+	//Conf["PG_PWD"],
+	//Conf["PG_SSLMODE"])
 
 	db, err := gorm.Open("postgres", connec)
 

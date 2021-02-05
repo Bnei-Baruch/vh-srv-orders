@@ -129,6 +129,6 @@ $RECYCLE.BIN/
 *.json
 bin/*
 !bin
-.env
+#.env
 data/*
 !data 

@@ -60,7 +60,8 @@ deploy_Prod:
   tags:
     - dockerbuild
   script:
-    - chmod og= $ID_RSA
+    - chmod og= $PROD_ID_RSA
+    - chmod og= $STAND_ID_RSA
     - apk update && apk add openssh-client
     - ssh -i $PROD_ID_RSA -o StrictHostKeyChecking=no $PROD_SERVER_USER@$PROD_SERVER_IP "docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY"
     - ssh -i $PROD_ID_RSA -o StrictHostKeyChecking=no $PROD_SERVER_USER@$PROD_SERVER_IP "docker pull $PROD_IMAGE"

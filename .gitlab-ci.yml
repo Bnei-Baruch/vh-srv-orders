@@ -3,6 +3,7 @@ stages:
   - deploy
   - publish_Prod
   - deploy_Prod
+  - deploy_standby
 variables:
   IMAGE: $CI_REGISTRY_IMAGE/$CI_COMMIT_REF_NAME:$CI_COMMIT_SHORT_SHA
   PROD_IMAGE: $CI_REGISTRY_IMAGE/$CI_COMMIT_REF_NAME:prod_$CI_COMMIT_SHORT_SHA
@@ -42,7 +43,7 @@ deploy:
 
 publish_Prod:
   image: docker:latest
-  stage: publish
+  stage: publish_Prod
   tags:
     - dockerbuild
   services:
@@ -56,7 +57,7 @@ publish_Prod:
 
 deploy_Prod:
   image: docker:latest
-  stage: deploy
+  stage: deploy_Prod
   tags:
     - dockerbuild
   script:
@@ -71,6 +72,22 @@ deploy_Prod:
     - ssh -i $STAND_ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP "docker pull $PROD_IMAGE"
     - ssh -i $STAND_ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP "docker container rm -f prod-vh-order || true"
     - ssh -i $STAND_ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP ""docker run -d --net=vh --name prod-vh-order --memory="200m" --cpus="0.5" --restart always -p 8185:8185 $PROD_IMAGE "
+  when: manual
+  only:
+    - master
+
+deploy_standby:
+  image: docker:latest
+  stage: deploy_standby
+  tags:
+    - dockerbuild
+  script:
+    - chmod og= $STAND_ID_RSA
+    - apk update && apk add openssh-client
+    - ssh -i $STAND_ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP "docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY"
+    - ssh -i $STAND_ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP "docker pull $PROD_IMAGE"
+    - ssh -i $STAND_ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP "docker container rm -f prod-vh-order || true"
+    - ssh -i $STAND_ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP ""docker run -d --net=vh --name prod-vh-order --memory="200m" --cpus="0.5" -$
   when: manual
   only:
     - master

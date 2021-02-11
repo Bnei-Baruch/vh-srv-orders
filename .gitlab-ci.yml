@@ -4,6 +4,7 @@ stages:
   - publish_Prod
   - deploy_Prod
   - deploy_standby
+
 variables:
   IMAGE: $CI_REGISTRY_IMAGE/$CI_COMMIT_REF_NAME:$CI_COMMIT_SHORT_SHA
   PROD_IMAGE: $CI_REGISTRY_IMAGE/$CI_COMMIT_REF_NAME:prod_$CI_COMMIT_SHORT_SHA
@@ -62,16 +63,11 @@ deploy_Prod:
     - dockerbuild
   script:
     - chmod og= $PROD_ID_RSA
-    - chmod og= $STAND_ID_RSA
     - apk update && apk add openssh-client
     - ssh -i $PROD_ID_RSA -o StrictHostKeyChecking=no $PROD_SERVER_USER@$PROD_SERVER_IP "docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY"
     - ssh -i $PROD_ID_RSA -o StrictHostKeyChecking=no $PROD_SERVER_USER@$PROD_SERVER_IP "docker pull $PROD_IMAGE"
     - ssh -i $PROD_ID_RSA -o StrictHostKeyChecking=no $PROD_SERVER_USER@$PROD_SERVER_IP "docker container rm -f prod-vh-order || true"
     - ssh -i $PROD_ID_RSA -o StrictHostKeyChecking=no $PROD_SERVER_USER@$PROD_SERVER_IP "docker run -d --net=vh --name prod-vh-order --memory="200m" --cpus="0.5" --restart always -p 8185:8185 $PROD_IMAGE "
-    - ssh -i $STAND_ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP "docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY"
-    - ssh -i $STAND_ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP "docker pull $PROD_IMAGE"
-    - ssh -i $STAND_ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP "docker container rm -f prod-vh-order || true"
-    - ssh -i $STAND_ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP ""docker run -d --net=vh --name prod-vh-order --memory="200m" --cpus="0.5" --restart always -p 8185:8185 $PROD_IMAGE "
   when: manual
   only:
     - master
@@ -87,7 +83,7 @@ deploy_standby:
     - ssh -i $STAND_ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP "docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY"
     - ssh -i $STAND_ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP "docker pull $PROD_IMAGE"
     - ssh -i $STAND_ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP "docker container rm -f prod-vh-order || true"
-    - ssh -i $STAND_ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP ""docker run -d --net=vh --name prod-vh-order --memory="200m" --cpus="0.5" -$
+    - ssh -i $STAND_ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP ""docker run -d --net=vh --name prod-vh-order --memory="200m" --cpus="0.5" --restart always -p 8185:8185 $PROD_IMAGE "
   when: manual
   only:
     - master

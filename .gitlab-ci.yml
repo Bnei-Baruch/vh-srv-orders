@@ -83,7 +83,7 @@ deploy_standby:
     - ssh -i $STAND_ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP "docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY"
     - ssh -i $STAND_ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP "docker pull $PROD_IMAGE"
     - ssh -i $STAND_ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP "docker container rm -f prod-vh-order || true"
-    - ssh -i $STAND_ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP ""docker run -d --net=vh --name prod-vh-order --memory="200m" --cpus="0.5" --restart always -p 8185:8185 $PROD_IMAGE "
+    - ssh -i $STAND_ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP "docker run -d --net=vh --name prod-vh-order --memory="200m" --cpus="0.5" --restart always -p 8185:8185 $PROD_IMAGE "
   when: manual
   only:
     - master

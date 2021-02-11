@@ -1,0 +1,75 @@
+stages:
+  - publish
+  - deploy
+  - publish_Prod
+  - deploy_Prod
+variables:
+  IMAGE: $CI_REGISTRY_IMAGE/$CI_COMMIT_REF_NAME:$CI_COMMIT_SHORT_SHA
+  PROD_IMAGE: $CI_REGISTRY_IMAGE/$CI_COMMIT_REF_NAME:prod_$CI_COMMIT_SHORT_SHA
+
+publish:
+  image: docker:latest
+  stage: publish
+  tags:
+    - dockerbuild
+  services:
+    - docker:19.03.12-dind
+  script:
+    - docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY
+    - docker build -t $IMAGE --build-arg PG_HOST=$DEV_PG_HOST --build-arg PG_USER=$DEV_PG_USER --build-arg PG_PWD=$DEV_PG_PWD .
+    - docker push $IMAGE
+  only:
+    - development
+
+deploy:
+  image: docker:latest
+  stage: deploy
+  tags:
+    - dockerbuild
+  script:
+    - chmod og= $ID_RSA
+    - apk update && apk add openssh-client
+    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_IP "docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY"
+    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_IP "docker pull $IMAGE"
+    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_IP "docker container rm -f vh-order || true"
+    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_IP "docker run -d --net=vh --name vh-order --memory="200m" --cpus="0.5" --restart always -p 8185:8185 $IMAGE "
+  environment:
+    name: development
+    url: http://51.15.238.1
+  when: manual
+  only:
+    - development
+
+publish_Prod:
+  image: docker:latest
+  stage: publish
+  tags:
+    - dockerbuild
+  services:
+    - docker:19.03.12-dind
+  script:
+    - docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY
+    - docker build -t $PROD_IMAGE --build-arg PG_HOST=$DEV_PG_HOST --build-arg PG_USER=$DEV_PG_USER --build-arg PG_PWD=$DEV_PG_PWD .
+    - docker push $PROD_IMAGE
+  only:
+    - master
+
+deploy_Prod:
+  image: docker:latest
+  stage: deploy
+  tags:
+    - dockerbuild
+  script:
+    - chmod og= $ID_RSA
+    - apk update && apk add openssh-client
+    - ssh -i $PROD_ID_RSA -o StrictHostKeyChecking=no $PROD_SERVER_USER@$PROD_SERVER_IP "docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY"
+    - ssh -i $PROD_ID_RSA -o StrictHostKeyChecking=no $PROD_SERVER_USER@$PROD_SERVER_IP "docker pull $PROD_IMAGE"
+    - ssh -i $PROD_ID_RSA -o StrictHostKeyChecking=no $PROD_SERVER_USER@$PROD_SERVER_IP "docker container rm -f prod-vh-order || true"
+    - ssh -i $PROD_ID_RSA -o StrictHostKeyChecking=no $PROD_SERVER_USER@$PROD_SERVER_IP "docker run -d --net=vh --name prod-vh-order --memory="200m" --cpus="0.5" --restart always -p 8185:8185 $PROD_IMAGE "
+    - ssh -i $STAND_ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP "docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY"
+    - ssh -i $STAND_ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP "docker pull $PROD_IMAGE"
+    - ssh -i $STAND_ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP "docker container rm -f prod-vh-order || true"
+    - ssh -i $STAND_ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP ""docker run -d --net=vh --name prod-vh-order --memory="200m" --cpus="0.5" --restart always -p 8185:8185 $PROD_IMAGE "
+  when: manual
+  only:
+    - master

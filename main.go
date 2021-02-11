@@ -31,4 +31,9 @@ func initConf() {
 		log.Fatal("Error loading .env file")
 	}
 	Conf = conf
+	// also loading in the env - TODO: cleanup that mess later
+	err = godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
 }

@@ -129,6 +129,10 @@ $RECYCLE.BIN/
 *.json
 bin/*
 !bin
-.env
+#.env
 data/*
+<<<<<<< HEAD
 !data/.gitkeep
+=======
+!data 
+>>>>>>> development

@@ -18,7 +18,7 @@ publish:
     - docker:19.03.12-dind
   script:
     - docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY
-    - docker build -t $IMAGE --build-arg PG_HOST=$DEV_PG_HOST --build-arg PG_USER=$DEV_PG_USER --build-arg PG_PWD=$DEV_PG_PWD .
+    - docker build -t $IMAGE --build-arg PG_HOST=$DEV_PG_HOST --build-arg PG_PORT=$DEV_PG_PORT --build-arg PG_USER=$DEV_PG_USER --build-arg PG_DBNAME=$DEV_PG_DBNAME --build-arg PG_PWD=$DEV_PG_PWD .
     - docker push $IMAGE
   only:
     - development
@@ -51,7 +51,7 @@ publish_Prod:
     - docker:19.03.12-dind
   script:
     - docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY
-    - docker build -t $PROD_IMAGE --build-arg PG_HOST=$DEV_PG_HOST --build-arg PG_USER=$DEV_PG_USER --build-arg PG_PWD=$DEV_PG_PWD .
+    - docker build -t $PROD_IMAGE --build-arg PG_HOST=$PROD_PG_HOST --build-arg PG_PORT=$PROD_PG_PORT --build-arg PG_USER=$PROD_PG_USER --build-arg PG_DBNAME=$PROD_PG_DBNAME --build-arg PG_PWD=$PROD_PG_PWD .
     - docker push $PROD_IMAGE
   only:
     - master
@@ -62,12 +62,12 @@ deploy_Prod:
   tags:
     - dockerbuild
   script:
-    - chmod og= $PROD_ID_RSA
+    - chmod og= $ID_RSA
     - apk update && apk add openssh-client
-    - ssh -i $PROD_ID_RSA -o StrictHostKeyChecking=no $PROD_SERVER_USER@$PROD_SERVER_IP "docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY"
-    - ssh -i $PROD_ID_RSA -o StrictHostKeyChecking=no $PROD_SERVER_USER@$PROD_SERVER_IP "docker pull $PROD_IMAGE"
-    - ssh -i $PROD_ID_RSA -o StrictHostKeyChecking=no $PROD_SERVER_USER@$PROD_SERVER_IP "docker container rm -f prod-vh-order || true"
-    - ssh -i $PROD_ID_RSA -o StrictHostKeyChecking=no $PROD_SERVER_USER@$PROD_SERVER_IP "docker run -d --net=vh --name prod-vh-order --memory="200m" --cpus="0.5" --restart always -p 8185:8185 $PROD_IMAGE "
+    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $PROD_SERVER_USER@$PROD_SERVER_IP "docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY"
+    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $PROD_SERVER_USER@$PROD_SERVER_IP "docker pull $PROD_IMAGE"
+    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $PROD_SERVER_USER@$PROD_SERVER_IP "docker container rm -f prod-vh-order || true"
+    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $PROD_SERVER_USER@$PROD_SERVER_IP "docker run -d --net=vh --name prod-vh-order --memory="200m" --cpus="0.5" --restart always -p 8185:8185 $PROD_IMAGE "
   when: manual
   only:
     - master
@@ -80,10 +80,10 @@ deploy_standby:
   script:
     - chmod og= $STAND_ID_RSA
     - apk update && apk add openssh-client
-    - ssh -i $STAND_ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP "docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY"
-    - ssh -i $STAND_ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP "docker pull $PROD_IMAGE"
-    - ssh -i $STAND_ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP "docker container rm -f prod-vh-order || true"
-    - ssh -i $STAND_ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP "docker run -d --net=vh --name prod-vh-order --memory="200m" --cpus="0.5" --restart always -p 8185:8185 $PROD_IMAGE "
+    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP "docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY"
+    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP "docker pull $PROD_IMAGE"
+    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP "docker container rm -f prod-vh-order || true"
+    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP "docker run -d --net=vh --name prod-vh-order --memory="200m" --cpus="0.5" --restart always -p 8185:8185 $PROD_IMAGE "
   when: manual
   only:
     - master

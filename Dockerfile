@@ -2,6 +2,8 @@ FROM golang:1.14.14-stretch
 
 RUN apt-get update && apt-get upgrade -y
 
+MAINTAINER Himanshu Sadadiya
+
 RUN mkdir /app
 
 ADD . /app

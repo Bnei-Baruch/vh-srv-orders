@@ -258,13 +258,13 @@ func handleOrdersFlag(c *gin.Context) {
 }
 
 func handleOrdersTest(c *gin.Context) {
-	renewOrder(5728)
+	//renewOrder(5728)
 
 	//c.JSON(http.StatusOK, gin.H{"account": val})
 	//count := findOrdersToRenew(6)
 	//fmt.Println(count)
-	//c.JSON(http.StatusOK, gin.H{"count": count})
-	return
+	c.JSON(http.StatusOK, gin.H{"test": true})
+	//return
 }
 
 func handleOrdersClean(c *gin.Context) {
@@ -276,4 +276,15 @@ func handleOrdersClean(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"cleaned": len(dups)})
+}
+func handleVHisPaid(c *gin.Context) {
+	keycloakID := string(c.Params.ByName("id"))
+	total := activeOrderByKeycloakID(keycloakID)
+	ispaid := false
+	if total > 0 {
+		ispaid = true
+	}
+	c.JSON(http.StatusOK,
+		gin.H{"keycloakID": keycloakID,
+			"total": total, "ispaid": ispaid})
 }

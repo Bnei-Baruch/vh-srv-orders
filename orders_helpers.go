@@ -571,3 +571,27 @@ func cleanDuplicates(aid uint, month string) {
 	DB.Exec(req2, aid)
 
 }
+
+// find active orders by Keycloak ID
+func activeOrderByKeycloakID(id string) int {
+	req := `select o.id 
+	from orders as o, accounts as a 
+	where a."UserKey" = ? and 
+	o."AccountID" = a.id and
+	o."Status" = 'paid'`
+
+	rows, err := DB.Raw(req, id).Rows() // (*sql.Rows, error)
+	if err != nil {
+		return -1
+	}
+	defer rows.Close()
+	var count int
+	var oid int
+	count = 0
+	for rows.Next() {
+		rows.Scan(&oid)
+		count++
+	}
+	return count
+
+}

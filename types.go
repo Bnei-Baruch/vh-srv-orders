@@ -224,3 +224,44 @@ type RequestPaid struct {
 	TransactionUpdateTime string `json:"transaction_update_time"`
 	VoucherID             string `json:"voucher_id"`
 }
+
+//Product is storing all product info
+type Product struct {
+	//Product data
+	Descriptions  []ProductDescription `json:"ProductDescription"` // arranged by language
+	Cost          []Price              `json:"Cost"`               // arranged by currency
+	Type          string               `json:"Type"`
+	ProductType   string               `json:"ProductType"`
+	SKU           string               `json:"SKU"`
+	RecurringFreq int                  `json:"RecurringFreq"`
+	Installements int                  `json:"Installements"`
+	Organization  string               `json:"Organization"`
+}
+
+//Price for multicurrent products
+type Price struct {
+	Currency string  `json:"currency"`
+	Fixed    bool    `json:"fixed"`
+	Amount   float32 `json:"amount"`
+	Min      int     `json:"min"`
+	Max      int     `json:"max"`
+	Step     int     `json:"step"`
+}
+
+//ProductDescription specify product desc
+type ProductDescription struct {
+	Locale     string      `json:"locale"`
+	Header     Description `json:"header"`
+	Body       Description `json:"body"`
+	TosURL     string      `json:"TosURL"`
+	CancelURL  string      `json:"CancelURL"`
+	CancelText string      `json:"CancelText"`
+	ButtonText string      `json:"ButtonText"`
+}
+
+//Description generic  metadata
+type Description struct {
+	Title    string `json:"title"`
+	Subtitle string `json:"subtitle"`
+	Body     string `json:"body"`
+}

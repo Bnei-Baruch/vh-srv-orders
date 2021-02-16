@@ -30,6 +30,10 @@ ARG PG_PWD=postgres
 ENV PG_PWD=$PG_PWD
 RUN echo $PG_PWD
 
+ARG SUFX=-F2
+ENV SUFX=$SUFX
+RUN echo $SUFX
+
 RUN go build -o main .
 
 EXPOSE 8185

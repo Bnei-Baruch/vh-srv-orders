@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -61,6 +62,7 @@ func createOrder(req RequestOrder) (Order, error) {
 }
 
 func postJSON(method string, url string, payload []byte) (*http.Response, error) {
+	fmt.Println("POSTING TO ENDPOINT")
 	payReq, _ := http.NewRequest(method, url, bytes.NewReader(payload))
 	payReq.Header.Set("Content-Type", "application/json")
 
@@ -98,8 +100,8 @@ func createPendingPayment(sum float32, oid uint) (Payment, error) {
 
 	DB.Create(&p)
 
-	paramx := "mb-" + strconv.FormatUint(uint64(p.ID), 10) + Conf["SUFX"]
-	ordkey := "ord-" + strconv.FormatUint(uint64(oid), 10) + Conf["SUFX"]
+	paramx := "mb-" + strconv.FormatUint(uint64(p.ID), 10) + os.Getenv("SUFX")
+	ordkey := "ord-" + strconv.FormatUint(uint64(oid), 10) + os.Getenv("SUFX")
 
 	p.ParamX = paramx
 	p.Ordkey = ordkey
@@ -305,6 +307,7 @@ func getAccountForOrderID(orderID uint) Account {
 	return a
 }
 
+// TODO: REFACTOR
 func createRequestPayByToken(a Account, o Order, p Payment) (RequestPayment, Payment) {
 	newp, _ := createPendingPayment(o.Amount, o.ID)
 	newp.PelecardToken = p.PelecardToken

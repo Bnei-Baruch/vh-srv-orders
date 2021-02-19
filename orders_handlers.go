@@ -6,7 +6,9 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -115,8 +117,8 @@ func handleCreateOrderAndPay(c *gin.Context) {
 	ord, err := createOrder(req)
 
 	p, err := createPayment(req, ord)
-	paramx := "mb-" + strconv.FormatUint(uint64(p.ID), 10) + Conf["SUFX"]
-	ordkey := "ord-" + strconv.FormatUint(uint64(ord.ID), 10) + Conf["SUFX"]
+	paramx := "mb-" + strconv.FormatUint(uint64(p.ID), 10) + os.Getenv("SUFX")
+	ordkey := "ord-" + strconv.FormatUint(uint64(ord.ID), 10) + os.Getenv("SUFX")
 
 	errorurl := req.ErrorURL + "/" + ordkey + "/" + paramx
 	cancelurl := req.CancelURL + "/" + ordkey + "/" + paramx
@@ -137,34 +139,52 @@ func handleCreateOrderAndPay(c *gin.Context) {
 		City:         req.City,
 		Country:      "Undef",
 		Participans:  "1",
-		Details:      "Membership",
+		Details:      req.Reference,
 		SKU:          req.SKU,
 		VAT:          "f",
 		Installments: 1,
 		Language:     req.OrderLanguage,
 		Reference:    paramx,
-		Organization: "ben2",
+		Organization: req.Organization,
 	}
 
+	fmt.Println(extPay)
+
 	payload, err := json.Marshal(extPay)
-	resp, err := postJSON("POST", "https://checkout.kbb1.com/token/new", payload)
-	//resp, err := postJSON("POST", "https://checkout.kbb1.com/payments/new", payload)
+
+	ENDPOINT := ""
+
+	if req.Type == "recurring" {
+		ENDPOINT = "https://checkout.kbb1.com/token/new"
+	}
+
+	if req.Type == "regular" {
+		ENDPOINT = "https://checkout.kbb1.com/payments/new"
+	}
+
+	resp, err := postJSON("POST", ENDPOINT, payload)
 	defer resp.Body.Close()
 	fmt.Println("response Status:", resp.Status)
 	fmt.Println("response Headers:", resp.Header)
 	body, _ := ioutil.ReadAll(resp.Body)
-	parsableBody := string(body)
-	//actualURL := strings.Split(parsableBody, "'")[1]
 
+	parsableBody := string(body)
 	fmt.Println("response URL:", parsableBody)
-	var i interface{}
-	json.Unmarshal(body, &i)
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"Error": err})
 	} else {
-		//c.JSON(http.StatusOK, gin.H{"url": actualURL})
-		c.JSON(http.StatusOK, i)
+		// Grisha you should fix that one... seriously
+		if req.Type == "regular" {
+			// if req.Type is regular - endpoint return some ass-shit string
+			// gota parse the m*fkr
+			actualURL := strings.Split(parsableBody, "'")[1]
+			c.JSON(http.StatusOK, gin.H{"url": actualURL})
+		} else {
+			var i interface{}
+			json.Unmarshal(body, &i)
+			c.JSON(http.StatusOK, i)
+		}
 	}
 }
 

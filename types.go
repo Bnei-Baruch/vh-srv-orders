@@ -118,6 +118,7 @@ type RequestOrder struct {
 	//Product data
 	Amount        float32 `json:"Amount"`
 	Currency      string  `json:"Currency"`
+	Reference     string  `json:"Reference"`
 	Type          string  `json:"Type"`
 	ProductType   string  `json:"ProductType"`
 	SKU           string  `json:"SKU"`

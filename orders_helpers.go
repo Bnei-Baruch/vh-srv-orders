@@ -400,6 +400,7 @@ func renewOrder(orderID uint) string {
 		newp.Success = "1"
 		data := answers["data"].(string)
 		fmt.Println(data)
+		flagOrderAsRenewed(orderID)
 	} else {
 		newp.PaymentStatus = "failed"
 		newp.Success = "0"
@@ -409,23 +410,37 @@ func renewOrder(orderID uint) string {
 	return newp.Success
 }
 
-func findOrdersToRenew(month int) int {
+func flagOrderAsRenewed(orderID uint) {
+	req := `update orders 
+		set "Flag" = 'renewed'
+		where id = ?`
+
+	res := DB.Exec(req, orderID)
+
+	if res.Error != nil {
+		fmt.Println(res.Error)
+	}
+
+}
+
+func chargeOrdersToRenew() int {
 	sqlQuery := `
-	Select ID from orders 
+	Select id from orders 
 	Where "Status" = 'paid' 
 	and "Type" = 'recurring'
-	and (("Flag" is Null) or ("Flag" <> 'duplicate')) 
-	and date_part('month', "PaymentDate") = ? 
-	order by id asc 
+	and "Flag" = 'torenew'
 	`
-	rows, err := DB.Raw(sqlQuery, month).Rows() // (*sql.Rows, error)
+	rows, err := DB.Raw(sqlQuery).Rows()
+
 	if err != nil {
 		return -1
 	}
 	defer rows.Close()
+
 	var count int
 	var id int
 	count = 0
+
 	for rows.Next() {
 		rows.Scan(&id)
 		status := renewOrder(uint(id))
@@ -437,6 +452,97 @@ func findOrdersToRenew(month int) int {
 		}
 	}
 	return count
+}
+
+func flagOrdersToRenew(month int64, year int64) int64 {
+	// fmt.Println(month)
+	// fmt.Println(year)
+	// return 2
+
+	// Select all unique individuals who have
+	// an active renewable order
+	qOPotentialStr := `
+	select userkey, count(userkey) as qt 
+	from orders where "Status" = 'paid' 
+	and "Type" = 'recurring'
+	group by userkey 
+	order by qt desc
+	`
+	rows, err := DB.Raw(qOPotentialStr).Rows()
+
+	if err != nil {
+		fmt.Println("error 1")
+		return -1
+	}
+
+	type qOPotential struct {
+		Userkey string
+		Qt      int64
+	}
+
+	var aOPotential qOPotential
+
+	defer rows.Close()
+
+	var counter int64
+	counter = 0
+
+	for rows.Next() {
+		DB.ScanRows(rows, &aOPotential)
+
+		// fmt.Printf("Key: %s  -- Qt: %d\n",
+		// 	aOPotential.Userkey,
+		// 	aOPotential.Qt)
+
+		qOSelectStr := `
+		select * from orders 
+		where userkey = ?
+		and "Status"='paid' 
+		and "Type" = 'recurring'
+		order by "PaymentDate" desc
+		limit 1
+		`
+		oselected, err := DB.Raw(qOSelectStr, aOPotential.Userkey).Rows()
+
+		if err != nil {
+			fmt.Println("error 2")
+			fmt.Println(err)
+			return -1
+		}
+
+		defer oselected.Close()
+		var aOSelect Order
+
+		for oselected.Next() {
+			DB.ScanRows(oselected, &aOSelect)
+
+			//fmt.Println(aOSelect.PaymentDate)
+			//fmt.Println(int(aOSelect.PaymentDate.Month()))
+
+			if int64(aOSelect.PaymentDate.Month()) == month && int64(aOSelect.PaymentDate.Year()) == year {
+				fmt.Printf("No need to charge order %d\n", aOSelect.ID)
+			} else {
+				fmt.Printf("Mark Order %d for renewal\n", aOSelect.ID)
+				flagOrderForRenewal(uint(aOSelect.ID))
+				counter++
+			}
+		}
+	}
+	return counter
+}
+
+func flagOrderForRenewal(id uint) {
+	req := `
+		update orders
+		set "Flag" = 'torenew'
+		where id = ?`
+
+	res := DB.Exec(req, id)
+
+	if res.Error != nil {
+		fmt.Println(res.Error)
+	}
+
 }
 
 func flagDuplicateOrders(ProductType string) int {

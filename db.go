@@ -69,6 +69,7 @@ func connectPostgreSQL() {
 	db, err := gorm.Open("postgres", connec)
 
 	if err != nil {
+		log.Fatal(connec)
 		log.Fatal("Failed to connect to database with error", err)
 	}
 

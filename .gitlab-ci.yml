@@ -22,7 +22,7 @@ build_staging:
     - docker push $STAGING_IMAGE
     - docker push $STAGING_LATEST_IMAGE
   only:
-    - updated-build
+    - master
 
 deploy_staging:
   #image: tmaier/docker-compose:latest
@@ -42,7 +42,7 @@ deploy_staging:
     - docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY
     - IMAGE_NAME=$STAGING_IMAGE docker-compose up -d
   only:
-    - updated-build
+    - master
 
 
 build_production:

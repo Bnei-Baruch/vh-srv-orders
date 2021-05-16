@@ -16,6 +16,7 @@ build_staging:
     - docker:19.03.12-dind
   script:
     - docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY
+    - docker pull $STAGING_LATEST_IMAGE
     - docker build --cache-from $STAGING_LATEST_IMAGE -t $STAGING_IMAGE .
     - docker tag $STAGING_IMAGE $STAGING_LATEST_IMAGE
     - docker push $STAGING_IMAGE

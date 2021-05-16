@@ -30,8 +30,8 @@ deploy_staging:
     # we want to use the db in staging server itself.
     DB_HOST: "ordersdb" #"${DEV_PG_HOST}"
     DB_PORT: ${DEV_PG_PORT}
-    DB_USER: ${DEV_PG_USER}
-    DB_DATABASE: ${DEV_PG_DBNAME}
+    DB_USER: ${DEV_ORDER_PG_USER}
+    DB_DATABASE: ${DEV_ORDER_PG_DBNAME}
     DB_PASSWORD: ${DEV_PG_PWD}
     SUFX: ${DEV_SUFX}
   image: gitlab.bbdev.team:5050/vh/buildutils/buildutil:0.2.0
@@ -69,8 +69,8 @@ deploy_production:
   variables:
     DB_HOST: ${PROD_PG_HOST}
     DB_PORT: ${PROD_PG_PORT}
-    DB_USER: ${PROD_PG_USER}
-    DB_DATABASE: ${PROD_PG_DBNAME}
+    DB_USER: ${PROD_ORDER_PG_USER}
+    DB_DATABASE: ${PROD_ORDER_PG_DBNAME}
     DB_PASSWORD: ${PROD_PG_PWD}
     SUFX: ${PROD_SUFX}
   script:

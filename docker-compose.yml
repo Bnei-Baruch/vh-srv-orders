@@ -1,0 +1,29 @@
+version: '2'
+services:
+  ordersdb:
+    container_name: 'ordersdb'
+    image: postgres:9.6
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_DB: ${DB_DATABASE}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    # volumes:
+    #   - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+  vh-srv-orders:
+    environment:
+      PGUSER: ${DB_USER}
+      PGPASSWORD: ${DB_PASSWORD}
+      PGHOST: ${DB_HOST}
+      PGPORT: ${DB_PORT}
+      PGDATABASE: ${DB_DATABASE}
+      PORT: 8185
+      SUFX: "${DEV_SUFX}"
+    container_name: 'vh-srv-orders'
+    image: "${IMAGE_NAME}"
+    mem_limit: 250M
+    ports:
+      - 8185:8185
+networks:
+  default:
+    external:
+      name: vh

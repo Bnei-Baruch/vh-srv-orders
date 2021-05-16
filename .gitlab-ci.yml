@@ -1,89 +1,172 @@
 stages:
-  - publish
+  - build
   - deploy
-  - publish_Prod
-  - deploy_Prod
-  - deploy_standby
 
 variables:
-  IMAGE: $CI_REGISTRY_IMAGE/$CI_COMMIT_REF_NAME:$CI_COMMIT_SHORT_SHA
-  PROD_IMAGE: $CI_REGISTRY_IMAGE/$CI_COMMIT_REF_NAME:prod_$CI_COMMIT_SHORT_SHA
-
-publish:
+  STAGING_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+  STAGING_LATEST_IMAGE: $CI_REGISTRY_IMAGE:staging
+  PROD_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG
+  PROD_LATEST_IMAGE: $CI_REGISTRY_IMAGE:latest
+build_staging:
   image: docker:latest
-  stage: publish
+  stage: build
   tags:
-    - dockerbuild
+    - staging
   services:
     - docker:19.03.12-dind
   script:
     - docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY
-    - docker build -t $IMAGE --build-arg PG_HOST=$DEV_PG_HOST --build-arg PG_PORT=$DEV_PG_PORT --build-arg PG_USER=$DEV_PG_USER --build-arg PG_DBNAME=$DEV_PG_DBNAME --build-arg PG_PWD=$DEV_PG_PWD --build-arg SUFX=$DEV_SUFX .
-    - docker push $IMAGE
+    - docker pull $STAGING_LATEST_IMAGE
+    - docker build --cache-from $STAGING_LATEST_IMAGE -t $STAGING_IMAGE .
+    - docker tag $STAGING_IMAGE $STAGING_LATEST_IMAGE
+    - docker push $STAGING_IMAGE
+    - docker push $STAGING_LATEST_IMAGE
   only:
-    - development
+    - updated-build
 
-deploy:
-  image: docker:latest
+deploy_staging:
+  #image: tmaier/docker-compose:latest
+  variables:
+    # we want to use the db in staging server itself.
+    DB_HOST: "ordersdb" #"${DEV_PG_HOST}"
+    DB_PORT: ${DEV_PG_PORT}
+    DB_USER: ${DEV_ORDER_PG_USER}
+    DB_DATABASE: ${DEV_ORDER_PG_DBNAME}
+    DB_PASSWORD: ${DEV_PG_PWD}
+    SUFX: ${DEV_SUFX}
+  image: gitlab.bbdev.team:5050/vh/buildutils/buildutil:0.2.0
   stage: deploy
   tags:
-    - dockerbuild
+    - staging
   script:
-    - chmod og= $ID_RSA
-    - apk update && apk add openssh-client
-    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_IP "docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY"
-    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_IP "docker pull $IMAGE"
-    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_IP "docker container rm -f vh-order || true"
-    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_IP "docker run -d --net=vh --name vh-order --memory="200m" --cpus="0.5" --restart always -p 8185:8185 $IMAGE "
-  environment:
-    name: development
-    url: http://51.15.238.1
-  when: manual
+    - docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY
+    - IMAGE_NAME=$STAGING_IMAGE docker-compose up -d
   only:
-    - development
+    - updated-build
 
-publish_Prod:
+
+build_production:
   image: docker:latest
-  stage: publish_Prod
+  stage: build
   tags:
     - dockerbuild
   services:
     - docker:19.03.12-dind
   script:
+    - env
     - docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY
-    - docker build -t $PROD_IMAGE --build-arg PG_HOST=$PROD_PG_HOST --build-arg PG_PORT=$PROD_PG_PORT --build-arg PG_USER=$PROD_PG_USER --build-arg PG_DBNAME=$PROD_PG_DBNAME --build-arg PG_PWD=$PROD_PG_PWD --build-arg SUFX=$PROD_SUFX .
+    - docker build -t $PROD_IMAGE .
     - docker push $PROD_IMAGE
   only:
-    - master
+    - tags
 
-deploy_Prod:
-  image: docker:latest
-  stage: deploy_Prod
+deploy_production:
+  #image: tmaier/docker-compose:latest
+  image: gitlab.bbdev.team:5050/vh/buildutils/buildutil:0.2.0
+  stage: deploy
   tags:
-    - dockerbuild
+    - production
+  variables:
+    DB_HOST: ${PROD_PG_HOST}
+    DB_PORT: ${PROD_PG_PORT}
+    DB_USER: ${PROD_ORDER_PG_USER}
+    DB_DATABASE: ${PROD_ORDER_PG_DBNAME}
+    DB_PASSWORD: ${PROD_PG_PWD}
+    SUFX: ${PROD_SUFX}
   script:
-    - chmod og= $ID_RSA
-    - apk update && apk add openssh-client
-    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $PROD_SERVER_USER@$PROD_SERVER_IP "docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY"
-    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $PROD_SERVER_USER@$PROD_SERVER_IP "docker pull $PROD_IMAGE"
-    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $PROD_SERVER_USER@$PROD_SERVER_IP "docker container rm -f prod-vh-order || true"
-    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $PROD_SERVER_USER@$PROD_SERVER_IP "docker run -d --net=vh --name prod-vh-order --memory="200m" --cpus="0.5" --restart always -p 8185:8185 $PROD_IMAGE "
-  when: manual
+    - docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY
+    - IMAGE_NAME=$PROD_IMAGE docker-compose up -d vh-srv-orders
   only:
-    - master
+    - tags
+  when: manual
 
-deploy_standby:
-  image: docker:latest
-  stage: deploy_standby
-  tags:
-    - dockerbuild
-  script:
-    - chmod og= $ID_RSA
-    - apk update && apk add openssh-client
-    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP "docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY"
-    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP "docker pull $PROD_IMAGE"
-    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP "docker container rm -f prod-vh-order || true"
-    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP "docker run -d --net=vh --name prod-vh-order --memory="200m" --cpus="0.5" --restart always -p 8185:8185 $PROD_IMAGE "
-  when: manual
-  only:
-    - master
+
+#stages:
+#  - publish
+#  - deploy
+#  - publish_Prod
+#  - deploy_Prod
+#  - deploy_standby
+#
+#variables:
+#  IMAGE: $CI_REGISTRY_IMAGE/$CI_COMMIT_REF_NAME:$CI_COMMIT_SHORT_SHA
+#  PROD_IMAGE: $CI_REGISTRY_IMAGE/$CI_COMMIT_REF_NAME:prod_$CI_COMMIT_SHORT_SHA
+#
+#publish:
+#  image: docker:latest
+#  stage: publish
+#  tags:
+#    - dockerbuild
+#  services:
+#    - docker:19.03.12-dind
+#  script:
+#    - docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY
+#    - docker build -t $IMAGE --build-arg PG_HOST=$DEV_PG_HOST --build-arg PG_PORT=$DEV_PG_PORT --build-arg PG_USER=$DEV_PG_USER --build-arg PG_DBNAME=$DEV_PG_DBNAME --build-arg PG_PWD=$DEV_PG_PWD --build-arg SUFX=$DEV_SUFX .
+#    - docker push $IMAGE
+#  only:
+#    - development
+#
+#deploy:
+#  image: docker:latest
+#  stage: deploy
+#  tags:
+#    - dockerbuild
+#  script:
+#    - chmod og= $ID_RSA
+#    - apk update && apk add openssh-client
+#    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_IP "docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY"
+#    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_IP "docker pull $IMAGE"
+#    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_IP "docker container rm -f vh-order || true"
+#    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_IP "docker run -d --net=vh --name vh-order --memory="200m" --cpus="0.5" --restart always -p 8185:8185 $IMAGE "
+#  environment:
+#    name: development
+#    url: http://51.15.238.1
+#  when: manual
+#  only:
+#    - development
+#
+#publish_Prod:
+#  image: docker:latest
+#  stage: publish_Prod
+#  tags:
+#    - dockerbuild
+#  services:
+#    - docker:19.03.12-dind
+#  script:
+#    - docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY
+#    - docker build -t $PROD_IMAGE --build-arg PG_HOST=$PROD_PG_HOST --build-arg PG_PORT=$PROD_PG_PORT --build-arg PG_USER=$PROD_PG_USER --build-arg PG_DBNAME=$PROD_PG_DBNAME --build-arg PG_PWD=$PROD_PG_PWD --build-arg SUFX=$PROD_SUFX .
+#    - docker push $PROD_IMAGE
+#  only:
+#    - master
+#
+#deploy_Prod:
+#  image: docker:latest
+#  stage: deploy_Prod
+#  tags:
+#    - dockerbuild
+#  script:
+#    - chmod og= $ID_RSA
+#    - apk update && apk add openssh-client
+#    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $PROD_SERVER_USER@$PROD_SERVER_IP "docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY"
+#    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $PROD_SERVER_USER@$PROD_SERVER_IP "docker pull $PROD_IMAGE"
+#    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $PROD_SERVER_USER@$PROD_SERVER_IP "docker container rm -f prod-vh-order || true"
+#    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $PROD_SERVER_USER@$PROD_SERVER_IP "docker run -d --net=vh --name prod-vh-order --memory="200m" --cpus="0.5" --restart always -p 8185:8185 $PROD_IMAGE "
+#  when: manual
+#  only:
+#    - master
+#
+#deploy_standby:
+#  image: docker:latest
+#  stage: deploy_standby
+#  tags:
+#    - dockerbuild
+#  script:
+#    - chmod og= $ID_RSA
+#    - apk update && apk add openssh-client
+#    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP "docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY"
+#    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP "docker pull $PROD_IMAGE"
+#    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP "docker container rm -f prod-vh-order || true"
+#    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $STAND_SERVER_USER@$STAND_SERVER_IP "docker run -d --net=vh --name prod-vh-order --memory="200m" --cpus="0.5" --restart always -p 8185:8185 $PROD_IMAGE "
+#  when: manual
+#  only:
+#    - master

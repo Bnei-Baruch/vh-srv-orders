@@ -12,6 +12,12 @@ import (
 
 //DB is ...
 var DB *gorm.DB
+const DEFAULT_PG_HOST = "localhost"
+const DEFAULT_PG_PORT = "5432"
+const DEFAULT_PG_USER = "user"
+const DEFAULT_PG_PASS = "pass"
+const DEFAULT_PG_SSL = "disable"
+const DEFAULT_PG_DBNAME = "PGDATABASE"
 
 //Init DB
 func initDB(dbtype string) {
@@ -50,14 +56,22 @@ func connectMockdb() {
 	DB = db
 }
 
+func getEnv(key, defaultValue string) string {
+	value := os.Getenv(key)
+	if len(value) == 0 {
+		return defaultValue
+	}
+	return value
+}
+
 func connectPostgreSQL() {
 	connec := fmt.Sprintf("host=%s port=%s user=%s dbname=%s password=%s sslmode=%s",
-		os.Getenv("PG_HOST"),
-		os.Getenv("PG_PORT"),
-		os.Getenv("PG_USER"),
-		os.Getenv("PG_DBNAME"),
-		os.Getenv("PG_PWD"),
-		os.Getenv("PG_SSLMODE"),
+		getEnv("PGHOST" , DEFAULT_PG_HOST),
+		getEnv("PGPORT", DEFAULT_PG_PORT),
+		getEnv("PGUSER", DEFAULT_PG_USER),
+		getEnv("PGDATABASE", DEFAULT_PG_DBNAME ),
+		getEnv("PGPASSWORD", DEFAULT_PG_PASS),
+		getEnv("PG_SSLMODE", DEFAULT_PG_SSL),
 	)
 	//Conf["PG_HOST"],
 	//Conf["PG_PORT"],
@@ -69,7 +83,7 @@ func connectPostgreSQL() {
 	db, err := gorm.Open("postgres", connec)
 
 	if err != nil {
-		log.Fatal("Failed to connect to database with error", err)
+		log.Fatal("Failed to connect to database with error \n", err , "\n",connec)
 	}
 
 	DB = db

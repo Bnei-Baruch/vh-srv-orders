@@ -1,7 +1,7 @@
 version: '2'
 services:
-  stagingdb_orders:
-    container_name: 'stagingdb_orders'
+  ordersdb:
+    container_name: 'ordersdb'
     image: postgres:9.6
     environment:
       POSTGRES_USER: ${DB_USER}
@@ -17,7 +17,7 @@ services:
       PGPORT: ${DB_PORT}
       PGDATABASE: ${DB_DATABASE}
       PORT: 8185
-      SUFX: "-F2"
+      SUFX: "${DEV_SUFX}"
     container_name: 'vh-srv-orders'
     image: "${IMAGE_NAME}"
     mem_limit: 250M

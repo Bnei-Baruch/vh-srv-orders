@@ -75,7 +75,7 @@ deploy_production:
     SUFX: ${PROD_SUFX}
   script:
     - docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY
-    - IMAGE_NAME=$PROD_IMAGE docker-compose up -d
+    - IMAGE_NAME=$PROD_IMAGE docker-compose up -d vh-srv-orders
   only:
     - tags
   when: manual

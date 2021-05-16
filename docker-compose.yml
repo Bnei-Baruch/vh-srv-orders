@@ -7,8 +7,8 @@ services:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_DB: ${DB_DATABASE}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
-    volumes:
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    # volumes:
+    #   - ./init.sql:/docker-entrypoint-initdb.d/init.sql
   vh-srv-orders:
     environment:
       PGUSER: ${DB_USER}

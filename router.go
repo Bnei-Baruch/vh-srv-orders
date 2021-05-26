@@ -12,7 +12,7 @@ func initRouter() *gin.Engine {
 
 	r := gin.Default()
 	r.Use(location.Default())
-	r.Use(CORSMiddleware())
+	// r.Use(CORSMiddleware())
 	orders := r.Group("/orders")
 	{
 		orders.GET("/", handleOrdersList)

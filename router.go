@@ -36,6 +36,11 @@ func initRouter() *gin.Engine {
 		vh.GET("/ispaid/:id", handleVHisPaid)
 	}
 
+	fix := r.Group("/fix")
+	{
+		fix.POST("/payments", handleFixPayments)
+	}
+
 	products := r.Group("/prod")
 	{
 		products.GET("/:id", handleProductbyID)

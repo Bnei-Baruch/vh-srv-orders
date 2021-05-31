@@ -33,6 +33,8 @@ require (
 	github.com/modern-go/reflect2 v1.0.1 // indirect
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/rogpeppe/go-internal v1.6.0 // indirect
+	github.com/sendgrid/rest v2.6.4+incompatible // indirect
+	github.com/sendgrid/sendgrid-go v3.10.0+incompatible // indirect
 	github.com/stretchr/objx v0.2.0 // indirect
 	github.com/stretchr/testify v1.5.1 // indirect
 	github.com/yuin/goldmark v1.1.31 // indirect

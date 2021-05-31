@@ -39,6 +39,7 @@ func initRouter() *gin.Engine {
 	fix := r.Group("/fix")
 	{
 		fix.POST("/payments", handleFixPayments)
+		fix.POST("/echo", handleFixEcho)
 	}
 
 	products := r.Group("/prod")

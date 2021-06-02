@@ -687,7 +687,9 @@ func activeOrderByKeycloakID(id string) int {
 	from orders as o, accounts as a 
 	where a."UserKey" = ? and 
 	o."AccountID" = a.id and
-	o."Status" = 'paid'`
+	o."Status" = 'paid'
+    o."ProductType" = 'globalmembership'
+`
 
 	rows, err := DB.Raw(req, id).Rows() // (*sql.Rows, error)
 	if err != nil {

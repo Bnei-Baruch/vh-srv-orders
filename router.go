@@ -71,6 +71,7 @@ func initRouter() *gin.Engine {
 	admin := r.Group("/admin")
 	{
 		admin.GET("/subscriptions", handleAdminSubscriptions)
+		admin.POST("/stats", handleAdminStats)
 		admin.GET("/subscriptions/:id", handleAdminSubscriptionByID)
 		admin.GET("/payments", handleAdmin)
 		admin.GET("/payments/:id", handleAdmin)

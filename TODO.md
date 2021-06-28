@@ -40,3 +40,4 @@ update orders set "Flag" = '', "Status" = 'cancelled', "Note" = 'was duplicate' 
 
 ## todos
 - stress test on max request and add limitation
+- test validity of queries before processing 

@@ -12,11 +12,12 @@ func initRouter() *gin.Engine {
 
 	r := gin.Default()
 	r.Use(location.Default())
-	r.Use(CORSMiddleware())
+	//r.Use(CORSMiddleware())
 	orders := r.Group("/orders")
 	{
 		orders.GET("/", handleOrdersList)
 		orders.POST("/new", handleOrdersCreate)
+		orders.POST("/update", handleUpdateOrders)
 		orders.POST("/paid", handleOrdersPaid)
 		orders.POST("/newandpay", handleCreateOrderAndPay)
 		orders.POST("/renew", handleOrdersRenew)
@@ -43,6 +44,8 @@ func initRouter() *gin.Engine {
 
 	payments := r.Group("/payments")
 	{
+		payments.POST("/", handleCreatePayment)
+		payments.POST("/update", handleUpdatePayment)
 		payments.GET("/count/:filter/:month", handlePaymentsCountByMonth)
 		payments.GET("/count/:filter/:month/:currency", handlePaymentsCountByMonthAndCurrency)
 	}

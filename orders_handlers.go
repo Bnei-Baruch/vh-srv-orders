@@ -226,13 +226,6 @@ func handleOrdersUpdateStatus(c *gin.Context) {
 	return
 }
 
-func handleCreatePayment(c *gin.Context) {
-	var p Payment
-	c.BindJSON(&p)
-	DB.Create(&p)
-	c.JSON(http.StatusOK, p)
-}
-
 func handleOrdersRenewByID(c *gin.Context) {
 	id := string(c.Params.ByName("id"))
 	oid, err := strconv.ParseUint(id, 10, 64)

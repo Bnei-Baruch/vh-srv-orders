@@ -1,11 +1,24 @@
 #!/bin/bash
 
-export PG_HOST=localhost
-export PG_PORT=5432
-export PG_USER=gorm
-export PG_DBNAME=gorm
-export PG_PWD=gorm
+export PGHOST=localhost
+export PGPORT=5532
+export PGUSER=gorm
+export PGDATABASE=gorm
+export PGPASSWORD=gorm
 export PG_SSLMODE=disable
 export SUFX="-G1"
 
-./bin/orders
+case $1 in
+	"dbconnect")
+		psql -h localhost --port $PGPORT -d $PGDATABASE -U $PGUSER
+	;;
+	"dbexec")
+		psql -h localhost --port $PGPORT -d $PGDATABASE -U $PGUSER -c "$2"
+	;;
+	"dbrun")
+		psql -h localhost --port $PGPORT -d $PGDATABASE -U $PGUSER < "$2"
+	;;
+    "run")
+    ./bin/orders
+esac
+

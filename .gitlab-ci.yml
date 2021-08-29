@@ -40,7 +40,9 @@ deploy_staging:
     - staging
   script:
     - docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY
-    - IMAGE_NAME=$STAGING_IMAGE docker-compose up -d
+    - IMAGE_NAME=$STAGING_IMAGE docker-compose up -d ordersdb
+    - sleep 60
+    - IMAGE_NAME=$STAGING_IMAGE docker-compose up -d vh-srv-orders
   only:
     - master
 

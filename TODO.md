@@ -36,3 +36,8 @@ if hasDuplicate
  - cancel all duplicate who have payment for this month
 for each id in orders do 
 update orders set "Flag" = '', "Status" = 'cancelled', "Note" = 'was duplicate' where AccountID
+
+
+## todos
+- stress test on max request and add limitation
+- test validity of queries before processing 

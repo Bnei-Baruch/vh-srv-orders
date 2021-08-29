@@ -5,7 +5,7 @@ export PGPORT=5532
 export PGUSER=gorm
 export PGDATABASE=gorm
 export PGPASSWORD=gorm
-export PG_SSLMODE=disable
+export PGSSLMODE=disable
 export SUFX="-G1"
 
 case $1 in

@@ -12,7 +12,7 @@ func initRouter() *gin.Engine {
 
 	r := gin.Default()
 	r.Use(location.Default())
-	//r.Use(CORSMiddleware())
+
 	orders := r.Group("/orders")
 	{
 		orders.GET("/", handleOrdersList)
@@ -35,6 +35,14 @@ func initRouter() *gin.Engine {
 	vh := r.Group("/vh")
 	{
 		vh.GET("/ispaid/:id", handleVHisPaid)
+	}
+
+	fix := r.Group("/fix")
+	{
+		fix.POST("/payments", handleFixPayments)
+		fix.POST("/echo", handleFixEcho)
+		fix.POST("/pelecard", handleFixPelecard)
+		fix.GET("/invalid", handleFixInvalid)
 	}
 
 	products := r.Group("/prod")
@@ -67,6 +75,7 @@ func initRouter() *gin.Engine {
 	admin := r.Group("/admin")
 	{
 		admin.GET("/subscriptions", handleAdminSubscriptions)
+		admin.POST("/stats", handleAdminStats)
 		admin.GET("/subscriptions/:id", handleAdminSubscriptionByID)
 		admin.GET("/payments", handleAdmin)
 		admin.GET("/payments/:id", handleAdmin)

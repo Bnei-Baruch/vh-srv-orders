@@ -426,8 +426,8 @@ func flagOrderAsRenewed(orderID uint) {
 func chargeOrdersToRenew() int {
 	sqlQuery := `
 	Select id from orders 
-	Where "Status" = 'paid'
-    or "Status" = 'nosuccess'
+	Where ("Status" = 'paid'
+    or "Status" = 'nosuccess')
 	and "Type" = 'recurring'
 	and "Flag" = 'torenew'
 	`
@@ -464,8 +464,8 @@ func flagOrdersToRenew(month int64, year int64) int64 {
 	// an active renewable order
 	qOPotentialStr := `
 	select userkey, count(userkey) as qt 
-	from orders where "Status" = 'paid'
-	or "Status" = 'nosuccess'
+	from orders where ("Status" = 'paid'
+	or "Status" = 'nosuccess')
 	and "Type" = 'recurring'
 	group by userkey 
 	order by qt desc
@@ -499,8 +499,8 @@ func flagOrdersToRenew(month int64, year int64) int64 {
 		qOSelectStr := `
 		select * from orders 
 		where userkey = ?
-		and "Status"='paid'
-		or "Status"='nosuccess'
+		and ("Status"='paid'
+		or "Status"='nosuccess')
 		and "Type" = 'recurring'
 		order by "PaymentDate" desc
 		limit 1

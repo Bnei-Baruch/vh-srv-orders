@@ -55,7 +55,13 @@ func createOrder(req RequestOrder) (Order, error) {
 	}
 
 	accountID := CreateOrUpdateAccount(a)
+
+	if accountID == 0 {
+		return o, errors.New("Null account")
+	}
+
 	o.AccountID = accountID
+
 	DB.Create(&o)
 
 	return o, nil

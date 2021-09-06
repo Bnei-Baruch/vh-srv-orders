@@ -106,17 +106,30 @@ func handleOrdersCreate(c *gin.Context) {
 
 func handleCreateOrderAndPay(c *gin.Context) {
 	var req RequestOrder
-	err := c.BindJSON(&req)
+	errRequest := c.BindJSON(&req)
 
-	if err != nil {
-		log.Println("Err:", err)
-		c.JSON(http.StatusBadRequest, gin.H{"Error": err})
+	if errRequest != nil {
+		log.Println("Err:", errRequest)
+		c.JSON(http.StatusBadRequest, gin.H{"Error": errRequest})
 		return
 	}
 
-	ord, err := createOrder(req)
+	ord, errOrderCreation := createOrder(req)
 
-	p, err := createPayment(req, ord)
+	if errOrderCreation != nil {
+		log.Println("Err:", errOrderCreation)
+		c.JSON(http.StatusBadRequest, gin.H{"Error": errOrderCreation})
+		return
+	}
+
+	p, errPaymentCreation := createPayment(req, ord)
+
+	if errPaymentCreation != nil {
+		log.Println("Err:", errPaymentCreation)
+		c.JSON(http.StatusBadRequest, gin.H{"Error": errPaymentCreation})
+		return
+	}
+
 	paramx := "mb-" + strconv.FormatUint(uint64(p.ID), 10) + os.Getenv("SUFX")
 	ordkey := "ord-" + strconv.FormatUint(uint64(ord.ID), 10) + os.Getenv("SUFX")
 

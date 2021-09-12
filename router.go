@@ -1,6 +1,10 @@
 package main
 
 import (
+	"fmt"
+	"os"
+
+	"github.com/gin-contrib/cors"
 	"github.com/gin-contrib/location"
 	"github.com/gin-gonic/gin"
 )
@@ -12,6 +16,11 @@ func initRouter() *gin.Engine {
 
 	r := gin.Default()
 	r.Use(location.Default())
+
+	if os.Getenv("CORSISON") == "YES" {
+		fmt.Println("CORS ACTIVE")
+		r.Use(cors.Default())
+	}
 
 	orders := r.Group("/orders")
 	{

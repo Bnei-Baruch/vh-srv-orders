@@ -179,7 +179,19 @@ func handleCreateOrderAndPay(c *gin.Context) {
 		ENDPOINT = "https://checkout.kbb1.com/payments/new"
 	}
 
+	if req.Reference == "testemv" {
+		fmt.Println("EMV")
+		ENDPOINT = "https://checkout.kbb1.com/emv/new"
+	}
+	fmt.Println(ENDPOINT)
+
 	resp, err := postJSON("POST", ENDPOINT, payload)
+	if err != nil {
+		fmt.Println("Error wehn posting to ENDPOINT")
+		fmt.Println(err)
+		c.JSON(http.StatusOK, gin.H{"url": errorurl})
+		return
+	}
 	defer resp.Body.Close()
 	fmt.Println("response Status:", resp.Status)
 	fmt.Println("response Headers:", resp.Header)

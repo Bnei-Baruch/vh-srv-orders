@@ -1,5 +1,6 @@
 #!/bin/bash
 
+#export CORSISON="YES" 
 export PGHOST=localhost
 export PGPORT=5532
 export PGUSER=gorm

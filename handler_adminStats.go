@@ -8,15 +8,18 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+//RequestStats is query for stats
 type RequestStats struct {
 	Product string `json:"product" binding:"required"`
 	Year    string `json:"year" binding:"required"`
 }
 
+//ResponseStats is reponse from stats
 type ResponseStats struct {
 	Data []StatsMonth `json:"data"`
 }
 
+//StatsMonth are stats for a month
 type StatsMonth struct {
 	Month    string              `json:"month"`
 	Year     string              `json:"year"`
@@ -24,6 +27,7 @@ type StatsMonth struct {
 	Orders   BreakdownByCurrency `json:"orders"`
 }
 
+//BreakdownByCurrency is breakdown by currency
 type BreakdownByCurrency struct {
 	USD   string `json:"USD"`
 	NIS   string `json:"NIS"`
@@ -54,6 +58,7 @@ func handleAdminStats(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+//GetStatsForMonth provide stats for months
 func GetStatsForMonth(month int, year string) StatsMonth {
 	stats := StatsMonth{
 		Month:    time.Month(month).String(),
@@ -65,6 +70,7 @@ func GetStatsForMonth(month int, year string) StatsMonth {
 	return stats
 }
 
+//GetProductBreakdownByCurrency provide produtcs by currency
 func GetProductBreakdownByCurrency(month int, year string) BreakdownByCurrency {
 	// replace with query
 	pbc := BreakdownByCurrency{
@@ -76,6 +82,7 @@ func GetProductBreakdownByCurrency(month int, year string) BreakdownByCurrency {
 	return pbc
 }
 
+//GetOrderBreakdownByCurrency provide orders by currency
 func GetOrderBreakdownByCurrency(month int, year string) BreakdownByCurrency {
 	obc := BreakdownByCurrency{
 		USD:   "2121",

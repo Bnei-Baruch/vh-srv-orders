@@ -10,14 +10,26 @@ import (
 	_ "github.com/jinzhu/gorm/dialects/sqlite"
 )
 
-//DB is ...
+//DB is globally available
 var DB *gorm.DB
-const DEFAULT_PG_HOST = "localhost"
-const DEFAULT_PG_PORT = "5432"
-const DEFAULT_PG_USER = "user"
-const DEFAULT_PG_PASS = "pass"
-const DEFAULT_PG_SSL = "disable"
-const DEFAULT_PG_DBNAME = "PGDATABASE"
+
+//PgHost default value
+const PgHost = "localhost"
+
+//PgPort default value
+const PgPort = "5432"
+
+//PgUser default value
+const PgUser = "user"
+
+//PgPass default value
+const PgPass = "pass"
+
+//PgSSL default value
+const PgSSL = "disable"
+
+//PgDbName default value
+const PgDbName = "PGDATABASE"
 
 //Init DB
 func initDB(dbtype string) {
@@ -66,24 +78,18 @@ func getEnv(key, defaultValue string) string {
 
 func connectPostgreSQL() {
 	connec := fmt.Sprintf("host=%s port=%s user=%s dbname=%s password=%s sslmode=%s",
-		getEnv("PGHOST" , DEFAULT_PG_HOST),
-		getEnv("PGPORT", DEFAULT_PG_PORT),
-		getEnv("PGUSER", DEFAULT_PG_USER),
-		getEnv("PGDATABASE", DEFAULT_PG_DBNAME ),
-		getEnv("PGPASSWORD", DEFAULT_PG_PASS),
-		getEnv("PG_SSLMODE", DEFAULT_PG_SSL),
+		getEnv("PGHOST", PgHost),
+		getEnv("PGPORT", PgPort),
+		getEnv("PGUSER", PgUser),
+		getEnv("PGDATABASE", PgDbName),
+		getEnv("PGPASSWORD", PgPass),
+		getEnv("PG_SSLMODE", PgSSL),
 	)
-	//Conf["PG_HOST"],
-	//Conf["PG_PORT"],
-	//Conf["PG_USER"],
-	//Conf["PG_DBNAME"],
-	//Conf["PG_PWD"],
-	//Conf["PG_SSLMODE"])
 
 	db, err := gorm.Open("postgres", connec)
 
 	if err != nil {
-		log.Fatal("Failed to connect to database with error \n", err , "\n",connec)
+		log.Fatal("Failed to connect to database with error \n", err, "\n", connec)
 	}
 
 	DB = db

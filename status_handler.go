@@ -6,7 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-//Status: return membership and status
+//Status returns membership and status
 func Status(c *gin.Context) {
 	filter := string(c.Params.ByName("email"))
 	paidmb := hasPaidMembership(filter)

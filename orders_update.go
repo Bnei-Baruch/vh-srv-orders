@@ -41,8 +41,10 @@ func handleUpdateOrders(c *gin.Context) {
 	}
 
 	oi.Status = o.Status
-	oi.PaymentDate = time.Now()
-	oi.Flag = "renewed"
+	if oi.Status == "success" || oi.Status == "paid" {
+		oi.PaymentDate = time.Now()
+		oi.Flag = "renewed"
+	}
 
 	savedResult := DB.Save(&oi)
 

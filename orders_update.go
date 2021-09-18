@@ -25,7 +25,7 @@ func handleUpdateOrders(c *gin.Context) {
 	result := DB.First(&oi, o.ID)
 
 	if result.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": result.Error})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": result.Error, "msg": "error finding order"})
 		return
 	}
 
@@ -49,7 +49,7 @@ func handleUpdateOrders(c *gin.Context) {
 	savedResult := DB.Save(&oi)
 
 	if savedResult.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": savedResult.Error})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": savedResult.Error, "msg": "error saving result"})
 		return
 	}
 

@@ -351,7 +351,8 @@ func createRequestPayByToken(a Account, o Order, p Payment) (RequestPayment, Pay
 
 func renewPaymentByToken(extPay RequestPayment) (interface{}, error) {
 	payload, _ := json.Marshal(extPay)
-	resp, err := postJSON("POST", "https://checkout.kbb1.com/token/charge", payload)
+	//resp, err := postJSON("POST", "https://checkout.kbb1.com/token/charge", payload)
+	resp, err := postJSON("POST", "https://checkout.kbb1.com/emv/charge", payload)
 	defer resp.Body.Close()
 	fmt.Println("response Status:", resp.Status)
 	fmt.Println("response Headers:", resp.Header)

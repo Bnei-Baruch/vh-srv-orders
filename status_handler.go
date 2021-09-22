@@ -47,7 +47,7 @@ from orders as o, accounts as a
 where a."Email" = ?
 and o."AccountID" = a.id
 and o."ProductType" = 'globalmembership'
-and (o."Status" = 'paid' or o."Status" = 'success')
+and (o."Status" = 'paid' or o."Status" = 'success' or o."Status" = 'nosuccess')
 `
 	type Results struct {
 		Total int

@@ -1,3 +1,17 @@
+-- List of order for a given user by email
+select a.id, a."Email",
+o.created_at, o."Amount", o."Currency",  o.id, o."Status",o."PaymentDate", o."Flag" , o."Type", o.userkey, o.updated_at, o."ProductType"
+from accounts as a, orders as o where a."Email" like '%youremail@mail.com%'
+and a.id = o."AccountID" order by "PaymentDate" desc 
+
+
+-- List of payments order by last payment for a given user by email
+select * from payments 
+where "OrderID" in (select o.id from accounts as a, orders as o where a."Email" like '%youremail@mail.com%'
+and a.id = o."AccountID" ) order by created_at desc 
+
+
+
 -- List of accounts who paid more than once
 select mistakes."AccountID"
 from (

@@ -172,7 +172,9 @@ func handleCreateOrderAndPay(c *gin.Context) {
 	ENDPOINT := ""
 
 	if req.Type == "recurring" {
-		ENDPOINT = "https://checkout.kbb1.com/token/new"
+		//ENDPOINT = "https://checkout.kbb1.com/token/new"
+		fmt.Println("EMV")
+		ENDPOINT = "https://checkout.kbb1.com/emv/new"
 	}
 
 	if req.Type == "regular" {

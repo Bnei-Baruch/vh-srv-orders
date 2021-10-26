@@ -437,7 +437,7 @@ func flagOrderAsRenewed(orderID uint) {
 func chargeOrdersToRenew(pmx string) int {
 	sqlQuery := `
 	Select id from orders 
-	Where "Status" = 'paid'
+	Where ("Status" = 'paid' or "Status" = 'nosuccess')
 	and "Type" = 'recurring'
 	and "Flag" = 'torenew'
 	`

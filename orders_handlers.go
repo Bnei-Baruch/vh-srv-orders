@@ -278,6 +278,7 @@ func handleOrdersRenew(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"Error": err.Error()})
 	} else {
 		if body.User == "admin" && (body.Key == "t" || body.Key == "e") {
+			fmt.Printf("Renewing with key : %s\n", body.Key)
 			count := chargeOrdersToRenew(body.Key)
 			c.JSON(http.StatusOK, gin.H{"count": count})
 		} else {

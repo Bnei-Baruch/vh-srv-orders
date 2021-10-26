@@ -108,6 +108,7 @@ func createPendingPayment(sum float32, oid uint, pmx string) (Payment, error) {
 
 	paramx := "mb-" + strconv.FormatUint(uint64(p.ID), 10) + os.Getenv("SUFX") + pmx
 	ordkey := "ord-" + strconv.FormatUint(uint64(oid), 10) + os.Getenv("SUFX")
+	fmt.Printf(">>>> ParamX: %s\n", paramx)
 
 	p.ParamX = paramx
 	p.Ordkey = ordkey
@@ -453,6 +454,7 @@ func chargeOrdersToRenew(pmx string) int {
 
 	for rows.Next() {
 		rows.Scan(&id)
+		fmt.Printf(">>> Renewing %d\n", id)
 		status := renewOrder(uint(id), pmx)
 		//status := "1"
 		if status == "1" {

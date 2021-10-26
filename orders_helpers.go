@@ -95,7 +95,7 @@ func createPayment(req RequestOrder, o Order) (Payment, error) {
 
 }
 
-func createPendingPayment(sum float32, oid uint) (Payment, error) {
+func createPendingPayment(sum float32, oid uint, pmx string) (Payment, error) {
 
 	p := Payment{
 		Amount:        sum,
@@ -106,7 +106,7 @@ func createPendingPayment(sum float32, oid uint) (Payment, error) {
 
 	DB.Create(&p)
 
-	paramx := "mb-" + strconv.FormatUint(uint64(p.ID), 10) + os.Getenv("SUFX")
+	paramx := "mb-" + strconv.FormatUint(uint64(p.ID), 10) + os.Getenv("SUFX") + pmx
 	ordkey := "ord-" + strconv.FormatUint(uint64(oid), 10) + os.Getenv("SUFX")
 
 	p.ParamX = paramx
@@ -314,8 +314,8 @@ func getAccountForOrderID(orderID uint) Account {
 }
 
 // TODO: REFACTOR
-func createRequestPayByToken(a Account, o Order, p Payment) (RequestPayment, Payment) {
-	newp, _ := createPendingPayment(o.Amount, o.ID)
+func createRequestPayByToken(a Account, o Order, p Payment, pmx string) (RequestPayment, Payment) {
+	newp, _ := createPendingPayment(o.Amount, o.ID, pmx)
 	newp.PelecardToken = p.PelecardToken
 	newp.AuthNo = p.AuthNo
 
@@ -349,10 +349,15 @@ func createRequestPayByToken(a Account, o Order, p Payment) (RequestPayment, Pay
 	return extPay, newp
 }
 
-func renewPaymentByToken(extPay RequestPayment) (interface{}, error) {
+func renewPaymentByToken(extPay RequestPayment, pmx string) (interface{}, error) {
 	payload, _ := json.Marshal(extPay)
-	resp, err := postJSON("POST", "https://checkout.kbb1.com/token/charge", payload)
-	//resp, err := postJSON("POST", "https://checkout.kbb1.com/emv/charge", payload)
+	var url string
+	if pmx == "t" {
+		url = "https://checkout.kbb1.com/token/charge"
+	} else if pmx == "e" {
+		url = "https://checkout.kbb1.com/emv/charge"
+	}
+	resp, err := postJSON("POST", url, payload)
 	defer resp.Body.Close()
 	fmt.Println("response Status:", resp.Status)
 	fmt.Println("response Headers:", resp.Header)
@@ -367,7 +372,7 @@ func renewPaymentByToken(extPay RequestPayment) (interface{}, error) {
 	return i, err
 }
 
-func renewOrder(orderID uint) string {
+func renewOrder(orderID uint, pmx string) string {
 	/*
 			get account by order
 			if no token in account
@@ -390,11 +395,9 @@ func renewOrder(orderID uint) string {
 	// 	a.PaymentToken = p.PelecardToken
 	// 	// add other parameter
 	// 	// parse payment card stuff (split and convert to int)
-	// 	DB.Model(&a).Updates(a)
-	// }
-
-	pr, newp := createRequestPayByToken(a, o, p)
-	resp, err := renewPaymentByToken(pr)
+	// 	DB.Model(&a).Uoken(a, o, p, pmx)
+	pr, newp := createRequestPayByToken(a, o, p, pmx)
+	resp, err := renewPaymentByToken(pr, pmx)
 	if err != nil {
 		newp.PaymentStatus = "failed"
 		newp.Success = "0"
@@ -430,7 +433,7 @@ func flagOrderAsRenewed(orderID uint) {
 
 }
 
-func chargeOrdersToRenew() int {
+func chargeOrdersToRenew(pmx string) int {
 	sqlQuery := `
 	Select id from orders 
 	Where "Status" = 'paid'
@@ -450,7 +453,7 @@ func chargeOrdersToRenew() int {
 
 	for rows.Next() {
 		rows.Scan(&id)
-		status := renewOrder(uint(id))
+		status := renewOrder(uint(id), pmx)
 		//status := "1"
 		if status == "1" {
 			count++

@@ -261,7 +261,7 @@ func handleOrdersRenewByID(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusNotAcceptable, gin.H{"error": "wrong type"})
 	}
-	renewedStatus := renewOrder(uint(oid))
+	renewedStatus := renewOrder(uint(oid), "t")
 	c.JSON(http.StatusOK, gin.H{"renewedStatus": renewedStatus})
 	return
 }
@@ -277,8 +277,8 @@ func handleOrdersRenew(c *gin.Context) {
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"Error": err.Error()})
 	} else {
-		if body.User == "admin" && body.Key == "pass" {
-			count := chargeOrdersToRenew()
+		if body.User == "admin" && (body.Key == "t" || body.Key == "e") {
+			count := chargeOrdersToRenew(body.Key)
 			c.JSON(http.StatusOK, gin.H{"count": count})
 		} else {
 			c.JSON(http.StatusUnauthorized, gin.H{"Error": "You are not allowed here"})

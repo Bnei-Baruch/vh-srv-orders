@@ -186,6 +186,7 @@ func syncServiceRegistration(p Payment, o Order) error {
 		Lang                  string `json:"lang"`
 		CommunicationLanguage string `json:"communication_language"`
 		TicketStatus          string `json:"ticket_status"`
+		KeycloakID            string `json:"keycloakid"`
 	}
 
 	var payload RequestSyncRegistration
@@ -206,6 +207,7 @@ func syncServiceRegistration(p Payment, o Order) error {
 	payload.Lang = o.OrderLanguage
 	payload.CommunicationLanguage = strings.ToLower(o.OrderLanguage)
 	payload.TicketStatus = o.ProductType
+	payload.KeycloakID = a.UserKey
 
 	log.Println(">>> order/synch/payload::")
 	log.Println(payload)

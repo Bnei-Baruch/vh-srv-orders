@@ -176,6 +176,51 @@ func updatePayment(req RequestPaid) (Payment, error) {
 
 }
 
+func syncServiceRegistration(p Payment, o Order) error {
+	type RequestSyncRegistration struct {
+		FirstName             string `json:"first_name"`
+		LastName              string `json:"last_name"`
+		Email                 string `json:"email"`
+		Event                 string `json:"event"`
+		Choice                string `json:"choice"`
+		Lang                  string `json:"lang"`
+		CommunicationLanguage string `json:"communication_language"`
+		TicketStatus          string `json:"ticket_status"`
+	}
+
+	var payload RequestSyncRegistration
+
+	var a Account
+
+	result := DB.Where("ID = ?", o.AccountID).First(&a)
+
+	if result.Error != nil {
+		return result.Error
+	}
+
+	payload.FirstName = a.FirstName
+	payload.LastName = a.LastName
+	payload.Email = a.Email
+	payload.Event = "jan2022"
+	payload.Choice = "ticket"
+	payload.Lang = o.OrderLanguage
+	payload.CommunicationLanguage = o.OrderLanguage
+	payload.TicketStatus = o.ProductType
+
+	log.Println(">>> order/synch/payload::")
+	log.Println(payload)
+
+	marshaledPayload, _ := json.Marshal(payload)
+	url := "http://vh-srv-registration:3200/choice/kc/" + a.UserKey
+	_, err := postJSON("POST", url, marshaledPayload)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func createOrphanPayment(req RequestPaid) (Payment, error) {
 
 	p := Payment{

@@ -4,7 +4,7 @@ func countsTicketsOrders() int64 {
 	query := `
 select count(o.*) as total
 from orders as o
-where o."ProductType" = 'sept2021ticket'
+where o."ProductType" = 'jan2022ticket'
 and (o."Status" = 'paid' or o."Status" = 'success')
 `
 	type Results struct {

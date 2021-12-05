@@ -204,7 +204,7 @@ func syncServiceRegistration(p Payment, o Order) error {
 	payload.Event = "jan2022"
 	payload.Choice = "ticket"
 	payload.Lang = o.OrderLanguage
-	payload.CommunicationLanguage = o.OrderLanguage
+	payload.CommunicationLanguage = strings.ToLower(o.OrderLanguage)
 	payload.TicketStatus = o.ProductType
 
 	log.Println(">>> order/synch/payload::")

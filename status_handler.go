@@ -66,7 +66,9 @@ select count(o.*) as total
 from orders as o, accounts as a
 where a."Email" = ?
 and o."AccountID" = a.id
-and o."ProductType" = 'sept2021ticket'
+and (o."ProductType" = 'jan2022ticket' or
+     o."ProductType" = 'jan2022ticket10' or
+     o."ProductType" = 'jan2022ticket30')
 and (o."Status" = 'paid' or o."Status" = 'success')
 `
 	type Results struct {

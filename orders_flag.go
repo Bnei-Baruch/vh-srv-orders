@@ -52,7 +52,10 @@ func flagOrdersToRenew(month int64, year int64) int64 {
 	rows, err := DB.Raw(qOPotentialStr).Rows()
 
 	if err != nil {
-		fmt.Println("error 1")
+		fmt.Println("error queries orders")
+		fmt.Println(qOPotentialStr)
+		fmt.Println(">> Error is :")
+		fmt.Println(err)
 		return -1
 	}
 

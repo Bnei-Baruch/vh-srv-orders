@@ -36,10 +36,8 @@ func handleOrdersFlag(c *gin.Context) {
 	}
 }
 
+// flagging
 func flagOrdersToRenew(month int64, year int64) int64 {
-	// fmt.Println(month)
-	// fmt.Println(year)
-	// return 2
 
 	// Select all unique individuals who have
 	// an active renewable order
@@ -47,7 +45,7 @@ func flagOrdersToRenew(month int64, year int64) int64 {
 	select userkey, count(userkey) as qt
 	from orders where ("Status" = 'paid'
 	or "Status" = 'nosuccess')
-	and "Type" = 'recurring'
+	and "ProductType" = 'globalmembership'
 	group by userkey
 	order by qt desc
 	`
@@ -67,22 +65,23 @@ func flagOrdersToRenew(month int64, year int64) int64 {
 
 	defer rows.Close()
 
-	var counter int64
-	counter = 0
+	var counter int64 = 0
 
 	for rows.Next() {
-		DB.ScanRows(rows, &aOPotential)
+		err := DB.ScanRows(rows, &aOPotential)
 
-		// fmt.Printf("Key: %s  -- Qt: %d\n",
-		// 	aOPotential.Userkey,
-		// 	aOPotential.Qt)
+		if err != nil {
+			fmt.Println("Error reading row in scan")
+			fmt.Println(err)
+			return -1
+		}
 
 		qOSelectStr := `
 		select * from orders
 		where userkey = ?
 		and ("Status"='paid'
 		or "Status"='nosuccess')
-		and "Type" = 'recurring'
+		and "ProductType" = 'globalmembership'
 		order by "PaymentDate" desc
 		limit 1
 		`
@@ -105,11 +104,19 @@ func flagOrdersToRenew(month int64, year int64) int64 {
 
 			if int64(aOSelect.PaymentDate.Month()) == month && int64(aOSelect.PaymentDate.Year()) == year {
 				fmt.Printf("No need to charge order %d\n", aOSelect.ID)
-			} else {
-				fmt.Printf("Mark Order %d for renewal\n", aOSelect.ID)
-				flagOrderForRenewal(uint(aOSelect.ID))
-				counter++
+				continue
 			}
+
+			if aOSelect.Type == "regular" {
+				fmt.Printf("No need to charge regular order %d\n", aOSelect.ID)
+				continue
+			}
+
+			// if not this month and not regular, go ahead
+			fmt.Printf("Mark Order %d for renewal\n", aOSelect.ID)
+			flagOrderForRenewal(uint(aOSelect.ID))
+			counter++
+
 		}
 	}
 	return counter

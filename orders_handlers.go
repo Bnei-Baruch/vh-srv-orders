@@ -32,33 +32,6 @@ func handleOrdersList(c *gin.Context) {
 	}
 }
 
-func handleOrdersCount(c *gin.Context) {
-	var total int64
-	filter := string(c.Params.ByName("filter"))
-	switch filter {
-	case "all":
-		total = countsAllOrders()
-	case "paid":
-		total = countsFilteredOrders(filter)
-	case "failed":
-		total = countsFilteredOrders(filter)
-	case "pending":
-		total = countsFilteredOrders(filter)
-	case "tickets":
-		total = countsTicketsOrders()
-	case "tickets10":
-		total = countsTickets10Orders()
-	case "tickets30":
-		total = countsTickets30Orders()
-	case "convention":
-		total = countsConventionOrders()
-	default:
-		total = countsAllOrders()
-	}
-
-	c.JSON(http.StatusOK, gin.H{filter: total})
-}
-
 func handleOrdersCountByMonth(c *gin.Context) {
 	var total int64
 	filter := string(c.Params.ByName("filter"))

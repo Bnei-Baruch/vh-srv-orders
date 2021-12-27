@@ -46,6 +46,10 @@ func handleOrdersCount(c *gin.Context) {
 		total = countsFilteredOrders(filter)
 	case "tickets":
 		total = countsTicketsOrders()
+	case "tickets10":
+		total = countsTickets10Orders()
+	case "tickets30":
+		total = countsTickets30Orders()
 	case "convention":
 		total = countsConventionOrders()
 	default:

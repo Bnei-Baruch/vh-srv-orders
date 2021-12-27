@@ -37,3 +37,55 @@ and (select count(q.id) from orders as q where q."AccountID" = o."AccountID" and
 
 	return r.Total
 }
+
+func countsTickets10Orders() int64 {
+	query := `
+select count(distinct o."AccountID") as total
+from orders as o
+where o."ProductType" = 'jan2022ticket'
+and (o."Status" = 'paid' or o."Status" = 'success')
+and (
+  (o."Currency" = 'USD' and o."Amount" = '10')
+  or
+  (o."Currency" = 'NIS' and o."Amount" = '35')
+  or
+  (o."Currency" = 'EUR' and o."Amount" = '9')
+)
+`
+	type Results struct {
+		Total int64
+	}
+
+	var r Results
+	//var count map[string]interface{}
+	//DB.Raw(query, email).Scan(&r)
+	DB.Raw(query).Scan(&r)
+
+	return r.Total
+}
+
+func countsTickets30Orders() int64 {
+	query := `
+select count(distinct o."AccountID") as total
+from orders as o
+where o."ProductType" = 'jan2022ticket'
+and (o."Status" = 'paid' or o."Status" = 'success')
+and (
+  (o."Currency" = 'USD' and o."Amount" = '30')
+  or
+  (o."Currency" = 'NIS' and o."Amount" = '100')
+  or
+  (o."Currency" = 'EUR' and o."Amount" = '25')
+)
+`
+	type Results struct {
+		Total int64
+	}
+
+	var r Results
+	//var count map[string]interface{}
+	//DB.Raw(query, email).Scan(&r)
+	DB.Raw(query).Scan(&r)
+
+	return r.Total
+}

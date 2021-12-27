@@ -2,7 +2,7 @@ package main
 
 func countsTicketsOrders() int64 {
 	query := `
-select count(o.*) as total
+select count(distinct o."AccountID") as total
 from orders as o
 where o."ProductType" = 'jan2022ticket'
 and (o."Status" = 'paid' or o."Status" = 'success')

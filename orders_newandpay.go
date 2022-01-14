@@ -81,7 +81,7 @@ func handleCreateOrderAndPay(c *gin.Context) {
 	}
 
 	if req.Type == "regular" {
-		ENDPOINT = "https://checkout.kbb1.com/payments/new"
+		ENDPOINT = "https://checkout.kbb1.com/emv/new"
 	}
 
 	if req.Reference == "testemv" {

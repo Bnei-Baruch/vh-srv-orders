@@ -6,18 +6,20 @@ and a.id = o."AccountID" order by "PaymentDate" desc
 
 
 -- List of payments order by last payment for a given user by email
-select * from payments 
-where "OrderID" in (select o.id from accounts as a, orders as o where a."Email" like '%youremail@mail.com%'
-and a.id = o."AccountID" ) order by created_at desc 
-
-
--- List of payments order by last payment for a given user by email
-select o."ProductType", p.* 
+-- Also display Product Type, and Order Type
+select o."ProductType", o."Type", p.* 
 from payments as p, orders as o  
 where p."OrderID" in (select o.id from accounts as a, orders as o where a."Email" like '%youremail@mail.com%'
 and a.id = o."AccountID" ) 
 and p."OrderID" = o.id 
 order by p.created_at desc 
+
+
+
+-- List of payments order by last payment for a given user by email
+select * from payments 
+where "OrderID" in (select o.id from accounts as a, orders as o where a."Email" like '%youremail@mail.com%'
+and a.id = o."AccountID" ) order by created_at desc 
 
 
 

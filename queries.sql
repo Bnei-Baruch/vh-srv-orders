@@ -11,6 +11,15 @@ where "OrderID" in (select o.id from accounts as a, orders as o where a."Email" 
 and a.id = o."AccountID" ) order by created_at desc 
 
 
+-- List of payments order by last payment for a given user by email
+select o."ProductType", p.* 
+from payments as p, orders as o  
+where p."OrderID" in (select o.id from accounts as a, orders as o where a."Email" like '%youremail@mail.com%'
+and a.id = o."AccountID" ) 
+and p."OrderID" = o.id 
+order by p.created_at desc 
+
+
 
 -- List of accounts who paid more than once
 select mistakes."AccountID"

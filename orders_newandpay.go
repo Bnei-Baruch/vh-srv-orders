@@ -112,8 +112,22 @@ func handleCreateOrderAndPay(c *gin.Context) {
 		if req.Type == "regular" {
 			// if req.Type is regular - endpoint return some ass-shit string
 			// gota parse the m*fkr
-			actualURL := strings.Split(parsableBody, "'")[1]
-			c.JSON(http.StatusOK, gin.H{"url": actualURL})
+
+			var serRes OrderServiceEmvRes
+			if err := json.Unmarshal(body, &serRes); err != nil {
+				log.Println("Err while parsing https://checkout.kbb1.com/emv/new response", err)
+			}
+
+			if serRes.Status == "success" {
+				actualURL := strings.Split(serRes.URL, "'")[1]
+				c.JSON(http.StatusOK, gin.H{"url": actualURL})
+			} else {
+				fmt.Println("--error-in-https://checkout.kbb1.com/emv/new--")
+				var i interface{}
+				json.Unmarshal(body, &i)
+				c.JSON(http.StatusOK, i)
+			}
+
 		} else {
 			var i interface{}
 			json.Unmarshal(body, &i)

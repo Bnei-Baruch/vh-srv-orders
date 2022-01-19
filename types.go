@@ -266,3 +266,9 @@ type Description struct {
 	Subtitle string `json:"subtitle"`
 	Body     string `json:"body"`
 }
+
+type OrderServiceEmvRes struct {
+	Status string `json:"status"`
+	URL    string `json:"url"`
+	Error  string `json:"error"`
+}

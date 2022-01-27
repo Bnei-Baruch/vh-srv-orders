@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"strconv"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -119,7 +118,8 @@ func handleCreateOrderAndPay(c *gin.Context) {
 			}
 
 			if serRes.Status == "success" {
-				actualURL := strings.Split(serRes.URL, "'")[1]
+				// actualURL := strings.Split(serRes.URL, "'")[1]
+				actualURL := serRes.URL
 				c.JSON(http.StatusOK, gin.H{"url": actualURL})
 			} else {
 				fmt.Println("--error-in-https://checkout.kbb1.com/emv/new--")

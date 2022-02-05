@@ -1,0 +1,34 @@
+#+Title: Refactoring
+
+
+
+* Configuration
+Clean the file that manage configurations
+- .env-start
+- env-dev
+- env-local
+- env-prod
+
+* Build process
+- Makefile: can probably be removed.
+- clean all the extra irrelevant docker*.yml files
+
+* Doc
+- Move all the doc into one folder
+- Use orgmode format to handle the doc
+
+* Code
+** Dead code
+- Remove all the deadcode
+- Remove the test
+- Dead routes
+** Config
+- Refactor the config
+- Approach:
+  config structure, hydrated with env variable.
+  Avoid to read from a config file. (getting rid of .env)
+** Gorm to pgx
+- remove migrations
+- remove invoice related code
+- remove support for multiple db
+** Pause and think

@@ -7,7 +7,7 @@ and a.id = o."AccountID" order by "PaymentDate" desc
 
 -- List of payments order by last payment for a given user by email
 -- Also display Product Type, and Order Type
-select o."ProductType", o."Type", p.* 
+select o."ProductType", o."Type", p.created_at,  p."Amount", p."PaymentType",  p."OrderID", p."ParamX", p."PaymentStatus", p."CCNumber", p."CCExpDate"
 from payments as p, orders as o  
 where p."OrderID" in (select o.id from accounts as a, orders as o where a."Email" like '%youremail@mail.com%'
 and a.id = o."AccountID" ) 

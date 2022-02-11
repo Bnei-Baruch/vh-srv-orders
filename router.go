@@ -24,24 +24,24 @@ func initRouter() *gin.Engine {
 
 	orders := r.Group("/orders")
 	{
-		orders.GET("/", handleOrdersList)
+		orders.GET("/", handleOrdersList) // rm
 		orders.POST("/new", handleOrdersCreate)
 		orders.POST("/update", handleUpdateOrders)
 		orders.POST("/paid", handleOrdersPaid)
 		orders.POST("/newandpay", handleCreateOrderAndPay)
 		orders.POST("/renew", handleOrdersRenew)
-		orders.POST("/renewbyid/:id", handleOrdersRenewByID)
+		orders.POST("/renewbyid/:id", handleOrdersRenewByID) //rm
 		orders.GET("/count/:filter", handleOrdersCount)
-		orders.GET("/count/:filter/:month", handleOrdersCountByMonth)
-		orders.GET("/count/:filter/:month/:currency", handleOrdersCountByMonthAndCurrency)
-		orders.GET("/update/:id/:status", handleOrdersUpdateStatus)
-		orders.POST("/note/:id/:note", handleOrdersAnnotate)
+		orders.GET("/count/:filter/:month", handleOrdersCountByMonth)                      // rm
+		orders.GET("/count/:filter/:month/:currency", handleOrdersCountByMonthAndCurrency) // rm
+		orders.GET("/update/:id/:status", handleOrdersUpdateStatus)                        // rm
+		orders.POST("/note/:id/:note", handleOrdersAnnotate)                               // rm
 		orders.POST("/flag", handleOrdersFlag)
-		orders.POST("/clean/:month", handleOrdersClean)
-		orders.GET("/test", handleOrdersTest)
+		orders.POST("/clean/:month", handleOrdersClean) // rm
+		orders.GET("/test", handleOrdersTest)           // rm
 	}
 
-	vh := r.Group("/vh")
+	vh := r.Group("/vh") // rm
 	{
 		vh.GET("/ispaid/:id", handleVHisPaid)
 	}
@@ -50,25 +50,25 @@ func initRouter() *gin.Engine {
 	{
 		payments.POST("/", handleCreatePayment)
 		payments.POST("/update", handleUpdatePayment)
-		payments.GET("/count/:filter/:month", handlePaymentsCountByMonth)
-		payments.GET("/count/:filter/:month/:currency", handlePaymentsCountByMonthAndCurrency)
+		payments.GET("/count/:filter/:month", handlePaymentsCountByMonth)                      // rm
+		payments.GET("/count/:filter/:month/:currency", handlePaymentsCountByMonthAndCurrency) //rm
 	}
 
 	accounts := r.Group("/accounts")
 	{
-		accounts.GET("/list", listAll)
-		accounts.GET("/ping", pingAccounts)
-		accounts.POST("/ping", echoAccounts)
-		accounts.POST("/new", new)
-		accounts.POST("/update/:id", update)
-		accounts.GET("/findByEmail/:email", findByEmail)
-		accounts.GET("/find/:id", find)
-		accounts.GET("/count", handleCountAccounts)
-		accounts.POST("/delete/:id", delete)
-		accounts.GET("/test", handleAccountsTest)
+		accounts.GET("/list", listAll)                   // rm
+		accounts.GET("/ping", pingAccounts)              // rm
+		accounts.POST("/ping", echoAccounts)             // rm
+		accounts.POST("/new", new)                       // rm
+		accounts.POST("/update/:id", update)             // rm
+		accounts.GET("/findByEmail/:email", findByEmail) // rm
+		accounts.GET("/find/:id", find)                  // rm
+		accounts.GET("/count", handleCountAccounts)      // rm
+		accounts.POST("/delete/:id", delete)             // rm
+		accounts.GET("/test", handleAccountsTest)        // rm
 	}
 
-	admin := r.Group("/admin")
+	admin := r.Group("/admin") // rm
 	{
 		admin.GET("/subscriptions", handleAdminSubscriptions)
 		admin.POST("/stats", handleAdminStats)

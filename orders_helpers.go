@@ -223,46 +223,6 @@ func syncServiceRegistration(p Payment, o Order) error {
 	return nil
 }
 
-func createOrphanPayment(req RequestPaid) (Payment, error) {
-
-	p := Payment{
-		PaymentStatus: "orphan",
-	}
-
-	if req.Success == "1" {
-		p.PaymentType = "pelecard"
-		p.ParamX = req.ParamX
-		p.AuthNo = req.AuthNo
-		p.ConfirmationKey = req.ConfirmationKey
-		p.Success = req.Success
-		p.PelecardToken = req.Token
-		p.TransactionID = req.TransactionID
-		p.CardHebrewName = req.CardHebrewName
-		p.CCAbroadCard = req.CCAbroadCard
-		p.CCCompanyClearer = req.CCCompanyClearer
-		p.CreditType = req.CreditType
-		p.CCExpDate = req.CCExpDate
-		p.CCNumber = req.CCNumber
-		p.DebitCode = req.DebitCode
-		p.DebitCurrency = req.DebitCurrency
-		p.DebitTotal = req.DebitTotal
-		p.DebitType = req.DebitType
-		p.FirstPaymentTotal = req.FirstPaymentTotal
-		p.JParam = req.TotalPayments
-		p.TransactionInitTime = req.TransactionInitTime
-		p.TransactionUpdateTime = req.TransactionUpdateTime
-		p.VoucherID = req.VoucherID
-	} else {
-		p.PaymentStatus = "failed"
-		p.ErrorMsg = "Failed" // TODO: improve
-		p.PaymentType = "pelecard"
-	}
-
-	DB.Create(&p)
-
-	return p, nil
-}
-
 func updateOrderAfterPayment(p Payment) (Order, error) {
 	var o Order
 
@@ -282,47 +242,6 @@ func updateOrderAfterPayment(p Payment) (Order, error) {
 	DB.Model(&o).Update(o)
 
 	return o, nil
-}
-
-func generateOrders() Order {
-	o := Order{
-		Type:         "recurring",
-		ProductType:  "galaxy",
-		RecuringFreq: 30,
-		AccountID:    1,
-		Organization: "bb",
-		Amount:       20,
-		Currency:     "us",
-	}
-
-	return o
-}
-
-func generatePayment(o Order) Payment {
-	p := Payment{
-		Amount:      20,
-		PaymentType: "plop",
-		OrderID:     o.ID,
-	}
-	return p
-}
-
-func generateInvoice(p Payment) Invoice {
-	i := Invoice{
-		FirstName: "Paul",
-		LastName:  "Jenkins",
-		Email:     "Paull.Jenkings@gmail.com",
-		Phone:     "+332983945",
-		Street:    "Main Street, 145",
-		City:      "London",
-		State:     "England",
-		Postcode:  "W38 7EC",
-		Country:   "UK",
-
-		OrderLanguage: "EN",
-		PaymentID:     p.ID,
-	}
-	return i
 }
 
 // Renewal function
@@ -536,12 +455,6 @@ order by duplicate desc`
 	}
 	return count
 }
-
-func addNoteToOrder(oid uint, note string) {
-	o := getOrderByID(uint(oid))
-	o.Note = note
-	DB.Model(&o).Updates(o)
-}
 func addFlagToOrder(oid uint, flag string) {
 	o := getOrderByID(uint(oid))
 	o.Flag = flag
@@ -561,114 +474,6 @@ func flagOrdersByAccountID(aid int, flag string) int {
 	for rows.Next() {
 		rows.Scan(&id)
 		addFlagToOrder(uint(id), flag)
-		count++
-	}
-	return count
-
-}
-
-func countsAllOrdersByMonth(filter string, month string) int64 {
-	req := `select id  from orders 
-	where "Status" = ? and "Type" = 'recurring' 
-	 and date_part('month', "PaymentDate") = ? `
-	rows, err := DB.Raw(req, filter, month).Rows()
-
-	if err != nil {
-		return -1
-	}
-	defer rows.Close()
-	var count int
-	var id int
-	count = 0
-	for rows.Next() {
-		rows.Scan(&id)
-		fmt.Println(id)
-		count++
-	}
-	return int64(count)
-
-}
-
-func countsAllOrdersByMonthAndCurrency(filter string, month string, currency string) (int64, float32) {
-	req := `select id, "Amount"  from orders 
-	where "Status" = ? and "Type" = 'recurring' 
-	 and "Currency" = ?
-	 and date_part('month', "PaymentDate") = ? `
-	rows, err := DB.Raw(req, filter, currency, month).Rows()
-
-	if err != nil {
-		return -1, -1
-	}
-
-	defer rows.Close()
-
-	var count int
-	var id int
-	var sum float32
-	var amount string
-	count = 0
-	sum = 0
-
-	for rows.Next() {
-		rows.Scan(&id, &amount)
-		fmt.Println(id)
-
-		af, _ := strconv.ParseFloat(amount, 32)
-
-		sum = sum + float32(af)
-		count++
-	}
-	return int64(count), sum
-
-}
-
-func getAllOrdersByAccounts(aid uint) []Order {
-	//TODO: refactor using ORM functions
-
-	var ordersDuplicate []Order
-	DB.Where(&Order{AccountID: aid, Status: "paid"}).Find(&ordersDuplicate)
-
-	return ordersDuplicate
-
-}
-
-func cleanDuplicates(aid uint, month string) {
-	// Remove payment
-	req1 := `update orders 
-	set "Status"='removed'
-	where "AccountID"= ? and date_part('month', "PaymentDate") < ?
-	`
-	DB.Exec(req1, aid, month)
-
-	// Remove duplicate status
-	req2 := `update orders 
-	set "Flag"=''
-	where "AccountID"= ? 
-	`
-	DB.Exec(req2, aid)
-
-}
-
-// find active orders by Keycloak ID
-func activeOrderByKeycloakID(id string) int {
-	req := `select o.id 
-	from orders as o, accounts as a 
-	where a."UserKey" = ? and 
-	o."AccountID" = a.id and
-	o."Status" = 'paid'  and
-    o."ProductType" = 'globalmembership'
-`
-
-	rows, err := DB.Raw(req, id).Rows() // (*sql.Rows, error)
-	if err != nil {
-		return -1
-	}
-	defer rows.Close()
-	var count int
-	var oid int
-	count = 0
-	for rows.Next() {
-		rows.Scan(&oid)
 		count++
 	}
 	return count

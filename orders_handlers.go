@@ -54,7 +54,6 @@ func handleOrdersPaid(c *gin.Context) {
 	p, err := updatePayment(rp)
 
 	if err != nil {
-		//createOrphanPayment(rp)
 		// TODO : ask grisha to return more info on error
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"Error": err})
 		return
@@ -93,5 +92,4 @@ func handleOrdersRenew(c *gin.Context) {
 			c.JSON(http.StatusUnauthorized, gin.H{"Error": "You are not allowed here"})
 		}
 	}
-	return
 }

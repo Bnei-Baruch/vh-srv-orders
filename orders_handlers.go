@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
@@ -21,45 +20,6 @@ TODO: fix issues in DB
 TODO: add payment method
 TODO: clean data
 **/
-
-func handleOrdersList(c *gin.Context) {
-	var o []Order
-	if err := DB.Find(&o).Error; err != nil {
-		c.AbortWithStatus(404)
-		log.Println(err)
-	} else {
-		c.JSON(http.StatusOK, o)
-	}
-}
-
-func handleOrdersCountByMonth(c *gin.Context) {
-	var total int64
-	filter := string(c.Params.ByName("filter"))
-	month := string(c.Params.ByName("month"))
-	//TODO check value of filter and month
-	total = countsAllOrdersByMonth(filter, month)
-	c.JSON(http.StatusOK, gin.H{
-		filter:  total,
-		"month": month,
-	})
-}
-
-func handleOrdersCountByMonthAndCurrency(c *gin.Context) {
-	var total int64
-	var sum float32
-	sum = 0
-	filter := string(c.Params.ByName("filter"))
-	month := string(c.Params.ByName("month"))
-	currency := string(c.Params.ByName("currency"))
-	//TODO check value of filter and month
-	total, sum = countsAllOrdersByMonthAndCurrency(filter, month, currency)
-	c.JSON(http.StatusOK, gin.H{
-		filter:     total,
-		"month":    month,
-		"currency": currency,
-		"sum":      sum,
-	})
-}
 
 //TODO: Rewrite and merge with new & pay
 func handleOrdersCreate(c *gin.Context) {
@@ -94,7 +54,6 @@ func handleOrdersPaid(c *gin.Context) {
 	p, err := updatePayment(rp)
 
 	if err != nil {
-		//createOrphanPayment(rp)
 		// TODO : ask grisha to return more info on error
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"Error": err})
 		return
@@ -112,30 +71,6 @@ func handleOrdersPaid(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusOK, nil)
-}
-
-func handleOrdersUpdateStatus(c *gin.Context) {
-	status := string(c.Params.ByName("status"))
-	id := string(c.Params.ByName("id"))
-	oid, _ := strconv.ParseUint(id, 10, 64)
-
-	o := getOrderByID(uint(oid))
-	o.Status = status
-	DB.Model(&o).Updates(o)
-
-	c.JSON(http.StatusOK, o)
-	return
-}
-
-func handleOrdersRenewByID(c *gin.Context) {
-	id := string(c.Params.ByName("id"))
-	oid, err := strconv.ParseUint(id, 10, 64)
-	if err != nil {
-		c.JSON(http.StatusNotAcceptable, gin.H{"error": "wrong type"})
-	}
-	renewedStatus := renewOrder(uint(oid), "t")
-	c.JSON(http.StatusOK, gin.H{"renewedStatus": renewedStatus})
-	return
 }
 
 func handleOrdersRenew(c *gin.Context) {
@@ -157,46 +92,4 @@ func handleOrdersRenew(c *gin.Context) {
 			c.JSON(http.StatusUnauthorized, gin.H{"Error": "You are not allowed here"})
 		}
 	}
-	return
-}
-
-func handleOrdersAnnotate(c *gin.Context) {
-	note := string(c.Params.ByName("note"))
-	id := string(c.Params.ByName("id"))
-	oid, _ := strconv.ParseUint(id, 10, 64)
-
-	addNoteToOrder(uint(oid), note)
-	c.JSON(http.StatusOK, nil)
-}
-
-func handleOrdersTest(c *gin.Context) {
-	//renewOrder(5728)
-
-	//c.JSON(http.StatusOK, gin.H{"account": val})
-	//count := findOrdersToRenew(6)
-	//fmt.Println(count)
-	c.JSON(http.StatusOK, gin.H{"test": true})
-	//return
-}
-
-func handleOrdersClean(c *gin.Context) {
-	month := string(c.Params.ByName("month"))
-	dups, _ := GetAccountsWithDuplicatesByMonth(month)
-
-	for _, d := range dups {
-		cleanDuplicates(d, month)
-	}
-
-	c.JSON(http.StatusOK, gin.H{"cleaned": len(dups)})
-}
-func handleVHisPaid(c *gin.Context) {
-	keycloakID := string(c.Params.ByName("id"))
-	total := activeOrderByKeycloakID(keycloakID)
-	ispaid := false
-	if total > 0 {
-		ispaid = true
-	}
-	c.JSON(http.StatusOK,
-		gin.H{"keycloakID": keycloakID,
-			"total": total, "ispaid": ispaid})
 }

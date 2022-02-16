@@ -1,96 +1,59 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
-	"os"
+	"time"
 
-	"github.com/jinzhu/gorm"
+	"github.com/jackc/pgx/v4/pgxpool"
 	_ "github.com/jinzhu/gorm/dialects/postgres"
 	_ "github.com/jinzhu/gorm/dialects/sqlite"
+	"github.com/kelseyhightower/envconfig"
 )
 
 //DB is globally available
-var DB *gorm.DB
+var DB *pgxpool.Pool
 
-//PgHost default value
-const PgHost = "localhost"
-
-//PgPort default value
-const PgPort = "5432"
-
-//PgUser default value
-const PgUser = "user"
-
-//PgPass default value
-const PgPass = "pass"
-
-//PgSSL default value
-const PgSSL = "disable"
-
-//PgDbName default value
-const PgDbName = "PGDATABASE"
+// cfg is the struct type that contains fields that stores the necessary configuration
+// gathered from the environment.
+var cfg struct {
+	PgHost   string `envconfig:"DB_USER" default:"localhost"`
+	PgPort   string `envconfig:"DB_PASSWORD" default:"5432"`
+	PgUser   string `envconfig:"DB_DATABASE" default:"postgres"`
+	PgPass   string `envconfig:"DB_HOST" default:"pass"`
+	PgSSL    string `envconfig:"DB_PORT" default:"disable"`
+	PgDbName string `envconfig:"APP_PORT" default:"gorm"`
+}
 
 //Init DB
 func initDB(dbtype string) {
-	switch dbtype {
-	case "sqlite":
-		connectSqlite()
-	case "pg":
-		connectPostgreSQL()
-	case "mockdb":
-		connectMockdb()
-	default:
-		log.Fatal("Unknown or undefined DB")
-	}
-
-	DB.AutoMigrate(&Order{})
-	DB.AutoMigrate(&Payment{})
-	DB.AutoMigrate(&Invoice{})
-	DB.AutoMigrate(&Account{})
-}
-
-func connectSqlite() {
-	db, err := gorm.Open("sqlite3", Conf["DB_FILE"])
-	if err != nil {
-		log.Fatal("Failed to connect to database with error", err)
-	}
-
-	DB = db
-}
-
-func connectMockdb() {
-	db, err := gorm.Open("sqlite3", "test.db")
-	if err != nil {
-		log.Fatal("Failed to connect to database with error", err)
-	}
-
-	DB = db
-}
-
-func getEnv(key, defaultValue string) string {
-	value := os.Getenv(key)
-	if len(value) == 0 {
-		return defaultValue
-	}
-	return value
+	connectPostgreSQL()
 }
 
 func connectPostgreSQL() {
-	connec := fmt.Sprintf("host=%s port=%s user=%s dbname=%s password=%s sslmode=%s",
-		getEnv("PGHOST", PgHost),
-		getEnv("PGPORT", PgPort),
-		getEnv("PGUSER", PgUser),
-		getEnv("PGDATABASE", PgDbName),
-		getEnv("PGPASSWORD", PgPass),
-		getEnv("PG_SSLMODE", PgSSL),
-	)
 
-	db, err := gorm.Open("postgres", connec)
-
-	if err != nil {
-		log.Fatal("Failed to connect to database with error \n", err, "\n", connec)
+	if err := envconfig.Process("LIST", &cfg); err != nil {
+		log.Fatalln("Error while fetching env file")
+		return
 	}
 
-	DB = db
+	connec := fmt.Sprintf("host=%s port=%s user=%s dbname=%s password=%s sslmode=%s",
+		cfg.PgHost,
+		cfg.PgPort,
+		cfg.PgUser,
+		cfg.PgDbName,
+		cfg.PgPass,
+		cfg.PgSSL,
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	pool, err := pgxpool.Connect(ctx, connec)
+	if err != nil {
+		fmt.Errorf("unable to connect to database: %w", err)
+	}
+
+	DB = pool
 }

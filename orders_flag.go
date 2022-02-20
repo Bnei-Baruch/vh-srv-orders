@@ -105,7 +105,7 @@ func flagOrdersToRenew(month int64, year int64) int64 {
 			//fmt.Println(aOSelect.PaymentDate)
 			//fmt.Println(int(aOSelect.PaymentDate.Month()))
 
-			if int64(aOSelect.PaymentDate.Month()) == month && int64(aOSelect.PaymentDate.Year()) == year {
+			if int64(aOSelect.PaymentDate.Month()) >= month && int64(aOSelect.PaymentDate.Year()) >= year {
 				fmt.Printf("No need to charge order %d\n", aOSelect.ID)
 				continue
 			}

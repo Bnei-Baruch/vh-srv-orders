@@ -32,7 +32,7 @@ func handleOrdersCreate(c *gin.Context) {
 		return
 	}
 
-	ord, err := createOrder(req)
+	ord, err := createOrder(c, req)
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"Error": err})

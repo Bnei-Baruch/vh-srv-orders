@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
 func countsAllOrders() int64 {
@@ -26,7 +28,7 @@ func countsFilteredOrders(filter string) int64 {
 	return result
 }
 
-func createOrder(req RequestOrder) (Order, error) {
+func createOrder(c *gin.Context, req RequestOrder) (Order, error) {
 	o := Order{
 		Type:          req.Type,
 		ProductType:   req.ProductType,
@@ -54,7 +56,7 @@ func createOrder(req RequestOrder) (Order, error) {
 		UserKey:     req.UserKey,
 	}
 
-	accountID := CreateOrUpdateAccount(a)
+	accountID := CreateOrUpdateAccount(c, a)
 
 	if accountID == 0 {
 		return o, errors.New("Null account")

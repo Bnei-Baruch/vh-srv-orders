@@ -17,7 +17,7 @@ func CreateOrUpdateAccount(ctx *gin.Context, a Account) uint {
 		if err == pgx.ErrNoRows {
 			var ID uint
 			// Add new account if not exist
-			if err := DB.QueryRow(ctx, `INSERT INTO broadcast_url (
+			if err := DB.QueryRow(ctx, `INSERT INTO accounts (
 				FirstName,
 				LastName,
 				Email,

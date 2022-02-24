@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -9,9 +10,9 @@ import (
 //Status returns membership and status
 func Status(c *gin.Context) {
 	filter := string(c.Params.ByName("email"))
-	paidmb := hasPaidMembership(filter)
-	ticket := hasTicket(filter)
-	specialmb := hasSpecialMembership(filter)
+	paidmb := hasPaidMembership(c, filter)
+	ticket := hasTicket(c, filter)
+	specialmb := hasSpecialMembership(c, filter)
 
 	var mb bool
 
@@ -40,11 +41,11 @@ func Status(c *gin.Context) {
 
 }
 
-func hasPaidMembership(email string) bool {
+func hasPaidMembership(ctx *gin.Context, email string) bool {
 	query := `
 select count(o.*) as total
 from orders as o, accounts as a
-where a."Email" = ?
+where a."Email" = $1
 and o."AccountID" = a.id
 and o."ProductType" = 'globalmembership'
 and (o."Status" = 'paid' or o."Status" = 'success' or o."Status" = 'nosuccess')
@@ -55,16 +56,20 @@ and (o."Status" = 'paid' or o."Status" = 'success' or o."Status" = 'nosuccess')
 	var r Results
 	//var count map[string]interface{}
 	//DB.Raw(query, email).Scan(&r)
-	DB.Raw(query, email).Scan(&r)
+	if err := DB.QueryRow(ctx, query, email).Scan(
+		&r.Total,
+	); err != nil {
+		fmt.Println("--error--", err)
+	}
 
 	return r.Total > 0
 }
 
-func hasTicket(email string) bool {
+func hasTicket(ctx *gin.Context, email string) bool {
 	query := `
 select count(o.*) as total
 from orders as o, accounts as a
-where a."Email" = ?
+where a."Email" = $1
 and o."AccountID" = a.id
 and (o."ProductType" = 'jan2022ticket' or
      o."ProductType" = 'jan2022ticket10' or
@@ -77,16 +82,21 @@ and (o."Status" = 'paid' or o."Status" = 'success')
 	var r Results
 	//var count map[string]interface{}
 	//DB.Raw(query, email).Scan(&r)
-	DB.Raw(query, email).Scan(&r)
+	// DB.Raw(query, email).Scan(&r)
+	if err := DB.QueryRow(ctx, query, email).Scan(
+		&r.Total,
+	); err != nil {
+		fmt.Println("--error--", err)
+	}
 
 	return r.Total > 0
 }
 
-func hasSpecialMembership(email string) bool {
+func hasSpecialMembership(ctx *gin.Context, email string) bool {
 	query := `
 select count(s.*) as total
 from specials as s
-where s."email" = ?
+where s."email" = $1
 `
 	type Results struct {
 		Total int
@@ -94,7 +104,13 @@ where s."email" = ?
 	var r Results
 	//var count map[string]interface{}
 	//DB.Raw(query, email).Scan(&r)
-	DB.Raw(query, email).Scan(&r)
+	// DB.Raw(query, email).Scan(&r)
+
+	if err := DB.QueryRow(ctx, query, email).Scan(
+		&r.Total,
+	); err != nil {
+		fmt.Println("--error--", err)
+	}
 
 	return r.Total > 0
 }

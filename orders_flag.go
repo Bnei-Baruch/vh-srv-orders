@@ -23,7 +23,7 @@ func handleOrdersFlag(c *gin.Context) {
 
 	switch body.Flag {
 	case "torenew":
-		count := flagOrdersToRenew(body.Month, body.Year)
+		count := flagOrdersToRenew(c, body.Month, body.Year)
 		c.JSON(http.StatusOK, gin.H{"count": count})
 		return
 	case "duplicates":
@@ -37,7 +37,7 @@ func handleOrdersFlag(c *gin.Context) {
 }
 
 // flagging
-func flagOrdersToRenew(month int64, year int64) int64 {
+func flagOrdersToRenew(c *gin.Context, month int64, year int64) int64 {
 
 	// Select all unique individuals who have
 	// an active renewable order
@@ -49,13 +49,13 @@ func flagOrdersToRenew(month int64, year int64) int64 {
 	group by userkey
 	order by qt desc
 	`
-	rows, err := DB.Raw(qOPotentialStr).Rows()
+	rows, qOerr := DB.Query(c, qOPotentialStr)
 
-	if err != nil {
+	if qOerr != nil {
 		fmt.Println("error queries orders")
 		fmt.Println(qOPotentialStr)
 		fmt.Println(">> Error is :")
-		fmt.Println(err)
+		fmt.Println(qOerr)
 		return -1
 	}
 
@@ -71,36 +71,88 @@ func flagOrdersToRenew(month int64, year int64) int64 {
 	var counter int64 = 0
 
 	for rows.Next() {
-		err := DB.ScanRows(rows, &aOPotential)
 
-		if err != nil {
+		// var aOSelect Order
+
+		aOerr := rows.Scan(
+			&aOPotential.Userkey,
+			&aOPotential.Qt)
+		if aOerr != nil {
 			fmt.Println("Error reading row in scan")
-			fmt.Println(err)
+			fmt.Println(aOerr)
 			return -1
 		}
 
+		// err := DB.ScanRows(rows, &aOPotential)
+
+		// if err != nil {
+		// 	fmt.Println("Error reading row in scan")
+		// 	fmt.Println(err)
+		// 	return -1
+		// }
+
 		qOSelectStr := `
-		select * from orders
-		where userkey = ?
+		select 
+		id,
+		Type,
+		ProductType,
+		RecuringFreq,
+		AccountID,
+		Organization,
+		Amount,
+		Currency,
+		Status,
+		OrderLanguage,
+		PaymentDate,
+		SKU,
+		Note,
+		Flag,
+		created_at,
+		updated_at,
+		deleted_at from orders
+		where userkey = $1
 		and ("Status"='paid'
 		or "Status"='nosuccess')
 		and "ProductType" = 'globalmembership'
 		order by "PaymentDate" desc
 		limit 1
 		`
-		oselected, err := DB.Raw(qOSelectStr, aOPotential.Userkey).Rows()
+		oselected, qOSelectStrErr := DB.Query(c, qOSelectStr, aOPotential.Userkey)
 
-		if err != nil {
+		if qOSelectStrErr != nil {
 			fmt.Println("error 2")
-			fmt.Println(err)
+			fmt.Println(qOSelectStrErr)
 			return -1
 		}
 
 		defer oselected.Close()
-		var aOSelect Order
 
 		for oselected.Next() {
-			DB.ScanRows(oselected, &aOSelect)
+			var aOSelect Order
+
+			oselectedErr := oselected.Scan(
+				&aOSelect.ID,
+				&aOSelect.Type,
+				&aOSelect.ProductType,
+				&aOSelect.RecuringFreq,
+				&aOSelect.AccountID,
+				&aOSelect.Organization,
+				&aOSelect.Amount,
+				&aOSelect.Currency,
+				&aOSelect.Status,
+				&aOSelect.OrderLanguage,
+				&aOSelect.PaymentDate,
+				&aOSelect.SKU,
+				&aOSelect.Note,
+				&aOSelect.Flag,
+				&aOSelect.CreatedAt,
+				&aOSelect.UpdatedAt,
+				&aOSelect.DeletedAt)
+			if oselectedErr != nil {
+				fmt.Println("Error reading row in scan")
+				fmt.Println(oselectedErr)
+				return -1
+			}
 
 			//fmt.Println(aOSelect.PaymentDate)
 			//fmt.Println(int(aOSelect.PaymentDate.Month()))
@@ -117,7 +169,7 @@ func flagOrdersToRenew(month int64, year int64) int64 {
 
 			// if not this month and not regular, go ahead
 			fmt.Printf("Mark Order %d for renewal\n", aOSelect.ID)
-			flagOrderForRenewal(uint(aOSelect.ID))
+			flagOrderForRenewal(c, uint(aOSelect.ID))
 			counter++
 
 		}
@@ -125,16 +177,16 @@ func flagOrdersToRenew(month int64, year int64) int64 {
 	return counter
 }
 
-func flagOrderForRenewal(id uint) {
+func flagOrderForRenewal(ctx *gin.Context, id uint) {
 	req := `
 		update orders
 		set "Flag" = 'torenew'
-		where id = ?`
+		where id = $1`
 
-	res := DB.Exec(req, id)
+	_, err := DB.Exec(ctx, req, id)
 
-	if res.Error != nil {
-		fmt.Println(res.Error)
+	if err != nil {
+		fmt.Println(err)
 	}
 
 }

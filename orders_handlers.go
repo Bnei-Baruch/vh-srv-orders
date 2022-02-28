@@ -86,7 +86,7 @@ func handleOrdersRenew(c *gin.Context) {
 	} else {
 		if body.User == "admin" && (body.Key == "t" || body.Key == "e") {
 			fmt.Printf("Renewing with key : %s\n", body.Key)
-			count := chargeOrdersToRenew(body.Key)
+			count := chargeOrdersToRenew(c, body.Key)
 			c.JSON(http.StatusOK, gin.H{"count": count})
 		} else {
 			c.JSON(http.StatusUnauthorized, gin.H{"Error": "You are not allowed here"})

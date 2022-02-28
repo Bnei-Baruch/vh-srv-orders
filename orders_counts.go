@@ -12,13 +12,13 @@ func handleOrdersCount(c *gin.Context) {
 	filter := string(c.Params.ByName("filter"))
 	switch filter {
 	case "all":
-		total = countsAllOrders()
+		total = countsAllOrders(c)
 	case "paid":
-		total = countsFilteredOrders(filter)
+		total = countsFilteredOrders(c, filter)
 	case "failed":
-		total = countsFilteredOrders(filter)
+		total = countsFilteredOrders(c, filter)
 	case "pending":
-		total = countsFilteredOrders(filter)
+		total = countsFilteredOrders(c, filter)
 	case "tickets":
 		total = countsTicketsOrders(c)
 	case "tickets10":
@@ -28,7 +28,7 @@ func handleOrdersCount(c *gin.Context) {
 	case "convention":
 		total = countsConventionOrders(c)
 	default:
-		total = countsAllOrders()
+		total = countsAllOrders(c)
 	}
 	fmt.Printf("\n>> Count %s : %d", filter, total)
 	c.JSON(http.StatusOK, gin.H{filter: total})

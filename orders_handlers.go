@@ -51,7 +51,7 @@ func handleOrdersPaid(c *gin.Context) {
 		return
 	}
 
-	p, err := updatePayment(rp)
+	p, err := updatePayment(c, rp)
 
 	if err != nil {
 		// TODO : ask grisha to return more info on error
@@ -63,7 +63,7 @@ func handleOrdersPaid(c *gin.Context) {
 
 	if p.PaymentStatus == "success" && o.ProductType == "jan2022ticket" {
 		log.Println("Synch with Registration")
-		err := syncServiceRegistration(p, o)
+		err := syncServiceRegistration(c, p, o)
 
 		if err != nil {
 			log.Println("we have an error")

@@ -128,7 +128,7 @@ func handleUpdatePayment(c *gin.Context) {
 		CCNumber=$19,
 		DebitCode=$20,
 		DebitCurrency=$21,
-		DebitTota=$22,
+		DebitTotal=$22,
 		DebitType=$23,
 		FirstPaymentTotal=$24,
 		FixedPaymentTotal=$25,

@@ -145,7 +145,7 @@ func handleUpdatePayment(c *gin.Context) {
 		p.CCExpDate, p.CCNumber, p.DebitCode, p.DebitCurrency, p.DebitTotal, p.DebitType, p.FirstPaymentTotal, p.FixedPaymentTotal,
 		p.JParam, p.TotalPayments, p.TransactionInitTime, p.TransactionUpdateTime, p.VoucherID, p.Ordkey, time.Now(), p.ID)
 	if err != nil {
-		fmt.Errorf("problem updating audience: %w", err)
+		fmt.Errorf("problem updating payments: %w", err)
 	}
 
 	if updateRes.RowsAffected() != 1 {

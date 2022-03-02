@@ -40,7 +40,7 @@ func handleUpdateOrders(c *gin.Context) {
 		oi.Flag = "renewed"
 	}
 
-	updateRes, err := DB.Exec(c, `UPDATE payments 
+	updateRes, err := DB.Exec(c, `UPDATE orders 
 		SET
 		Status=$1,
 		PaymentDate=$2,
@@ -49,7 +49,7 @@ func handleUpdateOrders(c *gin.Context) {
 		WHERE id = $5`,
 		oi.Status, oi.PaymentDate, oi.Flag, time.Now(), oi.ID)
 	if err != nil {
-		fmt.Errorf("problem updating audience: %w", err)
+		fmt.Errorf("problem updating orders: %w", err)
 	}
 
 	if updateRes.RowsAffected() != 1 {

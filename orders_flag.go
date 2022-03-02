@@ -27,7 +27,7 @@ func handleOrdersFlag(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"count": count})
 		return
 	case "duplicates":
-		count := flagDuplicateOrders(body.Flag)
+		count := flagDuplicateOrders(c, body.Flag)
 		c.JSON(http.StatusOK, gin.H{"count": count})
 		return
 	default:

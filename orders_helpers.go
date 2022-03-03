@@ -34,7 +34,7 @@ func countsFilteredOrders(c *gin.Context, filter string) int64 {
 
 	var result int64
 
-	if err := DB.QueryRow(c, "SELECT COUNT(*) FROM orders WHERE Status=$1", filter).Scan(
+	if err := DB.QueryRow(c, `SELECT COUNT(*) FROM orders WHERE "Status"=$1`, filter).Scan(
 		&result,
 	); err != nil {
 		log.Println(err)
@@ -82,19 +82,21 @@ func createOrder(c *gin.Context, req RequestOrder) (Order, error) {
 	o.AccountID = accountID
 
 	execRes, err := DB.Exec(c, `INSERT INTO orders (
-		Type,
-		ProductType,
-		RecuringFreq,
-		Organization,
-		Amount,
-		Currency,
-		Status,
-		OrderLanguage,
-		AccountID
+		"Type",
+		"ProductType",
+		"RecuringFreq",
+		"Organization",
+		"Amount",
+		"Currency",
+		"Status",
+		"OrderLanguage",
+		"AccountID",
+		created_at,
+		updated_at
 	)
 	VALUES (
-		$1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-		o.Type, o.ProductType, o.RecuringFreq, o.Organization, o.Amount, o.Currency, o.Status, o.OrderLanguage, o.AccountID)
+		$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+		o.Type, o.ProductType, o.RecuringFreq, o.Organization, fmt.Sprintf("%g", o.Amount), o.Currency, o.Status, o.OrderLanguage, o.AccountID, time.Now(), time.Now())
 
 	if err != nil {
 		return o, err

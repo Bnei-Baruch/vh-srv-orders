@@ -23,10 +23,11 @@ func handleUpdateOrders(c *gin.Context) {
 	}
 	var oi Order
 
-	if err := DB.QueryRow(c, `select id AccountID, PaymentDate, Flag from orders where id = $1`, o.ID).Scan(
-		&oi.ID, &oi.AccountID, &oi.PaymentDate, &oi.Flag,
+	if err := DB.QueryRow(c, `SELECT id, "AccountID" from orders WHERE id = $1`, o.ID).Scan(
+		&oi.ID, &oi.AccountID,
 	); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err, "msg": "error finding order"})
+		return
 	}
 
 	if o.AccountID != oi.AccountID {
@@ -42,9 +43,9 @@ func handleUpdateOrders(c *gin.Context) {
 
 	updateRes, err := DB.Exec(c, `UPDATE orders 
 		SET
-		Status=$1,
-		PaymentDate=$2,
-		Flag=$3,
+		"Status"=$1,
+		"PaymentDate"=$2,
+		"Flag"=$3,
 		updated_at=$4 
 		WHERE id = $5`,
 		oi.Status, oi.PaymentDate, oi.Flag, time.Now(), oi.ID)

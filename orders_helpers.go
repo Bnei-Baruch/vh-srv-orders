@@ -223,36 +223,41 @@ func updatePayment(ctx *gin.Context, req RequestPaid) (Payment, error) {
 
 	// Get payment
 	if err := DB.QueryRow(ctx, `SELECT 
-	PaymentStatus,
-	PaymentType,
-	ParamX,
-	AuthNo,
+	"OrderID",
+	"PaymentStatus",
+	"PaymentType",
+	"ParamX",
+	"AuthNo",
 	confirmation_key,
 	success,
 	pelecard_token,
-	TransactionID,
-	CCBrand,
-	CardHebrewName,
-	CCAbroadCard,
-	CCCompanyClearer,
+	"TransactionID",
+	"CCBrand",
+	"CardHebrewName",
+	"CCAbroadCard",
+	"CCCompanyClearer",
 	credit_type,
-	CCExpDate,
-	CCNumber,
-	DebitCode,
-	DebitCurrency,
-	DebitTotal,
-	DebitType,
-	FirstPaymentTotal,
-	FixedPaymentTotal,
-	TotalPayments,
+	"CCExpDate",
+	"CCNumber",
+	"DebitCode",
+	"DebitCurrency",
+	"DebitTotal",
+	"DebitType",
+	"FirstPaymentTotal",
+	"FixedPaymentTotal",
+	"TotalPayments",
 	j_param,
-	TransactionInitTime,
-	TransactionUpdateTime,
-	VoucherID FROM payments WHERE OrderID=$1 AND id=$2`, uint(orderid), uint(paymentid)).Scan(
-		&p,
+	"TransactionInitTime",
+	"TransactionUpdateTime",
+	"VoucherID" FROM payments WHERE "OrderID"=$1 AND id=$2`, uint(orderid), uint(paymentid)).Scan(
+		&p.OrderID, &p.PaymentStatus, &p.PaymentType, &p.ParamX, &p.AuthNo, &p.ConfirmationKey, &p.Success,
+		&p.PelecardToken, &p.TransactionID, &p.CCBrand, &p.CardHebrewName, &p.CCAbroadCard,
+		&p.CCCompanyClearer, &p.CreditType, &p.CCExpDate, &p.CCNumber, &p.DebitCode, &p.DebitCurrency,
+		&p.DebitTotal, &p.DebitType, &p.FirstPaymentTotal, &p.FixedPaymentTotal, &p.TotalPayments,
+		&p.JParam, &p.TransactionInitTime, &p.TransactionUpdateTime, &p.VoucherID,
 	); err != nil {
 		if err == pgx.ErrNoRows {
-			return p, errors.New("Cannot find related Order for Payment")
+			return p, errors.New("cannot find related Order for Payment")
 		}
 	}
 
@@ -298,49 +303,45 @@ func updatePayment(ctx *gin.Context, req RequestPaid) (Payment, error) {
 
 	updateRes, err := DB.Exec(ctx, `UPDATE payments 
 		SET
-		PaymentStatus=$1,
-		PaymentType=$2,
-		ParamX=$3,
-		AuthNo=$4,
+		"PaymentStatus"=$1,
+		"PaymentType"=$2,
+		"ParamX"=$3,
+		"AuthNo"=$4,
 		confirmation_key=$5,
 		success=$6,
 		pelecard_token=$7,
-		TransactionID=$8,
-		CCBrand=$9,
-		CardHebrewName=$10,
-		CCAbroadCard=$11,
-		CCCompanyClearer=$12,
+		"TransactionID"=$8,
+		"CCBrand"=$9,
+		"CardHebrewName"=$10,
+		"CCAbroadCard"=$11,
+		"CCCompanyClearer"=$12,
 		credit_type=$13,
-		CCExpDate=$14,
-		CCNumber=$15,
-		DebitCode=$16,
-		DebitCurrency=$17,
-		DebitTotal=$18,
-		DebitType=$19,
-		FirstPaymentTotal=$20,
-		FixedPaymentTotal=$21,
-		TotalPayments=$22,
+		"CCExpDate"=$14,
+		"CCNumber"=$15,
+		"DebitCode"=$16,
+		"DebitCurrency"=$17,
+		"DebitTotal"=$18,
+		"DebitType"=$19,
+		"FirstPaymentTotal"=$20,
+		"FixedPaymentTotal"=$21,
+		"TotalPayments"=$22,
 		j_param=$23,
-		TransactionInitTime=$24,
-		TransactionUpdateTime=$25,
-		VoucherID=$26,
-		ErrorMsg=$27,
+		"TransactionInitTime"=$24,
+		"TransactionUpdateTime"=$25,
+		"VoucherID"=$26,
+		"ErrorMsg"=$27,
 		updated_at=$28 
 		WHERE id = $29`,
 		p.PaymentStatus, p.PaymentType, p.ParamX, p.AuthNo, p.ConfirmationKey, p.Success, p.PelecardToken,
 		p.TransactionID, p.CCBrand, p.CardHebrewName, p.CCAbroadCard, p.CCCompanyClearer, p.CreditType, p.CCExpDate,
 		p.CCNumber, p.DebitCode, p.DebitCurrency, p.DebitTotal, p.DebitType, p.FirstPaymentTotal, p.FixedPaymentTotal,
-		p.TotalPayments, p.JParam, p.TransactionInitTime, p.TransactionUpdateTime, p.VoucherID, p.ErrorMsg, time.Now(), p.ID)
+		p.TotalPayments, p.JParam, p.TransactionInitTime, p.TransactionUpdateTime, p.VoucherID, p.ErrorMsg, time.Now(), uint(paymentid))
 	if err != nil {
-		fmt.Errorf("problem updating payments: %w", err)
+		return p, fmt.Errorf("problem updating payments: %w", err)
 	}
 
 	if updateRes.RowsAffected() != 1 {
 		return p, fmt.Errorf("Payment not Updated")
-	}
-
-	if err != nil {
-		return p, err
 	}
 
 	return p, nil
@@ -365,14 +366,14 @@ func syncServiceRegistration(ctx *gin.Context, p Payment, o Order) error {
 	var a Account
 
 	if err := DB.QueryRow(ctx, `SELECT 
-	FirstName,
-	LastName,
-	Email,
-	UserKey 
-	FROM orders WHERE id=$1`, o.AccountID).Scan(
-		&a,
+	"FirstName",
+	"LastName",
+	"Email",
+	"UserKey" 
+	FROM accounts WHERE id=$1`, o.AccountID).Scan(
+		&a.FirstName, &a.LastName, &a.Email, &a.UserKey,
 	); err != nil {
-		return errors.New("Cannot find related Order for Payment")
+		return errors.New("cannot find related Order for Payment")
 	}
 
 	payload.FirstName = a.FirstName
@@ -403,10 +404,8 @@ func updateOrderAfterPayment(ctx *gin.Context, p Payment) (Order, error) {
 	var o Order
 
 	if err := DB.QueryRow(ctx, `SELECT 
-	Status,
-	PaymentDate,
-	VoucherID FROM orders WHERE id=$1`, p.OrderID).Scan(
-		&o,
+	id, "ProductType", "AccountID", "OrderLanguage" FROM orders WHERE id=$1`, p.OrderID).Scan(
+		&o.ID, &o.ProductType, &o.AccountID, &o.OrderLanguage,
 	); err != nil {
 		return o, err
 	}
@@ -414,27 +413,35 @@ func updateOrderAfterPayment(ctx *gin.Context, p Payment) (Order, error) {
 	if p.Success == "1" {
 		o.Status = "paid"
 		o.PaymentDate = time.Now()
+
+		updateRes, err := DB.Exec(ctx, `UPDATE orders 
+		SET
+		"Status"=$1,
+		"PaymentDate"=$2,
+		updated_at=$3 
+		WHERE id = $4`, o.Status, o.PaymentDate, time.Now(), p.OrderID)
+		if err != nil {
+			return o, fmt.Errorf("problem updating payments: %w", err)
+		}
+
+		if updateRes.RowsAffected() != 1 {
+			return o, fmt.Errorf("orders not Updated")
+		}
+
 	} else {
 		o.Status = "nosuccess"
-	}
-
-	updateRes, err := DB.Exec(ctx, `UPDATE payments 
+		updateRes, err := DB.Exec(ctx, `UPDATE orders 
 		SET
-		Status=$1,
-		PaymentDate=$2,
-		updated_at=$3 
-		WHERE id = $4`,
-		o.Status, o.PaymentDate, time.Now(), p.OrderID)
-	if err != nil {
-		fmt.Errorf("problem updating payments: %w", err)
-	}
+		"Status"=$1,
+		updated_at=$2 
+		WHERE id = $3`, o.Status, time.Now(), p.OrderID)
+		if err != nil {
+			return o, fmt.Errorf("problem updating payments: %w", err)
+		}
 
-	if updateRes.RowsAffected() != 1 {
-		return o, fmt.Errorf("Payment not Updated")
-	}
-
-	if err != nil {
-		return o, err
+		if updateRes.RowsAffected() != 1 {
+			return o, fmt.Errorf("orders not Updated")
+		}
 	}
 
 	return o, nil

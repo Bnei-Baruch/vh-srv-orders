@@ -43,7 +43,7 @@ type Payment struct {
 	PaymentType   string `json:"PaymentType" gorm:"Column:PaymentType;type:varchar(100)"`
 	OrderID       uint   `json:"OrderID" gorm:"Column:OrderID"`
 
-	ParamX          string `json:"​additional_details_param_x" gorm:"Column:ParamX"`
+	ParamX          string `json:"additional_details_param_x" gorm:"Column:ParamX"`
 	Ordkey          string `json:"user_key" gorm:"Column:Ordkey"`
 	AuthNo          string `json:"authNo" gorm:"Column:AuthNo"`
 	ConfirmationKey string `json:"confirmation_key" gorm:"ConfirmationKey"`

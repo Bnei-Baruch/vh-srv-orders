@@ -83,33 +83,11 @@ func flagOrdersToRenew(c *gin.Context, month int64, year int64) int64 {
 			return -1
 		}
 
-		// err := DB.ScanRows(rows, &aOPotential)
-
-		// if err != nil {
-		// 	fmt.Println("Error reading row in scan")
-		// 	fmt.Println(err)
-		// 	return -1
-		// }
-
 		qOSelectStr := `
 		select 
 		id,
-		Type,
-		ProductType,
-		RecuringFreq,
-		AccountID,
-		Organization,
-		Amount,
-		Currency,
-		Status,
-		OrderLanguage,
-		PaymentDate,
-		SKU,
-		Note,
-		Flag,
-		created_at,
-		updated_at,
-		deleted_at from orders
+		"Type",
+		"PaymentDate" from orders
 		where userkey = $1
 		and ("Status"='paid'
 		or "Status"='nosuccess')
@@ -133,29 +111,12 @@ func flagOrdersToRenew(c *gin.Context, month int64, year int64) int64 {
 			oselectedErr := oselected.Scan(
 				&aOSelect.ID,
 				&aOSelect.Type,
-				&aOSelect.ProductType,
-				&aOSelect.RecuringFreq,
-				&aOSelect.AccountID,
-				&aOSelect.Organization,
-				&aOSelect.Amount,
-				&aOSelect.Currency,
-				&aOSelect.Status,
-				&aOSelect.OrderLanguage,
-				&aOSelect.PaymentDate,
-				&aOSelect.SKU,
-				&aOSelect.Note,
-				&aOSelect.Flag,
-				&aOSelect.CreatedAt,
-				&aOSelect.UpdatedAt,
-				&aOSelect.DeletedAt)
+				&aOSelect.PaymentDate)
 			if oselectedErr != nil {
 				fmt.Println("Error reading row in scan")
 				fmt.Println(oselectedErr)
 				return -1
 			}
-
-			//fmt.Println(aOSelect.PaymentDate)
-			//fmt.Println(int(aOSelect.PaymentDate.Month()))
 
 			if int64(aOSelect.PaymentDate.Month()) == month && int64(aOSelect.PaymentDate.Year()) == year {
 				fmt.Printf("No need to charge order %d\n", aOSelect.ID)

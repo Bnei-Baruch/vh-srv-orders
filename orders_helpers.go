@@ -464,20 +464,18 @@ func getOrderByID(ctx *gin.Context, orderID uint) Order {
 	"Status",
 	"OrderLanguage",
 	"PaymentDate",
-	"SKU",
-	"Note",
 	"Flag",
 	created_at,
 	updated_at,
 	deleted_at 
 	FROM orders WHERE id=$1`, orderID).Scan(
 		&o.ID, &o.Type, &o.ProductType, &o.RecuringFreq, &o.AccountID, &o.Organization, &amount,
-		&o.Currency, &o.Status, &o.OrderLanguage, &o.PaymentDate, &o.SKU, &o.Note, &o.Flag, &o.CreatedAt, &o.UpdatedAt, &o.DeletedAt,
+		&o.Currency, &o.Status, &o.OrderLanguage, &o.PaymentDate, &o.Flag, &o.CreatedAt, &o.UpdatedAt, &o.DeletedAt,
 	); err != nil {
+		fmt.Println("--get-order-err", err)
 		log.Printf("\n## ERROR - NO ORDER %v\n", orderID)
 		return o
 	}
-	// result := DB.Where(&Order{ID: orderID}).First(&o)
 
 	value, err := strconv.ParseFloat(amount, 32)
 
@@ -758,7 +756,6 @@ func chargeOrdersToRenew(c *gin.Context, pmx string) int {
 		if err != nil {
 			return -1
 		}
-		// rows.Scan(&id)
 		fmt.Printf(">>> Renewing %d\n", id)
 		status := renewOrder(c, uint(id), pmx)
 		//status := "1"
@@ -802,15 +799,15 @@ func addFlagToOrder(ctx *gin.Context, oid uint, flag string) {
 	o := getOrderByID(ctx, uint(oid))
 	o.Flag = flag
 
-	if o.ID != 0 {
+	if o.ID == 0 {
 		fmt.Println("order not found")
 		return
 	}
 
 	updateRes, err := DB.Exec(ctx, `UPDATE orders 
 		SET 
-		Flag=$1,
-		updated_at=$2,
+		"Flag"=$1,
+		updated_at=$2
 		WHERE id=$3`, flag, time.Now(), o.ID)
 	if err != nil {
 		fmt.Println("problem updating orders: %w", err)
@@ -819,13 +816,10 @@ func addFlagToOrder(ctx *gin.Context, oid uint, flag string) {
 	if updateRes.RowsAffected() != 1 {
 		fmt.Println("no rows affected")
 	}
-
-	// DB.Model(&o).Updates(o)
 }
 
 func flagOrdersByAccountID(ctx *gin.Context, aid int, flag string) int {
 	req := `select id from orders where "AccountID" = $1 and "Status" = 'paid'`
-	// rows, err := DB.Raw(req, aid).Rows() // (*sql.Rows, error)
 	rows, err := DB.Query(ctx, req, aid)
 	if err != nil {
 		return -1

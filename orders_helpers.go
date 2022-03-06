@@ -76,12 +76,12 @@ func createOrder(c *gin.Context, req RequestOrder) (Order, error) {
 	accountID := CreateOrUpdateAccount(c, a)
 
 	if accountID == 0 {
-		return o, errors.New("Null account")
+		return o, errors.New("null account")
 	}
 
 	o.AccountID = accountID
 
-	execRes, err := DB.Exec(c, `INSERT INTO orders (
+	if err := DB.QueryRow(c, `INSERT INTO orders (
 		"Type",
 		"ProductType",
 		"RecuringFreq",
@@ -95,15 +95,14 @@ func createOrder(c *gin.Context, req RequestOrder) (Order, error) {
 		updated_at
 	)
 	VALUES (
-		$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-		o.Type, o.ProductType, o.RecuringFreq, o.Organization, fmt.Sprintf("%g", o.Amount), o.Currency, o.Status, o.OrderLanguage, o.AccountID, time.Now(), time.Now())
-
-	if err != nil {
+		$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
+		o.Type, o.ProductType, o.RecuringFreq, o.Organization, fmt.Sprintf("%g", o.Amount), o.Currency, o.Status, o.OrderLanguage, o.AccountID, time.Now(), time.Now()).Scan(
+		&o.ID,
+	); err != nil {
+		if err == pgx.ErrNoRows {
+			return o, fmt.Errorf("no rows affected")
+		}
 		return o, err
-	}
-
-	if execRes.RowsAffected() == 0 {
-		return o, fmt.Errorf("No rows affected")
 	}
 
 	return o, nil
@@ -132,11 +131,11 @@ func createPayment(c *gin.Context, req RequestOrder, o Order) (Payment, error) {
 		PaymentStatus: "pending",
 	}
 
-	execRes, err := DB.Exec(c, `INSERT INTO orders (
-		Amount,
-		PaymentType,
-		OrderID,
-		PaymentStatus
+	execRes, err := DB.Exec(c, `INSERT INTO payments (
+		"Amount",
+		"PaymentType",
+		"OrderID",
+		"PaymentStatus"
 	)
 	VALUES (
 		$1, $2, $3, $4)`,
@@ -147,7 +146,7 @@ func createPayment(c *gin.Context, req RequestOrder, o Order) (Payment, error) {
 	}
 
 	if execRes.RowsAffected() == 0 {
-		return p, fmt.Errorf("No rows affected")
+		return p, fmt.Errorf("no rows affected")
 	}
 
 	return p, nil
@@ -166,10 +165,10 @@ func createPendingPayment(c *gin.Context, sum float32, oid uint, pmx string) (Pa
 	var ID int64
 	// Add new account if not exist
 	if err := DB.QueryRow(c, `INSERT INTO payments (
-		Amount,
-		PaymentType,
-		OrderID,
-		PaymentStatus
+		"Amount",
+		"PaymentType",
+		"OrderID",
+		"PaymentStatus"
 	)
 	VALUES (
 		$1, $2, $3, $4) RETURNING id`,
@@ -199,7 +198,7 @@ func createPendingPayment(c *gin.Context, sum float32, oid uint, pmx string) (Pa
 
 	if updateRes.RowsAffected() != 1 {
 		fmt.Println(updateRes.RowsAffected())
-		return p, fmt.Errorf("No rows affected")
+		return p, fmt.Errorf("no rows affected")
 	}
 
 	return p, nil

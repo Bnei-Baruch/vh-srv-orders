@@ -11,7 +11,7 @@ import (
 func CreateOrUpdateAccount(ctx *gin.Context, a Account) uint {
 	var b Account
 	reqAccountExist := `
-		select id from accounts where "UserKey" = $1
+		select id from accounts where "UserKey" = $1 ORDER BY id DESC LIMIT 1
 	`
 	if err := DB.QueryRow(ctx, reqAccountExist, a.UserKey).Scan(
 		&b.ID,

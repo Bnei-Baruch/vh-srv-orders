@@ -18,12 +18,11 @@ var DB *pgxpool.Pool
 // cfg is the struct type that contains fields that stores the necessary configuration
 // gathered from the environment.
 var cfg struct {
-	PgHost   string `envconfig:"DB_USER" default:"localhost"`
-	PgPort   string `envconfig:"DB_PASSWORD" default:"5432"`
-	PgUser   string `envconfig:"DB_DATABASE" default:"postgres"`
-	PgPass   string `envconfig:"DB_HOST" default:"pass"`
-	PgSSL    string `envconfig:"DB_PORT" default:"disable"`
-	PgDbName string `envconfig:"APP_PORT" default:"gorm"`
+	PgHost   string `envconfig:"DB_HOST" default:"localhost"`
+	PgPort   string `envconfig:"DB_PORT" default:"5432"`
+	PgUser   string `envconfig:"DB_USER" default:"postgres"`
+	PgPass   string `envconfig:"DB_PASSWORD" default:"pass"`
+	PgDbName string `envconfig:"DB_DATABASE" default:"gorm"`
 }
 
 //Init DB
@@ -38,13 +37,12 @@ func connectPostgreSQL() {
 		return
 	}
 
-	connec := fmt.Sprintf("host=%s port=%s user=%s dbname=%s password=%s sslmode=%s",
+	connec := fmt.Sprintf("host=%s port=%s user=%s dbname=%s password=%s",
 		cfg.PgHost,
 		cfg.PgPort,
 		cfg.PgUser,
 		cfg.PgDbName,
 		cfg.PgPass,
-		cfg.PgSSL,
 	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

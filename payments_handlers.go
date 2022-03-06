@@ -60,7 +60,7 @@ func handleCreatePayment(c *gin.Context) {
 			$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
 			$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33
 			)`,
-		p.Amount, p.PaymentStatus, p.PaymentType, p.OrderID, p.ParamX, p.AuthNo, p.ConfirmationKey, p.Success, p.PelecardToken,
+		p.Amount, p.PaymentStatus, p.PaymentType, p.OrderID, p.ParamX, *p.AuthNo, p.ConfirmationKey, p.Success, p.PelecardToken,
 		p.TransactionID, p.ErrorMsg, p.CardHebrewName, p.CCAbroadCard, p.CCBrand, p.CCCompanyClearer, p.CCCompanyIssuer, p.CreditType,
 		p.CCExpDate, p.CCNumber, p.DebitCode, p.DebitCurrency, p.DebitTotal, p.DebitType, p.FirstPaymentTotal, p.FixedPaymentTotal,
 		p.JParam, p.TotalPayments, p.TransactionInitTime, p.TransactionUpdateTime, p.VoucherID, p.Ordkey, time.Now(), time.Now())
@@ -141,7 +141,7 @@ func handleUpdatePayment(c *gin.Context) {
 		"Ordkey"=$31,
 		updated_at=$32 
 		WHERE id = $33`,
-		p.Amount, p.PaymentStatus, p.PaymentType, p.OrderID, p.ParamX, p.AuthNo, p.ConfirmationKey, p.Success, p.PelecardToken,
+		p.Amount, p.PaymentStatus, p.PaymentType, p.OrderID, p.ParamX, *p.AuthNo, p.ConfirmationKey, p.Success, p.PelecardToken,
 		p.TransactionID, p.ErrorMsg, p.CardHebrewName, p.CCAbroadCard, p.CCBrand, p.CCCompanyClearer, p.CCCompanyIssuer, p.CreditType,
 		p.CCExpDate, p.CCNumber, p.DebitCode, p.DebitCurrency, p.DebitTotal, p.DebitType, p.FirstPaymentTotal, p.FixedPaymentTotal,
 		p.JParam, p.TotalPayments, p.TransactionInitTime, p.TransactionUpdateTime, p.VoucherID, p.Ordkey, time.Now(), p.ID)

@@ -153,7 +153,7 @@ func createPayment(c *gin.Context, req RequestOrder, o Order) (Payment, error) {
 
 }
 
-func createPendingPayment(c *gin.Context, sum float32, oid uint, pmx string) (Payment, error) {
+func createPendingPayment(c *gin.Context, sum float64, oid uint, pmx string) (Payment, error) {
 
 	p := Payment{
 		Amount:        sum,
@@ -162,7 +162,6 @@ func createPendingPayment(c *gin.Context, sum float32, oid uint, pmx string) (Pa
 		PaymentStatus: "pending",
 	}
 
-	var ID int64
 	// Add new account if not exist
 	if err := DB.QueryRow(c, `INSERT INTO payments (
 		"Amount",
@@ -173,7 +172,7 @@ func createPendingPayment(c *gin.Context, sum float32, oid uint, pmx string) (Pa
 	VALUES (
 		$1, $2, $3, $4) RETURNING id`,
 		p.Amount, p.PaymentType, p.OrderID, p.PaymentStatus).Scan(
-		&ID,
+		&p.ID,
 	); err != nil {
 		return p, err
 	}
@@ -187,8 +186,8 @@ func createPendingPayment(c *gin.Context, sum float32, oid uint, pmx string) (Pa
 
 	updateRes, err := DB.Exec(c, `UPDATE payments 
 		SET
-		ParamX=$1,
-		Ordkey=$2,
+		"ParamX"=$1,
+		"Ordkey"=$2,
 		updated_at=$3 
 		WHERE id = $4`,
 		p.ParamX, p.Ordkey, time.Now(), p.ID)
@@ -331,7 +330,7 @@ func updatePayment(ctx *gin.Context, req RequestPaid) (Payment, error) {
 		"ErrorMsg"=$27,
 		updated_at=$28 
 		WHERE id = $29`,
-		p.PaymentStatus, p.PaymentType, p.ParamX, p.AuthNo, p.ConfirmationKey, p.Success, p.PelecardToken,
+		p.PaymentStatus, p.PaymentType, p.ParamX, *p.AuthNo, p.ConfirmationKey, p.Success, p.PelecardToken,
 		p.TransactionID, p.CCBrand, p.CardHebrewName, p.CCAbroadCard, p.CCCompanyClearer, p.CreditType, p.CCExpDate,
 		p.CCNumber, p.DebitCode, p.DebitCurrency, p.DebitTotal, p.DebitType, p.FirstPaymentTotal, p.FixedPaymentTotal,
 		p.TotalPayments, p.JParam, p.TransactionInitTime, p.TransactionUpdateTime, p.VoucherID, p.ErrorMsg, time.Now(), uint(paymentid))
@@ -451,33 +450,43 @@ func updateOrderAfterPayment(ctx *gin.Context, p Payment) (Order, error) {
 //Get Order
 func getOrderByID(ctx *gin.Context, orderID uint) Order {
 	var o Order
+	var amount string
 
 	if err := DB.QueryRow(ctx, `SELECT 
 	id,
-	Type,
-	ProductType,
-	RecuringFreq,
-	AccountID,
-	Organization,
-	Amount,
-	Currency,
-	Status,
-	OrderLanguage,
-	PaymentDate,
-	SKU,
-	Note,
-	Flag,
+	"Type",
+	"ProductType",
+	"RecuringFreq",
+	"AccountID",
+	"Organization",
+	"Amount",
+	"Currency",
+	"Status",
+	"OrderLanguage",
+	"PaymentDate",
+	"SKU",
+	"Note",
+	"Flag",
 	created_at,
 	updated_at,
-	deleted_at,
+	deleted_at 
 	FROM orders WHERE id=$1`, orderID).Scan(
-		&o.ID, &o.Type, &o.ProductType, &o.RecuringFreq, &o.AccountID, &o.Organization, &o.Amount,
+		&o.ID, &o.Type, &o.ProductType, &o.RecuringFreq, &o.AccountID, &o.Organization, &amount,
 		&o.Currency, &o.Status, &o.OrderLanguage, &o.PaymentDate, &o.SKU, &o.Note, &o.Flag, &o.CreatedAt, &o.UpdatedAt, &o.DeletedAt,
 	); err != nil {
 		log.Printf("\n## ERROR - NO ORDER %v\n", orderID)
 		return o
 	}
 	// result := DB.Where(&Order{ID: orderID}).First(&o)
+
+	value, err := strconv.ParseFloat(amount, 32)
+
+	if err != nil {
+		fmt.Println("error converting amount string to float")
+		return o
+	}
+
+	o.Amount = float64(value)
 
 	return o
 }
@@ -489,41 +498,41 @@ func getPaymentForOrderID(ctx *gin.Context, orderID uint) Payment {
 	// Get payment
 	if err := DB.QueryRow(ctx, `SELECT 
 	id,
-	Amount,
-	PaymentStatus,
-	PaymentType,
-	OrderID,
-	ParamX,
-	AuthNo,
+	"Amount",
+	"PaymentStatus",
+	"PaymentType",
+	"OrderID",
+	"ParamX",
+	"AuthNo",
 	confirmation_key,
 	success,
 	pelecard_token,
-	TransactionID,
-	ErrorMsg,
-	CardHebrewName,
-	CCAbroadCard,
-	CCBrand,
-	CCCompanyClearer,
-	CCCompanyIssuer,
+	"TransactionID",
+	"ErrorMsg",
+	"CardHebrewName",
+	"CCAbroadCard",
+	"CCBrand",
+	"CCCompanyClearer",
+	"CCCompanyIssuer",
 	credit_type,
-	CCExpDate,
-	CCNumber,
-	DebitCode,
-	DebitCurrency,
-	DebitTotal,
-	DebitType,
-	FirstPaymentTotal,
-	FixedPaymentTotal,
+	"CCExpDate",
+	"CCNumber",
+	"DebitCode",
+	"DebitCurrency",
+	"DebitTotal",
+	"DebitType",
+	"FirstPaymentTotal",
+	"FixedPaymentTotal",
 	j_param,
-	TotalPayments,
-	TransactionInitTime,
-	TransactionUpdateTime,
-	VoucherID,
-	Ordkey,
+	"TotalPayments",
+	"TransactionInitTime",
+	"TransactionUpdateTime",
+	"VoucherID",
+	"Ordkey",
 	created_at,
 	updated_at,
 	deleted_at 
-	FROM payments WHERE OrderID=$1 AND PaymentStatus=$2`, orderID, "success").Scan(
+	FROM payments WHERE "OrderID"=$1 AND "PaymentStatus"=$2`, orderID, "success").Scan(
 		&p.ID, &p.Amount, &p.PaymentStatus, &p.PaymentType, &p.OrderID, &p.ParamX, &p.AuthNo, &p.ConfirmationKey, &p.Success, &p.PelecardToken,
 		&p.TransactionID, &p.ErrorMsg, &p.CardHebrewName, &p.CCAbroadCard, &p.CCBrand, &p.CCCompanyClearer,
 		&p.CCCompanyIssuer, &p.CreditType, &p.CCExpDate, &p.CCNumber, &p.DebitCode,
@@ -545,22 +554,22 @@ func getAccountForOrderID(ctx *gin.Context, orderID uint) Account {
 
 	if err := DB.QueryRow(ctx, `SELECT 
 	id,
-	FirstName,
-	LastName,
-	Email,
-	Phone,
-	Street,
-	City,
-	State,
-	Postcode,
-	Country,
-	AccountType,
-	PaymentToken,
-	PaymentCardID,
-	PaymentCardExpMonth,
-	PaymentCardExpYear,
-	UserKey,
-	AuthNo, 
+	"FirstName",
+	"LastName",
+	"Email",
+	"Phone",
+	"Street",
+	"City",
+	"State",
+	"Postcode",
+	"Country",
+	"AccountType",
+	"PaymentToken",
+	"PaymentCardID",
+	"PaymentCardExpMonth",
+	"PaymentCardExpYear",
+	"UserKey",
+	"AuthNo", 
 	created_at,
 	updated_at,
 	deleted_at 
@@ -587,7 +596,7 @@ func createRequestPayByToken(c *gin.Context, a Account, o Order, p Payment, pmx 
 		GoodURL:    "http://ec41a043fda1.ngrok.io/pelecard/good",
 		ErrorURL:   "http://ec41a043fda1.ngrok.io/pelecard/error",
 		CancelURL:  "http://ec41a043fda1.ngrok.io/pelecard/cancel",
-		ApprovalNo: p.AuthNo,
+		ApprovalNo: *p.AuthNo,
 		Token:      p.PelecardToken,
 
 		Name:         a.FirstName + " " + a.LastName,
@@ -665,8 +674,6 @@ func renewOrder(c *gin.Context, orderID uint, pmx string) string {
 		newp.Success = "0"
 	}
 	answers := resp.(map[string]interface{})
-	// data := answers["data"].(string)
-	// fmt.Println(data)
 	if answers["status"].(string) == "success" {
 		newp.PaymentStatus = "success"
 		newp.Success = "1"
@@ -677,7 +684,6 @@ func renewOrder(c *gin.Context, orderID uint, pmx string) string {
 		newp.PaymentStatus = "failed"
 		newp.Success = "0"
 	}
-	// DB.Model(&newp).Updates(newp)
 
 	updateRes, err := DB.Exec(c, `UPDATE payments 
 		SET
@@ -692,7 +698,7 @@ func renewOrder(c *gin.Context, orderID uint, pmx string) string {
 		Ordkey=$9,
 		updated_at=$10 
 		WHERE id = $11`,
-		newp.Amount, newp.PaymentStatus, newp.PaymentType, newp.OrderID, newp.ParamX, newp.AuthNo,
+		newp.Amount, newp.PaymentStatus, newp.PaymentType, newp.OrderID, newp.ParamX, *newp.AuthNo,
 		newp.Success, newp.PelecardToken, newp.Ordkey, time.Now(), newp.ID)
 	if err != nil {
 		fmt.Errorf("problem updating payments: %w", err)
@@ -716,7 +722,7 @@ func flagOrderAsRenewed(ctx *gin.Context, orderID uint) {
 
 	updateRes, err := DB.Exec(ctx, `UPDATE orders 
 		SET 
-		Flag=$1,
+		"Flag"=$1,
 		updated_at=$2,
 		WHERE id = $3`,
 		"renewed", time.Now(), orderID)

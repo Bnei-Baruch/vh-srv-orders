@@ -18,7 +18,7 @@ type Order struct {
 	AccountID    uint   `json:"AccountID" gorm:"Column:AccountID;"`
 	Organization string `json:"Organization" gorm:"Column:Organization;type:varchar(10)"`
 
-	Amount        float32   `json:"Amount" gorm:"Column:Amount;type:varchar(85)"`
+	Amount        float64   `json:"Amount" gorm:"Column:Amount;type:varchar(85)"`
 	Currency      string    `json:"Currency"  gorm:"Column:Currency;type:varchar(10)"`
 	SKU           string    `json:"SKU"  gorm:"Column:SKU;type:varchar(30)"`
 	Status        string    `json:"Status,omitempty" gorm:"Column:Status;type:varchar(85)"`
@@ -37,20 +37,20 @@ type Payment struct {
 	UpdatedAt time.Time  `json:"-"`
 	DeletedAt *time.Time `json:"-" sql:"index"`
 
-	Amount float32 `json:"Amount" gorm:"Column:Amount"`
+	Amount float64 `json:"Amount" gorm:"Column:Amount"`
 
 	PaymentStatus string `json:"PaymentStatus" gorm:"Column:PaymentStatus"`
 	PaymentType   string `json:"PaymentType" gorm:"Column:PaymentType;type:varchar(100)"`
 	OrderID       uint   `json:"OrderID" gorm:"Column:OrderID"`
 
-	ParamX          string `json:"additional_details_param_x" gorm:"Column:ParamX"`
-	Ordkey          string `json:"user_key" gorm:"Column:Ordkey"`
-	AuthNo          string `json:"authNo" gorm:"Column:AuthNo"`
-	ConfirmationKey string `json:"confirmation_key" gorm:"ConfirmationKey"`
-	Success         string `json:"success" gorm:"Success"`
-	PelecardToken   string `json:"token" gorm:"PelecardToken"`
-	TransactionID   string `json:"transaction_id" gorm:"Column:TransactionID"`
-	ErrorMsg        string `json:"ErrorMsg" gorm:"Column:ErrorMsg"`
+	ParamX          string  `json:"additional_details_param_x" gorm:"Column:ParamX"`
+	Ordkey          string  `json:"user_key" gorm:"Column:Ordkey"`
+	AuthNo          *string `json:"authNo" gorm:"Column:AuthNo"`
+	ConfirmationKey string  `json:"confirmation_key" gorm:"ConfirmationKey"`
+	Success         string  `json:"success" gorm:"Success"`
+	PelecardToken   string  `json:"token" gorm:"PelecardToken"`
+	TransactionID   string  `json:"transaction_id" gorm:"Column:TransactionID"`
+	ErrorMsg        string  `json:"ErrorMsg" gorm:"Column:ErrorMsg"`
 
 	CardHebrewName   string `json:"card_hebrew_name" gorm:"Column:CardHebrewName"`
 	CCAbroadCard     string `json:"CCAbroadCard" gorm:"Column:CCAbroadCard"`
@@ -116,7 +116,7 @@ type RequestOrder struct {
 	UserKey   string `json:"UserKey"`
 
 	//Product data
-	Amount        float32 `json:"Amount"`
+	Amount        float64 `json:"Amount"`
 	Currency      string  `json:"Currency"`
 	Reference     string  `json:"Reference"`
 	Type          string  `json:"Type"`
@@ -150,13 +150,13 @@ type Account struct {
 	Postcode  string `json:"Postcode" gorm:"Column:Postcode;type:varchar(85)"`
 	Country   string `json:"Country" gorm:"Column:Country;type:varchar(50)"`
 
-	AccountType         string `json:"AccountType,omitempty" gorm:"Column:AccountType;type:varchar(100);default:'personal'"`
-	PaymentToken        string `json:"PaymentToken,omitempty" gorm:"Column:PaymentToken;type:varchar(100)"`
-	PaymentCardID       string `json:"PaymentCardID,omitempty" gorm:"Column:PaymentCardID;type:varchar(100)"`
-	PaymentCardExpMonth int    `json:"PaymentCardExpMonth,omitempty" gorm:"Column:PaymentCardExpMonth;type:int"`
-	PaymentCardExpYear  int    `json:"PaymentCardExpYear,omitempty" gorm:"Column:PaymentCardExpYear;type:int"`
-	AuthNo              string `json:"authNo" gorm:"Column:AuthNo"`
-	UserKey             string `json:"UserKCID,omitempty" gorm:"Column:UserKey;type:varchar(85)"`
+	AccountType         string  `json:"AccountType,omitempty" gorm:"Column:AccountType;type:varchar(100);default:'personal'"`
+	PaymentToken        string  `json:"PaymentToken,omitempty" gorm:"Column:PaymentToken;type:varchar(100)"`
+	PaymentCardID       string  `json:"PaymentCardID,omitempty" gorm:"Column:PaymentCardID;type:varchar(100)"`
+	PaymentCardExpMonth int     `json:"PaymentCardExpMonth,omitempty" gorm:"Column:PaymentCardExpMonth;type:int"`
+	PaymentCardExpYear  int     `json:"PaymentCardExpYear,omitempty" gorm:"Column:PaymentCardExpYear;type:int"`
+	AuthNo              *string `json:"authNo" gorm:"Column:AuthNo"`
+	UserKey             string  `json:"UserKCID,omitempty" gorm:"Column:UserKey;type:varchar(85)"`
 }
 
 // RequestPayment ..
@@ -170,7 +170,7 @@ type RequestPayment struct {
 
 	// Part for Priority
 	Name         string  `json:"Name"`
-	Price        float32 `json:"Price"`
+	Price        float64 `json:"Price"`
 	Currency     string  `json:"Currency"`
 	Email        string  `json:"Email"`
 	Phone        string  `json:"Phone"`
@@ -192,13 +192,13 @@ type RequestPayment struct {
 type RequestPaid struct {
 	UserKey string `json:"user_key"`
 
-	TransactionID   string `json:"transaction_id"`
-	ParamX          string `json:"additional_details_param_x"`
-	AuthNo          string `json:"authNo"`
-	ConfirmationKey string `json:"confirmation_key"`
-	Success         string `json:"success"`
-	Token           string `json:"token"`
-	Error           string `json:"error,omitempty"`
+	TransactionID   string  `json:"transaction_id"`
+	ParamX          string  `json:"additional_details_param_x"`
+	AuthNo          *string `json:"authNo"`
+	ConfirmationKey string  `json:"confirmation_key"`
+	Success         string  `json:"success"`
+	Token           string  `json:"token"`
+	Error           string  `json:"error,omitempty"`
 
 	CardHebrewName   string `json:"card_hebrew_name"`
 	CCAbroadCard     string `json:"credit_card_abroad_card"`
@@ -243,7 +243,7 @@ type Product struct {
 type Price struct {
 	Currency string  `json:"currency"`
 	Fixed    bool    `json:"fixed"`
-	Amount   float32 `json:"amount"`
+	Amount   float64 `json:"amount"`
 	Min      int     `json:"min"`
 	Max      int     `json:"max"`
 	Step     int     `json:"step"`

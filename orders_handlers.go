@@ -32,7 +32,7 @@ func handleOrdersCreate(c *gin.Context) {
 		return
 	}
 
-	ord, err := createOrder(req)
+	ord, err := createOrder(c, req)
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"Error": err})
@@ -51,7 +51,7 @@ func handleOrdersPaid(c *gin.Context) {
 		return
 	}
 
-	p, err := updatePayment(rp)
+	p, err := updatePayment(c, rp)
 
 	if err != nil {
 		// TODO : ask grisha to return more info on error
@@ -59,11 +59,11 @@ func handleOrdersPaid(c *gin.Context) {
 		return
 	}
 
-	o, err := updateOrderAfterPayment(p)
+	o, err := updateOrderAfterPayment(c, p)
 
 	if p.PaymentStatus == "success" && o.ProductType == "jan2022ticket" {
 		log.Println("Synch with Registration")
-		err := syncServiceRegistration(p, o)
+		err := syncServiceRegistration(c, p, o)
 
 		if err != nil {
 			log.Println("we have an error")
@@ -86,7 +86,7 @@ func handleOrdersRenew(c *gin.Context) {
 	} else {
 		if body.User == "admin" && (body.Key == "t" || body.Key == "e") {
 			fmt.Printf("Renewing with key : %s\n", body.Key)
-			count := chargeOrdersToRenew(body.Key)
+			count := chargeOrdersToRenew(c, body.Key)
 			c.JSON(http.StatusOK, gin.H{"count": count})
 		} else {
 			c.JSON(http.StatusUnauthorized, gin.H{"Error": "You are not allowed here"})

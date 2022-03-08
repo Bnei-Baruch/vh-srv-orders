@@ -22,7 +22,7 @@ func handleCreateOrderAndPay(c *gin.Context) {
 		return
 	}
 
-	ord, errOrderCreation := createOrder(req)
+	ord, errOrderCreation := createOrder(c, req)
 
 	if errOrderCreation != nil {
 		log.Println("Err:", errOrderCreation)
@@ -30,7 +30,7 @@ func handleCreateOrderAndPay(c *gin.Context) {
 		return
 	}
 
-	p, errPaymentCreation := createPayment(req, ord)
+	p, errPaymentCreation := createPayment(c, req, ord)
 
 	if errPaymentCreation != nil {
 		log.Println("Err:", errPaymentCreation)

@@ -22,16 +22,11 @@ func handleUpdateOrders(c *gin.Context) {
 		return
 	}
 	var oi Order
-	result := DB.First(&oi, o.ID)
 
-	if result.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": result.Error, "msg": "error finding order"})
-		return
-	}
-
-	if result.RowsAffected != 1 {
-		fmt.Println(result.RowsAffected)
-		c.JSON(http.StatusNotFound, gin.H{"error": "Order ID not found"})
+	if err := DB.QueryRow(c, `SELECT id, "AccountID" from orders WHERE id = $1`, o.ID).Scan(
+		&oi.ID, &oi.AccountID,
+	); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err, "msg": "error finding order"})
 		return
 	}
 
@@ -46,19 +41,28 @@ func handleUpdateOrders(c *gin.Context) {
 		oi.Flag = "renewed"
 	}
 
-	savedResult := DB.Save(&oi)
+	updateRes, err := DB.Exec(c, `UPDATE orders 
+		SET
+		"Status"=$1,
+		"PaymentDate"=$2,
+		"Flag"=$3,
+		updated_at=$4 
+		WHERE id = $5`,
+		oi.Status, oi.PaymentDate, oi.Flag, time.Now(), oi.ID)
+	if err != nil {
+		fmt.Errorf("problem updating orders: %w", err)
+	}
 
-	if savedResult.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": savedResult.Error, "msg": "error saving result"})
+	if updateRes.RowsAffected() != 1 {
+		fmt.Println(updateRes.RowsAffected())
+		c.JSON(http.StatusNotFound, gin.H{"error": "Order not Saved"})
 		return
 	}
 
-	if savedResult.RowsAffected != 1 {
-		fmt.Println(savedResult.RowsAffected)
-		c.JSON(http.StatusNotFound, gin.H{"error": "not Saved"})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
 		return
 	}
 
-	c.JSON(http.StatusOK, o)
-
+	c.JSON(http.StatusOK, oi)
 }

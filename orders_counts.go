@@ -12,29 +12,29 @@ func handleOrdersCount(c *gin.Context) {
 	filter := string(c.Params.ByName("filter"))
 	switch filter {
 	case "all":
-		total = countsAllOrders()
+		total = countsAllOrders(c)
 	case "paid":
-		total = countsFilteredOrders(filter)
+		total = countsFilteredOrders(c, filter)
 	case "failed":
-		total = countsFilteredOrders(filter)
+		total = countsFilteredOrders(c, filter)
 	case "pending":
-		total = countsFilteredOrders(filter)
+		total = countsFilteredOrders(c, filter)
 	case "tickets":
-		total = countsTicketsOrders()
+		total = countsTicketsOrders(c)
 	case "tickets10":
-		total = countsTickets10Orders()
+		total = countsTickets10Orders(c)
 	case "tickets30":
-		total = countsTickets30Orders()
+		total = countsTickets30Orders(c)
 	case "convention":
-		total = countsConventionOrders()
+		total = countsConventionOrders(c)
 	default:
-		total = countsAllOrders()
+		total = countsAllOrders(c)
 	}
 	fmt.Printf("\n>> Count %s : %d", filter, total)
 	c.JSON(http.StatusOK, gin.H{filter: total})
 }
 
-func countsTicketsOrders() int64 {
+func countsTicketsOrders(ctx *gin.Context) int64 {
 	query := `
 select count(distinct o."AccountID") as total
 from orders as o
@@ -47,12 +47,16 @@ and (o."Status" = 'paid' or o."Status" = 'success')
 	var r Results
 	//var count map[string]interface{}
 	//DB.Raw(query, email).Scan(&r)
-	DB.Raw(query).Scan(&r)
+	if err := DB.QueryRow(ctx, query).Scan(
+		&r.Total,
+	); err != nil {
+		return 0
+	}
 
 	return r.Total
 }
 
-func countsConventionOrders() int64 {
+func countsConventionOrders(ctx *gin.Context) int64 {
 	query := `
 select count(o.*) as total
 from orders as o
@@ -67,12 +71,16 @@ and (select count(q.id) from orders as q where q."AccountID" = o."AccountID" and
 	var r Results
 	//var count map[string]interface{}
 	//DB.Raw(query, email).Scan(&r)
-	DB.Raw(query).Scan(&r)
+	if err := DB.QueryRow(ctx, query).Scan(
+		&r.Total,
+	); err != nil {
+		return 0
+	}
 
 	return r.Total
 }
 
-func countsTickets10Orders() int64 {
+func countsTickets10Orders(ctx *gin.Context) int64 {
 	query := `
 select count(distinct o."AccountID") as total
 from orders as o
@@ -93,12 +101,17 @@ and (
 	var r Results
 	//var count map[string]interface{}
 	//DB.Raw(query, email).Scan(&r)
-	DB.Raw(query).Scan(&r)
+	// DB.Raw(query).Scan(&r)
+	if err := DB.QueryRow(ctx, query).Scan(
+		&r.Total,
+	); err != nil {
+		return 0
+	}
 
 	return r.Total
 }
 
-func countsTickets30Orders() int64 {
+func countsTickets30Orders(ctx *gin.Context) int64 {
 	query := `
 select count(distinct o."AccountID") as total
 from orders as o
@@ -117,9 +130,15 @@ and (
 	}
 
 	var r Results
+
+	if err := DB.QueryRow(ctx, query).Scan(
+		&r.Total,
+	); err != nil {
+		return 0
+	}
 	//var count map[string]interface{}
 	//DB.Raw(query, email).Scan(&r)
-	DB.Raw(query).Scan(&r)
+	// DB.QueryRow(query).Scan(&r)
 
 	return r.Total
 }

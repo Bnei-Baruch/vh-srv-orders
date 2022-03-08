@@ -135,28 +135,28 @@ type RequestOrder struct {
 
 // Account is defined by
 type Account struct {
-	ID        uint       `json:"ID" gorm:"primary_key"`
-	CreatedAt time.Time  `json:"-"`
-	UpdatedAt time.Time  `json:"-"`
+	ID        *uint      `json:"ID" gorm:"primary_key"`
+	CreatedAt *time.Time `json:"-"`
+	UpdatedAt *time.Time `json:"-"`
 	DeletedAt *time.Time `json:"-" sql:"index"`
 
-	FirstName string `json:"FirstName" gorm:"Column:FirstName;type:varchar(100)"`
-	LastName  string `json:"LastName" gorm:"Column:LastName;type:varchar(100)"`
-	Email     string `json:"Email" gorm:"Column:Email;type:varchar(100)"`
-	Phone     string `json:"Phone" gorm:"Column:Phone;type:varchar(30)"`
-	Street    string `json:"Street" gorm:"Column:Street;type:varchar(100)"`
-	City      string `json:"City" gorm:"Column:City;type:varchar(85)"`
-	State     string `json:"State" gorm:"Column:State;type:varchar(85)"`
-	Postcode  string `json:"Postcode" gorm:"Column:Postcode;type:varchar(85)"`
-	Country   string `json:"Country" gorm:"Column:Country;type:varchar(50)"`
+	FirstName *string `json:"FirstName" gorm:"Column:FirstName;type:varchar(100)"`
+	LastName  *string `json:"LastName" gorm:"Column:LastName;type:varchar(100)"`
+	Email     *string `json:"Email" gorm:"Column:Email;type:varchar(100)"`
+	Phone     *string `json:"Phone" gorm:"Column:Phone;type:varchar(30)"`
+	Street    *string `json:"Street" gorm:"Column:Street;type:varchar(100)"`
+	City      *string `json:"City" gorm:"Column:City;type:varchar(85)"`
+	State     *string `json:"State" gorm:"Column:State;type:varchar(85)"`
+	Postcode  *string `json:"Postcode" gorm:"Column:Postcode;type:varchar(85)"`
+	Country   *string `json:"Country" gorm:"Column:Country;type:varchar(50)"`
 
-	AccountType         string  `json:"AccountType,omitempty" gorm:"Column:AccountType;type:varchar(100);default:'personal'"`
-	PaymentToken        string  `json:"PaymentToken,omitempty" gorm:"Column:PaymentToken;type:varchar(100)"`
-	PaymentCardID       string  `json:"PaymentCardID,omitempty" gorm:"Column:PaymentCardID;type:varchar(100)"`
-	PaymentCardExpMonth int     `json:"PaymentCardExpMonth,omitempty" gorm:"Column:PaymentCardExpMonth;type:int"`
-	PaymentCardExpYear  int     `json:"PaymentCardExpYear,omitempty" gorm:"Column:PaymentCardExpYear;type:int"`
+	AccountType         *string `json:"AccountType,omitempty" gorm:"Column:AccountType;type:varchar(100);default:'personal'"`
+	PaymentToken        *string `json:"PaymentToken,omitempty" gorm:"Column:PaymentToken;type:varchar(100)"`
+	PaymentCardID       *string `json:"PaymentCardID,omitempty" gorm:"Column:PaymentCardID;type:varchar(100)"`
+	PaymentCardExpMonth *int    `json:"PaymentCardExpMonth,omitempty" gorm:"Column:PaymentCardExpMonth;type:int"`
+	PaymentCardExpYear  *int    `json:"PaymentCardExpYear,omitempty" gorm:"Column:PaymentCardExpYear;type:int"`
 	AuthNo              *string `json:"authNo" gorm:"Column:AuthNo"`
-	UserKey             string  `json:"UserKCID,omitempty" gorm:"Column:UserKey;type:varchar(85)"`
+	UserKey             *string `json:"UserKCID,omitempty" gorm:"Column:UserKey;type:varchar(85)"`
 }
 
 // RequestPayment ..

@@ -58,19 +58,21 @@ func createOrder(c *gin.Context, req RequestOrder) (Order, error) {
 		AccountID:     0,
 	}
 
-	a := Account{
-		FirstName: req.FirstName,
-		LastName:  req.LastName,
-		Email:     req.Email,
-		Phone:     req.Phone,
-		Street:    req.Street,
-		City:      req.City,
-		State:     req.State,
-		Postcode:  req.Postcode,
-		Country:   req.Country,
+	accountType := "personal"
 
-		AccountType: "personal",
-		UserKey:     req.UserKey,
+	a := Account{
+		FirstName: &req.FirstName,
+		LastName:  &req.LastName,
+		Email:     &req.Email,
+		Phone:     &req.Phone,
+		Street:    &req.Street,
+		City:      &req.City,
+		State:     &req.State,
+		Postcode:  &req.Postcode,
+		Country:   &req.Country,
+
+		AccountType: &accountType,
+		UserKey:     &req.UserKey,
 	}
 
 	accountID := CreateOrUpdateAccount(c, a)
@@ -374,21 +376,21 @@ func syncServiceRegistration(ctx *gin.Context, p Payment, o Order) error {
 		return errors.New("cannot find related Order for Payment")
 	}
 
-	payload.FirstName = a.FirstName
-	payload.LastName = a.LastName
-	payload.Email = a.Email
+	payload.FirstName = *a.FirstName
+	payload.LastName = *a.LastName
+	payload.Email = *a.Email
 	payload.Event = "jan2022"
 	payload.Choice = "ticket"
 	payload.Lang = o.OrderLanguage
 	payload.CommunicationLanguage = strings.ToLower(o.OrderLanguage)
 	payload.TicketStatus = o.ProductType
-	payload.KeycloakID = a.UserKey
+	payload.KeycloakID = *a.UserKey
 
 	log.Println(">>> order/synch/payload::")
 	log.Println(payload)
 
 	marshaledPayload, _ := json.Marshal(payload)
-	url := "http://vh-srv-registration:3200/choice/kc/" + a.UserKey
+	url := "http://vh-srv-registration:3200/choice/kc/" + *a.UserKey
 	_, err := postJSON("POST", url, marshaledPayload)
 
 	if err != nil {
@@ -597,13 +599,13 @@ func createRequestPayByToken(c *gin.Context, a Account, o Order, p Payment, pmx 
 		ApprovalNo: *p.AuthNo,
 		Token:      p.PelecardToken,
 
-		Name:         a.FirstName + " " + a.LastName,
+		Name:         *a.FirstName + " " + *a.LastName,
 		Price:        o.Amount,
 		Currency:     o.Currency,
-		Email:        a.Email,
+		Email:        *a.Email,
 		Phone:        "+NA",
-		Street:       a.Street,
-		City:         a.City,
+		Street:       *a.Street,
+		City:         *a.City,
 		Country:      "Undef",
 		Participans:  "1",
 		Details:      "Membership",

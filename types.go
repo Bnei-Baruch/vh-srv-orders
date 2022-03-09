@@ -32,49 +32,49 @@ type Order struct {
 
 //Payment is defined by
 type Payment struct {
-	ID        uint       `json:"ID" gorm:"primary_key"`
-	CreatedAt time.Time  `json:"-"`
-	UpdatedAt time.Time  `json:"-"`
+	ID        *uint      `json:"ID" gorm:"primary_key"`
+	CreatedAt *time.Time `json:"-"`
+	UpdatedAt *time.Time `json:"-"`
 	DeletedAt *time.Time `json:"-" sql:"index"`
 
-	Amount float64 `json:"Amount" gorm:"Column:Amount"`
+	Amount *float64 `json:"Amount" gorm:"Column:Amount"`
 
-	PaymentStatus string `json:"PaymentStatus" gorm:"Column:PaymentStatus"`
-	PaymentType   string `json:"PaymentType" gorm:"Column:PaymentType;type:varchar(100)"`
-	OrderID       uint   `json:"OrderID" gorm:"Column:OrderID"`
+	PaymentStatus *string `json:"PaymentStatus" gorm:"Column:PaymentStatus"`
+	PaymentType   *string `json:"PaymentType" gorm:"Column:PaymentType;type:varchar(100)"`
+	OrderID       *uint   `json:"OrderID" gorm:"Column:OrderID"`
 
-	ParamX          string  `json:"additional_details_param_x" gorm:"Column:ParamX"`
-	Ordkey          string  `json:"user_key" gorm:"Column:Ordkey"`
+	ParamX          *string `json:"additional_details_param_x" gorm:"Column:ParamX"`
+	Ordkey          *string `json:"user_key" gorm:"Column:Ordkey"`
 	AuthNo          *string `json:"authNo" gorm:"Column:AuthNo"`
-	ConfirmationKey string  `json:"confirmation_key" gorm:"ConfirmationKey"`
-	Success         string  `json:"success" gorm:"Success"`
-	PelecardToken   string  `json:"token" gorm:"PelecardToken"`
-	TransactionID   string  `json:"transaction_id" gorm:"Column:TransactionID"`
-	ErrorMsg        string  `json:"ErrorMsg" gorm:"Column:ErrorMsg"`
+	ConfirmationKey *string `json:"confirmation_key" gorm:"ConfirmationKey"`
+	Success         *string `json:"success" gorm:"Success"`
+	PelecardToken   *string `json:"token" gorm:"PelecardToken"`
+	TransactionID   *string `json:"transaction_id" gorm:"Column:TransactionID"`
+	ErrorMsg        *string `json:"ErrorMsg" gorm:"Column:ErrorMsg"`
 
-	CardHebrewName   string `json:"card_hebrew_name" gorm:"Column:CardHebrewName"`
-	CCAbroadCard     string `json:"CCAbroadCard" gorm:"Column:CCAbroadCard"`
-	CCBrand          string `json:"CCBrand" gorm:"Column:CCBrand"`
-	CCCompanyClearer string `json:"CCCompanyClearer" gorm:"Column:CCCompanyClearer"`
-	CCCompanyIssuer  string `json:"CCCompanyIssuer" gorm:"Column:CCCompanyIssuer"`
-	CreditType       string `json:"credit_type" gorm:"CreditType"`
+	CardHebrewName   *string `json:"card_hebrew_name" gorm:"Column:CardHebrewName"`
+	CCAbroadCard     *string `json:"CCAbroadCard" gorm:"Column:CCAbroadCard"`
+	CCBrand          *string `json:"CCBrand" gorm:"Column:CCBrand"`
+	CCCompanyClearer *string `json:"CCCompanyClearer" gorm:"Column:CCCompanyClearer"`
+	CCCompanyIssuer  *string `json:"CCCompanyIssuer" gorm:"Column:CCCompanyIssuer"`
+	CreditType       *string `json:"credit_type" gorm:"CreditType"`
 
-	CCExpDate string `json:"CCExpDate" gorm:"Column:CCExpDate"`
-	CCNumber  string `json:"CCNumber" gorm:"Column:CCNumber"`
+	CCExpDate *string `json:"CCExpDate" gorm:"Column:CCExpDate"`
+	CCNumber  *string `json:"CCNumber" gorm:"Column:CCNumber"`
 
-	DebitCode     string `json:"DebitCode" gorm:"Column:DebitCode"`
-	DebitCurrency string `json:"DebitCurrency" gorm:"Column:DebitCurrency"`
-	DebitTotal    string `json:"DebitTotal" gorm:"Column:DebitTotal"`
-	DebitType     string `json:"DebitType" gorm:"Column:DebitType"`
+	DebitCode     *string `json:"DebitCode" gorm:"Column:DebitCode"`
+	DebitCurrency *string `json:"DebitCurrency" gorm:"Column:DebitCurrency"`
+	DebitTotal    *string `json:"DebitTotal" gorm:"Column:DebitTotal"`
+	DebitType     *string `json:"DebitType" gorm:"Column:DebitType"`
 
-	FirstPaymentTotal string `json:"FirstPaymentTotal" gorm:"Column:FirstPaymentTotal"`
-	FixedPaymentTotal string `json:"FixedPaymentTotal" gorm:"Column:FixedPaymentTotal"`
-	JParam            string `json:"j_param"`
-	TotalPayments     string `json:"TotalPayments" gorm:"Column:TotalPayments"`
+	FirstPaymentTotal *string `json:"FirstPaymentTotal" gorm:"Column:FirstPaymentTotal"`
+	FixedPaymentTotal *string `json:"FixedPaymentTotal" gorm:"Column:FixedPaymentTotal"`
+	JParam            *string `json:"j_param"`
+	TotalPayments     *string `json:"TotalPayments" gorm:"Column:TotalPayments"`
 
-	TransactionInitTime   string `json:"TransactionInitTime" gorm:"Column:TransactionInitTime"`
-	TransactionUpdateTime string `json:"TransactionUpdateTime" gorm:"Column:TransactionUpdateTime"`
-	VoucherID             string `json:"VoucherID" gorm:"Column:VoucherID"`
+	TransactionInitTime   *string `json:"TransactionInitTime" gorm:"Column:TransactionInitTime"`
+	TransactionUpdateTime *string `json:"TransactionUpdateTime" gorm:"Column:TransactionUpdateTime"`
+	VoucherID             *string `json:"VoucherID" gorm:"Column:VoucherID"`
 
 	Invoices []Invoice `gorm:"foreignkey:PaymentID"`
 }

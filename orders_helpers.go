@@ -126,11 +126,14 @@ func postJSON(method string, url string, payload []byte) (*http.Response, error)
 
 func createPayment(c *gin.Context, req RequestOrder, o Order) (Payment, error) {
 
+	payment_status := "pending"
+	payment_type := "pelecard"
+
 	p := Payment{
-		Amount:        req.Amount,
-		PaymentType:   "pelecard",
-		OrderID:       o.ID,
-		PaymentStatus: "pending",
+		Amount:        &req.Amount,
+		PaymentType:   &payment_type,
+		OrderID:       &o.ID,
+		PaymentStatus: &payment_status,
 	}
 
 	execRes, err := DB.Exec(c, `INSERT INTO payments (
@@ -157,11 +160,14 @@ func createPayment(c *gin.Context, req RequestOrder, o Order) (Payment, error) {
 
 func createPendingPayment(c *gin.Context, sum float64, oid uint, pmx string) (Payment, error) {
 
+	payment_status := "pending"
+	payment_type := "pelecard"
+
 	p := Payment{
-		Amount:        sum,
-		PaymentType:   "pelecard",
-		OrderID:       oid,
-		PaymentStatus: "pending",
+		Amount:        &sum,
+		PaymentType:   &payment_type,
+		OrderID:       &oid,
+		PaymentStatus: &payment_status,
 	}
 
 	// Add new account if not exist
@@ -179,12 +185,12 @@ func createPendingPayment(c *gin.Context, sum float64, oid uint, pmx string) (Pa
 		return p, err
 	}
 
-	paramx := "mb-" + strconv.FormatUint(uint64(p.ID), 10) + os.Getenv("SUFX") + pmx
+	paramx := "mb-" + strconv.FormatUint(uint64(*p.ID), 10) + os.Getenv("SUFX") + pmx
 	ordkey := "ord-" + strconv.FormatUint(uint64(oid), 10) + os.Getenv("SUFX")
 	fmt.Printf(">>>> ParamX: %s\n", paramx)
 
-	p.ParamX = paramx
-	p.Ordkey = ordkey
+	*p.ParamX = paramx
+	*p.Ordkey = ordkey
 
 	updateRes, err := DB.Exec(c, `UPDATE payments 
 		SET
@@ -267,36 +273,36 @@ func updatePayment(ctx *gin.Context, req RequestPaid) (Payment, error) {
 
 	//update payment object
 	if req.Success == "1" {
-		p.PaymentStatus = "success"
-		p.PaymentType = "pelecard"
-		p.ParamX = req.ParamX
+		*p.PaymentStatus = "success"
+		*p.PaymentType = "pelecard"
+		*p.ParamX = req.ParamX
 		p.AuthNo = req.AuthNo
-		p.ConfirmationKey = req.ConfirmationKey
-		p.Success = req.Success
-		p.PelecardToken = req.Token
-		p.TransactionID = req.TransactionID
-		p.CCBrand = req.CCBrand
-		p.CardHebrewName = req.CardHebrewName
-		p.CCAbroadCard = req.CCAbroadCard
-		p.CCCompanyClearer = req.CCCompanyClearer
-		p.CreditType = req.CreditType
-		p.CCExpDate = req.CCExpDate
-		p.CCNumber = req.CCNumber
-		p.DebitCode = req.DebitCode
-		p.DebitCurrency = req.DebitCurrency
-		p.DebitTotal = req.DebitTotal
-		p.DebitType = req.DebitType
-		p.FirstPaymentTotal = req.FirstPaymentTotal
-		p.FixedPaymentTotal = req.FixedPaymentTotal
-		p.TotalPayments = req.TotalPayments
-		p.JParam = req.JParam
-		p.TransactionInitTime = req.TransactionInitTime
-		p.TransactionUpdateTime = req.TransactionUpdateTime
-		p.VoucherID = req.VoucherID
+		*p.ConfirmationKey = req.ConfirmationKey
+		*p.Success = req.Success
+		*p.PelecardToken = req.Token
+		*p.TransactionID = req.TransactionID
+		*p.CCBrand = req.CCBrand
+		*p.CardHebrewName = req.CardHebrewName
+		*p.CCAbroadCard = req.CCAbroadCard
+		*p.CCCompanyClearer = req.CCCompanyClearer
+		*p.CreditType = req.CreditType
+		*p.CCExpDate = req.CCExpDate
+		*p.CCNumber = req.CCNumber
+		*p.DebitCode = req.DebitCode
+		*p.DebitCurrency = req.DebitCurrency
+		*p.DebitTotal = req.DebitTotal
+		*p.DebitType = req.DebitType
+		*p.FirstPaymentTotal = req.FirstPaymentTotal
+		*p.FixedPaymentTotal = req.FixedPaymentTotal
+		*p.TotalPayments = req.TotalPayments
+		*p.JParam = req.JParam
+		*p.TransactionInitTime = req.TransactionInitTime
+		*p.TransactionUpdateTime = req.TransactionUpdateTime
+		*p.VoucherID = req.VoucherID
 	} else {
-		p.PaymentStatus = "failed"
-		p.ErrorMsg = "Failed" // TODO: improve
-		p.PaymentType = "pelecard"
+		*p.PaymentStatus = "failed"
+		*p.ErrorMsg = "Failed" // TODO: improve
+		*p.PaymentType = "pelecard"
 	}
 
 	// DB.Model(&p).Updates(p)
@@ -410,7 +416,7 @@ func updateOrderAfterPayment(ctx *gin.Context, p Payment) (Order, error) {
 		return o, err
 	}
 
-	if p.Success == "1" {
+	if *p.Success == "1" {
 		o.Status = "paid"
 		o.PaymentDate = time.Now()
 
@@ -591,13 +597,13 @@ func createRequestPayByToken(c *gin.Context, a Account, o Order, p Payment, pmx 
 	newp.AuthNo = p.AuthNo
 
 	extPay := RequestPayment{
-		UserKey: newp.Ordkey,
+		UserKey: *newp.Ordkey,
 
 		GoodURL:    "http://ec41a043fda1.ngrok.io/pelecard/good",
 		ErrorURL:   "http://ec41a043fda1.ngrok.io/pelecard/error",
 		CancelURL:  "http://ec41a043fda1.ngrok.io/pelecard/cancel",
 		ApprovalNo: *p.AuthNo,
-		Token:      p.PelecardToken,
+		Token:      *p.PelecardToken,
 
 		Name:         *a.FirstName + " " + *a.LastName,
 		Price:        o.Amount,
@@ -613,7 +619,7 @@ func createRequestPayByToken(c *gin.Context, a Account, o Order, p Payment, pmx 
 		VAT:          "f",
 		Installments: 1,
 		Language:     o.OrderLanguage,
-		Reference:    newp.ParamX,
+		Reference:    *newp.ParamX,
 		Organization: "ben2",
 	}
 
@@ -670,19 +676,19 @@ func renewOrder(c *gin.Context, orderID uint, pmx string) string {
 	pr, newp := createRequestPayByToken(c, a, o, p, pmx)
 	resp, err := renewPaymentByToken(pr, pmx)
 	if err != nil {
-		newp.PaymentStatus = "failed"
-		newp.Success = "0"
+		*newp.PaymentStatus = "failed"
+		*newp.Success = "0"
 	}
 	answers := resp.(map[string]interface{})
 	if answers["status"].(string) == "success" {
-		newp.PaymentStatus = "success"
-		newp.Success = "1"
+		*newp.PaymentStatus = "success"
+		*newp.Success = "1"
 		data := answers["data"].(string)
 		fmt.Println(data)
 		flagOrderAsRenewed(c, orderID)
 	} else {
-		newp.PaymentStatus = "failed"
-		newp.Success = "0"
+		*newp.PaymentStatus = "failed"
+		*newp.Success = "0"
 	}
 
 	updateRes, err := DB.Exec(c, `UPDATE payments 
@@ -707,10 +713,10 @@ func renewOrder(c *gin.Context, orderID uint, pmx string) string {
 	if updateRes.RowsAffected() != 1 {
 		fmt.Println(updateRes.RowsAffected())
 		// c.JSON(http.StatusNotFound, gin.H{"error": "Payment not Updted"})
-		return newp.Success
+		return *newp.Success
 	}
 	updateOrderAfterPayment(c, newp)
-	return newp.Success
+	return *newp.Success
 }
 
 func flagOrderAsRenewed(ctx *gin.Context, orderID uint) {

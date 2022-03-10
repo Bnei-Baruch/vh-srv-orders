@@ -46,16 +46,20 @@ func countsFilteredOrders(c *gin.Context, filter string) int64 {
 }
 
 func createOrder(c *gin.Context, req RequestOrder) (Order, error) {
+
+	order_status := "pending"
+	var account_id uint = 0
+
 	o := Order{
-		Type:          req.Type,
-		ProductType:   req.ProductType,
-		RecuringFreq:  req.RecurringFreq,
-		Organization:  req.Organization,
-		Amount:        req.Amount,
-		Currency:      req.Currency,
-		Status:        "pending",
-		OrderLanguage: req.OrderLanguage,
-		AccountID:     0,
+		Type:          &req.Type,
+		ProductType:   &req.ProductType,
+		RecuringFreq:  &req.RecurringFreq,
+		Organization:  &req.Organization,
+		Amount:        &req.Amount,
+		Currency:      &req.Currency,
+		Status:        &order_status,
+		OrderLanguage: &req.OrderLanguage,
+		AccountID:     &account_id,
 	}
 
 	accountType := "personal"
@@ -81,24 +85,12 @@ func createOrder(c *gin.Context, req RequestOrder) (Order, error) {
 		return o, errors.New("null account")
 	}
 
-	o.AccountID = accountID
+	*o.AccountID = accountID
 
-	if err := DB.QueryRow(c, `INSERT INTO orders (
-		"Type",
-		"ProductType",
-		"RecuringFreq",
-		"Organization",
-		"Amount",
-		"Currency",
-		"Status",
-		"OrderLanguage",
-		"AccountID",
-		created_at,
-		updated_at
-	)
-	VALUES (
-		$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
-		o.Type, o.ProductType, o.RecuringFreq, o.Organization, fmt.Sprintf("%g", o.Amount), o.Currency, o.Status, o.OrderLanguage, o.AccountID, time.Now(), time.Now()).Scan(
+	createString, numString, createQueryArgs := prepareOrderCreateQuery(o)
+
+	if err := DB.QueryRow(c, fmt.Sprintf(`INSERT INTO accounts (%s) VALUES (%s) RETURNING id`, createString, numString),
+		createQueryArgs...).Scan(
 		&o.ID,
 	); err != nil {
 		if err == pgx.ErrNoRows {
@@ -132,19 +124,14 @@ func createPayment(c *gin.Context, req RequestOrder, o Order) (Payment, error) {
 	p := Payment{
 		Amount:        &req.Amount,
 		PaymentType:   &payment_type,
-		OrderID:       &o.ID,
+		OrderID:       o.ID,
 		PaymentStatus: &payment_status,
 	}
 
-	execRes, err := DB.Exec(c, `INSERT INTO payments (
-		"Amount",
-		"PaymentType",
-		"OrderID",
-		"PaymentStatus"
-	)
-	VALUES (
-		$1, $2, $3, $4)`,
-		p.Amount, p.PaymentType, p.OrderID, p.PaymentStatus)
+	createString, numString, createQueryArgs := preparePaymentCreateQuery(p)
+
+	execRes, err := DB.Exec(c, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s)`, createString, numString),
+		createQueryArgs...)
 
 	if err != nil {
 		return p, err
@@ -170,16 +157,11 @@ func createPendingPayment(c *gin.Context, sum float64, oid uint, pmx string) (Pa
 		PaymentStatus: &payment_status,
 	}
 
+	createString, numString, createQueryArgs := preparePaymentCreateQuery(p)
+
 	// Add new account if not exist
-	if err := DB.QueryRow(c, `INSERT INTO payments (
-		"Amount",
-		"PaymentType",
-		"OrderID",
-		"PaymentStatus"
-	)
-	VALUES (
-		$1, $2, $3, $4) RETURNING id`,
-		p.Amount, p.PaymentType, p.OrderID, p.PaymentStatus).Scan(
+	if err := DB.QueryRow(c, fmt.Sprintf(`INSERT INTO accounts (%s) VALUES (%s) RETURNING id`, createString, numString),
+		createQueryArgs...).Scan(
 		&p.ID,
 	); err != nil {
 		return p, err
@@ -192,20 +174,22 @@ func createPendingPayment(c *gin.Context, sum float64, oid uint, pmx string) (Pa
 	*p.ParamX = paramx
 	*p.Ordkey = ordkey
 
-	updateRes, err := DB.Exec(c, `UPDATE payments 
-		SET
-		"ParamX"=$1,
-		"Ordkey"=$2,
-		updated_at=$3 
-		WHERE id = $4`,
-		p.ParamX, p.Ordkey, time.Now(), p.ID)
-	if err != nil {
-		return p, err
-	}
+	toUpdate, toUpdateArgs := preparePaymentUpdateQuery(p)
 
-	if updateRes.RowsAffected() != 1 {
-		fmt.Println(updateRes.RowsAffected())
-		return p, fmt.Errorf("no rows affected")
+	if len(toUpdateArgs) != 0 {
+		updateRes, err := DB.Exec(c, fmt.Sprintf(`UPDATE payments SET %s WHERE id=%d`, toUpdate, *p.ID),
+			toUpdateArgs...)
+		if err != nil {
+			fmt.Println("problem updating payment: %w", err)
+			return p, err
+		}
+
+		if updateRes.RowsAffected() == 0 {
+			return p, fmt.Errorf("no rows affected")
+		}
+
+	} else {
+		fmt.Println("invalid values")
 	}
 
 	return p, nil
@@ -305,49 +289,21 @@ func updatePayment(ctx *gin.Context, req RequestPaid) (Payment, error) {
 		*p.PaymentType = "pelecard"
 	}
 
-	// DB.Model(&p).Updates(p)
+	toUpdate, toUpdateArgs := preparePaymentUpdateQuery(p)
 
-	updateRes, err := DB.Exec(ctx, `UPDATE payments 
-		SET
-		"PaymentStatus"=$1,
-		"PaymentType"=$2,
-		"ParamX"=$3,
-		"AuthNo"=$4,
-		confirmation_key=$5,
-		success=$6,
-		pelecard_token=$7,
-		"TransactionID"=$8,
-		"CCBrand"=$9,
-		"CardHebrewName"=$10,
-		"CCAbroadCard"=$11,
-		"CCCompanyClearer"=$12,
-		credit_type=$13,
-		"CCExpDate"=$14,
-		"CCNumber"=$15,
-		"DebitCode"=$16,
-		"DebitCurrency"=$17,
-		"DebitTotal"=$18,
-		"DebitType"=$19,
-		"FirstPaymentTotal"=$20,
-		"FixedPaymentTotal"=$21,
-		"TotalPayments"=$22,
-		j_param=$23,
-		"TransactionInitTime"=$24,
-		"TransactionUpdateTime"=$25,
-		"VoucherID"=$26,
-		"ErrorMsg"=$27,
-		updated_at=$28 
-		WHERE id = $29`,
-		p.PaymentStatus, p.PaymentType, p.ParamX, *p.AuthNo, p.ConfirmationKey, p.Success, p.PelecardToken,
-		p.TransactionID, p.CCBrand, p.CardHebrewName, p.CCAbroadCard, p.CCCompanyClearer, p.CreditType, p.CCExpDate,
-		p.CCNumber, p.DebitCode, p.DebitCurrency, p.DebitTotal, p.DebitType, p.FirstPaymentTotal, p.FixedPaymentTotal,
-		p.TotalPayments, p.JParam, p.TransactionInitTime, p.TransactionUpdateTime, p.VoucherID, p.ErrorMsg, time.Now(), uint(paymentid))
-	if err != nil {
-		return p, fmt.Errorf("problem updating payments: %w", err)
-	}
+	if len(toUpdateArgs) != 0 {
+		updateRes, err := DB.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=%d`, toUpdate, uint(paymentid)),
+			toUpdateArgs...)
+		if err != nil {
+			return p, fmt.Errorf("problem updating payments: %w", err)
+		}
 
-	if updateRes.RowsAffected() != 1 {
-		return p, fmt.Errorf("Payment not Updated")
+		if updateRes.RowsAffected() == 0 {
+			return p, fmt.Errorf("Payment not Updated")
+		}
+
+	} else {
+		fmt.Println("invalid values")
 	}
 
 	return p, nil
@@ -387,9 +343,9 @@ func syncServiceRegistration(ctx *gin.Context, p Payment, o Order) error {
 	payload.Email = *a.Email
 	payload.Event = "jan2022"
 	payload.Choice = "ticket"
-	payload.Lang = o.OrderLanguage
-	payload.CommunicationLanguage = strings.ToLower(o.OrderLanguage)
-	payload.TicketStatus = o.ProductType
+	payload.Lang = *o.OrderLanguage
+	payload.CommunicationLanguage = strings.ToLower(*o.OrderLanguage)
+	payload.TicketStatus = *o.ProductType
 	payload.KeycloakID = *a.UserKey
 
 	log.Println(">>> order/synch/payload::")
@@ -417,15 +373,15 @@ func updateOrderAfterPayment(ctx *gin.Context, p Payment) (Order, error) {
 	}
 
 	if *p.Success == "1" {
-		o.Status = "paid"
-		o.PaymentDate = time.Now()
+		*o.Status = "paid"
+		*o.PaymentDate = time.Now()
 
 		updateRes, err := DB.Exec(ctx, `UPDATE orders 
-		SET
+		SET 
 		"Status"=$1,
 		"PaymentDate"=$2,
 		updated_at=$3 
-		WHERE id = $4`, o.Status, o.PaymentDate, time.Now(), p.OrderID)
+		WHERE id = $4`, *o.Status, *o.PaymentDate, time.Now(), *p.OrderID)
 		if err != nil {
 			return o, fmt.Errorf("problem updating payments: %w", err)
 		}
@@ -435,12 +391,12 @@ func updateOrderAfterPayment(ctx *gin.Context, p Payment) (Order, error) {
 		}
 
 	} else {
-		o.Status = "nosuccess"
+		*o.Status = "nosuccess"
 		updateRes, err := DB.Exec(ctx, `UPDATE orders 
-		SET
+		SET 
 		"Status"=$1,
 		updated_at=$2 
-		WHERE id = $3`, o.Status, time.Now(), p.OrderID)
+		WHERE id = $3`, *o.Status, time.Now(), *p.OrderID)
 		if err != nil {
 			return o, fmt.Errorf("problem updating payments: %w", err)
 		}
@@ -492,7 +448,7 @@ func getOrderByID(ctx *gin.Context, orderID uint) Order {
 		return o
 	}
 
-	o.Amount = float64(value)
+	*o.Amount = float64(value)
 
 	return o
 }
@@ -592,7 +548,7 @@ func getAccountForOrderID(ctx *gin.Context, orderID uint) Account {
 
 // TODO: REFACTOR
 func createRequestPayByToken(c *gin.Context, a Account, o Order, p Payment, pmx string) (RequestPayment, Payment) {
-	newp, _ := createPendingPayment(c, o.Amount, o.ID, pmx)
+	newp, _ := createPendingPayment(c, *o.Amount, *o.ID, pmx)
 	newp.PelecardToken = p.PelecardToken
 	newp.AuthNo = p.AuthNo
 
@@ -606,8 +562,8 @@ func createRequestPayByToken(c *gin.Context, a Account, o Order, p Payment, pmx 
 		Token:      *p.PelecardToken,
 
 		Name:         *a.FirstName + " " + *a.LastName,
-		Price:        o.Amount,
-		Currency:     o.Currency,
+		Price:        *o.Amount,
+		Currency:     *o.Currency,
 		Email:        *a.Email,
 		Phone:        "+NA",
 		Street:       *a.Street,
@@ -618,7 +574,7 @@ func createRequestPayByToken(c *gin.Context, a Account, o Order, p Payment, pmx 
 		SKU:          "40037",
 		VAT:          "f",
 		Installments: 1,
-		Language:     o.OrderLanguage,
+		Language:     *o.OrderLanguage,
 		Reference:    *newp.ParamX,
 		Organization: "ben2",
 	}
@@ -691,29 +647,21 @@ func renewOrder(c *gin.Context, orderID uint, pmx string) string {
 		*newp.Success = "0"
 	}
 
-	updateRes, err := DB.Exec(c, `UPDATE payments 
-		SET
-		Amount=$1,
-		PaymentStatus=$2,
-		PaymentType=$3,
-		OrderID=$4,
-		ParamX=$5,
-		AuthNo=$6,
-		success=$7,
-		pelecard_token=$8,
-		Ordkey=$9,
-		updated_at=$10 
-		WHERE id = $11`,
-		newp.Amount, newp.PaymentStatus, newp.PaymentType, newp.OrderID, newp.ParamX, *newp.AuthNo,
-		newp.Success, newp.PelecardToken, newp.Ordkey, time.Now(), newp.ID)
-	if err != nil {
-		fmt.Errorf("problem updating payments: %w", err)
-	}
+	toUpdate, toUpdateArgs := preparePaymentUpdateQuery(newp)
 
-	if updateRes.RowsAffected() != 1 {
-		fmt.Println(updateRes.RowsAffected())
-		// c.JSON(http.StatusNotFound, gin.H{"error": "Payment not Updted"})
-		return *newp.Success
+	if len(toUpdateArgs) != 0 {
+		updateRes, err := DB.Exec(c, fmt.Sprintf(`UPDATE payments SET %s WHERE id=%d`, toUpdate, *newp.ID),
+			toUpdateArgs...)
+		if err != nil {
+			fmt.Errorf("problem updating payments: %w", err)
+		}
+
+		if updateRes.RowsAffected() == 0 {
+			return *newp.Success
+		}
+
+	} else {
+		fmt.Println("invalid values")
 	}
 	updateOrderAfterPayment(c, newp)
 	return *newp.Success
@@ -805,24 +753,28 @@ order by duplicate desc`
 }
 func addFlagToOrder(ctx *gin.Context, oid uint, flag string) {
 	o := getOrderByID(ctx, uint(oid))
-	o.Flag = flag
+	*o.Flag = flag
 
-	if o.ID == 0 {
+	if *o.ID == 0 {
 		fmt.Println("order not found")
 		return
 	}
 
-	updateRes, err := DB.Exec(ctx, `UPDATE orders 
-		SET 
-		"Flag"=$1,
-		updated_at=$2
-		WHERE id=$3`, flag, time.Now(), o.ID)
-	if err != nil {
-		fmt.Println("problem updating orders: %w", err)
-	}
+	toUpdate, toUpdateArgs := prepareOrderUpdateQuery(o)
 
-	if updateRes.RowsAffected() != 1 {
-		fmt.Println("no rows affected")
+	if len(toUpdateArgs) != 0 {
+		updateRes, err := DB.Exec(ctx, fmt.Sprintf(`UPDATE orders SET %s WHERE id=%d`, toUpdate, *o.ID),
+			toUpdateArgs...)
+		if err != nil {
+			fmt.Println("problem updating orders: %w", err)
+		}
+
+		if updateRes.RowsAffected() == 0 {
+			fmt.Println("no rows affected")
+		}
+
+	} else {
+		fmt.Println("invalid values")
 	}
 }
 
@@ -843,4 +795,158 @@ func flagOrdersByAccountID(ctx *gin.Context, aid int, flag string) int {
 	}
 	return count
 
+}
+
+func prepareOrderCreateQuery(req Order) (string, string, []interface{}) {
+	var createStrings []string
+	var numString []string
+	var args []interface{}
+
+	if req.Type != nil {
+		createStrings = append(createStrings, `"Type"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, *req.Type)
+	}
+	if req.ProductType != nil {
+		createStrings = append(createStrings, `"ProductType"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, *req.ProductType)
+	}
+	if req.RecuringFreq != nil {
+		createStrings = append(createStrings, `"RecuringFreq"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, *req.RecuringFreq)
+	}
+	if req.AccountID != nil {
+		createStrings = append(createStrings, `"AccountID"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, *req.AccountID)
+	}
+	if req.Organization != nil {
+		createStrings = append(createStrings, `"Organization"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, *req.Organization)
+	}
+	if req.Amount != nil {
+		createStrings = append(createStrings, `"Amount"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, *req.Amount)
+	}
+	if req.Currency != nil {
+		createStrings = append(createStrings, `"Currency"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, *req.Currency)
+	}
+	if req.SKU != nil {
+		createStrings = append(createStrings, `"SKU"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, *req.SKU)
+	}
+	if req.Status != nil {
+		createStrings = append(createStrings, `"Status"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, *req.Status)
+	}
+	if req.OrderLanguage != nil {
+		createStrings = append(createStrings, `"OrderLanguage"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, *req.OrderLanguage)
+	}
+	if req.PaymentDate != nil {
+		createStrings = append(createStrings, `"PaymentDate"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, *req.PaymentDate)
+	}
+	if req.Note != nil {
+		createStrings = append(createStrings, `"Note"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, *req.Note)
+	}
+	if req.Flag != nil {
+		createStrings = append(createStrings, `"Flag"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, *req.Flag)
+	}
+
+	if len(args) != 0 {
+		createStrings = append(createStrings, "created_at")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, time.Now())
+
+		createStrings = append(createStrings, "updated_at")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, time.Now())
+	}
+
+	concatedCreateString := strings.Join(createStrings, ",")
+	concatedNumString := strings.Join(numString, ",")
+
+	return concatedCreateString, concatedNumString, args
+}
+
+func prepareOrderUpdateQuery(req Order) (string, []interface{}) {
+	var updateStrings []string
+	var args []interface{}
+
+	if req.Type != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"Type"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.Type)
+	}
+	if req.ProductType != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"ProductType"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.ProductType)
+	}
+	if req.RecuringFreq != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"RecuringFreq"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.RecuringFreq)
+	}
+	if req.AccountID != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"AccountID"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.AccountID)
+	}
+	if req.Organization != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"Organization"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.Organization)
+	}
+	if req.Amount != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"Amount"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.Amount)
+	}
+	if req.Currency != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"Currency"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.Currency)
+	}
+	if req.SKU != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"SKU"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.SKU)
+	}
+	if req.Status != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"Status"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.Status)
+	}
+	if req.OrderLanguage != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"OrderLanguage"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.OrderLanguage)
+	}
+	if req.PaymentDate != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"PaymentDate"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.PaymentDate)
+	}
+	if req.Note != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"Note"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.Note)
+	}
+	if req.Flag != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"Flag"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.Flag)
+	}
+
+	if len(args) != 0 {
+		updateStrings = append(updateStrings, fmt.Sprintf("updated_at=$%d", len(updateStrings)+1))
+		args = append(args, time.Now())
+	}
+
+	updateArgument := strings.Join(updateStrings, ",")
+
+	return updateArgument, args
 }

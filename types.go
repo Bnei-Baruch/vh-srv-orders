@@ -6,26 +6,26 @@ import (
 
 // Order is defined by
 type Order struct {
-	ID        uint       `json:"ID" gorm:"primary_key"`
-	CreatedAt time.Time  `json:"-"`
-	UpdatedAt time.Time  `json:"-"`
+	ID        *uint      `json:"ID" gorm:"primary_key"`
+	CreatedAt *time.Time `json:"-"`
+	UpdatedAt *time.Time `json:"-"`
 	DeletedAt *time.Time `json:"-" sql:"index"`
 
-	Type         string `json:"type" gorm:"Column:Type;type:varchar(100)"`
-	ProductType  string `json:"ProductType" gorm:"Column:ProductType;type:varchar(100)"`
-	RecuringFreq int    `json:"RecuringFreq,omitempty" gorm:"Column:RecuringFreq;type:int" sql:"DEFAULT:0"`
+	Type         *string `json:"type" gorm:"Column:Type;type:varchar(100)"`
+	ProductType  *string `json:"ProductType" gorm:"Column:ProductType;type:varchar(100)"`
+	RecuringFreq *int    `json:"RecuringFreq,omitempty" gorm:"Column:RecuringFreq;type:int" sql:"DEFAULT:0"`
 
-	AccountID    uint   `json:"AccountID" gorm:"Column:AccountID;"`
-	Organization string `json:"Organization" gorm:"Column:Organization;type:varchar(10)"`
+	AccountID    *uint   `json:"AccountID" gorm:"Column:AccountID;"`
+	Organization *string `json:"Organization" gorm:"Column:Organization;type:varchar(10)"`
 
-	Amount        float64   `json:"Amount" gorm:"Column:Amount;type:varchar(85)"`
-	Currency      string    `json:"Currency"  gorm:"Column:Currency;type:varchar(10)"`
-	SKU           string    `json:"SKU"  gorm:"Column:SKU;type:varchar(30)"`
-	Status        string    `json:"Status,omitempty" gorm:"Column:Status;type:varchar(85)"`
-	OrderLanguage string    `json:"OrderLanguage,omitempty" gorm:"Column:OrderLanguage;type:varchar(10)"`
-	PaymentDate   time.Time `json:"-" gorm:"Column:PaymentDate"`
-	Note          string    `json:"-" gorm:"Column:Note;type:varchar(200)"`
-	Flag          string    `json:"-" gorm:"Column:Flag;type:varchar(200)"`
+	Amount        *float64   `json:"Amount" gorm:"Column:Amount;type:varchar(85)"`
+	Currency      *string    `json:"Currency"  gorm:"Column:Currency;type:varchar(10)"`
+	SKU           *string    `json:"SKU"  gorm:"Column:SKU;type:varchar(30)"`
+	Status        *string    `json:"Status,omitempty" gorm:"Column:Status;type:varchar(85)"`
+	OrderLanguage *string    `json:"OrderLanguage,omitempty" gorm:"Column:OrderLanguage;type:varchar(10)"`
+	PaymentDate   *time.Time `json:"-" gorm:"Column:PaymentDate"`
+	Note          *string    `json:"-" gorm:"Column:Note;type:varchar(200)"`
+	Flag          *string    `json:"-" gorm:"Column:Flag;type:varchar(200)"`
 
 	Payments []Payment `json:"Payments" gorm:"foreignkey:OrderID"`
 }

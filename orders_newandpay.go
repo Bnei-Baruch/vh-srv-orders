@@ -39,7 +39,7 @@ func handleCreateOrderAndPay(c *gin.Context) {
 	}
 
 	paramx := "mb-" + strconv.FormatUint(uint64(*p.ID), 10) + os.Getenv("SUFX")
-	ordkey := "ord-" + strconv.FormatUint(uint64(ord.ID), 10) + os.Getenv("SUFX")
+	ordkey := "ord-" + strconv.FormatUint(uint64(*ord.ID), 10) + os.Getenv("SUFX")
 
 	errorurl := req.ErrorURL + "/" + ordkey + "/" + paramx
 	cancelurl := req.CancelURL + "/" + ordkey + "/" + paramx

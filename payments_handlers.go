@@ -55,7 +55,7 @@ func handleUpdatePayment(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
 	}
 
-	if &pi.OrderID == nil {
+	if pi.OrderID == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Payment ID not found"})
 	}
 
@@ -64,58 +64,22 @@ func handleUpdatePayment(c *gin.Context) {
 		return
 	}
 
-	updateRes, err := DB.Exec(c, `UPDATE payments 
-		SET
-		"Amount"=$1,
-		"PaymentStatus"=$2,
-		"PaymentType"=$3,
-		"OrderID"=$4,
-		"ParamX"=$5,
-		"AuthNo"=$6,
-		confirmation_key=$7,
-		success=$8,
-		pelecard_token=$9,
-		"TransactionID"=$10,
-		"ErrorMsg"=$11,
-		"CardHebrewName"=$12,
-		"CCAbroadCard"=$13,
-		"CCBrand"=$14,
-		"CCCompanyClearer"=$15,
-		"CCCompanyIssuer"=$16,
-		credit_type=$17,
-		"CCExpDate"=$18,
-		"CCNumber"=$19,
-		"DebitCode"=$20,
-		"DebitCurrency"=$21,
-		"DebitTotal"=$22,
-		"DebitType"=$23,
-		"FirstPaymentTotal"=$24,
-		"FixedPaymentTotal"=$25,
-		j_param=$26,
-		"TotalPayments"=$27,
-		"TransactionInitTime"=$28,
-		"TransactionUpdateTime"=$29,
-		"VoucherID"=$30,
-		"Ordkey"=$31,
-		updated_at=$32 
-		WHERE id = $33`,
-		*p.Amount, *p.PaymentStatus, *p.PaymentType, *p.OrderID, *p.ParamX, *p.AuthNo, *p.ConfirmationKey, *p.Success, *p.PelecardToken,
-		*p.TransactionID, *p.ErrorMsg, *p.CardHebrewName, *p.CCAbroadCard, *p.CCBrand, *p.CCCompanyClearer, *p.CCCompanyIssuer, *p.CreditType,
-		*p.CCExpDate, *p.CCNumber, *p.DebitCode, *p.DebitCurrency, *p.DebitTotal, *p.DebitType, *p.FirstPaymentTotal, *p.FixedPaymentTotal,
-		*p.JParam, *p.TotalPayments, *p.TransactionInitTime, *p.TransactionUpdateTime, *p.VoucherID, *p.Ordkey, time.Now(), *p.ID)
-	if err != nil {
-		fmt.Errorf("problem updating payments: %w", err)
-	}
+	toUpdate, toUpdateArgs := preparePaymentUpdateQuery(p)
 
-	if updateRes.RowsAffected() != 1 {
-		fmt.Println(updateRes.RowsAffected())
-		c.JSON(http.StatusNotFound, gin.H{"error": "Payment not Saved"})
-		return
-	}
+	if len(toUpdateArgs) != 0 {
+		updateRes, err := DB.Exec(c, fmt.Sprintf(`UPDATE payments SET %s WHERE id=%d`, toUpdate, *p.ID),
+			toUpdateArgs...)
+		if err != nil {
+			fmt.Errorf("problem updating payments: %w", err)
+		}
 
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
-		return
+		if updateRes.RowsAffected() == 0 {
+			fmt.Println(updateRes.RowsAffected())
+			c.JSON(http.StatusNotFound, gin.H{"error": "Payment not Saved"})
+			return
+		}
+	} else {
+		fmt.Println("invalid values")
 	}
 
 	c.JSON(http.StatusOK, p)
@@ -296,4 +260,143 @@ func preparePaymentCreateQuery(req Payment) (string, string, []interface{}) {
 	concatedNumString := strings.Join(numString, ",")
 
 	return concatedCreateString, concatedNumString, args
+}
+
+func preparePaymentUpdateQuery(req Payment) (string, []interface{}) {
+	var updateStrings []string
+	var args []interface{}
+
+	if req.Amount != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"Amount"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.Amount)
+	}
+	if req.PaymentStatus != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"PaymentStatus"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.PaymentStatus)
+	}
+	if req.PaymentType != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"PaymentType"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.PaymentType)
+	}
+	if req.OrderID != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"OrderID"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.OrderID)
+	}
+	if req.ParamX != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"ParamX"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.ParamX)
+	}
+	if req.AuthNo != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"AuthNo"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.AuthNo)
+	}
+	if req.ConfirmationKey != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf("confirmation_key=$%d", len(updateStrings)+1))
+		args = append(args, *req.ConfirmationKey)
+	}
+	if req.Success != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf("success=$%d", len(updateStrings)+1))
+		args = append(args, *req.Success)
+	}
+	if req.PelecardToken != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf("pelecard_token=$%d", len(updateStrings)+1))
+		args = append(args, *req.PelecardToken)
+	}
+	if req.TransactionID != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"TransactionID"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.TransactionID)
+	}
+	if req.ErrorMsg != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"ErrorMsg"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.ErrorMsg)
+	}
+	if req.CardHebrewName != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"CardHebrewName"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.CardHebrewName)
+	}
+	if req.CCAbroadCard != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"CCAbroadCard"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.CCAbroadCard)
+	}
+	if req.CCBrand != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"CCBrand"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.CCBrand)
+	}
+	if req.CCCompanyClearer != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"CCCompanyClearer"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.CCCompanyClearer)
+	}
+	if req.CCCompanyIssuer != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"CCCompanyIssuer"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.CCCompanyIssuer)
+	}
+	if req.CreditType != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf("credit_type=$%d", len(updateStrings)+1))
+		args = append(args, *req.CreditType)
+	}
+	if req.CCExpDate != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"CCExpDate"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.CCExpDate)
+	}
+	if req.CCNumber != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"CCNumber"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.CCNumber)
+	}
+	if req.DebitCode != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"DebitCode"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.DebitCode)
+	}
+	if req.DebitCurrency != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"DebitCurrency"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.DebitCurrency)
+	}
+	if req.DebitTotal != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"DebitTotal"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.DebitTotal)
+	}
+	if req.DebitType != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"DebitType"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.DebitType)
+	}
+	if req.FirstPaymentTotal != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"FirstPaymentTotal"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.FirstPaymentTotal)
+	}
+	if req.FixedPaymentTotal != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"FixedPaymentTotal"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.FixedPaymentTotal)
+	}
+	if req.JParam != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf("j_param=$%d", len(updateStrings)+1))
+		args = append(args, *req.JParam)
+	}
+	if req.TotalPayments != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"TotalPayments"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.TotalPayments)
+	}
+	if req.TransactionInitTime != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"TransactionInitTime"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.TransactionInitTime)
+	}
+	if req.TransactionUpdateTime != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"TransactionUpdateTime"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.TransactionUpdateTime)
+	}
+	if req.VoucherID != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"VoucherID"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.VoucherID)
+	}
+	if req.Ordkey != nil {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"Ordkey"=$%d`, len(updateStrings)+1))
+		args = append(args, *req.Ordkey)
+	}
+
+	if len(args) != 0 {
+		updateStrings = append(updateStrings, fmt.Sprintf("updated_at=$%d", len(updateStrings)+1))
+		args = append(args, time.Now())
+	}
+
+	updateArgument := strings.Join(updateStrings, ",")
+
+	return updateArgument, args
 }

@@ -17,7 +17,7 @@ func handleUpdateOrders(c *gin.Context) {
 		return
 	}
 
-	if o.AccountID == 0 {
+	if *o.AccountID == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing AccountID"})
 		return
 	}
@@ -36,9 +36,9 @@ func handleUpdateOrders(c *gin.Context) {
 	}
 
 	oi.Status = o.Status
-	if oi.Status == "success" || oi.Status == "paid" {
-		oi.PaymentDate = time.Now()
-		oi.Flag = "renewed"
+	if *oi.Status == "success" || *oi.Status == "paid" {
+		*oi.PaymentDate = time.Now()
+		*oi.Flag = "renewed"
 	}
 
 	updateRes, err := DB.Exec(c, `UPDATE orders 
@@ -48,7 +48,7 @@ func handleUpdateOrders(c *gin.Context) {
 		"Flag"=$3,
 		updated_at=$4 
 		WHERE id = $5`,
-		oi.Status, oi.PaymentDate, oi.Flag, time.Now(), oi.ID)
+		*oi.Status, *oi.PaymentDate, *oi.Flag, time.Now(), *oi.ID)
 	if err != nil {
 		fmt.Errorf("problem updating orders: %w", err)
 	}

@@ -123,14 +123,14 @@ func flagOrdersToRenew(c *gin.Context, month int64, year int64) int64 {
 				continue
 			}
 
-			if aOSelect.Type == "regular" {
+			if *aOSelect.Type == "regular" {
 				fmt.Printf("No need to charge regular order %d\n", aOSelect.ID)
 				continue
 			}
 
 			// if not this month and not regular, go ahead
 			fmt.Printf("Mark Order %d for renewal\n", aOSelect.ID)
-			flagOrderForRenewal(c, uint(aOSelect.ID))
+			flagOrderForRenewal(c, uint(*aOSelect.ID))
 			counter++
 
 		}

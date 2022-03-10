@@ -61,7 +61,7 @@ func handleOrdersPaid(c *gin.Context) {
 
 	o, err := updateOrderAfterPayment(c, p)
 
-	if *p.PaymentStatus == "success" && o.ProductType == "jan2022ticket" {
+	if *p.PaymentStatus == "success" && *o.ProductType == "jan2022ticket" {
 		log.Println("Synch with Registration")
 		err := syncServiceRegistration(c, p, o)
 

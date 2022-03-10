@@ -20,7 +20,7 @@ func CreateOrUpdateAccount(ctx *gin.Context, a Account) uint {
 	); err != nil {
 		if err == pgx.ErrNoRows {
 
-			createString, numString, createQueryArgs := prepareAccountsCreateQuery(a)
+			createString, numString, createQueryArgs := prepareAccountCreateQuery(a)
 
 			var ID uint
 			// Add new account if not exist
@@ -43,63 +43,88 @@ func CreateOrUpdateAccount(ctx *gin.Context, a Account) uint {
 	return *b.ID
 }
 
-func prepareAccountsCreateQuery(req Account) (string, string, []interface{}) {
+func prepareAccountCreateQuery(req Account) (string, string, []interface{}) {
 	var createStrings []string
 	var numString []string
 	var args []interface{}
 
 	if req.FirstName != nil {
-		createStrings = append(createStrings, "FirstName")
+		createStrings = append(createStrings, `"FirstName"`)
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, *req.FirstName)
 	}
 	if req.LastName != nil {
-		createStrings = append(createStrings, "LastName")
+		createStrings = append(createStrings, `"LastName"`)
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, *req.LastName)
 	}
 	if req.Email != nil {
-		createStrings = append(createStrings, "Email")
+		createStrings = append(createStrings, `"Email"`)
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, *req.Email)
 	}
 	if req.Phone != nil {
-		createStrings = append(createStrings, "Phone")
+		createStrings = append(createStrings, `"Phone"`)
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, *req.Phone)
 	}
 	if req.Street != nil {
-		createStrings = append(createStrings, "Street")
+		createStrings = append(createStrings, `"Street"`)
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, *req.Street)
 	}
 	if req.City != nil {
-		createStrings = append(createStrings, "City")
+		createStrings = append(createStrings, `"City"`)
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, *req.City)
 	}
 	if req.State != nil {
-		createStrings = append(createStrings, "State")
+		createStrings = append(createStrings, `"State"`)
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, *req.State)
 	}
 	if req.Postcode != nil {
-		createStrings = append(createStrings, "Postcode")
+		createStrings = append(createStrings, `"Postcode"`)
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, *req.Postcode)
 	}
 	if req.Country != nil {
-		createStrings = append(createStrings, "Country")
+		createStrings = append(createStrings, `"Country"`)
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, *req.Country)
 	}
 	if req.AccountType != nil {
-		createStrings = append(createStrings, "AccountType")
+		createStrings = append(createStrings, `"AccountType"`)
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, *req.AccountType)
 	}
+	if req.PaymentToken != nil {
+		createStrings = append(createStrings, `"PaymentToken"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, *req.PaymentToken)
+	}
+	if req.PaymentCardID != nil {
+		createStrings = append(createStrings, `"PaymentCardID"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, *req.PaymentCardID)
+	}
+	if req.PaymentCardExpMonth != nil {
+		createStrings = append(createStrings, `"PaymentCardExpMonth"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, *req.PaymentCardExpMonth)
+	}
+	if req.PaymentCardExpYear != nil {
+		createStrings = append(createStrings, `"PaymentCardExpYear"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, *req.PaymentCardExpYear)
+	}
+	if req.AuthNo != nil {
+		createStrings = append(createStrings, `"AuthNo"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, *req.AuthNo)
+	}
 	if req.UserKey != nil {
-		createStrings = append(createStrings, "UserKey")
+		createStrings = append(createStrings, `"UserKey"`)
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, *req.UserKey)
 	}

@@ -41,32 +41,32 @@ func handleCreateOrderAndPay(c *gin.Context) {
 	paramx := "mb-" + strconv.FormatUint(uint64(p.ID), 10) + os.Getenv("SUFX")
 	ordkey := "ord-" + strconv.FormatUint(uint64(ord.ID), 10) + os.Getenv("SUFX")
 
-	errorurl := req.ErrorURL + "/" + ordkey + "/" + paramx
-	cancelurl := req.CancelURL + "/" + ordkey + "/" + paramx
+	errorurl := req.ErrorURL.String + "/" + ordkey + "/" + paramx
+	cancelurl := req.CancelURL.String + "/" + ordkey + "/" + paramx
 
 	extPay := RequestPayment{
 		UserKey: ordkey,
 
-		GoodURL:   req.SuccessURL,
+		GoodURL:   req.SuccessURL.String,
 		ErrorURL:  errorurl,
 		CancelURL: cancelurl,
 
-		Name:         req.FirstName + " " + req.LastName,
-		Price:        req.Amount,
-		Currency:     req.Currency,
-		Email:        req.Email,
+		Name:         req.FirstName.String + " " + req.LastName.String,
+		Price:        req.Amount.Float64,
+		Currency:     req.Currency.String,
+		Email:        req.Email.String,
 		Phone:        "+NA",
-		Street:       req.Street,
-		City:         req.City,
+		Street:       req.Street.String,
+		City:         req.City.String,
 		Country:      "Undef",
 		Participans:  "1",
-		Details:      req.Reference,
-		SKU:          req.SKU,
+		Details:      req.Reference.String,
+		SKU:          req.SKU.String,
 		VAT:          "f",
 		Installments: 1,
-		Language:     req.OrderLanguage,
+		Language:     req.OrderLanguage.String,
 		Reference:    paramx,
-		Organization: req.Organization,
+		Organization: req.Organization.String,
 	}
 
 	fmt.Println(extPay)
@@ -75,15 +75,15 @@ func handleCreateOrderAndPay(c *gin.Context) {
 
 	ENDPOINT := ""
 
-	if req.Type == "recurring" {
+	if req.Type.String == "recurring" {
 		ENDPOINT = "https://checkout.kbb1.com/token/new"
 	}
 
-	if req.Type == "regular" {
+	if req.Type.String == "regular" {
 		ENDPOINT = "https://checkout.kbb1.com/emv/new"
 	}
 
-	if req.Reference == "testemv" {
+	if req.Reference.String == "testemv" {
 		fmt.Println("EMV")
 		ENDPOINT = "https://checkout.kbb1.com/emv/new"
 	}
@@ -108,7 +108,7 @@ func handleCreateOrderAndPay(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"Error": err})
 	} else {
 		// Grisha you should fix that one... seriously
-		if req.Type == "regular" {
+		if req.Type.String == "regular" {
 			// if req.Type is regular - endpoint return some ass-shit string
 			// gota parse the m*fkr
 

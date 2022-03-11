@@ -2,79 +2,81 @@ package main
 
 import (
 	"time"
+
+	"gopkg.in/guregu/null.v4"
 )
 
 // Order is defined by
 type Order struct {
-	ID        uint       `json:"ID" gorm:"primary_key"`
-	CreatedAt time.Time  `json:"-"`
-	UpdatedAt time.Time  `json:"-"`
-	DeletedAt *time.Time `json:"-" sql:"index"`
+	ID        int64     `json:"ID" gorm:"primary_key"`
+	CreatedAt null.Time `json:"-"`
+	UpdatedAt null.Time `json:"-"`
+	DeletedAt null.Time `json:"-" sql:"index"`
 
-	Type         string `json:"type" gorm:"Column:Type;type:varchar(100)"`
-	ProductType  string `json:"ProductType" gorm:"Column:ProductType;type:varchar(100)"`
-	RecuringFreq int    `json:"RecuringFreq,omitempty" gorm:"Column:RecuringFreq;type:int" sql:"DEFAULT:0"`
+	Type         null.String `json:"type" gorm:"Column:Type;type:varchar(100)"`
+	ProductType  null.String `json:"ProductType" gorm:"Column:ProductType;type:varchar(100)"`
+	RecuringFreq null.Int    `json:"RecuringFreq,omitempty" gorm:"Column:RecuringFreq;type:int" sql:"DEFAULT:0"`
 
-	AccountID    uint   `json:"AccountID" gorm:"Column:AccountID;"`
-	Organization string `json:"Organization" gorm:"Column:Organization;type:varchar(10)"`
+	AccountID    null.Int    `json:"AccountID" gorm:"Column:AccountID;"`
+	Organization null.String `json:"Organization" gorm:"Column:Organization;type:varchar(10)"`
 
-	Amount        float64   `json:"Amount" gorm:"Column:Amount;type:varchar(85)"`
-	Currency      string    `json:"Currency"  gorm:"Column:Currency;type:varchar(10)"`
-	SKU           string    `json:"SKU"  gorm:"Column:SKU;type:varchar(30)"`
-	Status        string    `json:"Status,omitempty" gorm:"Column:Status;type:varchar(85)"`
-	OrderLanguage string    `json:"OrderLanguage,omitempty" gorm:"Column:OrderLanguage;type:varchar(10)"`
-	PaymentDate   time.Time `json:"-" gorm:"Column:PaymentDate"`
-	Note          string    `json:"-" gorm:"Column:Note;type:varchar(200)"`
-	Flag          string    `json:"-" gorm:"Column:Flag;type:varchar(200)"`
+	Amount        null.Float  `json:"Amount" gorm:"Column:Amount;type:varchar(85)"`
+	Currency      null.String `json:"Currency"  gorm:"Column:Currency;type:varchar(10)"`
+	SKU           null.String `json:"SKU"  gorm:"Column:SKU;type:varchar(30)"`
+	Status        null.String `json:"Status,omitempty" gorm:"Column:Status;type:varchar(85)"`
+	OrderLanguage null.String `json:"OrderLanguage,omitempty" gorm:"Column:OrderLanguage;type:varchar(10)"`
+	PaymentDate   null.Time   `json:"-" gorm:"Column:PaymentDate"`
+	Note          null.String `json:"-" gorm:"Column:Note;type:varchar(200)"`
+	Flag          null.String `json:"-" gorm:"Column:Flag;type:varchar(200)"`
 
 	Payments []Payment `json:"Payments" gorm:"foreignkey:OrderID"`
 }
 
 //Payment is defined by
 type Payment struct {
-	ID        uint       `json:"ID" gorm:"primary_key"`
-	CreatedAt time.Time  `json:"-"`
-	UpdatedAt time.Time  `json:"-"`
-	DeletedAt *time.Time `json:"-" sql:"index"`
+	ID        uint      `json:"ID" gorm:"primary_key"`
+	CreatedAt null.Time `json:"-"`
+	UpdatedAt null.Time `json:"-"`
+	DeletedAt null.Time `json:"-" sql:"index"`
 
-	Amount float64 `json:"Amount" gorm:"Column:Amount"`
+	Amount null.Float `json:"Amount" gorm:"Column:Amount"`
 
-	PaymentStatus string `json:"PaymentStatus" gorm:"Column:PaymentStatus"`
-	PaymentType   string `json:"PaymentType" gorm:"Column:PaymentType;type:varchar(100)"`
-	OrderID       uint   `json:"OrderID" gorm:"Column:OrderID"`
+	PaymentStatus null.String `json:"PaymentStatus" gorm:"Column:PaymentStatus"`
+	PaymentType   null.String `json:"PaymentType" gorm:"Column:PaymentType;type:varchar(100)"`
+	OrderID       null.Int    `json:"OrderID" gorm:"Column:OrderID"`
 
-	ParamX          string  `json:"additional_details_param_x" gorm:"Column:ParamX"`
-	Ordkey          string  `json:"user_key" gorm:"Column:Ordkey"`
-	AuthNo          *string `json:"authNo" gorm:"Column:AuthNo"`
-	ConfirmationKey string  `json:"confirmation_key" gorm:"ConfirmationKey"`
-	Success         string  `json:"success" gorm:"Success"`
-	PelecardToken   string  `json:"token" gorm:"PelecardToken"`
-	TransactionID   string  `json:"transaction_id" gorm:"Column:TransactionID"`
-	ErrorMsg        string  `json:"ErrorMsg" gorm:"Column:ErrorMsg"`
+	ParamX          null.String `json:"additional_details_param_x" gorm:"Column:ParamX"`
+	Ordkey          null.String `json:"user_key" gorm:"Column:Ordkey"`
+	AuthNo          null.String `json:"authNo" gorm:"Column:AuthNo"`
+	ConfirmationKey null.String `json:"confirmation_key" gorm:"ConfirmationKey"`
+	Success         null.String `json:"success" gorm:"Success"`
+	PelecardToken   null.String `json:"token" gorm:"PelecardToken"`
+	TransactionID   null.String `json:"transaction_id" gorm:"Column:TransactionID"`
+	ErrorMsg        null.String `json:"ErrorMsg" gorm:"Column:ErrorMsg"`
 
-	CardHebrewName   string `json:"card_hebrew_name" gorm:"Column:CardHebrewName"`
-	CCAbroadCard     string `json:"CCAbroadCard" gorm:"Column:CCAbroadCard"`
-	CCBrand          string `json:"CCBrand" gorm:"Column:CCBrand"`
-	CCCompanyClearer string `json:"CCCompanyClearer" gorm:"Column:CCCompanyClearer"`
-	CCCompanyIssuer  string `json:"CCCompanyIssuer" gorm:"Column:CCCompanyIssuer"`
-	CreditType       string `json:"credit_type" gorm:"CreditType"`
+	CardHebrewName   null.String `json:"card_hebrew_name" gorm:"Column:CardHebrewName"`
+	CCAbroadCard     null.String `json:"CCAbroadCard" gorm:"Column:CCAbroadCard"`
+	CCBrand          null.String `json:"CCBrand" gorm:"Column:CCBrand"`
+	CCCompanyClearer null.String `json:"CCCompanyClearer" gorm:"Column:CCCompanyClearer"`
+	CCCompanyIssuer  null.String `json:"CCCompanyIssuer" gorm:"Column:CCCompanyIssuer"`
+	CreditType       null.String `json:"credit_type" gorm:"CreditType"`
 
-	CCExpDate string `json:"CCExpDate" gorm:"Column:CCExpDate"`
-	CCNumber  string `json:"CCNumber" gorm:"Column:CCNumber"`
+	CCExpDate null.String `json:"CCExpDate" gorm:"Column:CCExpDate"`
+	CCNumber  null.String `json:"CCNumber" gorm:"Column:CCNumber"`
 
-	DebitCode     string `json:"DebitCode" gorm:"Column:DebitCode"`
-	DebitCurrency string `json:"DebitCurrency" gorm:"Column:DebitCurrency"`
-	DebitTotal    string `json:"DebitTotal" gorm:"Column:DebitTotal"`
-	DebitType     string `json:"DebitType" gorm:"Column:DebitType"`
+	DebitCode     null.String `json:"DebitCode" gorm:"Column:DebitCode"`
+	DebitCurrency null.String `json:"DebitCurrency" gorm:"Column:DebitCurrency"`
+	DebitTotal    null.String `json:"DebitTotal" gorm:"Column:DebitTotal"`
+	DebitType     null.String `json:"DebitType" gorm:"Column:DebitType"`
 
-	FirstPaymentTotal string `json:"FirstPaymentTotal" gorm:"Column:FirstPaymentTotal"`
-	FixedPaymentTotal string `json:"FixedPaymentTotal" gorm:"Column:FixedPaymentTotal"`
-	JParam            string `json:"j_param"`
-	TotalPayments     string `json:"TotalPayments" gorm:"Column:TotalPayments"`
+	FirstPaymentTotal null.String `json:"FirstPaymentTotal" gorm:"Column:FirstPaymentTotal"`
+	FixedPaymentTotal null.String `json:"FixedPaymentTotal" gorm:"Column:FixedPaymentTotal"`
+	JParam            null.String `json:"j_param"`
+	TotalPayments     null.String `json:"TotalPayments" gorm:"Column:TotalPayments"`
 
-	TransactionInitTime   string `json:"TransactionInitTime" gorm:"Column:TransactionInitTime"`
-	TransactionUpdateTime string `json:"TransactionUpdateTime" gorm:"Column:TransactionUpdateTime"`
-	VoucherID             string `json:"VoucherID" gorm:"Column:VoucherID"`
+	TransactionInitTime   null.String `json:"TransactionInitTime" gorm:"Column:TransactionInitTime"`
+	TransactionUpdateTime null.String `json:"TransactionUpdateTime" gorm:"Column:TransactionUpdateTime"`
+	VoucherID             null.String `json:"VoucherID" gorm:"Column:VoucherID"`
 
 	Invoices []Invoice `gorm:"foreignkey:PaymentID"`
 }
@@ -104,59 +106,59 @@ type Invoice struct {
 //RequestOrder ...
 type RequestOrder struct {
 	//User data
-	FirstName string `json:"FirstName"`
-	LastName  string `json:"LastName" `
-	Email     string `json:"Email" `
-	Phone     string `json:"Phone" `
-	Street    string `json:"Street" `
-	City      string `json:"City" `
-	State     string `json:"State" `
-	Postcode  string `json:"Postcode" `
-	Country   string `json:"Country"`
-	UserKey   string `json:"UserKey"`
+	FirstName null.String `json:"FirstName"`
+	LastName  null.String `json:"LastName" `
+	Email     null.String `json:"Email" `
+	Phone     null.String `json:"Phone" `
+	Street    null.String `json:"Street" `
+	City      null.String `json:"City" `
+	State     null.String `json:"State" `
+	Postcode  null.String `json:"Postcode" `
+	Country   null.String `json:"Country"`
+	UserKey   null.String `json:"UserKey"`
 
 	//Product data
-	Amount        float64 `json:"Amount"`
-	Currency      string  `json:"Currency"`
-	Reference     string  `json:"Reference"`
-	Type          string  `json:"Type"`
-	ProductType   string  `json:"ProductType"`
-	SKU           string  `json:"SKU"`
-	RecurringFreq int     `json:"RecurringFreq"`
-	Installements int     `json:"Installements"`
-	Organization  string  `json:"Organization"`
-	OrderLanguage string  `json:"OrderLanguage"`
+	Amount        null.Float  `json:"Amount"`
+	Currency      null.String `json:"Currency"`
+	Reference     null.String `json:"Reference"`
+	Type          null.String `json:"Type"`
+	ProductType   null.String `json:"ProductType"`
+	SKU           null.String `json:"SKU"`
+	RecurringFreq null.Int    `json:"RecurringFreq"`
+	Installements null.Int    `json:"Installements"`
+	Organization  null.String `json:"Organization"`
+	OrderLanguage null.String `json:"OrderLanguage"`
 
 	//Transaction data
-	SuccessURL string `json:"SuccessURL"`
-	ErrorURL   string `json:"ErrorURL"`
-	CancelURL  string `json:"CancelURL"`
+	SuccessURL null.String `json:"SuccessURL"`
+	ErrorURL   null.String `json:"ErrorURL"`
+	CancelURL  null.String `json:"CancelURL"`
 }
 
 // Account is defined by
 type Account struct {
-	ID        uint       `json:"ID" gorm:"primary_key"`
-	CreatedAt time.Time  `json:"-"`
-	UpdatedAt time.Time  `json:"-"`
+	ID        int64      `json:"ID" gorm:"primary_key"`
+	CreatedAt *time.Time `json:"-"`
+	UpdatedAt *time.Time `json:"-"`
 	DeletedAt *time.Time `json:"-" sql:"index"`
 
-	FirstName string `json:"FirstName" gorm:"Column:FirstName;type:varchar(100)"`
-	LastName  string `json:"LastName" gorm:"Column:LastName;type:varchar(100)"`
-	Email     string `json:"Email" gorm:"Column:Email;type:varchar(100)"`
-	Phone     string `json:"Phone" gorm:"Column:Phone;type:varchar(30)"`
-	Street    string `json:"Street" gorm:"Column:Street;type:varchar(100)"`
-	City      string `json:"City" gorm:"Column:City;type:varchar(85)"`
-	State     string `json:"State" gorm:"Column:State;type:varchar(85)"`
-	Postcode  string `json:"Postcode" gorm:"Column:Postcode;type:varchar(85)"`
-	Country   string `json:"Country" gorm:"Column:Country;type:varchar(50)"`
+	FirstName null.String `json:"FirstName" gorm:"Column:FirstName;type:varchar(100)"`
+	LastName  null.String `json:"LastName" gorm:"Column:LastName;type:varchar(100)"`
+	Email     null.String `json:"Email" gorm:"Column:Email;type:varchar(100)"`
+	Phone     null.String `json:"Phone" gorm:"Column:Phone;type:varchar(30)"`
+	Street    null.String `json:"Street" gorm:"Column:Street;type:varchar(100)"`
+	City      null.String `json:"City" gorm:"Column:City;type:varchar(85)"`
+	State     null.String `json:"State" gorm:"Column:State;type:varchar(85)"`
+	Postcode  null.String `json:"Postcode" gorm:"Column:Postcode;type:varchar(85)"`
+	Country   null.String `json:"Country" gorm:"Column:Country;type:varchar(50)"`
 
-	AccountType         string  `json:"AccountType,omitempty" gorm:"Column:AccountType;type:varchar(100);default:'personal'"`
-	PaymentToken        string  `json:"PaymentToken,omitempty" gorm:"Column:PaymentToken;type:varchar(100)"`
-	PaymentCardID       string  `json:"PaymentCardID,omitempty" gorm:"Column:PaymentCardID;type:varchar(100)"`
-	PaymentCardExpMonth int     `json:"PaymentCardExpMonth,omitempty" gorm:"Column:PaymentCardExpMonth;type:int"`
-	PaymentCardExpYear  int     `json:"PaymentCardExpYear,omitempty" gorm:"Column:PaymentCardExpYear;type:int"`
-	AuthNo              *string `json:"authNo" gorm:"Column:AuthNo"`
-	UserKey             string  `json:"UserKCID,omitempty" gorm:"Column:UserKey;type:varchar(85)"`
+	AccountType         null.String `json:"AccountType,omitempty" gorm:"Column:AccountType;type:varchar(100);default:'personal'"`
+	PaymentToken        null.String `json:"PaymentToken,omitempty" gorm:"Column:PaymentToken;type:varchar(100)"`
+	PaymentCardID       null.String `json:"PaymentCardID,omitempty" gorm:"Column:PaymentCardID;type:varchar(100)"`
+	PaymentCardExpMonth null.Int    `json:"PaymentCardExpMonth,omitempty" gorm:"Column:PaymentCardExpMonth;type:int"`
+	PaymentCardExpYear  null.Int    `json:"PaymentCardExpYear,omitempty" gorm:"Column:PaymentCardExpYear;type:int"`
+	AuthNo              null.String `json:"authNo" gorm:"Column:AuthNo"`
+	UserKey             null.String `json:"UserKCID,omitempty" gorm:"Column:UserKey;type:varchar(85)"`
 }
 
 // RequestPayment ..
@@ -190,40 +192,40 @@ type RequestPayment struct {
 
 //RequestPaid ...
 type RequestPaid struct {
-	UserKey string `json:"user_key"`
+	UserKey null.String `json:"user_key"`
 
-	TransactionID   string  `json:"transaction_id"`
-	ParamX          string  `json:"additional_details_param_x"`
-	AuthNo          *string `json:"authNo"`
-	ConfirmationKey string  `json:"confirmation_key"`
-	Success         string  `json:"success"`
-	Token           string  `json:"token"`
-	Error           string  `json:"error,omitempty"`
+	TransactionID   null.String `json:"transaction_id"`
+	ParamX          null.String `json:"additional_details_param_x"`
+	AuthNo          null.String `json:"authNo"`
+	ConfirmationKey null.String `json:"confirmation_key"`
+	Success         null.String `json:"success"`
+	Token           null.String `json:"token"`
+	Error           null.String `json:"error,omitempty"`
 
-	CardHebrewName   string `json:"card_hebrew_name"`
-	CCAbroadCard     string `json:"credit_card_abroad_card"`
-	CCBrand          string `json:"credit_card_brand"`
-	CCCompanyClearer string `json:"credit_card_company_clearer"`
-	CCCompanyIssuer  string `json:"credit_card_company_issuer"`
-	CreditType       string `json:"credit_type"`
+	CardHebrewName   null.String `json:"card_hebrew_name"`
+	CCAbroadCard     null.String `json:"credit_card_abroad_card"`
+	CCBrand          null.String `json:"credit_card_brand"`
+	CCCompanyClearer null.String `json:"credit_card_company_clearer"`
+	CCCompanyIssuer  null.String `json:"credit_card_company_issuer"`
+	CreditType       null.String `json:"credit_type"`
 
-	CCNumber  string `json:"credit_card_number"`
-	CCExpDate string `json:"credit_card_exp_date"`
+	CCNumber  null.String `json:"credit_card_number"`
+	CCExpDate null.String `json:"credit_card_exp_date"`
 
-	DebitCode     string `json:"debit_code"`
-	DebitCurrency string `json:"debit_currency"`
-	DebitTotal    string `json:"debit_total"`
-	DebitType     string `json:"debit_type"`
+	DebitCode     null.String `json:"debit_code"`
+	DebitCurrency null.String `json:"debit_currency"`
+	DebitTotal    null.String `json:"debit_total"`
+	DebitType     null.String `json:"debit_type"`
 
-	FirstPaymentTotal string `json:"first_payment_total"`
-	FixedPaymentTotal string `json:"fixed_payment_total"`
-	JParam            string `json:"j_param"`
-	TotalPayments     string `json:"total_payments"`
+	FirstPaymentTotal null.String `json:"first_payment_total"`
+	FixedPaymentTotal null.String `json:"fixed_payment_total"`
+	JParam            null.String `json:"j_param"`
+	TotalPayments     null.String `json:"total_payments"`
 
-	TransactionInitTime   string `json:"transaction_init_time"`
-	TransactionPelecardID string `json:"transaction_pelecard_id"`
-	TransactionUpdateTime string `json:"transaction_update_time"`
-	VoucherID             string `json:"voucher_id"`
+	TransactionInitTime   null.String `json:"transaction_init_time"`
+	TransactionPelecardID null.String `json:"transaction_pelecard_id"`
+	TransactionUpdateTime null.String `json:"transaction_update_time"`
+	VoucherID             null.String `json:"voucher_id"`
 }
 
 //Product is storing all product info

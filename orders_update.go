@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gopkg.in/guregu/null.v4"
 )
 
 func handleUpdateOrders(c *gin.Context) {
@@ -17,7 +18,7 @@ func handleUpdateOrders(c *gin.Context) {
 		return
 	}
 
-	if o.AccountID == 0 {
+	if o.AccountID == null.NewInt(0, true) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing AccountID"})
 		return
 	}
@@ -36,13 +37,13 @@ func handleUpdateOrders(c *gin.Context) {
 	}
 
 	oi.Status = o.Status
-	if oi.Status == "success" || oi.Status == "paid" {
-		oi.PaymentDate = time.Now()
-		oi.Flag = "renewed"
+	if oi.Status == null.NewString("success", true) || oi.Status == null.NewString("paid", true) {
+		oi.PaymentDate = null.NewTime(time.Now(), true)
+		oi.Flag = null.NewString("renewed", true)
 	}
 
 	updateRes, err := DB.Exec(c, `UPDATE orders 
-		SET
+		SET 
 		"Status"=$1,
 		"PaymentDate"=$2,
 		"Flag"=$3,

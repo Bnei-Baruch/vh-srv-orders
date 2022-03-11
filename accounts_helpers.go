@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -8,7 +10,7 @@ import (
 )
 
 // CreateOrUpdateAccount account
-func CreateOrUpdateAccount(ctx *gin.Context, a Account) uint {
+func CreateOrUpdateAccount(ctx *gin.Context, a Account) int64 {
 	var b Account
 	reqAccountExist := `
 		select id from accounts where "UserKey" = $1 ORDER BY id DESC LIMIT 1
@@ -17,35 +19,128 @@ func CreateOrUpdateAccount(ctx *gin.Context, a Account) uint {
 		&b.ID,
 	); err != nil {
 		if err == pgx.ErrNoRows {
-			var ID uint
+
+			createString, numString, createQueryArgs := prepareAccountCreateQuery(a)
+
+			var ID int64
 			// Add new account if not exist
-			if err := DB.QueryRow(ctx, `INSERT INTO accounts (
-				"FirstName",
-				"LastName",
-				"Email",
-				"Phone",
-				"Street",
-				"City",
-				"State",
-				"Postcode",
-				"Country",
-				"AccountType",
-				"UserKey",
-				created_at,
-				updated_at
-			)
-			VALUES (
-				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
-				a.FirstName, a.LastName, a.Email, a.Phone, a.Street, a.City, a.State,
-				a.Postcode, a.Country, a.AccountType, a.UserKey, time.Now(), time.Now()).Scan(
-				&ID,
-			); err != nil {
+			if len(createQueryArgs) != 0 {
+				if err := DB.QueryRow(ctx, fmt.Sprintf(`INSERT INTO accounts (%s) VALUES (%s) RETURNING id`, createString, numString),
+					createQueryArgs...).Scan(
+					&ID,
+				); err != nil {
+					return 0
+				}
+				return ID
+			} else {
 				return 0
 			}
-			return ID
+
 		} else {
 			return 0
 		}
 	}
 	return b.ID
+}
+
+func prepareAccountCreateQuery(req Account) (string, string, []interface{}) {
+	var createStrings []string
+	var numString []string
+	var args []interface{}
+
+	if req.FirstName.Valid {
+		createStrings = append(createStrings, `"FirstName"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.FirstName.String)
+	}
+	if req.LastName.Valid {
+		createStrings = append(createStrings, `"LastName"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.LastName.String)
+	}
+	if req.Email.Valid {
+		createStrings = append(createStrings, `"Email"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.Email.String)
+	}
+	if req.Phone.Valid {
+		createStrings = append(createStrings, `"Phone"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.Phone.String)
+	}
+	if req.Street.Valid {
+		createStrings = append(createStrings, `"Street"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.Street.String)
+	}
+	if req.City.Valid {
+		createStrings = append(createStrings, `"City"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.City.String)
+	}
+	if req.State.Valid {
+		createStrings = append(createStrings, `"State"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.State.String)
+	}
+	if req.Postcode.Valid {
+		createStrings = append(createStrings, `"Postcode"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.Postcode.String)
+	}
+	if req.Country.Valid {
+		createStrings = append(createStrings, `"Country"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.Country.String)
+	}
+	if req.AccountType.Valid {
+		createStrings = append(createStrings, `"AccountType"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.AccountType.String)
+	}
+	if req.PaymentToken.Valid {
+		createStrings = append(createStrings, `"PaymentToken"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.PaymentToken.String)
+	}
+	if req.PaymentCardID.Valid {
+		createStrings = append(createStrings, `"PaymentCardID"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.PaymentCardID.String)
+	}
+	if req.PaymentCardExpMonth.Valid {
+		createStrings = append(createStrings, `"PaymentCardExpMonth"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.PaymentCardExpMonth.Int64)
+	}
+	if req.PaymentCardExpYear.Valid {
+		createStrings = append(createStrings, `"PaymentCardExpYear"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.PaymentCardExpYear.Int64)
+	}
+	if req.AuthNo.Valid {
+		createStrings = append(createStrings, `"AuthNo"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.AuthNo.String)
+	}
+	if req.UserKey.Valid {
+		createStrings = append(createStrings, `"UserKey"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.UserKey.String)
+	}
+
+	if len(args) != 0 {
+		createStrings = append(createStrings, "created_at")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, time.Now())
+
+		createStrings = append(createStrings, "updated_at")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, time.Now())
+	}
+
+	concatedCreateString := strings.Join(createStrings, ",")
+	concatedNumString := strings.Join(numString, ",")
+
+	return concatedCreateString, concatedNumString, args
 }

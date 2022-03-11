@@ -60,8 +60,8 @@ func flagOrdersToRenew(c *gin.Context, month int64, year int64) int64 {
 	}
 
 	type qOPotential struct {
-		Userkey string
-		Qt      int64
+		Userkey *string
+		Qt      *int64
 	}
 
 	var aOPotential qOPotential
@@ -118,19 +118,19 @@ func flagOrdersToRenew(c *gin.Context, month int64, year int64) int64 {
 				return -1
 			}
 
-			if int64(aOSelect.PaymentDate.Month()) >= month && int64(aOSelect.PaymentDate.Year()) >= year {
+			if int64(aOSelect.PaymentDate.Time.Month()) >= month && int64(aOSelect.PaymentDate.Time.Year()) >= year {
 				fmt.Printf("No need to charge order %d\n", aOSelect.ID)
 				continue
 			}
 
-			if *aOSelect.Type == "regular" {
+			if aOSelect.Type.String == "regular" {
 				fmt.Printf("No need to charge regular order %d\n", aOSelect.ID)
 				continue
 			}
 
 			// if not this month and not regular, go ahead
 			fmt.Printf("Mark Order %d for renewal\n", aOSelect.ID)
-			flagOrderForRenewal(c, uint(*aOSelect.ID))
+			flagOrderForRenewal(c, uint(aOSelect.ID))
 			counter++
 
 		}

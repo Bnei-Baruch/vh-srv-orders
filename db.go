@@ -58,7 +58,7 @@ func connectPostgreSQL() {
 
 	pool, err := pgxpool.Connect(ctx, connec)
 	if err != nil {
-		fmt.Errorf("unable to connect to database: %w", err)
+		fmt.Println("unable to connect to database: %w", err)
 	}
 
 	DB = pool

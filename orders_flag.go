@@ -95,7 +95,7 @@ func flagOrdersToRenew(c *gin.Context, month int64, year int64) int64 {
 		order by "PaymentDate" desc
 		limit 1
 		`
-		oselected, qOSelectStrErr := DB.Query(c, qOSelectStr, aOPotential.Userkey)
+		oselected, qOSelectStrErr := DB.Query(c, qOSelectStr, *aOPotential.Userkey)
 
 		if qOSelectStrErr != nil {
 			fmt.Println("error 2")

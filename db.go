@@ -18,11 +18,11 @@ var DB *pgxpool.Pool
 // cfg is the struct type that contains fields that stores the necessary configuration
 // gathered from the environment.
 var cfg struct {
-	PgHost   string `envconfig:"DB_HOST" default:"localhost"`
-	PgPort   string `envconfig:"DB_PORT" default:"5432"`
-	PgUser   string `envconfig:"DB_USER" default:"postgres"`
-	PgPass   string `envconfig:"DB_PASSWORD" default:"pass"`
-	PgDbName string `envconfig:"DB_DATABASE" default:"gorm"`
+	PgHost   string `envconfig:"PGHOST" default:"localhost"`
+	PgPort   string `envconfig:"PGPORT" default:"5432"`
+	PgUser   string `envconfig:"PGUSER" default:"postgres"`
+	PgPass   string `envconfig:"PGPASSWORD" default:"pass"`
+	PgDbName string `envconfig:"PGDATABASE" default:"gorm"`
 }
 
 //Init DB
@@ -45,12 +45,20 @@ func connectPostgreSQL() {
 		cfg.PgPass,
 	)
 
+	fmt.Println("--cfg.PgHost: ", cfg.PgHost)
+	fmt.Println("--cfg.PgPort: ", cfg.PgPort)
+	fmt.Println("--cfg.PgUser: ", cfg.PgUser)
+	fmt.Println("--cfg.PgPass: ", cfg.PgPass)
+	fmt.Println("--cfg.PgDbName: ", cfg.PgDbName)
+
+	fmt.Println("--connection-string--", connec)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	pool, err := pgxpool.Connect(ctx, connec)
 	if err != nil {
-		fmt.Errorf("unable to connect to database: %w", err)
+		fmt.Println("unable to connect to database: %w", err)
 	}
 
 	DB = pool

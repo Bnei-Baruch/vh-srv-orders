@@ -15,7 +15,7 @@ func CreateOrUpdateAccount(ctx *gin.Context, a Account) int64 {
 	reqAccountExist := `
 		select id from accounts where "UserKey" = $1 ORDER BY id DESC LIMIT 1
 	`
-	if err := DB.QueryRow(ctx, reqAccountExist, a.UserKey).Scan(
+	if err := DB.QueryRow(ctx, reqAccountExist, a.UserKey.String).Scan(
 		&b.ID,
 	); err != nil {
 		if err == pgx.ErrNoRows {

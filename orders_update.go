@@ -49,7 +49,7 @@ func handleUpdateOrders(c *gin.Context) {
 		"Flag"=$3,
 		updated_at=$4 
 		WHERE id = $5`,
-		oi.Status, oi.PaymentDate, oi.Flag, time.Now(), oi.ID)
+		oi.Status.String, oi.PaymentDate.Time, oi.Flag.String, time.Now(), oi.ID)
 	if err != nil {
 		fmt.Errorf("problem updating orders: %w", err)
 	}

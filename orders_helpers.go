@@ -322,7 +322,7 @@ func syncServiceRegistration(ctx *gin.Context, p Payment, o Order) error {
 	"LastName",
 	"Email",
 	"UserKey" 
-	FROM accounts WHERE id=$1`, o.AccountID).Scan(
+	FROM accounts WHERE id=$1`, o.AccountID.Int64).Scan(
 		&a.FirstName, &a.LastName, &a.Email, &a.UserKey,
 	); err != nil {
 		return errors.New("cannot find related Order for Payment")
@@ -356,7 +356,7 @@ func updateOrderAfterPayment(ctx *gin.Context, p Payment) (Order, error) {
 	var o Order
 
 	if err := DB.QueryRow(ctx, `SELECT 
-	id, "ProductType", "AccountID", "OrderLanguage" FROM orders WHERE id=$1`, p.OrderID).Scan(
+	id, "ProductType", "AccountID", "OrderLanguage" FROM orders WHERE id=$1`, p.OrderID.Int64).Scan(
 		&o.ID, &o.ProductType, &o.AccountID, &o.OrderLanguage,
 	); err != nil {
 		return o, err
@@ -527,7 +527,7 @@ func getAccountForOrderID(ctx *gin.Context, orderID uint) Account {
 	created_at,
 	updated_at,
 	deleted_at 
-	FROM accounts WHERE id=$1`, o.AccountID).Scan(
+	FROM accounts WHERE id=$1`, o.AccountID.Int64).Scan(
 		&a.ID, &a.FirstName, &a.LastName, &a.Email, &a.Phone, &a.Street, &a.City, &a.State, &a.Postcode, &a.Country,
 		&a.AccountType, &a.PaymentToken, &a.PaymentCardID, &a.PaymentCardExpMonth, &a.PaymentCardExpYear, &a.UserKey,
 		&a.AuthNo, &a.CreatedAt, &a.UpdatedAt, &a.DeletedAt,

@@ -45,6 +45,14 @@ func connectPostgreSQL() {
 		cfg.PgPass,
 	)
 
+	fmt.Println("--cfg.PgHost: ", cfg.PgHost)
+	fmt.Println("--cfg.PgPort: ", cfg.PgPort)
+	fmt.Println("--cfg.PgUser: ", cfg.PgUser)
+	fmt.Println("--cfg.PgPass: ", cfg.PgPass)
+	fmt.Println("--cfg.PgDbName: ", cfg.PgDbName)
+
+	fmt.Println("--connection-string--", connec)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

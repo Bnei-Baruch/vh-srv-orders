@@ -40,6 +40,17 @@ func handleOrdersCreate(c *gin.Context) {
 		c.JSON(http.StatusOK, ord)
 	}
 }
+func handleOrderFetchByEmail(c *gin.Context) {
+	var email = c.Param("email")
+
+	ord, err := getOrderByEmail(c, email)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"Error": err})
+	} else {
+		c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": ord, "success": true})
+	}
+}
 
 func handleOrdersPaid(c *gin.Context) {
 	var rp RequestPaid

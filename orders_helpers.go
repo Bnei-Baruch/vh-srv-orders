@@ -445,6 +445,64 @@ func getOrderByID(ctx *gin.Context, orderID uint) Order {
 	return o
 }
 
+func getOrderByEmail(ctx *gin.Context, email string) ([]Order, error) {
+	orderArr := []Order{}
+
+	rows, err := DB.Query(ctx, `SELECT 
+	o.id,
+	o."Type",
+	o."ProductType",
+	o."RecuringFreq",
+	o."AccountID",
+	o."Organization",
+	o."Amount",
+	o."Currency",
+	o."Status",
+	o."OrderLanguage",
+	o."PaymentDate",
+	o."Flag",
+	o.created_at,
+	o.updated_at,
+	o.deleted_at 
+	from accounts as a, orders as o
+	where a."Email" = $1
+	and a.id = o."AccountID"
+	order by o.id asc`, email)
+	if err != nil {
+		return orderArr, err
+	}
+
+	defer rows.Close()
+
+	for rows.Next() {
+
+		var o Order
+		var amount string
+
+		err := rows.Scan(&o.ID, &o.Type, &o.ProductType, &o.RecuringFreq, &o.AccountID, &o.Organization, &amount,
+			&o.Currency, &o.Status, &o.OrderLanguage, &o.PaymentDate, &o.Flag, &o.CreatedAt, &o.UpdatedAt, &o.DeletedAt)
+
+		if err != nil {
+			return orderArr, err
+		}
+
+		value, err := strconv.ParseFloat(amount, 32)
+
+		if err != nil {
+			fmt.Println("error converting amount string to float")
+			return orderArr, err
+		}
+
+		floatAmount := float64(value)
+
+		o.Amount = null.NewFloat(floatAmount, true)
+
+		orderArr = append(orderArr, o)
+	}
+
+	return orderArr, nil
+}
+
 //Get Payment
 func getPaymentForOrderID(ctx *gin.Context, orderID uint) Payment {
 	var p Payment

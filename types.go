@@ -25,9 +25,9 @@ type Order struct {
 	SKU           null.String `json:"SKU"  gorm:"Column:SKU;type:varchar(30)"`
 	Status        null.String `json:"Status,omitempty" gorm:"Column:Status;type:varchar(85)"`
 	OrderLanguage null.String `json:"OrderLanguage,omitempty" gorm:"Column:OrderLanguage;type:varchar(10)"`
-	PaymentDate   null.Time   `json:"-" gorm:"Column:PaymentDate"`
-	Note          null.String `json:"-" gorm:"Column:Note;type:varchar(200)"`
-	Flag          null.String `json:"-" gorm:"Column:Flag;type:varchar(200)"`
+	PaymentDate   null.Time   `json:"PaymentDate" gorm:"Column:PaymentDate"`
+	Note          null.String `json:"Note" gorm:"Column:Note;type:varchar(200)"`
+	Flag          null.String `json:"Flag" gorm:"Column:Flag;type:varchar(200)"`
 
 	Payments []Payment `json:"Payments" gorm:"foreignkey:OrderID"`
 }
@@ -273,4 +273,53 @@ type OrderServiceEmvRes struct {
 	Status string `json:"status"`
 	URL    string `json:"url"`
 	Error  string `json:"error"`
+}
+
+type paymentWithFullName struct {
+	AccountID   int    `json:"AccountID"`
+	UserKey     string `json:"UserKey"`
+	FirstName   string `json:"FirstName"`
+	LastName    string `json:"LastName"`
+	Email       string `json:"Email"`
+	Street      string `json:"Street"`
+	City        string `json:"City"`
+	Language    string `json:"Language"`
+	OrderAmount int    `json:"OrderAmount"`
+	Currency    string `json:"Currency"`
+
+	ID                    uint        `json:"ID" gorm:"primary_key"`
+	Amount                null.Float  `json:"Amount" gorm:"Column:Amount"`
+	PaymentStatus         null.String `json:"PaymentStatus" gorm:"Column:PaymentStatus"`
+	PaymentType           null.String `json:"PaymentType" gorm:"Column:PaymentType;type:varchar(100)"`
+	OrderID               null.Int    `json:"OrderID" gorm:"Column:OrderID"`
+	ParamX                null.String `json:"additional_details_param_x" gorm:"Column:ParamX"`
+	AuthNo                null.String `json:"authNo" gorm:"Column:AuthNo"`
+	ConfirmationKey       null.String `json:"confirmation_key" gorm:"ConfirmationKey"`
+	Success               null.String `json:"success" gorm:"Success"`
+	PelecardToken         null.String `json:"token" gorm:"PelecardToken"`
+	TransactionID         null.String `json:"transaction_id" gorm:"Column:TransactionID"`
+	ErrorMsg              null.String `json:"ErrorMsg" gorm:"Column:ErrorMsg"`
+	CardHebrewName        null.String `json:"card_hebrew_name" gorm:"Column:CardHebrewName"`
+	CCAbroadCard          null.String `json:"CCAbroadCard" gorm:"Column:CCAbroadCard"`
+	CCBrand               null.String `json:"CCBrand" gorm:"Column:CCBrand"`
+	CCCompanyClearer      null.String `json:"CCCompanyClearer" gorm:"Column:CCCompanyClearer"`
+	CCCompanyIssuer       null.String `json:"CCCompanyIssuer" gorm:"Column:CCCompanyIssuer"`
+	CreditType            null.String `json:"credit_type" gorm:"CreditType"`
+	CCExpDate             null.String `json:"CCExpDate" gorm:"Column:CCExpDate"`
+	CCNumber              null.String `json:"CCNumber" gorm:"Column:CCNumber"`
+	DebitCode             null.String `json:"DebitCode" gorm:"Column:DebitCode"`
+	DebitCurrency         null.String `json:"DebitCurrency" gorm:"Column:DebitCurrency"`
+	DebitTotal            null.String `json:"DebitTotal" gorm:"Column:DebitTotal"`
+	DebitType             null.String `json:"DebitType" gorm:"Column:DebitType"`
+	FirstPaymentTotal     null.String `json:"FirstPaymentTotal" gorm:"Column:FirstPaymentTotal"`
+	FixedPaymentTotal     null.String `json:"FixedPaymentTotal" gorm:"Column:FixedPaymentTotal"`
+	JParam                null.String `json:"j_param"`
+	TotalPayments         null.String `json:"TotalPayments" gorm:"Column:TotalPayments"`
+	TransactionInitTime   null.String `json:"TransactionInitTime" gorm:"Column:TransactionInitTime"`
+	TransactionUpdateTime null.String `json:"TransactionUpdateTime" gorm:"Column:TransactionUpdateTime"`
+	VoucherID             null.String `json:"VoucherID" gorm:"Column:VoucherID"`
+	Ordkey                null.String `json:"user_key" gorm:"Column:Ordkey"`
+	CreatedAt             null.Time   `json:"-"`
+	UpdatedAt             null.Time   `json:"-"`
+	DeletedAt             null.Time   `json:"-" sql:"index"`
 }

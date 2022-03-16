@@ -323,3 +323,15 @@ type paymentWithFullName struct {
 	UpdatedAt             null.Time   `json:"-"`
 	DeletedAt             null.Time   `json:"-" sql:"index"`
 }
+
+type PaymentByEmail struct {
+	CreatedAt     time.Time   `json:"created_at"`
+	PaymentDate   null.Time   `json:"payment_date"`
+	Type          null.String `json:"type"`
+	ProductType   null.String `json:"product_type"`
+	PaymentID     null.String `json:"payment_id"`
+	Currency      null.String `json:"currency"`
+	Amount        null.Float  `json:"amount"`
+	CCNumber      null.String `json:"cc_number"`
+	PaymentStatus null.String `json:"payment_status"`
+}

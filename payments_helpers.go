@@ -12,7 +12,7 @@ func getPaymentByEmail(ctx *gin.Context, email string) ([]PaymentByEmail, error)
 
 	paymentData := []PaymentByEmail{}
 
-	rows, err := DB.Query(ctx, `select p.created_at, o."PaymentDate", o."Type", o."Amount", p."CCNumber", p."PaymentStatus"
+	rows, err := DB.Query(ctx, `select p.created_at, o."PaymentDate", o."Type", o."Amount", o."Currency", p."CCNumber", p."PaymentStatus"
 	from payments as p, orders as o, accounts as a
 	where a."Email" = $1
 	and a.id = o."AccountID"
@@ -29,7 +29,7 @@ func getPaymentByEmail(ctx *gin.Context, email string) ([]PaymentByEmail, error)
 		var p PaymentByEmail
 		var amount string
 
-		err := rows.Scan(&p.CreatedAt, &p.PaymentDate, &p.Type, &amount, &p.CCNumber, &p.PaymentStatus)
+		err := rows.Scan(&p.CreatedAt, &p.PaymentDate, &p.Type, &amount, &p.Currency, &p.CCNumber, &p.PaymentStatus)
 
 		if err != nil {
 			return paymentData, err

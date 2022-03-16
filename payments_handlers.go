@@ -40,6 +40,18 @@ func handleCreatePayment(c *gin.Context) {
 	}
 }
 
+func handlePaymentFetchByEmail(c *gin.Context) {
+	var email = c.Param("email")
+
+	ord, err := getPaymentByEmail(c, email)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"Error": err})
+	} else {
+		c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": ord, "success": true})
+	}
+}
+
 func handleUpdatePayment(c *gin.Context) {
 	var p Payment
 	c.BindJSON(&p)

@@ -37,6 +37,7 @@ func initRouter() *gin.Engine {
 	{
 		payments.GET("/all/:email", handlePaymentFetchByEmail)
 		payments.POST("/", handleCreatePayment)
+		payments.GET("/payment/:paramx", handlePaymentFetchViaParamX)
 		payments.POST("/update", handleUpdatePayment)
 	}
 

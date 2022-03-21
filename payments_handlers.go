@@ -2,11 +2,13 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v4"
 )
 
 func handleCreatePayment(c *gin.Context) {
@@ -37,6 +39,23 @@ func handleCreatePayment(c *gin.Context) {
 	} else {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Errorf("no values to insert")})
 		return
+	}
+}
+
+func handlePaymentFetchViaParamX(c *gin.Context) {
+
+	var paramx = c.Param("paramx")
+
+	payment, err := fetchPaymentByParamX(c, paramx)
+
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Payment not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"Error": err})
+	} else {
+		c.JSON(http.StatusOK, payment)
 	}
 }
 
@@ -98,6 +117,36 @@ func handleUpdatePayment(c *gin.Context) {
 
 	c.JSON(http.StatusOK, p)
 
+}
+
+func fetchPaymentByParamX(ctx *gin.Context, paramX string) (paymentWithFullName, error) {
+	var p paymentWithFullName
+
+	if err := DB.QueryRow(ctx, `select a."UserKey", a.id, a."FirstName", a."LastName", a."Email", a."Street", a."City", o."OrderLanguage", o."Amount", o."Currency", 
+	p.id, p."Amount", p."PaymentStatus", p."PaymentType", p."OrderID", p."ParamX", p."AuthNo", p.confirmation_key,
+	p.success, p.pelecard_token, p."TransactionID", p."ErrorMsg", p."CardHebrewName", p."CCAbroadCard", p."CCBrand",
+	p."CCCompanyClearer", p."CCCompanyIssuer", p.credit_type, p."CCExpDate", p."CCNumber", p."DebitCode", p."DebitCurrency",
+	p."DebitTotal", p."DebitType", p."FirstPaymentTotal", p."FixedPaymentTotal", p.j_param, p."TotalPayments",
+	p."TransactionInitTime", p."TransactionUpdateTime", p."VoucherID", p."Ordkey", p.created_at, p.updated_at, p.deleted_at 
+	from accounts as a, orders as o, payments as p
+	where p."ParamX" = $1
+	and p."OrderID" = o.id 
+	and a.id = o."AccountID"
+	order by p."ParamX" asc`, paramX).Scan(
+		&p.UserKey, &p.AccountID, &p.FirstName, &p.LastName, &p.Email, &p.Street, &p.City, &p.Language, &p.Amount, &p.Currency,
+		&p.ID, &p.Amount, &p.PaymentStatus, &p.PaymentType, &p.OrderID, &p.ParamX, &p.AuthNo, &p.ConfirmationKey,
+		&p.Success, &p.PelecardToken, &p.TransactionID, &p.ErrorMsg, &p.CardHebrewName, &p.CCAbroadCard, &p.CCBrand,
+		&p.CCCompanyClearer, &p.CCCompanyIssuer, &p.CreditType, &p.CCExpDate, &p.CCNumber, &p.DebitCode,
+		&p.DebitCurrency, &p.DebitTotal, &p.DebitType, &p.FirstPaymentTotal, &p.FixedPaymentTotal, &p.JParam,
+		&p.TotalPayments, &p.TransactionInitTime, &p.TransactionUpdateTime, &p.VoucherID,
+		&p.Ordkey, &p.CreatedAt, &p.UpdatedAt, &p.DeletedAt,
+	); err != nil {
+		fmt.Println("--err--", err)
+		log.Printf("\n## ERROR - NO PAYMENT for ParamX %v\n", paramX)
+		return p, err
+	}
+
+	return p, nil
 }
 
 func preparePaymentCreateQuery(req Payment) (string, string, []interface{}) {

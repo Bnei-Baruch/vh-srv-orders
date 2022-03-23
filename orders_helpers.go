@@ -106,7 +106,7 @@ func createPendingPayment(sum float32, oid uint, pmx string) (Payment, error) {
 
 	DB.Create(&p)
 
-	paramx := "mb-" + strconv.FormatUint(uint64(p.ID), 10) + os.Getenv("SUFX") + pmx
+	paramx := "m-" + strconv.FormatUint(uint64(p.ID), 10) + os.Getenv("SUFX") + pmx
 	ordkey := "ord-" + strconv.FormatUint(uint64(oid), 10) + os.Getenv("SUFX")
 	fmt.Printf(">>>> ParamX: %s\n", paramx)
 

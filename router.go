@@ -41,6 +41,13 @@ func initRouter() *gin.Engine {
 		payments.POST("/update", handleUpdatePayment)
 	}
 
+	baseV2Path := r.Group("/v2")
+
+	participant := baseV2Path.Group("/payment")
+	{
+		participant.PATCH("/", handlePaymentUpdate)
+	}
+
 	r.GET("/status/:email", Status)
 
 	return r

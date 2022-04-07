@@ -38,6 +38,11 @@ func handleCreateOrderAndPay(c *gin.Context) {
 		return
 	}
 
+	if (req.PaymentType.String == "manual" || req.PaymentType.String == "helphaver") && req.PaymentType.Valid {
+		c.JSON(http.StatusCreated, gin.H{"Order": ord, "Payment": p})
+		return
+	}
+
 	paramx := "mb-" + strconv.FormatUint(uint64(p.ID), 10) + os.Getenv("SUFX")
 	ordkey := "ord-" + strconv.FormatUint(uint64(ord.ID), 10) + os.Getenv("SUFX")
 

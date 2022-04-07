@@ -10,7 +10,19 @@ CREATE TABLE IF NOT EXISTS payments_offline (
     created_at              TIMESTAMP WITH TIME ZONE DEFAULT now(),
     updated_at              TIMESTAMP WITH TIME ZONE DEFAULT now(),
     deleted_at              TIMESTAMP WITH TIME ZONE DEFAULT now(),
-    CONSTRAINT fk_payment_id  FOREIGN KEY(payment_id) REFERENCES payments(id),
+    CONSTRAINT fk_payment_id  FOREIGN KEY(payment_id) REFERENCES payments(id)
+);
+
+CREATE TABLE IF NOT EXISTS payments_helphaver (
+    id                      SERIAL PRIMARY KEY,
+    status                  TEXT,
+    payment_id              INT NOT NULL,
+    validation_message      TEXT,
+    rejection_message       TEXT,
+    created_at              TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    updated_at              TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    deleted_at              TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    CONSTRAINT fk_payment_id  FOREIGN KEY(payment_id) REFERENCES payments(id)
 );
 
 COMMIT;

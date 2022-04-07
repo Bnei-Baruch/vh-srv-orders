@@ -77,30 +77,6 @@ type Payment struct {
 	TransactionInitTime   null.String `json:"TransactionInitTime" gorm:"Column:TransactionInitTime"`
 	TransactionUpdateTime null.String `json:"TransactionUpdateTime" gorm:"Column:TransactionUpdateTime"`
 	VoucherID             null.String `json:"VoucherID" gorm:"Column:VoucherID"`
-
-	Invoices []Invoice `gorm:"foreignkey:PaymentID"`
-}
-
-//Invoice Details is defined by
-type Invoice struct {
-	ID        uint       `json:"ID" gorm:"primary_key"`
-	CreatedAt time.Time  `json:"-"`
-	UpdatedAt time.Time  `json:"-"`
-	DeletedAt *time.Time `json:"-" sql:"index"`
-
-	FirstName string `json:"FirstName" gorm:"Column:FirstName;type:varchar(100)"`
-	LastName  string `json:"LastName" gorm:"Column:LastName;type:varchar(100)"`
-	Email     string `json:"Email" gorm:"Column:Email;type:varchar(100)"`
-	Phone     string `json:"Phone" gorm:"Column:Phone;type:varchar(30)"`
-	Street    string `json:"Street" gorm:"Column:Street;type:varchar(100)"`
-	City      string `json:"City" gorm:"Column:City;type:varchar(85)"`
-	State     string `json:"State" gorm:"Column:State;type:varchar(85)"`
-	Postcode  string `json:"Postcode" gorm:"Column:Postcode;type:varchar(85)"`
-	Country   string `json:"Country" gorm:"Column:Country;type:varchar(50)"`
-
-	OrderLanguage string `json:"OrderLanguage" gorm:"Column:OrderLanguage;type:varchar(10)"`
-
-	PaymentID uint `json:"PaymentID" gorm:"Column:PaymentID"`
 }
 
 //RequestOrder ...
@@ -133,6 +109,34 @@ type RequestOrder struct {
 	SuccessURL null.String `json:"SuccessURL"`
 	ErrorURL   null.String `json:"ErrorURL"`
 	CancelURL  null.String `json:"CancelURL"`
+
+	//Offline Payment
+	PaymentType          null.String `json:"PaymentType,omitempty"`
+	PaymentMethod        null.String `json:"PaymentMethod,omitempty"`
+	Receipt              null.String `json:"Receipt,omitempty"`
+	ExtraInfo            null.String `json:"ExtraInfo,omitempty"`
+	OfflinePaymentStatus null.String `json:"OfflinePaymentStatus,omitempty"`
+
+	//Helphaver Payment
+	ValidationMessage null.String `json:"ValidationMessage,omitempty"`
+	RejectionMessage  null.String `json:"RejectionMessage,omitempty"`
+}
+
+type OfflinePayment struct {
+	PaymentType   null.String `json:"PaymentType,omitempty"`
+	PaymentMethod null.String `json:"PaymentMethod"`
+	Receipt       null.String `json:"Receipt"`
+	ExtraInfo     null.String `json:"ExtraInfo"`
+	Status        null.String `json:"Status"`
+	PaymentID     null.Int    `json:"PaymentID"`
+}
+
+type HelpHavedPayment struct {
+	PaymentType       null.String `json:"PaymentType,omitempty"`
+	Status            null.String `json:"Status"`
+	PaymentID         null.Int    `json:"PaymentID"`
+	ValidationMessage null.String `json:"ValidationMessage"`
+	RejectionMessage  null.String `json:"RejectionMessage"`
 }
 
 // Account is defined by

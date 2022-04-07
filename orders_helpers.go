@@ -122,6 +122,13 @@ func createPayment(c *gin.Context, req RequestOrder, o Order) (Payment, error) {
 	payment_status := "pending"
 	payment_type := "pelecard"
 
+	if req.PaymentType.String == "manual" && req.PaymentType.Valid {
+		payment_type = "manual"
+	}
+	if req.PaymentType.String == "helphaver" && req.PaymentType.Valid {
+		payment_type = "helphaver"
+	}
+
 	p := Payment{
 		Amount:        req.Amount,
 		PaymentType:   null.NewString(payment_type, true),
@@ -136,6 +143,21 @@ func createPayment(c *gin.Context, req RequestOrder, o Order) (Payment, error) {
 		&p.ID,
 	); err != nil {
 		return p, err
+	}
+
+	if req.PaymentType.String == "manual" && req.PaymentType.Valid {
+		offlinePaymentErr := createOfflinePayment(c, req, p.ID, payment_status)
+
+		if offlinePaymentErr != nil {
+			return p, offlinePaymentErr
+		}
+	}
+	if req.PaymentType.String == "helphaver" && req.PaymentType.Valid {
+		offlinePaymentErr := createHelpHaverPayment(c, req, p.ID, payment_status)
+
+		if offlinePaymentErr != nil {
+			return p, offlinePaymentErr
+		}
 	}
 
 	return p, nil

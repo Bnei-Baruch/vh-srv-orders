@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 	"github.com/jackc/pgx/v4"
 )
 
@@ -57,6 +58,65 @@ func handlePaymentFetchViaParamX(c *gin.Context) {
 	} else {
 		c.JSON(http.StatusOK, payment)
 	}
+}
+
+func handlePaymentUpdate(c *gin.Context) {
+
+	var req OfflinePayment
+	errRequest := c.ShouldBindBodyWith(&req, binding.JSON)
+
+	if errRequest != nil {
+		log.Println("Err:", errRequest)
+		c.JSON(http.StatusBadRequest, gin.H{"Error": errRequest})
+		return
+	}
+
+	if req.PaymentType.String == "manual" {
+		var offReq OfflinePayment
+		offErrRequest := c.ShouldBindBodyWith(&offReq, binding.JSON)
+
+		if offErrRequest != nil {
+			log.Println("Err:", offErrRequest)
+			c.JSON(http.StatusBadRequest, gin.H{"Error": offErrRequest.Error()})
+			return
+		}
+		err := updateOfflinePayment(c, offReq)
+
+		if err != nil {
+			if err == pgx.ErrNoRows {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Payment not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"Error": err})
+			return
+		} else {
+			c.Status(http.StatusOK)
+			return
+		}
+	} else if req.PaymentType.String == "helphaver" {
+		var helpReq HelpHavedPayment
+		errRequest := c.ShouldBindBodyWith(&helpReq, binding.JSON)
+
+		if errRequest != nil {
+			log.Println("Err:", errRequest)
+			c.JSON(http.StatusBadRequest, gin.H{"Error": errRequest})
+			return
+		}
+		err := updateHelpHavePayment(c, helpReq)
+
+		if err != nil {
+			if err == pgx.ErrNoRows {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Helphaver payment not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"Error": err})
+			return
+		} else {
+			c.Status(http.StatusOK)
+			return
+		}
+	}
+
 }
 
 func handlePaymentFetchByEmail(c *gin.Context) {

@@ -183,7 +183,7 @@ func createPendingPayment(c *gin.Context, sum null.Float, oid int64, pmx null.St
 		return p, err
 	}
 
-	paramx := "mb-" + strconv.FormatUint(uint64(p.ID), 10) + os.Getenv("SUFX") + pmx.String
+	paramx := "m-" + strconv.FormatUint(uint64(p.ID), 10) + os.Getenv("SUFX") + pmx.String
 	ordkey := "ord-" + strconv.FormatUint(uint64(oid), 10) + os.Getenv("SUFX")
 	fmt.Printf(">>>> ParamX: %s\n", paramx)
 

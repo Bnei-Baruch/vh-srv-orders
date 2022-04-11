@@ -20,6 +20,6 @@ case $1 in
 		psql -h localhost --port $PGPORT -d $PGDATABASE -U $PGUSER < "$2"
 	;;
     "run")
-    ./bin/orders
+    ./orders
 esac
 

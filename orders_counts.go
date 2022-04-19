@@ -7,8 +7,15 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type paidDetailC struct {
+	TotalPeoplePaid       int64 `json:"total_people_paid"`
+	TotalPeoplePaidWithCC int64 `json:"total_people_paid_with_cc"`
+	TotalTicketSold       int64 `json:"total_ticket_sold"`
+}
+
 func handleOrdersCount(c *gin.Context) {
 	var total int64
+	var res paidDetailC
 	filter := string(c.Params.ByName("filter"))
 	switch filter {
 	case "all":
@@ -27,13 +34,57 @@ func handleOrdersCount(c *gin.Context) {
 		total = countsTickets30Orders(c)
 	case "convention":
 		total = countsConventionOrders(c)
+	// for event in may2022
+	case "0522":
+		res = paidDetailCount(c)
 	default:
 		total = countsAllOrders(c)
 	}
+
+	if filter == "0522" {
+		c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": res, "success": true})
+		return
+	}
+
 	fmt.Printf("\n>> Count %s : %d", filter, total)
 	c.JSON(http.StatusOK, gin.H{filter: total})
 }
 
+func paidDetailCount(ctx *gin.Context) paidDetailC {
+
+	totalPeoplePaid := `select count(distinct "AccountID") 
+	from orders where "ProductType" like 't-0522-%' and "Status" = 'paid'`
+
+	totalPeoplePaidWithCC := `select count(distinct o."AccountID")
+	from orders as o, payments as p
+	where o."ProductType" like 't-0522-%'
+	and o."Status" = 'paid'
+	and o.id = p."OrderID"
+	and p."PaymentType" = 'pelecard'`
+
+	totalTicketSold := `select count(distinct "AccountID") 
+	from orders where "ProductType" like 't-0522-%' and "Status" = 'paid'`
+
+	var r paidDetailC
+	if fErr := DB.QueryRow(ctx, totalPeoplePaid).Scan(
+		&r.TotalPeoplePaid,
+	); fErr != nil {
+		return r
+	}
+
+	if sErr := DB.QueryRow(ctx, totalPeoplePaidWithCC).Scan(
+		&r.TotalPeoplePaidWithCC,
+	); sErr != nil {
+		return r
+	}
+	if tErr := DB.QueryRow(ctx, totalTicketSold).Scan(
+		&r.TotalTicketSold,
+	); tErr != nil {
+		return r
+	}
+
+	return r
+}
 func countsTicketsOrders(ctx *gin.Context) int64 {
 	query := `
 select count(distinct o."AccountID") as total

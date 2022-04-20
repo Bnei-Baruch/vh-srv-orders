@@ -19,7 +19,7 @@ func getPaymentByEmail(ctx *gin.Context, email string) ([]PaymentByEmail, error)
 	where a."Email" = $1
 	and a.id = o."AccountID"
 	and o.id = p."OrderID"
-	order by o."PaymentDate" desc`, email)
+	order by p.created_at desc`, email)
 	if err != nil {
 		return paymentData, err
 	}

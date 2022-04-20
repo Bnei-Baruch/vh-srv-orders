@@ -218,6 +218,7 @@ func updatePayment(ctx *gin.Context, req RequestPaid) (Payment, error) {
 		return p, errors.New(req.Error.String)
 	}
 
+	fmt.Println(">>> debug: reqUSERKEY - orderID: %s", req.UserKey.String)
 	orderid, err := strconv.ParseUint(strings.Split(req.UserKey.String, "-")[1], 10, 0)
 	if err != nil {
 		return p, err

@@ -39,6 +39,7 @@ func initRouter() *gin.Engine {
 		payments.POST("/", handleCreatePayment)
 		payments.GET("/payment/:paramx", handlePaymentFetchViaParamX)
 		payments.POST("/update", handleUpdatePayment)
+		payments.GET("/activities", handleGetActivities)
 	}
 
 	baseV2Path := r.Group("/v2")

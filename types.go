@@ -339,3 +339,20 @@ type PaymentByEmail struct {
 	CCNumber      null.String `json:"cc_number"`
 	PaymentStatus null.String `json:"payment_status"`
 }
+
+type PaymentActivitiesRes struct {
+	CreatedAt     null.Time   `json:"created_at"`
+	Amount        null.Float  `json:"amount"`
+	PaymentType   null.String `json:"payment_type"`
+	OrderID       null.Int    `json:"order_id"`
+	ParamX        null.String `json:"additional_details_param_x" gorm:"Column:ParamX"`
+	PaymentStatus null.String `json:"payment_status"`
+	CCNumber      null.String `json:"cc_number"`
+	CCExpDate     null.String `json:"cc_exp_date"`
+	ProductType   null.String `json:"product_type"`
+	Type          null.String `json:"type"`
+	FirstName     null.String `json:"first_name"`
+	LastName      null.String `json:"last_name"`
+	Email         null.String `json:"email"`
+	Country       null.String `json:"country"`
+}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -128,6 +129,44 @@ func handlePaymentFetchByEmail(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"Error": err})
 	} else {
 		c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": ord, "success": true})
+	}
+}
+
+func handleGetActivities(c *gin.Context) {
+	skip := c.Query("skip")
+	limit := c.Query("limit")
+	email := c.Query("email")
+	productType := c.Query("product-type")
+	paymentType := c.Query("payment-type")
+
+	if skip == "" {
+		skip = "0"
+	}
+
+	if limit == "" {
+		limit = "10"
+	}
+
+	// String conversion to int
+	intSkip, err := strconv.Atoi(skip)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid skip value! Accepted value is INTEGER", "success": false})
+		return
+	}
+
+	// String conversion to int
+	intLimit, err := strconv.Atoi(limit)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit value! Accepted value is INTEGER", "success": false})
+		return
+	}
+
+	payAct, err := getPaymentActivities(c, email, productType, paymentType, intSkip, intLimit)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"Error": err})
+	} else {
+		c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": payAct, "success": true})
 	}
 }
 

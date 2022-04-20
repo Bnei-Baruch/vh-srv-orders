@@ -10,6 +10,42 @@ import (
 	"gopkg.in/guregu/null.v4"
 )
 
+func getPaymentActivities(ctx *gin.Context, email string, productType string, paymentType string, skip int, limit int) ([]PaymentActivitiesRes, error) {
+
+	PaymentActivities := []PaymentActivitiesRes{}
+
+	userDbWhereQuery, orderByQuery := buildAndGetWherePaymentActQuery(email, productType, paymentType)
+
+	rows, err := DB.Query(ctx, `SELECT p.created_at,  p."Amount", p."PaymentType",  p."OrderID", 
+	p."ParamX", p."PaymentStatus", p."CCNumber", p."CCExpDate", 
+	o."ProductType", o."Type", 
+	a."FirstName", a."LastName", a."Email", a."Country" 
+	from payments as p, orders as o, accounts as a`+userDbWhereQuery+
+		orderByQuery+
+		" LIMIT $1 OFFSET $2", limit, skip)
+	if err != nil {
+		return PaymentActivities, err
+	}
+
+	defer rows.Close()
+
+	for rows.Next() {
+
+		var p PaymentActivitiesRes
+
+		err := rows.Scan(&p.CreatedAt, &p.Amount, &p.PaymentType, &p.OrderID, &p.ParamX, &p.PaymentStatus, &p.CCNumber, &p.CCExpDate, &p.ProductType, &p.Type, &p.FirstName, &p.LastName, &p.Email, &p.Country)
+
+		if err != nil {
+			fmt.Println("--error while scanning payment activities res--", err)
+			return PaymentActivities, err
+		}
+
+		PaymentActivities = append(PaymentActivities, p)
+	}
+
+	return PaymentActivities, nil
+}
+
 func getPaymentByEmail(ctx *gin.Context, email string) ([]PaymentByEmail, error) {
 
 	paymentData := []PaymentByEmail{}
@@ -258,4 +294,45 @@ func prepareHelpHaverPaymentUpdateQuery(req HelpHavedPayment) (string, []interfa
 	updateArgument := strings.Join(updateStrings, ",")
 
 	return updateArgument, args
+}
+
+func buildAndGetWherePaymentActQuery(email string, productType string, paymentType string) (string, string) {
+
+	var whereString strings.Builder
+	var orderBy strings.Builder
+	var whereCondition strings.Builder
+	whereString.WriteString(" WHERE")
+	whereCondition.WriteString("")
+
+	whereCondition.WriteString(" p.\"OrderID\" = o.id AND o.\"AccountID\" = a.id")
+
+	// WHERE query generation based on parameters
+	if email != "" {
+		whereCondition.WriteString(fmt.Sprintf(" AND LOWER(a.\"Email\") LIKE LOWER('%%%s%%')", email))
+	}
+
+	if productType != "" {
+		if whereCondition.String() != "" {
+			whereCondition.WriteString(fmt.Sprintf(" AND LOWER(o.\"ProductType\")=LOWER('%s')", productType))
+		} else {
+			whereCondition.WriteString(fmt.Sprintf(" LOWER(o.\"ProductType\")=LOWER('%s')", productType))
+		}
+	}
+
+	if paymentType != "" {
+		if whereCondition.String() != "" {
+			whereCondition.WriteString(fmt.Sprintf(" AND LOWER(p.\"PaymentType\")=LOWER('%s')", paymentType))
+		} else {
+			whereCondition.WriteString(fmt.Sprintf(" LOWER(p.\"PaymentType\")=LOWER('%s')", paymentType))
+		}
+	}
+
+	orderBy.WriteString(" order by p.created_at desc")
+
+	if whereCondition.String() != "" {
+		whereString.WriteString(whereCondition.String())
+	} else {
+		whereString.Reset()
+	}
+	return whereString.String(), orderBy.String()
 }

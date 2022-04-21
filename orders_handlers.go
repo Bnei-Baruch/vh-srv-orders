@@ -51,6 +51,13 @@ func handleOrdersPaid(c *gin.Context) {
 		return
 	}
 
+	if len(rp.UserKey.String) == 0 {
+		log.Println("Err: No Order ID provided")
+		log.Println(">> ParamX: " + rp.ParamX.String)
+		c.JSON(http.StatusBadRequest, gin.H{"Error": "No order id provided in UserKey"})
+		return
+	}
+
 	p, err := updatePayment(c, rp)
 
 	if err != nil {

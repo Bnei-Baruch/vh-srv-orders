@@ -162,11 +162,12 @@ func handleGetActivities(c *gin.Context) {
 	}
 
 	payAct, err := getPaymentActivities(c, email, productType, paymentType, intSkip, intLimit)
+	count, _ := getTotalParticipationStatusCount(c, email, productType, paymentType)
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"Error": err})
 	} else {
-		c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": payAct, "success": true})
+		c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": payAct, "totalCount": count, "success": true})
 	}
 }
 

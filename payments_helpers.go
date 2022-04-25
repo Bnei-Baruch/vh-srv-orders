@@ -46,6 +46,19 @@ func getPaymentActivities(ctx *gin.Context, email string, productType string, pa
 	return PaymentActivities, nil
 }
 
+func getTotalParticipationStatusCount(ctx *gin.Context, email string, productType string, paymentType string) (int, error) {
+	var count int
+
+	userDbWhereQuery, _ := buildAndGetWherePaymentActQuery(email, productType, paymentType)
+
+	err := DB.QueryRow(ctx, `SELECT COUNT(*) FROM payments as p, orders as o, accounts as a 
+	`+userDbWhereQuery).Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 func getPaymentByEmail(ctx *gin.Context, email string) ([]PaymentByEmail, error) {
 
 	paymentData := []PaymentByEmail{}

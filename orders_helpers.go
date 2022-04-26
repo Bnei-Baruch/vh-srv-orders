@@ -57,6 +57,7 @@ func createOrder(c *gin.Context, req RequestOrder) (Order, error) {
 		RecuringFreq:  req.RecurringFreq,
 		Organization:  req.Organization,
 		Amount:        req.Amount,
+		SKU:           req.SKU,
 		Currency:      req.Currency,
 		Status:        null.NewString(order_status, true),
 		OrderLanguage: req.OrderLanguage,

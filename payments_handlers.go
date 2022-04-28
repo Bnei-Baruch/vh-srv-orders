@@ -63,7 +63,7 @@ func handlePaymentFetchViaParamX(c *gin.Context) {
 
 func handlePaymentUpdate(c *gin.Context) {
 
-	var req OfflinePayment
+	var req OfflineAndPelecardPayment
 	errRequest := c.ShouldBindBodyWith(&req, binding.JSON)
 
 	if errRequest != nil {
@@ -72,16 +72,23 @@ func handlePaymentUpdate(c *gin.Context) {
 		return
 	}
 
-	if req.PaymentType.String == "manual" {
-		var offReq OfflinePayment
-		offErrRequest := c.ShouldBindBodyWith(&offReq, binding.JSON)
+	if req.PaymentType.String == "manual" || req.PaymentType.String == "pelecard" {
+		var offAndPeleReq OfflineAndPelecardPayment
+		offAndPeleErrRequest := c.ShouldBindBodyWith(&offAndPeleReq, binding.JSON)
 
-		if offErrRequest != nil {
-			log.Println("Err:", offErrRequest)
-			c.JSON(http.StatusBadRequest, gin.H{"Error": offErrRequest.Error()})
+		if offAndPeleErrRequest != nil {
+			log.Println("Err:", offAndPeleErrRequest)
+			c.JSON(http.StatusBadRequest, gin.H{"Error": offAndPeleErrRequest.Error()})
 			return
 		}
-		err := updateOfflinePayment(c, offReq)
+
+		var err error
+
+		if offAndPeleReq.PaymentType.String == "manual" {
+			err = updateOfflinePayment(c, offAndPeleReq)
+		} else {
+			err = updatePelecardPayment(c, offAndPeleReq)
+		}
 
 		if err != nil {
 			if err == pgx.ErrNoRows {
@@ -116,8 +123,10 @@ func handlePaymentUpdate(c *gin.Context) {
 			c.Status(http.StatusOK)
 			return
 		}
+	} else {
+		c.JSON(http.StatusBadRequest, gin.H{"Error": "Invalid payment type"})
+		return
 	}
-
 }
 
 func handlePaymentFetchByEmail(c *gin.Context) {

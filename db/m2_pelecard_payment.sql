@@ -1,6 +1,6 @@
 BEGIN;
 
-CREATE TABLE IF NOT EXISTS payments_offline (
+CREATE TABLE IF NOT EXISTS payments_pelecard (
     id                        SERIAL PRIMARY KEY,
     payment_method            TEXT NOT NULL,
     receipt                   TEXT,

@@ -105,10 +105,28 @@ func getPaymentByEmail(ctx *gin.Context, email string) ([]PaymentByEmail, error)
 
 func createOfflinePayment(c *gin.Context, req RequestOrder, paymentID uint, status string) error {
 
-	createString, numString, createQueryArgs := prepareOfflinePaymentCreateQuery(req, paymentID, status)
+	createString, numString, createQueryArgs := prepareOfflineAndPelecardPaymentCreateQuery(req, paymentID, status)
 
 	if len(createQueryArgs) != 0 {
 		_, err := DB.Exec(c, fmt.Sprintf(`INSERT INTO payments_offline (%s) VALUES (%s)`, createString, numString),
+			createQueryArgs...)
+		if err != nil {
+			return fmt.Errorf("problem creating offline payment: %w", err)
+		}
+
+		return nil
+	} else {
+		return fmt.Errorf("invalid values")
+	}
+
+}
+
+func createPelecardPayment(c *gin.Context, req RequestOrder, paymentID uint, status string) error {
+
+	createString, numString, createQueryArgs := prepareOfflineAndPelecardPaymentCreateQuery(req, paymentID, status)
+
+	if len(createQueryArgs) != 0 {
+		_, err := DB.Exec(c, fmt.Sprintf(`INSERT INTO payments_pelecard (%s) VALUES (%s)`, createString, numString),
 			createQueryArgs...)
 		if err != nil {
 			return fmt.Errorf("problem creating offline payment: %w", err)
@@ -139,9 +157,31 @@ func createHelpHaverPayment(c *gin.Context, req RequestOrder, paymentID uint, st
 
 }
 
-func updateOfflinePayment(c *gin.Context, req OfflinePayment) error {
+func updatePelecardPayment(c *gin.Context, req OfflineAndPelecardPayment) error {
 
-	toUpdate, toUpdateArgs := prepareOfflinePaymentUpdateQuery(req)
+	toUpdate, toUpdateArgs := prepareOfflineAndPelecardPaymentUpdateQuery(req)
+
+	if len(toUpdateArgs) != 0 {
+		updateRes, err := DB.Exec(c, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdate, req.PaymentID.Int64),
+			toUpdateArgs...)
+		if err != nil {
+			return fmt.Errorf("problem updating pelecard payments: %w", err)
+		}
+
+		if updateRes.RowsAffected() == 0 {
+			return fmt.Errorf("pelecard payment not updated as no rows affected")
+		}
+
+	} else {
+		fmt.Println("invalid values")
+	}
+
+	return nil
+}
+
+func updateOfflinePayment(c *gin.Context, req OfflineAndPelecardPayment) error {
+
+	toUpdate, toUpdateArgs := prepareOfflineAndPelecardPaymentUpdateQuery(req)
 
 	if len(toUpdateArgs) != 0 {
 		updateRes, err := DB.Exec(c, fmt.Sprintf(`UPDATE payments_offline SET %s WHERE payment_id=%d`, toUpdate, req.PaymentID.Int64),
@@ -183,7 +223,7 @@ func updateHelpHavePayment(c *gin.Context, req HelpHavedPayment) error {
 	return nil
 }
 
-func prepareOfflinePaymentCreateQuery(req RequestOrder, paymentID uint, status string) (string, string, []interface{}) {
+func prepareOfflineAndPelecardPaymentCreateQuery(req RequestOrder, paymentID uint, status string) (string, string, []interface{}) {
 	var createStrings []string
 	var numString []string
 	var args []interface{}
@@ -220,7 +260,7 @@ func prepareOfflinePaymentCreateQuery(req RequestOrder, paymentID uint, status s
 	return concatedCreateString, concatedNumString, args
 }
 
-func prepareOfflinePaymentUpdateQuery(req OfflinePayment) (string, []interface{}) {
+func prepareOfflineAndPelecardPaymentUpdateQuery(req OfflineAndPelecardPayment) (string, []interface{}) {
 	var updateStrings []string
 	var args []interface{}
 

@@ -29,17 +29,16 @@ func handleCreatePayment(c *gin.Context) {
 	createString, numString, createQueryArgs := preparePaymentCreateQuery(p)
 
 	if len(createQueryArgs) != 0 {
-		_, err := DB.Exec(c, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s)`, createString, numString),
-			createQueryArgs...)
-		if err != nil {
+		if err := DB.QueryRow(c, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createString, numString),
+			createQueryArgs...).Scan(
+			&p.ID,
+		); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err})
 			return
 		}
-
-		c.JSON(http.StatusOK, p)
-		return
+		c.JSON(http.StatusCreated, gin.H{"message": "Created!", "data": p, "success": true})
 	} else {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Errorf("no values to insert")})
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Errorf("no values to insert")})
 		return
 	}
 }

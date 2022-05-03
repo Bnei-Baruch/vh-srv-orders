@@ -122,7 +122,7 @@ type RequestOrder struct {
 	RejectionMessage  null.String `json:"RejectionMessage,omitempty"`
 }
 
-type OfflineAndPelecardPayment struct {
+type OfflinePayment struct {
 	PaymentType   null.String `json:"PaymentType,omitempty"`
 	PaymentMethod null.String `json:"PaymentMethod"`
 	Receipt       null.String `json:"Receipt"`

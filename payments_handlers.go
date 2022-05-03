@@ -63,7 +63,7 @@ func handlePaymentFetchViaParamX(c *gin.Context) {
 
 func handlePaymentUpdate(c *gin.Context) {
 
-	var req OfflineAndPelecardPayment
+	var req OfflinePayment
 	errRequest := c.ShouldBindBodyWith(&req, binding.JSON)
 
 	if errRequest != nil {
@@ -72,23 +72,17 @@ func handlePaymentUpdate(c *gin.Context) {
 		return
 	}
 
-	if req.PaymentType.String == "manual" || req.PaymentType.String == "pelecard" {
-		var offAndPeleReq OfflineAndPelecardPayment
-		offAndPeleErrRequest := c.ShouldBindBodyWith(&offAndPeleReq, binding.JSON)
+	if req.PaymentType.String == "manual" {
+		var offReq OfflinePayment
+		offErrRequest := c.ShouldBindBodyWith(&offReq, binding.JSON)
 
-		if offAndPeleErrRequest != nil {
-			log.Println("Err:", offAndPeleErrRequest)
-			c.JSON(http.StatusBadRequest, gin.H{"Error": offAndPeleErrRequest.Error()})
+		if offErrRequest != nil {
+			log.Println("Err:", offErrRequest)
+			c.JSON(http.StatusBadRequest, gin.H{"Error": offErrRequest.Error()})
 			return
 		}
 
-		var err error
-
-		if offAndPeleReq.PaymentType.String == "manual" {
-			err = updateOfflinePayment(c, offAndPeleReq)
-		} else {
-			err = updatePelecardPayment(c, offAndPeleReq)
-		}
+		err := updateOfflinePayment(c, offReq)
 
 		if err != nil {
 			if err == pgx.ErrNoRows {
@@ -123,6 +117,41 @@ func handlePaymentUpdate(c *gin.Context) {
 			c.Status(http.StatusOK)
 			return
 		}
+	} else if req.PaymentType.String == "pelecard" {
+
+		type PaymentWithPaymentID struct {
+			Payment
+			PaymentID int `json:"PaymentID"`
+		}
+
+		var peleReq PaymentWithPaymentID
+
+		errRequest := c.ShouldBindBodyWith(&peleReq, binding.JSON)
+		if errRequest != nil {
+			log.Println("Err:", errRequest)
+			c.JSON(http.StatusBadRequest, gin.H{"Error": errRequest})
+			return
+		}
+
+		if peleReq.PaymentID == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"Error": "Missing PaymentID"})
+			return
+		}
+
+		err := updatePelecardPayment(c, peleReq.Payment, peleReq.PaymentID)
+
+		if err != nil {
+			if err == pgx.ErrNoRows {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Pelecard payment not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"Error": err})
+			return
+		} else {
+			c.Status(http.StatusOK)
+			return
+		}
+
 	} else {
 		c.JSON(http.StatusBadRequest, gin.H{"Error": "Invalid payment type"})
 		return
@@ -212,7 +241,8 @@ func handleUpdatePayment(c *gin.Context) {
 		updateRes, err := DB.Exec(c, fmt.Sprintf(`UPDATE payments SET %s WHERE id=%d`, toUpdate, p.ID),
 			toUpdateArgs...)
 		if err != nil {
-			fmt.Errorf("problem updating payments: %w", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+			return
 		}
 
 		if updateRes.RowsAffected() == 0 {

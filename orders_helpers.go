@@ -162,7 +162,7 @@ func createPayment(c *gin.Context, req RequestOrder, o Order) (Payment, error) {
 	}
 
 	if payment_type == "pelecard" {
-		pelecardPaymentErr := createPelecardPayment(c, req, p.ID, payment_status)
+		pelecardPaymentErr := createPelecardPayment(c, req, p.ID, p)
 
 		if pelecardPaymentErr != nil {
 			return p, pelecardPaymentErr

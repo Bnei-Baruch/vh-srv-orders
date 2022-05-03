@@ -105,7 +105,7 @@ func getPaymentByEmail(ctx *gin.Context, email string) ([]PaymentByEmail, error)
 
 func createOfflinePayment(c *gin.Context, req RequestOrder, paymentID uint, status string) error {
 
-	createString, numString, createQueryArgs := prepareOfflineAndPelecardPaymentCreateQuery(req, paymentID, status)
+	createString, numString, createQueryArgs := prepareOfflinePaymentCreateQuery(req, paymentID, status)
 
 	if len(createQueryArgs) != 0 {
 		_, err := DB.Exec(c, fmt.Sprintf(`INSERT INTO payments_offline (%s) VALUES (%s)`, createString, numString),
@@ -121,9 +121,9 @@ func createOfflinePayment(c *gin.Context, req RequestOrder, paymentID uint, stat
 
 }
 
-func createPelecardPayment(c *gin.Context, req RequestOrder, paymentID uint, status string) error {
+func createPelecardPayment(c *gin.Context, req RequestOrder, paymentID uint, p Payment) error {
 
-	createString, numString, createQueryArgs := prepareOfflineAndPelecardPaymentCreateQuery(req, paymentID, status)
+	createString, numString, createQueryArgs := preparePelecardPaymentCreateQuery(p, paymentID)
 
 	if len(createQueryArgs) != 0 {
 		_, err := DB.Exec(c, fmt.Sprintf(`INSERT INTO payments_pelecard (%s) VALUES (%s)`, createString, numString),
@@ -137,6 +137,326 @@ func createPelecardPayment(c *gin.Context, req RequestOrder, paymentID uint, sta
 		return fmt.Errorf("invalid values")
 	}
 
+}
+
+func preparePelecardPaymentCreateQuery(req Payment, paymentID uint) (string, string, []interface{}) {
+	var createStrings []string
+	var numString []string
+	var args []interface{}
+
+	if paymentID != 0 {
+		createStrings = append(createStrings, "payment_id")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, paymentID)
+	}
+	if req.Amount.Valid {
+		createStrings = append(createStrings, "amount")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.Amount.Float64)
+	}
+	if req.PaymentStatus.Valid {
+		createStrings = append(createStrings, "payment_status")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.PaymentStatus.String)
+	}
+	if req.PaymentType.Valid {
+		createStrings = append(createStrings, "payment_type")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.PaymentType.String)
+	}
+	if req.OrderID.Valid {
+		createStrings = append(createStrings, "order_id")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.OrderID.Int64)
+	}
+	if req.ParamX.Valid {
+		createStrings = append(createStrings, "paramx")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.ParamX.String)
+	}
+	if req.AuthNo.Valid {
+		createStrings = append(createStrings, "auth_no")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.AuthNo.String)
+	}
+	if req.ConfirmationKey.Valid {
+		createStrings = append(createStrings, "confirmation_key")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.ConfirmationKey.String)
+	}
+	if req.Success.Valid {
+		createStrings = append(createStrings, "success")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.Success.String)
+	}
+	if req.PelecardToken.Valid {
+		createStrings = append(createStrings, "pelecard_token")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.PelecardToken.String)
+	}
+	if req.TransactionID.Valid {
+		createStrings = append(createStrings, "transaction_id")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.TransactionID.String)
+	}
+	if req.ErrorMsg.Valid {
+		createStrings = append(createStrings, "error_msg")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.ErrorMsg.String)
+	}
+	if req.CardHebrewName.Valid {
+		createStrings = append(createStrings, "cardhebrew_name")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.CardHebrewName.String)
+	}
+	if req.CCAbroadCard.Valid {
+		createStrings = append(createStrings, "cc_abroad_card")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.CCAbroadCard.String)
+	}
+	if req.CCBrand.Valid {
+		createStrings = append(createStrings, "cc_brand")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.CCBrand.String)
+	}
+	if req.CCCompanyClearer.Valid {
+		createStrings = append(createStrings, "cc_company_clearer")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.CCCompanyClearer.String)
+	}
+	if req.CCCompanyIssuer.Valid {
+		createStrings = append(createStrings, "cc_company_issuer")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.CCCompanyIssuer.String)
+	}
+	if req.CreditType.Valid {
+		createStrings = append(createStrings, "credit_type")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.CreditType.String)
+	}
+	if req.CCExpDate.Valid {
+		createStrings = append(createStrings, "cc_exp_date")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.CCExpDate.String)
+	}
+	if req.CCNumber.Valid {
+		createStrings = append(createStrings, "cc_number")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.CCNumber.String)
+	}
+	if req.DebitCode.Valid {
+		createStrings = append(createStrings, "debit_code")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.DebitCode.String)
+	}
+	if req.DebitCurrency.Valid {
+		createStrings = append(createStrings, "debit_currency")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.DebitCurrency.String)
+	}
+	if req.DebitTotal.Valid {
+		createStrings = append(createStrings, "debit_total")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.DebitTotal.String)
+	}
+	if req.DebitType.Valid {
+		createStrings = append(createStrings, "debit_type")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.DebitType.String)
+	}
+	if req.FirstPaymentTotal.Valid {
+		createStrings = append(createStrings, "first_payment_total")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.FirstPaymentTotal.String)
+	}
+	if req.FixedPaymentTotal.Valid {
+		createStrings = append(createStrings, "fixed_payment_total")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.FixedPaymentTotal.String)
+	}
+	if req.JParam.Valid {
+		createStrings = append(createStrings, "j_param")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.JParam.String)
+	}
+	if req.TotalPayments.Valid {
+		createStrings = append(createStrings, "total_payments")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.TotalPayments.String)
+	}
+	if req.TransactionInitTime.Valid {
+		createStrings = append(createStrings, "transaction_init_time")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.TransactionInitTime.String)
+	}
+	if req.TransactionUpdateTime.Valid {
+		createStrings = append(createStrings, "transaction_update_time")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.TransactionUpdateTime.String)
+	}
+	if req.VoucherID.Valid {
+		createStrings = append(createStrings, "voucher_id")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.VoucherID.String)
+	}
+	if req.Ordkey.Valid {
+		createStrings = append(createStrings, "ord_key")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.Ordkey.String)
+	}
+	if len(args) != 0 {
+		createStrings = append(createStrings, "created_at")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, time.Now())
+
+		createStrings = append(createStrings, "updated_at")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, time.Now())
+	}
+
+	concatedCreateString := strings.Join(createStrings, ",")
+	concatedNumString := strings.Join(numString, ",")
+
+	return concatedCreateString, concatedNumString, args
+}
+
+func preparePelecardPaymentUpdateQuery(req Payment) (string, []interface{}) {
+	var updateStrings []string
+	var args []interface{}
+
+	if req.Amount.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("amount=$%d", len(updateStrings)+1))
+		args = append(args, req.Amount.Float64)
+	}
+	if req.PaymentStatus.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("payment_status=$%d", len(updateStrings)+1))
+		args = append(args, req.PaymentStatus.String)
+	}
+	if req.PaymentType.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("payment_type=$%d", len(updateStrings)+1))
+		args = append(args, req.PaymentType.String)
+	}
+	if req.OrderID.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("order_id=$%d", len(updateStrings)+1))
+		args = append(args, req.OrderID.Int64)
+	}
+	if req.ParamX.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("paramx=$%d", len(updateStrings)+1))
+		args = append(args, req.ParamX.String)
+	}
+	if req.AuthNo.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("auth_no=$%d", len(updateStrings)+1))
+		args = append(args, req.AuthNo.String)
+	}
+	if req.ConfirmationKey.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("confirmation_key=$%d", len(updateStrings)+1))
+		args = append(args, req.ConfirmationKey.String)
+	}
+	if req.Success.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("success=$%d", len(updateStrings)+1))
+		args = append(args, req.Success.String)
+	}
+	if req.PelecardToken.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("pelecard_token=$%d", len(updateStrings)+1))
+		args = append(args, req.PelecardToken.String)
+	}
+	if req.TransactionID.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("transaction_id=$%d", len(updateStrings)+1))
+		args = append(args, req.TransactionID.String)
+	}
+	if req.ErrorMsg.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("error_msg=$%d", len(updateStrings)+1))
+		args = append(args, req.ErrorMsg.String)
+	}
+	if req.CardHebrewName.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("cardhebrew_name=$%d", len(updateStrings)+1))
+		args = append(args, req.CardHebrewName.String)
+	}
+	if req.CCAbroadCard.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("cc_abroad_card=$%d", len(updateStrings)+1))
+		args = append(args, req.CCAbroadCard.String)
+	}
+	if req.CCBrand.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("cc_brand=$%d", len(updateStrings)+1))
+		args = append(args, req.CCBrand.String)
+	}
+	if req.CCCompanyClearer.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("cc_company_clearer=$%d", len(updateStrings)+1))
+		args = append(args, req.CCCompanyClearer.String)
+	}
+	if req.CCCompanyIssuer.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("cc_company_issuer=$%d", len(updateStrings)+1))
+		args = append(args, req.CCCompanyIssuer.String)
+	}
+	if req.CreditType.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("credit_type=$%d", len(updateStrings)+1))
+		args = append(args, req.CreditType.String)
+	}
+	if req.CCExpDate.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("cc_exp_date=$%d", len(updateStrings)+1))
+		args = append(args, req.CCExpDate.String)
+	}
+	if req.CCNumber.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("cc_number=$%d", len(updateStrings)+1))
+		args = append(args, req.CCNumber.String)
+	}
+	if req.DebitCode.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("debit_code=$%d", len(updateStrings)+1))
+		args = append(args, req.DebitCode.String)
+	}
+	if req.DebitCurrency.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("debit_currency=$%d", len(updateStrings)+1))
+		args = append(args, req.DebitCurrency.String)
+	}
+	if req.DebitTotal.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("debit_total=$%d", len(updateStrings)+1))
+		args = append(args, req.DebitTotal.String)
+	}
+	if req.DebitType.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("debit_type=$%d", len(updateStrings)+1))
+		args = append(args, req.DebitType.String)
+	}
+	if req.FirstPaymentTotal.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("first_payment_total=$%d", len(updateStrings)+1))
+		args = append(args, req.FirstPaymentTotal.String)
+	}
+	if req.FixedPaymentTotal.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("fixed_payment_total=$%d", len(updateStrings)+1))
+		args = append(args, req.FixedPaymentTotal.String)
+	}
+	if req.JParam.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("j_param=$%d", len(updateStrings)+1))
+		args = append(args, req.JParam.String)
+	}
+	if req.TotalPayments.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("total_payments=$%d", len(updateStrings)+1))
+		args = append(args, req.TotalPayments.String)
+	}
+	if req.TransactionInitTime.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("transaction_init_time=$%d", len(updateStrings)+1))
+		args = append(args, req.TransactionInitTime.String)
+	}
+	if req.TransactionUpdateTime.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("transaction_update_time=$%d", len(updateStrings)+1))
+		args = append(args, req.TransactionUpdateTime.String)
+	}
+	if req.VoucherID.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("voucher_id=$%d", len(updateStrings)+1))
+		args = append(args, req.VoucherID.String)
+	}
+	if req.Ordkey.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("ord_key=$%d", len(updateStrings)+1))
+		args = append(args, req.Ordkey.String)
+	}
+
+	if len(args) != 0 {
+		updateStrings = append(updateStrings, fmt.Sprintf("updated_at=$%d", len(updateStrings)+1))
+		args = append(args, time.Now())
+	}
+
+	updateArgument := strings.Join(updateStrings, ",")
+
+	return updateArgument, args
 }
 
 func createHelpHaverPayment(c *gin.Context, req RequestOrder, paymentID uint, status string) error {
@@ -157,12 +477,12 @@ func createHelpHaverPayment(c *gin.Context, req RequestOrder, paymentID uint, st
 
 }
 
-func updatePelecardPayment(c *gin.Context, req OfflineAndPelecardPayment) error {
+func updatePelecardPayment(c *gin.Context, req Payment, paymentID int) error {
 
-	toUpdate, toUpdateArgs := prepareOfflineAndPelecardPaymentUpdateQuery(req)
+	toUpdate, toUpdateArgs := preparePelecardPaymentUpdateQuery(req)
 
 	if len(toUpdateArgs) != 0 {
-		updateRes, err := DB.Exec(c, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdate, req.PaymentID.Int64),
+		updateRes, err := DB.Exec(c, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdate, paymentID),
 			toUpdateArgs...)
 		if err != nil {
 			return fmt.Errorf("problem updating pelecard payments: %w", err)
@@ -179,9 +499,9 @@ func updatePelecardPayment(c *gin.Context, req OfflineAndPelecardPayment) error 
 	return nil
 }
 
-func updateOfflinePayment(c *gin.Context, req OfflineAndPelecardPayment) error {
+func updateOfflinePayment(c *gin.Context, req OfflinePayment) error {
 
-	toUpdate, toUpdateArgs := prepareOfflineAndPelecardPaymentUpdateQuery(req)
+	toUpdate, toUpdateArgs := prepareOfflinePaymentUpdateQuery(req)
 
 	if len(toUpdateArgs) != 0 {
 		updateRes, err := DB.Exec(c, fmt.Sprintf(`UPDATE payments_offline SET %s WHERE payment_id=%d`, toUpdate, req.PaymentID.Int64),
@@ -223,7 +543,7 @@ func updateHelpHavePayment(c *gin.Context, req HelpHavedPayment) error {
 	return nil
 }
 
-func prepareOfflineAndPelecardPaymentCreateQuery(req RequestOrder, paymentID uint, status string) (string, string, []interface{}) {
+func prepareOfflinePaymentCreateQuery(req RequestOrder, paymentID uint, status string) (string, string, []interface{}) {
 	var createStrings []string
 	var numString []string
 	var args []interface{}
@@ -260,7 +580,7 @@ func prepareOfflineAndPelecardPaymentCreateQuery(req RequestOrder, paymentID uin
 	return concatedCreateString, concatedNumString, args
 }
 
-func prepareOfflineAndPelecardPaymentUpdateQuery(req OfflineAndPelecardPayment) (string, []interface{}) {
+func prepareOfflinePaymentUpdateQuery(req OfflinePayment) (string, []interface{}) {
 	var updateStrings []string
 	var args []interface{}
 

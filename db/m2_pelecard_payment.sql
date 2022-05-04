@@ -1,0 +1,43 @@
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS payments_pelecard (
+    id                          SERIAL PRIMARY KEY,
+    payment_id                  INT NOT NULL,
+    amount                      INT,
+    payment_status              TEXT,
+    payment_type                TEXT,
+    order_id                    INT,
+    paramx                      TEXT,
+    auth_no                     TEXT,
+    confirmation_key            TEXT,
+    success                     TEXT,
+    pelecard_token              TEXT,
+    transaction_id              TEXT,
+    error_msg                   TEXT,
+    cardhebrew_name             TEXT,
+    cc_abroad_card              TEXT,
+    cc_brand                    TEXT,
+    cc_company_clearer          TEXT,
+    cc_company_issuer           TEXT,
+    credit_type                 TEXT,
+    cc_exp_date                 TEXT,
+    cc_number                   TEXT,
+    debit_code                  TEXT,
+    debit_currency              TEXT,
+    debit_total                 TEXT,
+    debit_type                  TEXT,
+    first_payment_total         TEXT,
+    fixed_payment_total         TEXT,
+    j_param                     TEXT,
+    total_payments              TEXT,
+    transaction_init_time       TEXT,
+    transaction_update_time     TEXT,
+    voucher_id                  TEXT,
+    ord_key                     TEXT,
+    created_at                  TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    updated_at                  TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    deleted_at                  TIMESTAMP WITH TIME ZONE DEFAULT null,
+    CONSTRAINT fk_payment_id    FOREIGN KEY(payment_id) REFERENCES payments(id)
+);
+
+COMMIT;

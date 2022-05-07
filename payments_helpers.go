@@ -18,7 +18,7 @@ func getPaymentActivities(ctx *gin.Context, email string, productType string, pa
 
 	rows, err := DB.Query(ctx, `SELECT p.created_at,  p."Amount", p."PaymentType",  p."OrderID", 
 	p."ParamX", p."PaymentStatus", p."CCNumber", p."CCExpDate", 
-	o."ProductType", o."Type", 
+	o."ProductType", o."Type", o."Currency",
 	a."FirstName", a."LastName", a."Email", a."Country" 
 	from payments as p, orders as o, accounts as a`+userDbWhereQuery+
 		orderByQuery+
@@ -33,7 +33,7 @@ func getPaymentActivities(ctx *gin.Context, email string, productType string, pa
 
 		var p PaymentActivitiesRes
 
-		err := rows.Scan(&p.CreatedAt, &p.Amount, &p.PaymentType, &p.OrderID, &p.ParamX, &p.PaymentStatus, &p.CCNumber, &p.CCExpDate, &p.ProductType, &p.Type, &p.FirstName, &p.LastName, &p.Email, &p.Country)
+		err := rows.Scan(&p.CreatedAt, &p.Amount, &p.PaymentType, &p.OrderID, &p.ParamX, &p.PaymentStatus, &p.CCNumber, &p.CCExpDate, &p.ProductType, &p.Type, &p.Currency, &p.FirstName, &p.LastName, &p.Email, &p.Country)
 
 		if err != nil {
 			fmt.Println("--error while scanning payment activities res--", err)

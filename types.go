@@ -351,6 +351,7 @@ type PaymentActivitiesRes struct {
 	CCExpDate     null.String `json:"cc_exp_date"`
 	ProductType   null.String `json:"product_type"`
 	Type          null.String `json:"type"`
+	Currency      null.String `json:"currency"`
 	FirstName     null.String `json:"first_name"`
 	LastName      null.String `json:"last_name"`
 	Email         null.String `json:"email"`

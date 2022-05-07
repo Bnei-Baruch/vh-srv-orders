@@ -265,7 +265,7 @@ func fetchPaymentByParamX(ctx *gin.Context, paramX string) (paymentWithFullName,
 	p.success, p.pelecard_token, p."TransactionID", p."ErrorMsg", p."CardHebrewName", p."CCAbroadCard", p."CCBrand",
 	p."CCCompanyClearer", p."CCCompanyIssuer", p.credit_type, p."CCExpDate", p."CCNumber", p."DebitCode", p."DebitCurrency",
 	p."DebitTotal", p."DebitType", p."FirstPaymentTotal", p."FixedPaymentTotal", p.j_param, p."TotalPayments",
-	p."TransactionInitTime", p."TransactionUpdateTime", p."VoucherID", p."Ordkey", p.created_at, p.updated_at, p.deleted_at 
+	p."TransactionInitTime", p."TransactionUpdateTime", p."VoucherID", p."Ordkey", p.created_at, p.updated_at, p.deleted_at, o."SKU" 
 	from accounts as a, orders as o, payments as p
 	where p."ParamX" = $1
 	and p."OrderID" = o.id 
@@ -277,7 +277,7 @@ func fetchPaymentByParamX(ctx *gin.Context, paramX string) (paymentWithFullName,
 		&p.CCCompanyClearer, &p.CCCompanyIssuer, &p.CreditType, &p.CCExpDate, &p.CCNumber, &p.DebitCode,
 		&p.DebitCurrency, &p.DebitTotal, &p.DebitType, &p.FirstPaymentTotal, &p.FixedPaymentTotal, &p.JParam,
 		&p.TotalPayments, &p.TransactionInitTime, &p.TransactionUpdateTime, &p.VoucherID,
-		&p.Ordkey, &p.CreatedAt, &p.UpdatedAt, &p.DeletedAt,
+		&p.Ordkey, &p.CreatedAt, &p.UpdatedAt, &p.DeletedAt, &p.SKU,
 	); err != nil {
 		fmt.Println("--err--", err)
 		log.Printf("\n## ERROR - NO PAYMENT for ParamX %v\n", paramX)

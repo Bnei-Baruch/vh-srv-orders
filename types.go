@@ -35,9 +35,9 @@ type Order struct {
 //Payment is defined by
 type Payment struct {
 	ID        uint      `json:"ID" gorm:"primary_key"`
-	CreatedAt null.Time `json:"-"`
-	UpdatedAt null.Time `json:"-"`
-	DeletedAt null.Time `json:"-" sql:"index"`
+	CreatedAt null.Time `json:"created_at"`
+	UpdatedAt null.Time `json:"updated_at"`
+	DeletedAt null.Time `json:"deleted_at" sql:"index"`
 
 	Amount null.Float `json:"Amount" gorm:"Column:Amount"`
 

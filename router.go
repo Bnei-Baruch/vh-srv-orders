@@ -48,6 +48,7 @@ func initRouter() *gin.Engine {
 	{
 		participant.PATCH("/", handlePaymentUpdate)
 	}
+	baseV2Path.GET("/payments", handlePaymentFetch)
 
 	baseV2Path.GET("/orders", handleOrderFetch)
 

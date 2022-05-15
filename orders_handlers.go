@@ -112,8 +112,11 @@ func handleOrderFetch(ctx *gin.Context) {
 	currency := ctx.Query("currency")
 	status := ctx.Query("status")
 	organisation := ctx.Query("org")
+	email := ctx.Query("email")
+	accountID := ctx.Query("account-id")
 
 	var (
+		intAccountID int
 		toDateParsed time.Time
 		err          error
 	)
@@ -151,7 +154,17 @@ func handleOrderFetch(ctx *gin.Context) {
 		return
 	}
 
-	orders, err := GetAllOrders(ctx, intSkip, intLimit, fromDate, &toDateParsed, productType, currency, status, organisation)
+	if accountID != "" {
+		intAccountID, err = strconv.Atoi(accountID)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit value! Accepted value is INTEGER", "success": false})
+			return
+		}
+	} else {
+		intAccountID = 0
+	}
+
+	orders, err := GetAllOrders(ctx, intSkip, intLimit, fromDate, &toDateParsed, productType, currency, status, organisation, email, intAccountID)
 
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{

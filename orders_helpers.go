@@ -825,22 +825,28 @@ func flagOrdersByAccountID(ctx *gin.Context, aid int, flag string) int {
 
 }
 
-func GetAllOrders(ctx *gin.Context, skip int, limit int, fromDate string, toDate *time.Time, productType string, currency string, status string, organisation string) (*[]Order, error) {
+func GetAllOrders(ctx *gin.Context, skip int, limit int, fromDate string, toDate *time.Time, productType string, currency string, status string, organisation string, email string, accountID int) (*[]Order, error) {
 
 	orders := []Order{}
 
 	limitOffsetString := fmt.Sprintf(" LIMIT %d OFFSET %d", limit, skip)
 
-	whereQuery, orderByQuery, queryBuildErr := buildAndGetOrdersWhereQuery(fromDate, toDate, productType, currency, status, organisation)
+	whereQuery, orderByQuery, queryBuildErr := buildAndGetOrdersWhereQuery(fromDate, toDate, productType, currency, status, organisation, email, accountID)
 
 	if queryBuildErr != nil {
 		return &orders, queryBuildErr
 	}
 
+	fromQuery := " FROM orders as o"
+
+	if email != "" {
+		fromQuery = fromQuery + ", accounts as a"
+	}
+
 	rows, err := DB.Query(ctx, `SELECT 
-		id, "Type", "ProductType", "RecuringFreq", "AccountID", "Organization", "Amount", 
-		"Currency", "Status", "OrderLanguage", "PaymentDate", "SKU", "Note", "Flag", created_at, updated_at, deleted_at from orders
-	`+whereQuery+orderByQuery+limitOffsetString)
+		o.id, o."Type", o."ProductType", o."RecuringFreq", o."AccountID", o."Organization", o."Amount", 
+		"Currency", o."Status", o."OrderLanguage", o."PaymentDate", o."SKU", o."Note", o."Flag", o.created_at, o.updated_at, o.deleted_at
+	`+fromQuery+whereQuery+orderByQuery+limitOffsetString)
 
 	if err != nil {
 		fmt.Println("--error-while-executing-query", err)
@@ -1015,7 +1021,7 @@ func prepareOrderUpdateQuery(req Order) (string, []interface{}) {
 	return updateArgument, args
 }
 
-func buildAndGetOrdersWhereQuery(fromDate string, dateTo *time.Time, productType string, currency string, status string, organisation string) (string, string, error) {
+func buildAndGetOrdersWhereQuery(fromDate string, dateTo *time.Time, productType string, currency string, status string, organisation string, email string, accountID int) (string, string, error) {
 
 	var whereString strings.Builder
 	var orderBy strings.Builder
@@ -1023,7 +1029,7 @@ func buildAndGetOrdersWhereQuery(fromDate string, dateTo *time.Time, productType
 	whereString.WriteString(" WHERE")
 	whereCondition.WriteString("")
 
-	whereCondition.WriteString(fmt.Sprintf(" updated_at <= '%s'", dateTo.Format("2006-01-02 15:04:05")))
+	whereCondition.WriteString(fmt.Sprintf(" o.updated_at <= '%s'", dateTo.Format("2006-01-02 15:04:05")))
 
 	// WHERE query generation based on parameters
 	if fromDate != "" {
@@ -1033,23 +1039,31 @@ func buildAndGetOrdersWhereQuery(fromDate string, dateTo *time.Time, productType
 		if err != nil {
 			return "", "", err
 		}
-		whereCondition.WriteString(fmt.Sprintf(" AND updated_at >= '%s'", fromDateParsed.Format("2006-01-02 15:04:05")))
+		whereCondition.WriteString(fmt.Sprintf(" AND o.updated_at >= '%s'", fromDateParsed.Format("2006-01-02 15:04:05")))
 	}
 
 	if currency != "" {
-		whereCondition.WriteString(fmt.Sprintf(" AND LOWER(\"Currency\")=LOWER('%s')", currency))
+		whereCondition.WriteString(fmt.Sprintf(" AND LOWER(o.\"Currency\")=LOWER('%s')", currency))
 	}
 
 	if status != "" {
-		whereCondition.WriteString(fmt.Sprintf(" AND LOWER(\"Status\")=LOWER('%s')", status))
+		whereCondition.WriteString(fmt.Sprintf(" AND LOWER(o.\"Status\")=LOWER('%s')", status))
 	}
 
 	if productType != "" {
-		whereCondition.WriteString(fmt.Sprintf(" AND LOWER(\"ProductType\")=LOWER('%s')", productType))
+		whereCondition.WriteString(fmt.Sprintf(" AND LOWER(o.\"ProductType\")=LOWER('%s')", productType))
 	}
 
 	if organisation != "" {
-		whereCondition.WriteString(fmt.Sprintf(" AND LOWER(\"Organization\")=LOWER('%s')", organisation))
+		whereCondition.WriteString(fmt.Sprintf(" AND LOWER(o.\"Organization\")=LOWER('%s')", organisation))
+	}
+
+	if accountID != 0 {
+		whereCondition.WriteString(fmt.Sprintf(" AND o.\"AccountID\" = %d", accountID))
+	}
+
+	if email != "" {
+		whereCondition.WriteString(fmt.Sprintf(" AND o.\"AccountID\" = a.id AND LOWER(a.\"Email\")=LOWER('%s')", email))
 	}
 
 	orderBy.WriteString(fmt.Sprintf(" ORDER BY updated_at %s", "desc"))

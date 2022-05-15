@@ -46,13 +46,13 @@ func getPaymentActivities(ctx *gin.Context, email string, productType string, pa
 	return PaymentActivities, nil
 }
 
-func GetAllPayments(ctx *gin.Context, skip int, limit int, fromDate string, toDate *time.Time, paymentType string, paymentStatus string, orderType string) (*[]Payment, error) {
+func GetAllPayments(ctx *gin.Context, skip int, limit int, fromDate string, toDate *time.Time, paymentType string, paymentStatus string, orderType string, email string, accountID int) (*[]Payment, error) {
 
 	payments := []Payment{}
 
 	limitOffsetString := fmt.Sprintf(" LIMIT %d OFFSET %d", limit, skip)
 
-	whereQuery, orderByQuery, queryBuildErr := buildAndGetPaymentsWhereQuery(fromDate, toDate, paymentType, paymentStatus, orderType)
+	whereQuery, orderByQuery, queryBuildErr := buildAndGetPaymentsWhereQuery(fromDate, toDate, paymentType, paymentStatus, orderType, email, accountID)
 
 	if queryBuildErr != nil {
 		return &payments, queryBuildErr
@@ -60,8 +60,11 @@ func GetAllPayments(ctx *gin.Context, skip int, limit int, fromDate string, toDa
 
 	fromQuery := " FROM payments as p"
 
-	if orderType != "" {
-		fromQuery = " FROM payments as p, orders as o"
+	if email != "" || accountID != 0 || orderType != "" {
+		fromQuery = fromQuery + ", orders as o"
+		if email != "" || accountID != 0 {
+			fromQuery = fromQuery + ", accounts as a"
+		}
 	}
 
 	rows, err := DB.Query(ctx, `SELECT 
@@ -756,7 +759,7 @@ func buildAndGetWherePaymentActQuery(email string, productType string, paymentTy
 	return whereString.String(), orderBy.String()
 }
 
-func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentType string, paymentStatus string, orderType string) (string, string, error) {
+func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentType string, paymentStatus string, orderType string, email string, accontID int) (string, string, error) {
 
 	var whereString strings.Builder
 	var orderBy strings.Builder
@@ -783,6 +786,18 @@ func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentTy
 
 	if paymentStatus != "" {
 		whereCondition.WriteString(fmt.Sprintf(" AND LOWER(p.\"PaymentStatus\")=LOWER('%s')", paymentStatus))
+	}
+
+	if orderType != "" {
+		whereCondition.WriteString(fmt.Sprintf(" AND o.id = p.\"OrderID\" AND LOWER(o.\"Type\")=LOWER('%s')", orderType))
+	}
+
+	if email != "" || accontID != 0 {
+		if email != "" {
+			whereCondition.WriteString(fmt.Sprintf(" AND p.\"OrderID\" = o.id AND a.id = o.\"AccountID\" AND LOWER(a.\"Email\")=LOWER('%s')", email))
+		} else {
+			whereCondition.WriteString(fmt.Sprintf(" AND p.\"OrderID\" = o.id AND a.id = o.\"AccountID\" AND a.id=%d", accontID))
+		}
 	}
 
 	if orderType != "" {

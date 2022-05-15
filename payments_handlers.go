@@ -157,6 +157,78 @@ func handlePaymentUpdate(c *gin.Context) {
 	}
 }
 
+func handlePaymentFetch(ctx *gin.Context) {
+	skip := ctx.Query("skip")
+	limit := ctx.Query("limit")
+	fromDate := ctx.Query("from-date")
+	toDate := ctx.Query("to-date")
+	paymentType := ctx.Query("p-type")
+	paymentStatus := ctx.Query("status")
+	orderType := ctx.Query("o-type")
+	email := ctx.Query("email")
+	accountID := ctx.Query("account-id")
+
+	var (
+		toDateParsed time.Time
+		err          error
+		intAccountID int
+	)
+
+	if toDate != "" {
+		rfcLayout := time.RFC3339
+		toDateParsed, err = time.Parse(rfcLayout, toDate)
+
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid date-from"})
+		}
+	} else {
+		toDateParsed = time.Now()
+	}
+
+	if skip == "" {
+		skip = "0"
+	}
+
+	if limit == "" {
+		limit = "10"
+	}
+
+	// String conversion to int
+	intSkip, err := strconv.Atoi(skip)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid skip value! Accepted value is INTEGER", "success": false})
+		return
+	}
+
+	// String conversion to int
+	intLimit, err := strconv.Atoi(limit)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit value! Accepted value is INTEGER", "success": false})
+		return
+	}
+
+	if accountID != "" {
+		intAccountID, err = strconv.Atoi(accountID)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit value! Accepted value is INTEGER", "success": false})
+			return
+		}
+	} else {
+		intAccountID = 0
+	}
+
+	payments, err := GetAllPayments(ctx, intSkip, intLimit, fromDate, &toDateParsed, paymentType, paymentStatus, orderType, email, intAccountID)
+
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"error":   err.Error(),
+			"success": false,
+		})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": payments, "success": true})
+}
+
 func handlePaymentFetchByEmail(c *gin.Context) {
 	var email = c.Param("email")
 

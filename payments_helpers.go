@@ -46,6 +46,52 @@ func getPaymentActivities(ctx *gin.Context, email string, productType string, pa
 	return PaymentActivities, nil
 }
 
+func GetAllPayments(ctx *gin.Context, skip int, limit int, fromDate string, toDate *time.Time, paymentType string, paymentStatus string, orderType string) (*[]Payment, error) {
+
+	payments := []Payment{}
+
+	limitOffsetString := fmt.Sprintf(" LIMIT %d OFFSET %d", limit, skip)
+
+	whereQuery, orderByQuery, queryBuildErr := buildAndGetPaymentsWhereQuery(fromDate, toDate, paymentType, paymentStatus, orderType)
+
+	if queryBuildErr != nil {
+		return &payments, queryBuildErr
+	}
+
+	fromQuery := " FROM payments as p"
+
+	if orderType != "" {
+		fromQuery = " FROM payments as p, orders as o"
+	}
+
+	rows, err := DB.Query(ctx, `SELECT 
+	p.id, p.created_at, p.updated_at, p.deleted_at, p."Amount", p."PaymentStatus", p."PaymentType", p."OrderID", p."ParamX", p."Ordkey", p."AuthNo", p.
+	confirmation_key, p.success, p.pelecard_token, p."TransactionID", p."ErrorMsg", p."CardHebrewName", p."CCAbroadCard", p."CCBrand", p.
+	"CCCompanyClearer", p."CCCompanyIssuer", p.credit_type, p."CCExpDate", p."CCNumber", p."DebitCode", p."DebitCurrency", p."DebitTotal", p."DebitType", p.
+	"FirstPaymentTotal", p."FixedPaymentTotal", p."TotalPayments", p.j_param, p."TransactionInitTime", p."TransactionUpdateTime", p."VoucherID"
+	`+fromQuery+whereQuery+orderByQuery+limitOffsetString)
+	if err != nil {
+		fmt.Println("--error-while-executing-query", err)
+		return &payments, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var d Payment
+		err := rows.Scan(
+			&d.ID, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt, &d.Amount, &d.PaymentStatus, &d.PaymentType, &d.OrderID, &d.ParamX, &d.Ordkey, &d.AuthNo,
+			&d.ConfirmationKey, &d.Success, &d.PelecardToken, &d.TransactionID, &d.ErrorMsg, &d.CardHebrewName, &d.CCAbroadCard, &d.CCBrand,
+			&d.CCCompanyClearer, &d.CCCompanyIssuer, &d.CreditType, &d.CCExpDate, &d.CCNumber, &d.DebitCode, &d.DebitCurrency, &d.DebitTotal, &d.DebitType,
+			&d.FirstPaymentTotal, &d.FixedPaymentTotal, &d.TotalPayments, &d.JParam, &d.TransactionInitTime, &d.TransactionUpdateTime, &d.VoucherID,
+		)
+		if err != nil {
+			return &payments, err
+		}
+		payments = append(payments, d)
+	}
+	return &payments, rows.Err()
+
+}
+
 func getTotalParticipationStatusCount(ctx *gin.Context, email string, productType string, paymentType string) (int, error) {
 	var count int
 
@@ -708,4 +754,47 @@ func buildAndGetWherePaymentActQuery(email string, productType string, paymentTy
 		whereString.Reset()
 	}
 	return whereString.String(), orderBy.String()
+}
+
+func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentType string, paymentStatus string, orderType string) (string, string, error) {
+
+	var whereString strings.Builder
+	var orderBy strings.Builder
+	var whereCondition strings.Builder
+	whereString.WriteString(" WHERE")
+	whereCondition.WriteString("")
+
+	whereCondition.WriteString(fmt.Sprintf(" p.updated_at <= '%s'", dateTo.Format("2006-01-02 15:04:05")))
+
+	// WHERE query generation based on parameters
+	if fromDate != "" {
+		rfcLayout := time.RFC3339
+		fromDateParsed, err := time.Parse(rfcLayout, fromDate)
+
+		if err != nil {
+			return "", "", err
+		}
+		whereCondition.WriteString(fmt.Sprintf(" AND p.updated_at >= '%s'", fromDateParsed.Format("2006-01-02 15:04:05")))
+	}
+
+	if paymentType != "" {
+		whereCondition.WriteString(fmt.Sprintf(" AND LOWER(p.\"PaymentType\")=LOWER('%s')", paymentType))
+	}
+
+	if paymentStatus != "" {
+		whereCondition.WriteString(fmt.Sprintf(" AND LOWER(p.\"PaymentStatus\")=LOWER('%s')", paymentStatus))
+	}
+
+	if orderType != "" {
+		whereCondition.WriteString(fmt.Sprintf(" AND o.id = p.\"OrderID\" AND LOWER(o.\"Type\")=LOWER('%s')", orderType))
+	}
+
+	orderBy.WriteString(fmt.Sprintf(" ORDER BY p.updated_at %s", "desc"))
+
+	if whereCondition.String() != "" {
+		whereString.WriteString(whereCondition.String())
+	} else {
+		whereString.Reset()
+	}
+	return whereString.String(), orderBy.String(), nil
 }

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -99,4 +101,77 @@ func handleOrdersRenew(c *gin.Context) {
 			c.JSON(http.StatusUnauthorized, gin.H{"Error": "You are not allowed here"})
 		}
 	}
+}
+
+func handleOrderFetch(ctx *gin.Context) {
+	skip := ctx.Query("skip")
+	limit := ctx.Query("limit")
+	fromDate := ctx.Query("from-date")
+	toDate := ctx.Query("to-date")
+	productType := ctx.Query("product-type")
+	currency := ctx.Query("currency")
+	status := ctx.Query("status")
+	organisation := ctx.Query("org")
+	email := ctx.Query("email")
+	accountID := ctx.Query("account-id")
+
+	var (
+		intAccountID int
+		toDateParsed time.Time
+		err          error
+	)
+
+	if toDate != "" {
+		rfcLayout := time.RFC3339
+		toDateParsed, err = time.Parse(rfcLayout, toDate)
+
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid date-from"})
+		}
+	} else {
+		toDateParsed = time.Now()
+	}
+
+	if skip == "" {
+		skip = "0"
+	}
+
+	if limit == "" {
+		limit = "10"
+	}
+
+	// String conversion to int
+	intSkip, err := strconv.Atoi(skip)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid skip value! Accepted value is INTEGER", "success": false})
+		return
+	}
+
+	// String conversion to int
+	intLimit, err := strconv.Atoi(limit)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit value! Accepted value is INTEGER", "success": false})
+		return
+	}
+
+	if accountID != "" {
+		intAccountID, err = strconv.Atoi(accountID)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit value! Accepted value is INTEGER", "success": false})
+			return
+		}
+	} else {
+		intAccountID = 0
+	}
+
+	orders, err := GetAllOrders(ctx, intSkip, intLimit, fromDate, &toDateParsed, productType, currency, status, organisation, email, intAccountID)
+
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"error":   err.Error(),
+			"success": false,
+		})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": orders, "success": true})
 }

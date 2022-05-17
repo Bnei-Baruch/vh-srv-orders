@@ -9,9 +9,9 @@ import (
 // Order is defined by
 type Order struct {
 	ID        int64     `json:"ID" gorm:"primary_key"`
-	CreatedAt null.Time `json:"-"`
-	UpdatedAt null.Time `json:"-"`
-	DeletedAt null.Time `json:"-" sql:"index"`
+	CreatedAt null.Time `json:"created_at"`
+	UpdatedAt null.Time `json:"updated_at"`
+	DeletedAt null.Time `json:"deleted_at" sql:"index"`
 
 	Type         null.String `json:"type" gorm:"Column:Type;type:varchar(100)"`
 	ProductType  null.String `json:"ProductType" gorm:"Column:ProductType;type:varchar(100)"`

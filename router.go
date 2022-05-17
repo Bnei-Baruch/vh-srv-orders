@@ -44,9 +44,14 @@ func initRouter() *gin.Engine {
 
 	baseV2Path := r.Group("/v2")
 
-	participant := baseV2Path.Group("/payment")
+	payment := baseV2Path.Group("/payment")
 	{
-		participant.PATCH("/", handlePaymentUpdate)
+		payment.PATCH("/", handlePaymentUpdate)
+	}
+
+	account := baseV2Path.Group("/account")
+	{
+		account.GET("/:id", handleGetAccount)
 	}
 	baseV2Path.GET("/payments", handlePaymentFetch)
 

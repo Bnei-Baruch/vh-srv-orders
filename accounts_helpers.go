@@ -44,6 +44,50 @@ func CreateOrUpdateAccount(ctx *gin.Context, a Account) int64 {
 	return b.ID
 }
 
+func getAccount(ctx *gin.Context, id int, email string) (Account, error) {
+	var (
+		acc        Account
+		whereQuery string
+	)
+
+	if id != 0 {
+		whereQuery = fmt.Sprintf("where id = %d", id)
+	} else {
+		whereQuery = fmt.Sprintf("where \"Email\" = '%s'", email)
+	}
+
+	if err := DB.QueryRow(ctx, `SELECT 
+			id,
+			"FirstName",
+			"LastName",
+			"Email",
+			"Phone",
+			"Street",
+			"City",
+			"State",
+			"Postcode",
+			"Country",
+			"AccountType",
+			"PaymentToken",
+			"PaymentCardID",
+			"PaymentCardExpMonth",
+			"PaymentCardExpYear",
+			"UserKey",
+			"AuthNo",
+			created_at,
+			updated_at,
+			deleted_at from accounts `+whereQuery).Scan(
+		&acc.ID, &acc.FirstName, &acc.LastName, &acc.Email, &acc.Phone, &acc.Street,
+		&acc.City, &acc.State, &acc.Postcode, &acc.Country, &acc.AccountType,
+		&acc.PaymentToken, &acc.PaymentCardID, &acc.PaymentCardExpMonth, &acc.PaymentCardExpYear,
+		&acc.UserKey, &acc.AuthNo, &acc.CreatedAt, &acc.UpdatedAt, &acc.DeletedAt,
+	); err != nil {
+		return acc, err
+	}
+	return acc, nil
+
+}
+
 func prepareAccountCreateQuery(req Account) (string, string, []interface{}) {
 	var createStrings []string
 	var numString []string

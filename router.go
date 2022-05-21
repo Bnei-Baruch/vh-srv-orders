@@ -51,6 +51,7 @@ func initRouter() *gin.Engine {
 
 	account := baseV2Path.Group("/account")
 	{
+		account.POST("/", handleCreateAccount)
 		account.GET("/:id", handleGetAccount)
 	}
 	baseV2Path.GET("/payments", handlePaymentFetch)

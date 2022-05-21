@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -37,4 +38,29 @@ func handleGetAccount(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": account, "success": true})
 		return
 	}
+}
+
+func handleCreateAccount(ctx *gin.Context) {
+
+	var req Account
+	errRequest := ctx.BindJSON(&req)
+
+	if errRequest != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"Error": errRequest.Error()})
+		return
+	}
+
+	accountId, err := createAccount(ctx, req)
+
+	if err != nil {
+		if errors.Is(err, fmt.Errorf("invalid body")) {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err})
+			return
+		}
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err})
+		return
+	}
+
+	ctx.JSON(http.StatusCreated, gin.H{"message": "Created!", "data": accountId, "success": true})
+
 }

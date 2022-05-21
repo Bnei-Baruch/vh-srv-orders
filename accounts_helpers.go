@@ -44,6 +44,26 @@ func CreateOrUpdateAccount(ctx *gin.Context, a Account) int64 {
 	return b.ID
 }
 
+func createAccount(ctx *gin.Context, a Account) (int, error) {
+
+	createString, numString, createQueryArgs := prepareAccountCreateQuery(a)
+
+	var ID int
+
+	if len(createQueryArgs) != 0 {
+		if err := DB.QueryRow(ctx, fmt.Sprintf(`INSERT INTO accounts (%s) VALUES (%s) RETURNING id`, createString, numString),
+			createQueryArgs...).Scan(
+			&ID,
+		); err != nil {
+			return 0, err
+		}
+		return ID, nil
+	} else {
+		return 0, fmt.Errorf("invalid body")
+	}
+
+}
+
 func getAccount(ctx *gin.Context, id int, email string) (Account, error) {
 	var (
 		acc        Account

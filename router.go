@@ -53,6 +53,7 @@ func initRouter() *gin.Engine {
 	{
 		account.POST("/", handleCreateAccount)
 		account.GET("/:id", handleGetAccount)
+		account.PATCH("/:id", handlePatchAccount)
 	}
 	baseV2Path.GET("/payments", handlePaymentFetch)
 

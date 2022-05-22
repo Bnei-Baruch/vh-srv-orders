@@ -54,6 +54,7 @@ func initRouter() *gin.Engine {
 		account.POST("/", handleCreateAccount)
 		account.GET("/:id", handleGetAccount)
 		account.PATCH("/:id", handlePatchAccount)
+		account.DELETE("/:id", handleDeleteAccount)
 	}
 	baseV2Path.GET("/payments", handlePaymentFetch)
 

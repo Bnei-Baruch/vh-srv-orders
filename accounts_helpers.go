@@ -86,6 +86,11 @@ func patchAccount(c *gin.Context, req Account, accountID int) error {
 	return nil
 }
 
+func softDeleteAccount(c *gin.Context, accountID int) error {
+	_, err := DB.Exec(c, "UPDATE accounts SET deleted_at = $1 WHERE id = $2", time.Now(), accountID)
+	return err
+}
+
 func getAccount(ctx *gin.Context, id int, email string) (Account, error) {
 	var (
 		acc        Account

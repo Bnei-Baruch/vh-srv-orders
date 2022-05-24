@@ -43,6 +43,38 @@ func handleOrdersCreate(c *gin.Context) {
 	}
 }
 
+func handleGetOrderByID(ctx *gin.Context) {
+	id := ctx.Param("id")
+
+	var (
+		intID int
+		err   error
+	)
+
+	intID, err = strconv.Atoi(id)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id! Accepted value is INTEGER", "success": false})
+		return
+	}
+
+	uIntId := uint(intID)
+
+	order := getOrderByID(ctx, uIntId)
+
+	if order.ID == 0 {
+		// Need to return proper error before this implementation
+		/* if err == pgx.ErrNoRows {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "Order not found"})
+			return
+		} */
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "order not found"})
+		return
+	} else {
+		ctx.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": order, "success": true})
+		return
+	}
+}
+
 func handleOrdersPaid(c *gin.Context) {
 	var rp RequestPaid
 	err := c.BindJSON(&rp)

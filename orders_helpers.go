@@ -779,6 +779,54 @@ order by duplicate desc`
 	}
 	return count
 }
+
+func createV2Order(ctx *gin.Context, o Order) (int, error) {
+
+	createString, numString, createQueryArgs := prepareOrderCreateQuery(o)
+
+	var ID int
+
+	if len(createQueryArgs) != 0 {
+		if err := DB.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+			createQueryArgs...).Scan(
+			&ID,
+		); err != nil {
+			return 0, err
+		}
+		return ID, nil
+	} else {
+		return 0, errInvalidBody
+	}
+
+}
+
+func softDeleteOrderByID(c *gin.Context, orderID int) error {
+	_, err := DB.Exec(c, "UPDATE orders SET deleted_at = $1 WHERE id = $2", time.Now(), orderID)
+	return err
+}
+
+func patchOrderByID(c *gin.Context, req Order, orderId int) error {
+
+	toUpdate, toUpdateArgs := prepareOrderUpdateQuery(req)
+
+	if len(toUpdateArgs) != 0 {
+		updateRes, err := DB.Exec(c, fmt.Sprintf(`UPDATE orders SET %s WHERE id=%d`, toUpdate, orderId),
+			toUpdateArgs...)
+		if err != nil {
+			return fmt.Errorf("problem updating order: %w", err)
+		}
+
+		if updateRes.RowsAffected() == 0 {
+			return fmt.Errorf("order not updated as no rows affected")
+		}
+
+	} else {
+		return errInvalidBody
+	}
+
+	return nil
+}
+
 func addFlagToOrder(ctx *gin.Context, oid uint, flag string) {
 	o := getOrderByID(ctx, uint(oid))
 	o.Flag = null.NewString(flag, true)
@@ -978,7 +1026,7 @@ func prepareOrderUpdateQuery(req Order) (string, []interface{}) {
 		updateStrings = append(updateStrings, fmt.Sprintf(`"Organization"=$%d`, len(updateStrings)+1))
 		args = append(args, req.Organization.String)
 	}
-	if !req.Amount.Valid {
+	if req.Amount.Valid {
 		updateStrings = append(updateStrings, fmt.Sprintf(`"Amount"=$%d`, len(updateStrings)+1))
 		args = append(args, fmt.Sprintf("%g", req.Amount.Float64))
 	}
@@ -998,7 +1046,7 @@ func prepareOrderUpdateQuery(req Order) (string, []interface{}) {
 		updateStrings = append(updateStrings, fmt.Sprintf(`"OrderLanguage"=$%d`, len(updateStrings)+1))
 		args = append(args, req.OrderLanguage.String)
 	}
-	if !req.PaymentDate.Valid {
+	if req.PaymentDate.Valid {
 		updateStrings = append(updateStrings, fmt.Sprintf(`"PaymentDate"=$%d`, len(updateStrings)+1))
 		args = append(args, req.PaymentDate.Time)
 	}

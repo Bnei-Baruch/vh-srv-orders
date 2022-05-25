@@ -1,10 +1,13 @@
 package main
 
 import (
+	"errors"
 	"log"
 
 	"github.com/joho/godotenv"
 )
+
+var errInvalidBody = errors.New("invalid body")
 
 //Conf store all conf
 var Conf map[string]string

@@ -46,7 +46,10 @@ func initRouter() *gin.Engine {
 
 	payment := baseV2Path.Group("/payment")
 	{
+		// payments.POST("/", handleCreatePayment) // uncomment when endpoint defined about /payments [POST] is no longer used
 		payment.PATCH("/", handlePaymentUpdate)
+		payment.DELETE("/:id", handlePaymentDelete)
+		payment.GET("/:id", handlePaymentFetchByID)
 	}
 
 	account := baseV2Path.Group("/account")

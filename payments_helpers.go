@@ -10,6 +10,29 @@ import (
 	"gopkg.in/guregu/null.v4"
 )
 
+func getPaymentByID(ctx *gin.Context, id int) (Payment, error) {
+	var pay Payment
+
+	if err := DB.QueryRow(ctx, `SELECT 
+	id, created_at, updated_at, deleted_at, "Amount", "PaymentStatus", "PaymentType", "OrderID", "ParamX", "Ordkey", "AuthNo", 
+	confirmation_key, success, pelecard_token, "TransactionID", "ErrorMsg", "CardHebrewName", "CCAbroadCard", "CCBrand", 
+	"CCCompanyClearer", "CCCompanyIssuer", credit_type, "CCExpDate", "CCNumber", "DebitCode", "DebitCurrency", "DebitTotal", "DebitType", 
+	"FirstPaymentTotal", "FixedPaymentTotal", "TotalPayments", j_param, "TransactionInitTime", "TransactionUpdateTime", "VoucherID" from payments where id = $1`, id).Scan(
+		&pay.ID, &pay.CreatedAt, &pay.UpdatedAt, &pay.DeletedAt, &pay.Amount, &pay.PaymentStatus, &pay.PaymentType, &pay.OrderID, &pay.ParamX, &pay.Ordkey, &pay.AuthNo,
+		&pay.ConfirmationKey, &pay.Success, &pay.PelecardToken, &pay.TransactionID, &pay.ErrorMsg, &pay.CardHebrewName, &pay.CCAbroadCard, &pay.CCBrand,
+		&pay.CCCompanyClearer, &pay.CCCompanyIssuer, &pay.CreditType, &pay.CCExpDate, &pay.CCNumber, &pay.DebitCode, &pay.DebitCurrency, &pay.DebitTotal, &pay.DebitType,
+		&pay.FirstPaymentTotal, &pay.FixedPaymentTotal, &pay.TotalPayments, &pay.JParam, &pay.TransactionInitTime, &pay.TransactionUpdateTime, &pay.VoucherID); err != nil {
+		return pay, err
+	}
+	return pay, nil
+
+}
+
+func softDeletePayment(c *gin.Context, paymentID int) error {
+	_, err := DB.Exec(c, "UPDATE payments SET deleted_at = $1 WHERE id = $2", time.Now(), paymentID)
+	return err
+}
+
 func getPaymentActivities(ctx *gin.Context, email string, productType string, paymentType string, skip int, limit int) ([]PaymentActivitiesRes, error) {
 
 	PaymentActivities := []PaymentActivitiesRes{}

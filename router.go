@@ -57,7 +57,7 @@ func initRouter() *gin.Engine {
 	{
 		order.GET("/:id", handleOrderGetByID)
 		order.DELETE("/:id", handleOrderDeleteByID)
-		order.POST("/:id", handleV2OrderCreate)
+		order.POST("/", handleV2OrderCreate)
 		order.PATCH("/:id", handleOrderUpdateByID)
 	}
 	baseV2Path.GET("/orders", handleOrderFetch)

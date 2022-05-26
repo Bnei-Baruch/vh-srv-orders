@@ -44,9 +44,12 @@ func initRouter() *gin.Engine {
 
 	baseV2Path := r.Group("/v2")
 
-	participant := baseV2Path.Group("/payment")
+	payment := baseV2Path.Group("/payment")
 	{
-		participant.PATCH("/", handlePaymentUpdate)
+		// payments.POST("/", handleCreatePayment) // uncomment when endpoint defined about /payments [POST] is no longer used
+		payment.PATCH("/", handlePaymentUpdate)
+		payment.DELETE("/:id", handlePaymentDelete)
+		payment.GET("/:id", handlePaymentFetchByID)
 	}
 	baseV2Path.GET("/payments", handlePaymentFetch)
 

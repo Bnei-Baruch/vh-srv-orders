@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -40,6 +41,126 @@ func handleOrdersCreate(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"Error": err})
 	} else {
 		c.JSON(http.StatusOK, ord)
+	}
+}
+
+func handleV2OrderCreate(ctx *gin.Context) {
+	var req Order
+	errRequest := ctx.BindJSON(&req)
+
+	if errRequest != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"Error": errRequest.Error()})
+		return
+	}
+
+	if req.AccountID.Int64 == 0 {
+		ctx.JSON(http.StatusNotAcceptable, gin.H{"error": "Missing AccountID"})
+		return
+	}
+
+	orderID, err := createV2Order(ctx, req)
+
+	if err != nil {
+		if errors.Is(err, errInvalidBody) {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err})
+			return
+		}
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err})
+		return
+	}
+
+	ctx.JSON(http.StatusCreated, gin.H{"message": "Created!", "data": orderID, "success": true})
+}
+
+func handleOrderDeleteByID(ctx *gin.Context) {
+	id := ctx.Param("id")
+
+	var (
+		intID int
+		err   error
+	)
+
+	intID, err = strconv.Atoi(id)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id! Accepted value is INTEGER", "success": false})
+		return
+	}
+
+	err = softDeleteOrderByID(ctx, intID)
+
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"message": "Deleted!", "success": true})
+}
+
+func handleOrderUpdateByID(ctx *gin.Context) {
+	var req Order
+	errRequest := ctx.BindJSON(&req)
+
+	id := ctx.Param("id")
+
+	if errRequest != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"Error": errRequest.Error()})
+		return
+	}
+
+	var (
+		intID int
+		err   error
+	)
+
+	intID, err = strconv.Atoi(id)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id! Accepted value is INTEGER", "success": false})
+		return
+	}
+
+	err = patchOrderByID(ctx, req, intID)
+
+	if err != nil {
+		if errors.Is(err, errInvalidBody) {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err})
+			return
+		}
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"message": "Updated!", "success": true})
+}
+
+func handleOrderGetByID(ctx *gin.Context) {
+	id := ctx.Param("id")
+
+	var (
+		intID int
+		err   error
+	)
+
+	intID, err = strconv.Atoi(id)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id! Accepted value is INTEGER", "success": false})
+		return
+	}
+
+	uIntId := uint(intID)
+
+	order := getOrderByID(ctx, uIntId)
+
+	if order.ID == 0 {
+		// Need to return proper error before this implementation
+		/* if err == pgx.ErrNoRows {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "Order not found"})
+			return
+		} */
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "order not found"})
+		return
+	} else {
+		ctx.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": order, "success": true})
+		return
 	}
 }
 

@@ -565,7 +565,7 @@ func updatePelecardPayment(c *gin.Context, req Payment, paymentID int) error {
 		}
 
 	} else {
-		fmt.Println("invalid values")
+		return errInvalidBody
 	}
 
 	return nil
@@ -587,7 +587,7 @@ func updateOfflinePayment(c *gin.Context, req OfflinePayment) error {
 		}
 
 	} else {
-		fmt.Println("invalid values")
+		return errInvalidBody
 	}
 
 	return nil
@@ -609,7 +609,7 @@ func updateHelpHavePayment(c *gin.Context, req HelpHavedPayment) error {
 		}
 
 	} else {
-		fmt.Println("invalid values")
+		return errInvalidBody
 	}
 
 	return nil

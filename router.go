@@ -53,6 +53,13 @@ func initRouter() *gin.Engine {
 	}
 	baseV2Path.GET("/payments", handlePaymentFetch)
 
+	order := baseV2Path.Group("/order")
+	{
+		order.GET("/:id", handleOrderGetByID)
+		order.DELETE("/:id", handleOrderDeleteByID)
+		order.POST("/", handleV2OrderCreate)
+		order.PATCH("/:id", handleOrderUpdateByID)
+	}
 	baseV2Path.GET("/orders", handleOrderFetch)
 
 	r.GET("/status/:email", Status)

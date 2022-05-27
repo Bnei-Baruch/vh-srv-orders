@@ -142,9 +142,9 @@ type HelpHavedPayment struct {
 // Account is defined by
 type Account struct {
 	ID        int64      `json:"ID" gorm:"primary_key"`
-	CreatedAt *time.Time `json:"-"`
-	UpdatedAt *time.Time `json:"-"`
-	DeletedAt *time.Time `json:"-" sql:"index"`
+	CreatedAt *time.Time `json:"created_at"`
+	UpdatedAt *time.Time `json:"updated_at"`
+	DeletedAt *time.Time `json:"deleted_at" sql:"index"`
 
 	FirstName null.String `json:"FirstName" gorm:"Column:FirstName;type:varchar(100)"`
 	LastName  null.String `json:"LastName" gorm:"Column:LastName;type:varchar(100)"`

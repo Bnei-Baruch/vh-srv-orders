@@ -125,7 +125,7 @@ func handlePaymentUpdate(c *gin.Context) {
 		return
 	}
 
-	if req.PaymentType.String == "manual" {
+	if req.PaymentType.String == "offline" {
 		var offReq OfflinePayment
 		offErrRequest := c.ShouldBindBodyWith(&offReq, binding.JSON)
 

@@ -38,7 +38,7 @@ func handleCreateOrderAndPay(c *gin.Context) {
 		return
 	}
 
-	if (req.PaymentType.String == "manual" || req.PaymentType.String == "helphaver") && req.PaymentType.Valid {
+	if (req.PaymentType.String == "offline" || req.PaymentType.String == "helphaver") && req.PaymentType.Valid {
 		c.JSON(http.StatusCreated, gin.H{"Order": ord, "Payment": p})
 		return
 	}

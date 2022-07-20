@@ -585,7 +585,6 @@ func updateOfflinePayment(c *gin.Context, req OfflinePayment) error {
 		if updateRes.RowsAffected() == 0 {
 			return fmt.Errorf("Payment not Updated")
 		}
-
 	} else {
 		return errInvalidBody
 	}
@@ -613,6 +612,16 @@ func updateHelpHavePayment(c *gin.Context, req HelpHavedPayment) error {
 	}
 
 	return nil
+}
+
+func updateParentPaymentTableStatusAndReturnOrderId(c *gin.Context, status string, paymentID int64) (int64, error) {
+	var orderId int64
+	if err := DB.QueryRow(c, `UPDATE payments SET "PaymentStatus"=$1 WHERE id=$2 RETURNING "OrderId"`, status, paymentID).Scan(
+		&orderId,
+	); err != nil {
+		return 0, fmt.Errorf("problem updating parent payment table: %w", err)
+	}
+	return orderId, nil
 }
 
 func prepareOfflinePaymentCreateQuery(req RequestOrder, paymentID uint, status string) (string, string, []interface{}) {

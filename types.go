@@ -122,6 +122,13 @@ type RequestOrder struct {
 	RejectionMessage  null.String `json:"RejectionMessage,omitempty"`
 }
 
+type PaymentUpdate struct {
+	PaymentType null.String `json:"PaymentType,omitempty"`
+	Status      null.String `json:"Status"`
+	UpdateOrder null.Bool   `json:"UpdateOrder"`
+	PaymentID   null.Int    `json:"PaymentID"`
+}
+
 type OfflinePayment struct {
 	PaymentType   null.String `json:"PaymentType,omitempty"`
 	PaymentMethod null.String `json:"PaymentMethod"`

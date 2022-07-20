@@ -116,7 +116,8 @@ func handlePaymentFetchViaParamX(c *gin.Context) {
 
 func handlePaymentUpdate(c *gin.Context) {
 
-	var req OfflinePayment
+	var req PaymentUpdate
+	var paymentStatus string
 	errRequest := c.ShouldBindBodyWith(&req, binding.JSON)
 
 	if errRequest != nil {
@@ -125,14 +126,23 @@ func handlePaymentUpdate(c *gin.Context) {
 		return
 	}
 
+	if req.PaymentID.Int64 == 0 {
+		c.JSON(http.StatusNotAcceptable, gin.H{"error": "Missing PaymentID"})
+		return
+	}
+
 	if req.PaymentType.String == "offline" {
 		var offReq OfflinePayment
-		offErrRequest := c.ShouldBindBodyWith(&offReq, binding.JSON)
+		offErrRequest := c.ShouldBind(&offReq)
 
 		if offErrRequest != nil {
 			log.Println("Err:", offErrRequest)
 			c.JSON(http.StatusBadRequest, gin.H{"Error": offErrRequest.Error()})
 			return
+		}
+
+		if offReq.Status.String != "" {
+			paymentStatus = offReq.Status.String
 		}
 
 		err := updateOfflinePayment(c, offReq)
@@ -144,19 +154,21 @@ func handlePaymentUpdate(c *gin.Context) {
 			}
 			c.JSON(http.StatusInternalServerError, gin.H{"Error": err})
 			return
-		} else {
-			c.Status(http.StatusOK)
-			return
 		}
 	} else if req.PaymentType.String == "helphaver" {
 		var helpReq HelpHavedPayment
-		errRequest := c.ShouldBindBodyWith(&helpReq, binding.JSON)
+		errRequest := c.ShouldBindJSON(&helpReq)
 
 		if errRequest != nil {
 			log.Println("Err:", errRequest)
 			c.JSON(http.StatusBadRequest, gin.H{"Error": errRequest})
 			return
 		}
+
+		if helpReq.Status.String != "" {
+			paymentStatus = helpReq.Status.String
+		}
+
 		err := updateHelpHavePayment(c, helpReq)
 
 		if err != nil {
@@ -165,9 +177,6 @@ func handlePaymentUpdate(c *gin.Context) {
 				return
 			}
 			c.JSON(http.StatusInternalServerError, gin.H{"Error": err})
-			return
-		} else {
-			c.Status(http.StatusOK)
 			return
 		}
 	} else if req.PaymentType.String == "pelecard" {
@@ -179,16 +188,15 @@ func handlePaymentUpdate(c *gin.Context) {
 
 		var peleReq PaymentWithPaymentID
 
-		errRequest := c.ShouldBindBodyWith(&peleReq, binding.JSON)
+		errRequest := c.ShouldBindJSON(&peleReq)
 		if errRequest != nil {
 			log.Println("Err:", errRequest)
 			c.JSON(http.StatusBadRequest, gin.H{"Error": errRequest})
 			return
 		}
 
-		if peleReq.PaymentID == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"Error": "Missing PaymentID"})
-			return
+		if peleReq.PaymentStatus.String != "" {
+			paymentStatus = peleReq.PaymentStatus.String
 		}
 
 		err := updatePelecardPayment(c, peleReq.Payment, peleReq.PaymentID)
@@ -200,13 +208,27 @@ func handlePaymentUpdate(c *gin.Context) {
 			}
 			c.JSON(http.StatusInternalServerError, gin.H{"Error": err})
 			return
-		} else {
-			c.Status(http.StatusOK)
-			return
 		}
 
 	} else {
 		c.JSON(http.StatusBadRequest, gin.H{"Error": "Invalid payment type"})
+		return
+	}
+
+	// Updating the status of the parent payment table.
+	if paymentStatus != "" {
+		orderId, parentPaymentUpdateErr := updateParentPaymentTableStatusAndReturnOrderId(c, paymentStatus, req.PaymentID.Int64)
+
+		if parentPaymentUpdateErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"Error": parentPaymentUpdateErr})
+			return
+		}
+
+		if orderId != 0 && req.UpdateOrder.Bool {
+			updateOrderStatusByOrderID(c, orderId, paymentStatus)
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "Updated!", "success": true})
 		return
 	}
 }

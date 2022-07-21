@@ -46,6 +46,13 @@ func countsFilteredOrders(c *gin.Context, filter string) int64 {
 
 }
 
+func updateOrderStatusByOrderID(c *gin.Context, oid int64, status string) error {
+	if _, err := DB.Exec(c, `UPDATE orders SET "Status"=$1 WHERE id=$2`, status, oid); err != nil {
+		return err
+	}
+	return nil
+}
+
 func createOrder(c *gin.Context, req RequestOrder) (Order, error) {
 
 	order_status := "pending"

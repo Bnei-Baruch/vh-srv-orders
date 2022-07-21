@@ -224,7 +224,7 @@ func handlePaymentUpdate(c *gin.Context) {
 			return
 		}
 
-		if orderId != 0 && req.UpdateOrder.Bool {
+		if orderId != 0 && !req.RestrictOrderUpdate.Bool {
 			updateOrderStatusByOrderID(c, orderId, paymentStatus)
 		}
 

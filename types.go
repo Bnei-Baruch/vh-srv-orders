@@ -123,10 +123,10 @@ type RequestOrder struct {
 }
 
 type PaymentUpdate struct {
-	PaymentType null.String `json:"PaymentType,omitempty"`
-	Status      null.String `json:"Status"`
-	UpdateOrder null.Bool   `json:"UpdateOrder"`
-	PaymentID   null.Int    `json:"PaymentID"`
+	PaymentType         null.String `json:"PaymentType,omitempty"`
+	Status              null.String `json:"Status"`
+	RestrictOrderUpdate null.Bool   `json:"RestrictOrderUpdate"`
+	PaymentID           null.Int    `json:"PaymentID"`
 }
 
 type OfflinePayment struct {

@@ -123,10 +123,61 @@ type RequestOrder struct {
 }
 
 type PaymentUpdate struct {
-	PaymentType         null.String `json:"PaymentType,omitempty"`
+	//Common data
+	PaymentType         null.String `json:"PaymentType"`
 	Status              null.String `json:"Status"`
 	RestrictOrderUpdate null.Bool   `json:"RestrictOrderUpdate"`
 	PaymentID           null.Int    `json:"PaymentID"`
+
+	//Offline Payment
+	PaymentMethod null.String `json:"PaymentMethod"`
+	Receipt       null.String `json:"Receipt"`
+	ExtraInfo     null.String `json:"ExtraInfo"`
+
+	// HelpHaver Payment
+	ValidationMessage null.String `json:"ValidationMessage"`
+	RejectionMessage  null.String `json:"RejectionMessage"`
+
+	// Pelecard Payment
+	DeletedAt null.Time `json:"deleted_at"`
+
+	Amount null.Float `json:"Amount"`
+
+	PaymentStatus null.String `json:"PaymentStatus"`
+	OrderID       null.Int    `json:"OrderID"`
+
+	ParamX          null.String `json:"additional_details_param_x"`
+	Ordkey          null.String `json:"user_key"`
+	AuthNo          null.String `json:"authNo"`
+	ConfirmationKey null.String `json:"confirmation_key"`
+	Success         null.String `json:"success"`
+	PelecardToken   null.String `json:"token"`
+	TransactionID   null.String `json:"transaction_id"`
+	ErrorMsg        null.String `json:"ErrorMsg"`
+
+	CardHebrewName   null.String `json:"card_hebrew_name"`
+	CCAbroadCard     null.String `json:"CCAbroadCard"`
+	CCBrand          null.String `json:"CCBrand"`
+	CCCompanyClearer null.String `json:"CCCompanyClearer"`
+	CCCompanyIssuer  null.String `json:"CCCompanyIssuer"`
+	CreditType       null.String `json:"credit_type"`
+
+	CCExpDate null.String `json:"CCExpDate"`
+	CCNumber  null.String `json:"CCNumber"`
+
+	DebitCode     null.String `json:"DebitCode"`
+	DebitCurrency null.String `json:"DebitCurrency"`
+	DebitTotal    null.String `json:"DebitTotal"`
+	DebitType     null.String `json:"DebitType"`
+
+	FirstPaymentTotal null.String `json:"FirstPaymentTotal"`
+	FixedPaymentTotal null.String `json:"FixedPaymentTotal"`
+	JParam            null.String `json:"j_param"`
+	TotalPayments     null.String `json:"TotalPayments"`
+
+	TransactionInitTime   null.String `json:"TransactionInitTime"`
+	TransactionUpdateTime null.String `json:"TransactionUpdateTime"`
+	VoucherID             null.String `json:"VoucherID"`
 }
 
 type OfflinePayment struct {

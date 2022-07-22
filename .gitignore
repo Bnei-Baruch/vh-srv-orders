@@ -131,8 +131,7 @@ bin/*
 !bin
 #.env
 data/*
-<<<<<<< HEAD
-!data/.gitkeep
-=======
 !data 
->>>>>>> development
+
+# Ignore all local history of files
+__debug_bin

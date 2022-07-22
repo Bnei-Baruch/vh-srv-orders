@@ -4,13 +4,15 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"orderservices/orders/utils"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gin-gonic/gin/binding"
+	"github.com/goji/param"
 	"github.com/jackc/pgx/v4"
+	"gopkg.in/guregu/null.v4"
 )
 
 func handlePaymentFetchByID(ctx *gin.Context) {
@@ -118,11 +120,17 @@ func handlePaymentUpdate(c *gin.Context) {
 
 	var req PaymentUpdate
 	var paymentStatus string
-	errRequest := c.ShouldBindBodyWith(&req, binding.JSON)
 
-	if errRequest != nil {
-		log.Println("Err:", errRequest)
-		c.JSON(http.StatusBadRequest, gin.H{"Error": errRequest})
+	err := c.Request.ParseMultipartForm(32 << 20) // 32 MB
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	parseErr := param.Parse(c.Request.MultipartForm.Value, &req)
+	if parseErr != nil {
+		fmt.Println(parseErr)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -132,20 +140,40 @@ func handlePaymentUpdate(c *gin.Context) {
 	}
 
 	if req.PaymentType.String == "offline" {
-		var offReq OfflinePayment
-		offErrRequest := c.ShouldBindBodyWith(&offReq, binding.JSON)
 
-		if offErrRequest != nil {
-			log.Println("Err:", offErrRequest)
-			c.JSON(http.StatusBadRequest, gin.H{"Error": offErrRequest.Error()})
+		if req.Status.String != "" {
+			paymentStatus = req.Status.String
+		}
+
+		file, header, formErr := c.Request.FormFile("receipt")
+		if formErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": formErr.Error()})
 			return
 		}
 
-		if offReq.Status.String != "" {
-			paymentStatus = offReq.Status.String
+		if header.Size != 0 {
+			fileName := "receipt/" + strconv.FormatInt(time.Now().UTC().UnixNano(), 10) + "-" + header.Filename
+
+			// get the file size and read
+			// the file content into a buffer
+			size := header.Size
+			buffer := make([]byte, size)
+			file.Read(buffer)
+
+			// Uploading the file to AWS S3 bucket.
+			fileUrl, uploadErr := utils.UploadFileToS3(buffer, fileName)
+
+			if uploadErr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": uploadErr.Error()})
+				return
+			}
+
+			req.Receipt = null.NewString(fileUrl, true)
+		} else {
+			req.Receipt = null.NewString("", true)
 		}
 
-		err := updateOfflinePayment(c, offReq)
+		err := updateOfflinePayment(c, req)
 
 		if err != nil {
 			if err == pgx.ErrNoRows {
@@ -156,20 +184,12 @@ func handlePaymentUpdate(c *gin.Context) {
 			return
 		}
 	} else if req.PaymentType.String == "helphaver" {
-		var helpReq HelpHavedPayment
-		errRequest := c.ShouldBindBodyWith(&helpReq, binding.JSON)
 
-		if errRequest != nil {
-			log.Println("Err:", errRequest)
-			c.JSON(http.StatusBadRequest, gin.H{"Error": errRequest})
-			return
+		if req.Status.String != "" {
+			paymentStatus = req.Status.String
 		}
 
-		if helpReq.Status.String != "" {
-			paymentStatus = helpReq.Status.String
-		}
-
-		err := updateHelpHavePayment(c, helpReq)
+		err := updateHelpHavePayment(c, req)
 
 		if err != nil {
 			if err == pgx.ErrNoRows {
@@ -181,25 +201,11 @@ func handlePaymentUpdate(c *gin.Context) {
 		}
 	} else if req.PaymentType.String == "pelecard" {
 
-		type PaymentWithPaymentID struct {
-			Payment
-			PaymentID int `json:"PaymentID"`
+		if req.PaymentStatus.String != "" {
+			paymentStatus = req.PaymentStatus.String
 		}
 
-		var peleReq PaymentWithPaymentID
-
-		errRequest := c.ShouldBindBodyWith(&peleReq, binding.JSON)
-		if errRequest != nil {
-			log.Println("Err:", errRequest)
-			c.JSON(http.StatusBadRequest, gin.H{"Error": errRequest})
-			return
-		}
-
-		if peleReq.PaymentStatus.String != "" {
-			paymentStatus = peleReq.PaymentStatus.String
-		}
-
-		err := updatePelecardPayment(c, peleReq.Payment, peleReq.PaymentID)
+		err := updatePelecardPayment(c, req)
 
 		if err != nil {
 			if err == pgx.ErrNoRows {

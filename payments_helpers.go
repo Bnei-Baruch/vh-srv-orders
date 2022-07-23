@@ -392,7 +392,7 @@ func preparePelecardPaymentCreateQuery(req Payment, paymentID uint) (string, str
 	return concatedCreateString, concatedNumString, args
 }
 
-func preparePelecardPaymentUpdateQuery(req Payment) (string, []interface{}) {
+func preparePelecardPaymentUpdateQuery(req PaymentUpdate) (string, []interface{}) {
 	var updateStrings []string
 	var args []interface{}
 
@@ -549,12 +549,12 @@ func createHelpHaverPayment(c *gin.Context, req RequestOrder, paymentID uint, st
 
 }
 
-func updatePelecardPayment(c *gin.Context, req Payment, paymentID int) error {
+func updatePelecardPayment(c *gin.Context, req PaymentUpdate) error {
 
 	toUpdate, toUpdateArgs := preparePelecardPaymentUpdateQuery(req)
 
 	if len(toUpdateArgs) != 0 {
-		updateRes, err := DB.Exec(c, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdate, paymentID),
+		updateRes, err := DB.Exec(c, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdate, req.PaymentID.Int64),
 			toUpdateArgs...)
 		if err != nil {
 			return fmt.Errorf("problem updating pelecard payments: %w", err)
@@ -571,7 +571,7 @@ func updatePelecardPayment(c *gin.Context, req Payment, paymentID int) error {
 	return nil
 }
 
-func updateOfflinePayment(c *gin.Context, req OfflinePayment) error {
+func updateOfflinePayment(c *gin.Context, req PaymentUpdate) error {
 
 	toUpdate, toUpdateArgs := prepareOfflinePaymentUpdateQuery(req)
 
@@ -592,7 +592,7 @@ func updateOfflinePayment(c *gin.Context, req OfflinePayment) error {
 	return nil
 }
 
-func updateHelpHavePayment(c *gin.Context, req HelpHavedPayment) error {
+func updateHelpHavePayment(c *gin.Context, req PaymentUpdate) error {
 
 	toUpdate, toUpdateArgs := prepareHelpHaverPaymentUpdateQuery(req)
 
@@ -661,7 +661,7 @@ func prepareOfflinePaymentCreateQuery(req RequestOrder, paymentID uint, status s
 	return concatedCreateString, concatedNumString, args
 }
 
-func prepareOfflinePaymentUpdateQuery(req OfflinePayment) (string, []interface{}) {
+func prepareOfflinePaymentUpdateQuery(req PaymentUpdate) (string, []interface{}) {
 	var updateStrings []string
 	var args []interface{}
 
@@ -723,7 +723,7 @@ func prepareHelpHaverPaymentCreateQuery(req RequestOrder, paymentID uint, status
 	return concatedCreateString, concatedNumString, args
 }
 
-func prepareHelpHaverPaymentUpdateQuery(req HelpHavedPayment) (string, []interface{}) {
+func prepareHelpHaverPaymentUpdateQuery(req PaymentUpdate) (string, []interface{}) {
 	var updateStrings []string
 	var args []interface{}
 

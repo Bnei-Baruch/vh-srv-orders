@@ -2,28 +2,28 @@ package utils
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"log"
 	"net/http"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/kelseyhightower/envconfig"
 )
 
 type envConfig struct {
-	PgHost        string `envconfig:"PGHOST" default:"localhost"`
-	PgPort        string `envconfig:"PGPORT" default:"5432"`
-	PgUser        string `envconfig:"PGUSER" default:"postgres"`
-	PgPass        string `envconfig:"PGPASSWORD" default:"pass"`
-	PgDbName      string `envconfig:"PGDATABASE" default:"gorm"`
-	AWSSecretKey  string `envconfig:"AWS_SECRET_KEY"`
-	AWSAccesstKey string `envconfig:"AWS_ACCESS_KEY"`
-	AWSRegion     string `envconfig:"AWS_REGION"`
-	AWSBucketName string `envconfig:"AWS_BUCKET_NAME"`
+	PgHost       string `envconfig:"PGHOST" default:"localhost"`
+	PgPort       string `envconfig:"PGPORT" default:"5432"`
+	PgUser       string `envconfig:"PGUSER" default:"postgres"`
+	PgPass       string `envconfig:"PGPASSWORD" default:"pass"`
+	PgDbName     string `envconfig:"PGDATABASE" default:"gorm"`
+	S3SecretKey  string `envconfig:"S3_SECRET_KEY"`
+	S3AccesstKey string `envconfig:"S3_ACCESS_KEY"`
+	S3Region     string `envconfig:"S3_REGION"`
+	S3BucketName string `envconfig:"S3_BUCKET_NAME"`
+	S3Endpoint   string `envconfig:"S3_ENDPOINT"`
 }
 
 // UploadFileToS3 will upload a single file to S3, it will require a file buffer and filename
@@ -37,41 +37,41 @@ func UploadFileToS3(buffer []byte, fileName string) (string, error) {
 		return "", envCfgErr
 	}
 
-	appCreds := aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider(envCgf.AWSAccesstKey, envCgf.AWSSecretKey, ""))
-	_, retErr := appCreds.Retrieve(context.TODO())
-	if retErr != nil {
-		fmt.Println("Error while fetching credentials")
-		return "", retErr
+	// Creating a new session with the given configuration.
+	s3Config := &aws.Config{
+		Credentials:      credentials.NewStaticCredentials(envCgf.S3AccesstKey, envCgf.S3SecretKey, ""),
+		Endpoint:         aws.String(envCgf.S3Endpoint),
+		Region:           aws.String(envCgf.S3Region),
+		DisableSSL:       aws.Bool(true),
+		S3ForcePathStyle: aws.Bool(true),
+	}
+	newSession, newSessErr := session.NewSession(s3Config)
+
+	if newSessErr != nil {
+		fmt.Println("Error while creating session")
+		return "", newSessErr
 	}
 
-	cfg, cfgErr := config.LoadDefaultConfig(context.TODO(),
-		config.WithRegion(envCgf.AWSRegion),
-	)
-	if cfgErr != nil {
-		fmt.Println("Error while fetching config")
-		return "", cfgErr
-	}
-
-	client := s3.NewFromConfig(cfg)
+	s3Client := s3.New(newSession)
 
 	// Uploading the file to S3.
-	_, uploadErr := client.PutObject(context.TODO(), &s3.PutObjectInput{
-		Bucket:               aws.String(envCgf.AWSBucketName),
-		Key:                  aws.String(fileName),
-		ACL:                  "public-read",
-		Body:                 bytes.NewReader(buffer),
-		ContentLength:        int64(len(buffer)),
-		ContentType:          aws.String(http.DetectContentType(buffer)),
-		ContentDisposition:   aws.String("attachment"),
-		ServerSideEncryption: "AES256",
+	_, erre := s3Client.PutObject(&s3.PutObjectInput{
+		Bucket:             aws.String(envCgf.S3BucketName),
+		Key:                aws.String(fileName),
+		ACL:                aws.String("public-read"),
+		Body:               bytes.NewReader(buffer),
+		ContentLength:      aws.Int64(int64(len(buffer))),
+		ContentType:        aws.String(http.DetectContentType(buffer)),
+		ContentDisposition: aws.String("attachment"),
 	})
 
-	if uploadErr != nil {
-		fmt.Println("Error uploading to S3", uploadErr)
-		return "", uploadErr
+	if erre != nil {
+		fmt.Printf("Failed to upload data to %s\n", erre.Error())
+		return "", erre
 	}
 
-	uploadedFileUrl := "https://" + envCgf.AWSBucketName + ".s3.amazonaws.com/" + fileName
+	// Creating a url for the uploaded file.
+	uploadedFileUrl := envCgf.S3Endpoint + "/" + fileName
 
 	return uploadedFileUrl, nil
 }

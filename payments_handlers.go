@@ -170,8 +170,6 @@ func handlePaymentUpdate(c *gin.Context) {
 			}
 
 			req.Receipt = null.NewString(fileUrl, true)
-		} else {
-			req.Receipt = null.NewString("", true)
 		}
 
 		err := updateOfflinePayment(c, req)

@@ -71,7 +71,7 @@ func UploadFileToS3(buffer []byte, fileName string) (string, error) {
 	}
 
 	// Creating a url for the uploaded file.
-	uploadedFileUrl := envCgf.S3Endpoint + "/" + fileName
+	uploadedFileUrl := envCgf.S3Endpoint + "/" + envCgf.S3BucketName + "/" + fileName
 
 	return uploadedFileUrl, nil
 }

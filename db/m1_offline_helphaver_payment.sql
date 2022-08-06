@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS payments_offline (
     payment_id              INT NOT NULL,
     created_at              TIMESTAMP WITH TIME ZONE DEFAULT now(),
     updated_at              TIMESTAMP WITH TIME ZONE DEFAULT now(),
-    deleted_at              TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    deleted_at              TIMESTAMP WITH TIME ZONE DEFAULT null,
     CONSTRAINT fk_payment_id  FOREIGN KEY(payment_id) REFERENCES payments(id)
 );
 
@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS payments_helphaver (
     rejection_message       TEXT,
     created_at              TIMESTAMP WITH TIME ZONE DEFAULT now(),
     updated_at              TIMESTAMP WITH TIME ZONE DEFAULT now(),
-    deleted_at              TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    deleted_at              TIMESTAMP WITH TIME ZONE DEFAULT null,
     CONSTRAINT fk_payment_id  FOREIGN KEY(payment_id) REFERENCES payments(id)
 );
 

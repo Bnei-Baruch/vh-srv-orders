@@ -15,7 +15,7 @@ type PelecardCardDetail struct {
 	} `json:"ResultData"`
 }
 
-func fetchPelecardCardDetailFromToken(token string, terminalNumber string) (PelecardCardDetail, error) {
+func FetchPelecardCardDetailFromToken(token string, terminalNumber string) (PelecardCardDetail, error) {
 
 	if len(token) == 0 {
 		return PelecardCardDetail{}, fmt.Errorf("empty token passed")

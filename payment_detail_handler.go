@@ -38,3 +38,27 @@ func handlePaymentDetailGetByID(ctx *gin.Context) {
 		return
 	}
 }
+
+func handlePaymentDetailSoftDeleteByID(ctx *gin.Context) {
+	id := ctx.Param("id")
+
+	var (
+		intID int
+		err   error
+	)
+
+	intID, err = strconv.Atoi(id)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id! Accepted value is INTEGER", "success": false})
+		return
+	}
+
+	err = softDeletePaymentDetailById(ctx, intID)
+
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"message": "Deleted!", "success": true})
+}

@@ -73,6 +73,7 @@ func initRouter() *gin.Engine {
 	userPaymentDetails := baseV2Path.Group("/payment_detail")
 	{
 		userPaymentDetails.GET("/:id", handlePaymentDetailGetByID)
+		userPaymentDetails.DELETE("/:id", handlePaymentDetailSoftDeleteByID)
 	}
 	baseV2Path.GET("/payment_details", handleOrderFetch)
 

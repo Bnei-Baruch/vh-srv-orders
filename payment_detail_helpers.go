@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -35,4 +36,9 @@ func getPaymentDetailById(ctx *gin.Context, id int) (PaymentDetails, error) {
 	}
 	return payDetail, nil
 
+}
+
+func softDeletePaymentDetailById(c *gin.Context, id int) error {
+	_, err := DB.Exec(c, "UPDATE payment_details SET deleted_at = $1 WHERE id = $2", time.Now(), id)
+	return err
 }

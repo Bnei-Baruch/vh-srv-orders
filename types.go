@@ -422,7 +422,7 @@ type PaymentDetails struct {
 	AccountID       null.Int    `json:"account_id"`
 	GatewayProvider null.String `json:"gateway_provider"`
 	CCNumber        null.String `json:"cc_number"`
-	CCExpDate       null.String `json:"cc_exp_date"`
+	CCExpDate       null.String `json:"cc_expdate"`
 	Active          null.Bool   `json:"active"`
 	CreatedAt       null.Time   `json:"created_at"`
 	UpdatedAt       null.Time   `json:"updated_at"`

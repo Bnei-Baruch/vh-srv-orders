@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -61,4 +62,63 @@ func handlePaymentDetailSoftDeleteByID(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{"message": "Deleted!", "success": true})
+}
+
+func handlePaymentDetailCreateByID(ctx *gin.Context) {
+	var req PaymentDetails
+	errRequest := ctx.BindJSON(&req)
+
+	if errRequest != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"Error": errRequest.Error()})
+		return
+	}
+
+	accountId, err := createPaymentDetailsById(ctx, req)
+
+	if err != nil {
+		if errors.Is(err, fmt.Errorf("invalid body")) {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err})
+			return
+		}
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err})
+		return
+	}
+
+	ctx.JSON(http.StatusCreated, gin.H{"message": "Created!", "data": accountId, "success": true})
+}
+
+func handlePaymentDetailUpdateByID(ctx *gin.Context) {
+	var req PaymentDetails
+	errRequest := ctx.BindJSON(&req)
+
+	id := ctx.Param("id")
+
+	if errRequest != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"Error": errRequest.Error()})
+		return
+	}
+
+	var (
+		intID int
+		err   error
+	)
+
+	intID, err = strconv.Atoi(id)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id! Accepted value is INTEGER", "success": false})
+		return
+	}
+
+	err = patchPaymentDetailsById(ctx, req, intID)
+
+	if err != nil {
+		if errors.Is(err, fmt.Errorf("invalid body")) {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err})
+			return
+		}
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"message": "Updated!", "success": true})
 }

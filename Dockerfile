@@ -1,8 +1,6 @@
-FROM golang:1.14.14-stretch
+FROM golang:1.19.0-buster AS base
 
 RUN apt-get update && apt-get upgrade -y
-
-MAINTAINER Himanshu Sadadiya
 
 RUN mkdir /app
 
@@ -10,8 +8,14 @@ ADD . /app
 
 WORKDIR /app
 
-RUN go build -o main .
+RUN CGO_ENABLED=0 go build -o orders .
+
+FROM alpine:latest
+
+COPY --from=base /app/orders /
+
+COPY ./.env /
 
 EXPOSE 8185
 
-ENTRYPOINT /app/main --port 8185
+CMD ["./orders", "--port",  "8185"]

@@ -69,13 +69,13 @@ func getPaymentActivities(ctx *gin.Context, email string, productType string, pa
 	return PaymentActivities, nil
 }
 
-func GetAllPayments(ctx *gin.Context, skip int, limit int, fromDate string, toDate *time.Time, paymentType string, paymentStatus string, orderType string, email string, accountID int) (*[]Payment, error) {
+func GetAllPayments(ctx *gin.Context, skip int, limit int, fromDate string, toDate *time.Time, paymentType string, paymentStatus string, orderType string, email string, accountID int, paymentsWithToken string) (*[]Payment, error) {
 
 	payments := []Payment{}
 
 	limitOffsetString := fmt.Sprintf(" LIMIT %d OFFSET %d", limit, skip)
 
-	whereQuery, orderByQuery, queryBuildErr := buildAndGetPaymentsWhereQuery(fromDate, toDate, paymentType, paymentStatus, orderType, email, accountID)
+	whereQuery, orderByQuery, queryBuildErr := buildAndGetPaymentsWhereQuery(fromDate, toDate, paymentType, paymentStatus, orderType, email, accountID, paymentsWithToken)
 
 	if queryBuildErr != nil {
 		return &payments, queryBuildErr
@@ -791,7 +791,7 @@ func buildAndGetWherePaymentActQuery(email string, productType string, paymentTy
 	return whereString.String(), orderBy.String()
 }
 
-func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentType string, paymentStatus string, orderType string, email string, accontID int) (string, string, error) {
+func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentType string, paymentStatus string, orderType string, email string, accontID int, paymentsWithToken string) (string, string, error) {
 
 	var whereString strings.Builder
 	var orderBy strings.Builder
@@ -818,6 +818,20 @@ func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentTy
 
 	if paymentStatus != "" {
 		whereCondition.WriteString(fmt.Sprintf(" AND LOWER(p.\"PaymentStatus\")=LOWER('%s')", paymentStatus))
+	}
+
+	if paymentsWithToken != "" {
+		//convert string to bool
+		paymentsWithTokenBool, err := strconv.ParseBool(paymentsWithToken)
+		if err != nil {
+			return "", "", err
+		}
+		if paymentsWithTokenBool {
+			whereCondition.WriteString(" AND p.pelecard_token != ''")
+		} else {
+			whereCondition.WriteString(" AND p.pelecard_token = ''")
+		}
+
 	}
 
 	if orderType != "" {

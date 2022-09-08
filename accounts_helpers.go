@@ -91,6 +91,54 @@ func softDeleteAccount(c *gin.Context, accountID int) error {
 	return err
 }
 
+func getAllAccounts(c *gin.Context, limit int, skip int) ([]Account, error) {
+
+	var accounts []Account
+
+	limitOffsetString := fmt.Sprintf(" LIMIT %d OFFSET %d", limit, skip)
+
+	rows, err := DB.Query(c, `SELECT 
+		id,
+		"FirstName",
+		"LastName",
+		"Email",
+		"Phone",
+		"Street",
+		"City",
+		"State",
+		"Postcode",
+		"Country",
+		"AccountType",
+		"PaymentToken",
+		"PaymentCardID",
+		"PaymentCardExpMonth",
+		"PaymentCardExpYear",
+		"UserKey",
+		"AuthNo",
+		created_at,
+		updated_at,
+		deleted_at from accounts
+	`+limitOffsetString)
+
+	if err != nil {
+		fmt.Println("--error-while-executing-account-query", err)
+		return accounts, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var d Account
+		err := rows.Scan(
+			&d.ID, &d.FirstName, &d.LastName, &d.Email, &d.Phone, &d.Street, &d.City, &d.State, &d.Postcode, &d.Country, &d.AccountType, &d.PaymentToken, &d.PaymentCardID, &d.PaymentCardExpMonth, &d.PaymentCardExpYear, &d.UserKey, &d.AuthNo, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt,
+		)
+		if err != nil {
+			fmt.Println("--error-while-scanning-account-query", err)
+			return accounts, err
+		}
+		accounts = append(accounts, d)
+	}
+	return accounts, nil
+}
+
 func getAccount(ctx *gin.Context, id int, email string) (Account, error) {
 	var (
 		acc        Account

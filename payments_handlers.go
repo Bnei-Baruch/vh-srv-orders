@@ -248,6 +248,7 @@ func handlePaymentFetch(ctx *gin.Context) {
 	orderType := ctx.Query("o-type")
 	email := ctx.Query("email")
 	accountID := ctx.Query("account-id")
+	tokenExist := ctx.Query("token-exist")
 
 	var (
 		toDateParsed time.Time
@@ -298,7 +299,7 @@ func handlePaymentFetch(ctx *gin.Context) {
 		intAccountID = 0
 	}
 
-	payments, err := GetAllPayments(ctx, intSkip, intLimit, fromDate, &toDateParsed, paymentType, paymentStatus, orderType, email, intAccountID)
+	payments, err := GetAllPayments(ctx, intSkip, intLimit, fromDate, &toDateParsed, paymentType, paymentStatus, orderType, email, intAccountID, tokenExist)
 
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{

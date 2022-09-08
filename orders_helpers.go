@@ -440,7 +440,7 @@ func updateOrderAfterPayment(ctx *gin.Context, p Payment) (Order, error) {
 
 // Renewal function
 
-//Get Order
+// Get Order
 func getOrderByID(ctx *gin.Context, orderID uint) Order {
 	var o Order
 	var amount string
@@ -484,7 +484,7 @@ func getOrderByID(ctx *gin.Context, orderID uint) Order {
 	return o
 }
 
-//Get Payment
+// Get Payment
 func getPaymentForOrderID(ctx *gin.Context, orderID uint) Payment {
 	var p Payment
 	// result := DB.Where(&Payment{OrderID: orderID, PaymentStatus: "success"}).First(&p)

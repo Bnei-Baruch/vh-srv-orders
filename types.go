@@ -32,7 +32,7 @@ type Order struct {
 	Payments []Payment `json:"Payments" gorm:"foreignkey:OrderID"`
 }
 
-//Payment is defined by
+// Payment is defined by
 type Payment struct {
 	ID        uint      `json:"ID" gorm:"primary_key"`
 	CreatedAt null.Time `json:"created_at"`
@@ -79,7 +79,7 @@ type Payment struct {
 	VoucherID             null.String `json:"VoucherID" gorm:"Column:VoucherID"`
 }
 
-//RequestOrder ...
+// RequestOrder ...
 type RequestOrder struct {
 	//User data
 	FirstName null.String `json:"FirstName"`
@@ -252,7 +252,7 @@ type RequestPayment struct {
 	UserKey      string  `json:"UserKey"`
 }
 
-//RequestPaid ...
+// RequestPaid ...
 type RequestPaid struct {
 	UserKey null.String `json:"user_key"`
 
@@ -290,7 +290,7 @@ type RequestPaid struct {
 	VoucherID             null.String `json:"voucher_id"`
 }
 
-//Product is storing all product info
+// Product is storing all product info
 type Product struct {
 	//Product data
 	Descriptions  []ProductDescription `json:"ProductDescription"` // arranged by language
@@ -303,7 +303,7 @@ type Product struct {
 	Organization  string               `json:"Organization"`
 }
 
-//Price for multicurrent products
+// Price for multicurrent products
 type Price struct {
 	Currency string  `json:"currency"`
 	Fixed    bool    `json:"fixed"`
@@ -313,7 +313,7 @@ type Price struct {
 	Step     int     `json:"step"`
 }
 
-//ProductDescription specify product desc
+// ProductDescription specify product desc
 type ProductDescription struct {
 	Locale     string      `json:"locale"`
 	Header     Description `json:"header"`
@@ -324,7 +324,7 @@ type ProductDescription struct {
 	ButtonText string      `json:"ButtonText"`
 }
 
-//Description generic  metadata
+// Description generic  metadata
 type Description struct {
 	Title    string `json:"title"`
 	Subtitle string `json:"subtitle"`
@@ -415,4 +415,16 @@ type PaymentActivitiesRes struct {
 	LastName      null.String `json:"last_name"`
 	Email         null.String `json:"email"`
 	Country       null.String `json:"country"`
+}
+
+type PaymentDetails struct {
+	ID              uint        `json:"id"`
+	AccountID       null.Int    `json:"account_id"`
+	GatewayProvider null.String `json:"gateway_provider"`
+	CCNumber        null.String `json:"cc_number"`
+	CCExpDate       null.String `json:"cc_expdate"`
+	Active          null.Bool   `json:"active"`
+	CreatedAt       null.Time   `json:"created_at"`
+	UpdatedAt       null.Time   `json:"updated_at"`
+	DeletedAt       null.Time   `json:"deleted_at"`
 }

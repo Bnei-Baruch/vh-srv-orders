@@ -135,3 +135,7 @@ data/*
 
 # Ignore all local history of files
 __debug_bin
+
+
+# ENV
+.env

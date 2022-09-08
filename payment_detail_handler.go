@@ -73,7 +73,7 @@ func handlePaymentDetailCreateByID(ctx *gin.Context) {
 		return
 	}
 
-	accountId, err := createPaymentDetailsById(ctx, req)
+	accountId, err := createPaymentDetailsAndGetId(ctx, req)
 
 	if err != nil {
 		if errors.Is(err, fmt.Errorf("invalid body")) {

@@ -2,10 +2,12 @@ package main
 
 import (
 	"fmt"
+	"orderservices/orders/utils"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gopkg.in/guregu/null.v4"
 )
 
 func getPaymentDetailById(ctx *gin.Context, id int) (PaymentDetails, error) {
@@ -39,7 +41,7 @@ func getPaymentDetailById(ctx *gin.Context, id int) (PaymentDetails, error) {
 
 }
 
-func createPaymentDetailsById(ctx *gin.Context, p PaymentDetails) (int, error) {
+func createPaymentDetailsAndGetId(ctx *gin.Context, p PaymentDetails) (int, error) {
 
 	createString, numString, createQueryArgs := preparePaymentDetailsCreateQuery(p)
 
@@ -84,6 +86,62 @@ func patchPaymentDetailsById(c *gin.Context, req PaymentDetails, id int) error {
 	}
 
 	return nil
+}
+
+func addPaymentDetailsFromAllExistingOrders(ctx *gin.Context, orderType string) {
+
+	var payments *[]Payment
+	var err error
+	var timeNow = time.Now()
+
+	var terminalNumber string
+
+	payments, err = GetAllPayments(ctx, int(0), int(100), "", &timeNow, "", "", orderType, "", int(0), "true")
+	if err != nil {
+		fmt.Println("error getting payments :: ", err.Error())
+		return
+	}
+
+	if orderType == "recurring" {
+		terminalNumber = "2814722016"
+	} else {
+		terminalNumber = "5776492014"
+	}
+
+	// loop over allPayments
+	for _, payment := range *payments {
+		var pelecardCardDetail utils.PelecardCardDetail
+		var peleErr error
+		pelecardCardDetail, peleErr = utils.FetchPelecardCardDetailFromToken(payment.PelecardToken.String, terminalNumber)
+
+		if peleErr != nil {
+			fmt.Println("error fetching pelecard card detail")
+			return
+		}
+
+		if pelecardCardDetail.ResultData.CreditCardNumber != "" && pelecardCardDetail.ResultData.ExpirationDate != "" {
+			order := getOrderByID(ctx, uint(payment.OrderID.Int64))
+
+			var paymentDetails PaymentDetails
+			paymentDetails.AccountID = order.AccountID
+			paymentDetails.GatewayProvider = null.NewString("pelecard", true)
+			first4Num := pelecardCardDetail.ResultData.CreditCardNumber[0:4]
+			last4 := pelecardCardDetail.ResultData.CreditCardNumber[len(pelecardCardDetail.ResultData.CreditCardNumber)-4:]
+			censoredCreditCardNum := first4Num + "****" + last4
+
+			paymentDetails.CCNumber = null.NewString(censoredCreditCardNum, true)
+			paymentDetails.CCExpDate = null.NewString(pelecardCardDetail.ResultData.ExpirationDate, true)
+			paymentDetails.Active = null.NewBool(true, true)
+
+			_, err = createPaymentDetailsAndGetId(ctx, paymentDetails)
+			// Error can originate from duplicate entry in DB for same payment details for same account id
+			if err != nil {
+				fmt.Println("error creating payment details")
+				fmt.Println(err.Error())
+				fmt.Println("--------------------------------")
+			}
+		}
+	}
 }
 
 func preparePaymentDetailsUpdateQuery(req PaymentDetails) (string, []interface{}) {

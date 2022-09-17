@@ -531,6 +531,145 @@ func preparePelecardPaymentUpdateQuery(req PaymentUpdate) (string, []interface{}
 	return updateArgument, args
 }
 
+func preparePelecardPaymentUpdateViaPaymentStructQuery(req Payment) (string, []interface{}) {
+	var updateStrings []string
+	var args []interface{}
+
+	if req.Amount.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("amount=$%d", len(updateStrings)+1))
+		args = append(args, req.Amount.Float64)
+	}
+	if req.PaymentStatus.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("payment_status=$%d", len(updateStrings)+1))
+		args = append(args, req.PaymentStatus.String)
+	}
+	if req.PaymentType.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("payment_type=$%d", len(updateStrings)+1))
+		args = append(args, req.PaymentType.String)
+	}
+	if req.OrderID.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("order_id=$%d", len(updateStrings)+1))
+		args = append(args, req.OrderID.Int64)
+	}
+	if req.ParamX.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("paramx=$%d", len(updateStrings)+1))
+		args = append(args, req.ParamX.String)
+	}
+	if req.AuthNo.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("auth_no=$%d", len(updateStrings)+1))
+		args = append(args, req.AuthNo.String)
+	}
+	if req.ConfirmationKey.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("confirmation_key=$%d", len(updateStrings)+1))
+		args = append(args, req.ConfirmationKey.String)
+	}
+	if req.Success.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("success=$%d", len(updateStrings)+1))
+		args = append(args, req.Success.String)
+	}
+	if req.PelecardToken.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("pelecard_token=$%d", len(updateStrings)+1))
+		args = append(args, req.PelecardToken.String)
+	}
+	if req.TransactionID.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("transaction_id=$%d", len(updateStrings)+1))
+		args = append(args, req.TransactionID.String)
+	}
+	if req.ErrorMsg.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("error_msg=$%d", len(updateStrings)+1))
+		args = append(args, req.ErrorMsg.String)
+	}
+	if req.CardHebrewName.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("cardhebrew_name=$%d", len(updateStrings)+1))
+		args = append(args, req.CardHebrewName.String)
+	}
+	if req.CCAbroadCard.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("cc_abroad_card=$%d", len(updateStrings)+1))
+		args = append(args, req.CCAbroadCard.String)
+	}
+	if req.CCBrand.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("cc_brand=$%d", len(updateStrings)+1))
+		args = append(args, req.CCBrand.String)
+	}
+	if req.CCCompanyClearer.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("cc_company_clearer=$%d", len(updateStrings)+1))
+		args = append(args, req.CCCompanyClearer.String)
+	}
+	if req.CCCompanyIssuer.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("cc_company_issuer=$%d", len(updateStrings)+1))
+		args = append(args, req.CCCompanyIssuer.String)
+	}
+	if req.CreditType.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("credit_type=$%d", len(updateStrings)+1))
+		args = append(args, req.CreditType.String)
+	}
+	if req.CCExpDate.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("cc_exp_date=$%d", len(updateStrings)+1))
+		args = append(args, req.CCExpDate.String)
+	}
+	if req.CCNumber.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("cc_number=$%d", len(updateStrings)+1))
+		args = append(args, req.CCNumber.String)
+	}
+	if req.DebitCode.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("debit_code=$%d", len(updateStrings)+1))
+		args = append(args, req.DebitCode.String)
+	}
+	if req.DebitCurrency.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("debit_currency=$%d", len(updateStrings)+1))
+		args = append(args, req.DebitCurrency.String)
+	}
+	if req.DebitTotal.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("debit_total=$%d", len(updateStrings)+1))
+		args = append(args, req.DebitTotal.String)
+	}
+	if req.DebitType.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("debit_type=$%d", len(updateStrings)+1))
+		args = append(args, req.DebitType.String)
+	}
+	if req.FirstPaymentTotal.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("first_payment_total=$%d", len(updateStrings)+1))
+		args = append(args, req.FirstPaymentTotal.String)
+	}
+	if req.FixedPaymentTotal.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("fixed_payment_total=$%d", len(updateStrings)+1))
+		args = append(args, req.FixedPaymentTotal.String)
+	}
+	if req.JParam.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("j_param=$%d", len(updateStrings)+1))
+		args = append(args, req.JParam.String)
+	}
+	if req.TotalPayments.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("total_payments=$%d", len(updateStrings)+1))
+		args = append(args, req.TotalPayments.String)
+	}
+	if req.TransactionInitTime.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("transaction_init_time=$%d", len(updateStrings)+1))
+		args = append(args, req.TransactionInitTime.String)
+	}
+	if req.TransactionUpdateTime.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("transaction_update_time=$%d", len(updateStrings)+1))
+		args = append(args, req.TransactionUpdateTime.String)
+	}
+	if req.VoucherID.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("voucher_id=$%d", len(updateStrings)+1))
+		args = append(args, req.VoucherID.String)
+	}
+	if req.Ordkey.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("ord_key=$%d", len(updateStrings)+1))
+		args = append(args, req.Ordkey.String)
+	}
+
+	if len(args) != 0 {
+		updateStrings = append(updateStrings, fmt.Sprintf("updated_at=$%d", len(updateStrings)+1))
+		args = append(args, time.Now())
+	}
+
+	updateArgument := strings.Join(updateStrings, ",")
+
+	return updateArgument, args
+}
+
 func createHelpHaverPayment(c *gin.Context, req RequestOrder, paymentID uint, status string) error {
 
 	createString, numString, createQueryArgs := prepareHelpHaverPaymentCreateQuery(req, paymentID, status)

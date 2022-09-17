@@ -199,6 +199,14 @@ func createPendingPayment(c *gin.Context, sum null.Float, oid int64, pmx null.St
 		return p, err
 	}
 
+	createPelecardString, numPelecardString, createPelecardQueryArgs := preparePelecardPaymentCreateQuery(p, p.ID)
+
+	_, err := DB.Exec(c, fmt.Sprintf(`INSERT INTO payments_pelecard (%s) VALUES (%s)`, createPelecardString, numPelecardString),
+		createPelecardQueryArgs...)
+	if err != nil {
+		return p, err
+	}
+
 	paramx := "m-" + strconv.FormatUint(uint64(p.ID), 10) + os.Getenv("SUFX") + pmx.String
 	ordkey := "ord-" + strconv.FormatUint(uint64(oid), 10) + os.Getenv("SUFX")
 	fmt.Printf(">>>> ParamX: %s\n", paramx)
@@ -214,6 +222,31 @@ func createPendingPayment(c *gin.Context, sum null.Float, oid int64, pmx null.St
 		if err != nil {
 			fmt.Println("problem updating payment: %w", err)
 			return p, err
+		}
+
+		// convert uint to int
+		paymentId := int(p.ID)
+
+		// Payment Struct to PaymentUpdate Struct
+		pu := PaymentUpdate{
+			PaymentID:     null.NewInt(int64(paymentId), true),
+			Amount:        p.Amount,
+			PaymentType:   p.PaymentType,
+			OrderID:       p.OrderID,
+			PaymentStatus: p.PaymentStatus,
+			ParamX:        p.ParamX,
+			Ordkey:        p.Ordkey,
+		}
+
+		toUpdatePelecard, toUpdatePelecardArgs := preparePelecardPaymentUpdateQuery(pu)
+
+		if len(toUpdatePelecardArgs) != 0 {
+			_, err := DB.Exec(c, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdatePelecard, paymentId),
+				toUpdatePelecardArgs...)
+			if err != nil {
+				fmt.Println("problem updating payments_pelecard: %w", err)
+				return p, err
+			}
 		}
 
 		if updateRes.RowsAffected() == 0 {
@@ -688,6 +721,15 @@ func renewOrder(c *gin.Context, orderID uint, pmx string) string {
 		updateRes, err := DB.Exec(c, fmt.Sprintf(`UPDATE payments SET %s WHERE id=%d`, toUpdate, newp.ID),
 			toUpdateArgs...)
 		if err != nil {
+			fmt.Errorf("problem updating payments: %w", err)
+		}
+
+		toUpdatePelecard, toUpdateArgsPeleCard := preparePelecardPaymentUpdateViaPaymentStructQuery(newp)
+
+		// update payments_pelecard table after payment
+		_, pelecardErr := DB.Exec(c, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdatePelecard, newp.ID),
+			toUpdateArgsPeleCard...)
+		if pelecardErr != nil {
 			fmt.Errorf("problem updating payments: %w", err)
 		}
 

@@ -11,15 +11,19 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/kelseyhightower/envconfig"
+	_ "github.com/lib/pq"
 )
 
 type envConfig struct {
-	PgHost           string `envconfig:"PGHOST" default:"localhost"`
-	PgPort           string `envconfig:"PGPORT" default:"5432"`
-	PgUser           string `envconfig:"PGUSER" default:"postgres"`
-	PgPass           string `envconfig:"PGPASSWORD" default:"pass"`
-	PgDbName         string `envconfig:"PGDATABASE" default:"gorm"`
+	PgHost           string `envconfig:"PGHOST"`
+	PgPort           string `envconfig:"PGPORT"`
+	PgUser           string `envconfig:"PGUSER"`
+	PgPass           string `envconfig:"PGPASSWORD"`
+	PgDbName         string `envconfig:"PGDATABASE"`
 	S3SecretKey      string `envconfig:"S3_SECRET_KEY"`
 	S3AccesstKey     string `envconfig:"S3_ACCESS_KEY"`
 	S3Region         string `envconfig:"S3_REGION"`
@@ -129,4 +133,40 @@ func HTTPCallAndGetBody(fullUrl string, bodyBuffer *bytes.Buffer, typeOfReq stri
 	}
 
 	return body
+}
+
+// get db connection url
+func GetDBURL() string {
+
+	envCgf, envCfgErr := getEnvVariables()
+
+	if envCfgErr != nil {
+		log.Fatalln("Error while fetching env file")
+		return ""
+	}
+
+	return "postgres://" + envCgf.PgUser + ":" + envCgf.PgPass + "@" + envCgf.PgHost + ":" + envCgf.PgPort + "/" + envCgf.PgDbName
+}
+
+func SyncDBStructInsertionAndMigrations() error {
+	fmt.Println("Starting DB Migration")
+	m, err := migrate.New(
+		"file://./db/migrations", GetDBURL()+"?sslmode=disable")
+	if err != nil {
+		if err != migrate.ErrNoChange {
+			return nil
+		}
+	}
+	// Syncing Table struct (UP Mig), Insertion ( Up Mig ) & UP Migrations
+	if err := m.Up(); err != nil {
+		m.Close()
+		if err == migrate.ErrNoChange {
+			fmt.Println("No changes in UP migration")
+			return nil
+		}
+		return err
+	}
+	m.Close()
+	fmt.Println("UP Migration Done!")
+	return nil
 }

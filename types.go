@@ -417,13 +417,14 @@ type PaymentActivitiesRes struct {
 	Country       null.String `json:"country"`
 }
 
-type PaymentDetails struct {
+type CardDetails struct {
 	ID              uint        `json:"id"`
 	AccountID       null.Int    `json:"account_id"`
 	GatewayProvider null.String `json:"gateway_provider"`
 	CCNumber        null.String `json:"cc_number"`
 	CCExpDate       null.String `json:"cc_expdate"`
 	Active          null.Bool   `json:"active"`
+	Token           null.String `json:"token"`
 	CreatedAt       null.Time   `json:"created_at"`
 	UpdatedAt       null.Time   `json:"updated_at"`
 	DeletedAt       null.Time   `json:"deleted_at"`

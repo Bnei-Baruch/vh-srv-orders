@@ -1,5 +1,5 @@
 BEGIN;
 
-DROP TABLE IF EXISTS payment_details;
+DROP TABLE IF EXISTS card_details;
 
 COMMIT;

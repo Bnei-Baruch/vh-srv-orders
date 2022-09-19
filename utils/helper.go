@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -145,7 +146,7 @@ func GetDBURL() string {
 		return ""
 	}
 
-	return "postgres://" + envCgf.PgUser + ":" + envCgf.PgPass + "@" + envCgf.PgHost + ":" + envCgf.PgPort + "/" + envCgf.PgDbName
+	return "postgres://" + url.QueryEscape(envCgf.PgUser) + ":" + url.QueryEscape(envCgf.PgPass) + "@" + envCgf.PgHost + ":" + envCgf.PgPort + "/" + url.QueryEscape(envCgf.PgDbName)
 }
 
 func SyncDBStructInsertionAndMigrations() error {

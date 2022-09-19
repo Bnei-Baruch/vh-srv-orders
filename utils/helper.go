@@ -20,7 +20,7 @@ import (
 
 type envConfig struct {
 	PgHost           string `envconfig:"PGHOST"`
-	PgPort           string `envconfig:"PORT"`
+	PgPort           string `envconfig:"PGPORT"`
 	PgUser           string `envconfig:"PGUSER"`
 	PgPass           string `envconfig:"PGPASSWORD"`
 	PgDbName         string `envconfig:"PGDATABASE"`

@@ -19,11 +19,11 @@ import (
 )
 
 type envConfig struct {
-	PgHost           string `envconfig:"DB_HOST"`
-	PgPort           string `envconfig:"DB_PORT"`
-	PgUser           string `envconfig:"DB_USER"`
-	PgPass           string `envconfig:"DB_PASSWORD"`
-	PgDbName         string `envconfig:"DB_DATABASE"`
+	PgHost           string `envconfig:"PGHOST"`
+	PgPort           string `envconfig:"PGPORT"`
+	PgUser           string `envconfig:"PGUSER"`
+	PgPass           string `envconfig:"PGPASSWORD"`
+	PgDbName         string `envconfig:"PGDATABASE"`
 	S3SecretKey      string `envconfig:"S3_SECRET_KEY"`
 	S3AccesstKey     string `envconfig:"S3_ACCESS_KEY"`
 	S3Region         string `envconfig:"S3_REGION"`

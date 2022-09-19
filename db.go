@@ -25,6 +25,8 @@ func connectPostgreSQL() {
 
 	connec := utils.GetDBURL()
 
+	fmt.Println("Connecting to DB URL: ", connec)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

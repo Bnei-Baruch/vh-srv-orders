@@ -9,6 +9,3 @@ CREATE TABLE IF NOT EXISTS specials
 );
 
 COMMIT;
-
-
--- \copy specials(email, category, subcategory) from './specials.csv' delimiter ',' csv header;

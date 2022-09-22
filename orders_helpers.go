@@ -458,12 +458,15 @@ func getOrderByID(ctx *gin.Context, orderID uint) Order {
 	"OrderLanguage",
 	"PaymentDate",
 	"Flag",
+	quantity,
+	amount_item,
 	created_at,
 	updated_at,
 	deleted_at 
 	FROM orders WHERE id=$1`, orderID).Scan(
 		&o.ID, &o.Type, &o.ProductType, &o.RecuringFreq, &o.AccountID, &o.Organization, &amount,
-		&o.Currency, &o.Status, &o.OrderLanguage, &o.PaymentDate, &o.Flag, &o.CreatedAt, &o.UpdatedAt, &o.DeletedAt,
+		&o.Currency, &o.Status, &o.OrderLanguage, &o.PaymentDate, &o.Flag, &o.Quantity, &o.AmountItem,
+		&o.CreatedAt, &o.UpdatedAt, &o.DeletedAt,
 	); err != nil {
 		fmt.Println("--get-order-err", err)
 		log.Printf("\n## ERROR - NO ORDER %v\n", orderID)
@@ -900,7 +903,8 @@ func GetAllOrders(ctx *gin.Context, skip int, limit int, fromDate string, toDate
 
 	rows, err := DB.Query(ctx, `SELECT 
 		o.id, o."Type", o."ProductType", o."RecuringFreq", o."AccountID", o."Organization", o."Amount", 
-		"Currency", o."Status", o."OrderLanguage", o."PaymentDate", o."SKU", o."Note", o."Flag", o.created_at, o.updated_at, o.deleted_at
+		"Currency", o."Status", o."OrderLanguage", o."PaymentDate", o."SKU", o."Note", o."Flag", o.quantity, o.amount_item,
+		 o.created_at, o.updated_at, o.deleted_at
 	`+fromQuery+whereQuery+orderByQuery+limitOffsetString)
 
 	if err != nil {
@@ -912,7 +916,8 @@ func GetAllOrders(ctx *gin.Context, skip int, limit int, fromDate string, toDate
 		var d Order
 		err := rows.Scan(
 			&d.ID, &d.Type, &d.ProductType, &d.RecuringFreq, &d.AccountID, &d.Organization, &d.Amount,
-			&d.Currency, &d.Status, &d.OrderLanguage, &d.PaymentDate, &d.SKU, &d.Note, &d.Flag, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt)
+			&d.Currency, &d.Status, &d.OrderLanguage, &d.PaymentDate, &d.SKU, &d.Note, &d.Flag, &d.Quantity, &d.AmountItem,
+			&d.CreatedAt, &d.UpdatedAt, &d.DeletedAt)
 		if err != nil {
 			return &orders, err
 		}
@@ -992,6 +997,16 @@ func prepareOrderCreateQuery(req Order) (string, string, []interface{}) {
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.Flag.String)
 	}
+	if req.Quantity.Valid {
+		createStrings = append(createStrings, "quantity")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.Quantity.Int64)
+	}
+	if req.AmountItem.Valid {
+		createStrings = append(createStrings, "amount_item")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.AmountItem.Int64)
+	}
 
 	if len(args) != 0 {
 		createStrings = append(createStrings, "created_at")
@@ -1064,6 +1079,14 @@ func prepareOrderUpdateQuery(req Order) (string, []interface{}) {
 	if req.Flag.Valid {
 		updateStrings = append(updateStrings, fmt.Sprintf(`"Flag"=$%d`, len(updateStrings)+1))
 		args = append(args, req.Flag.String)
+	}
+	if req.Quantity.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf(`quantity=$%d`, len(updateStrings)+1))
+		args = append(args, req.Quantity.Int64)
+	}
+	if req.AmountItem.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf(`amount_item=$%d`, len(updateStrings)+1))
+		args = append(args, req.AmountItem.Int64)
 	}
 
 	if len(args) != 0 {

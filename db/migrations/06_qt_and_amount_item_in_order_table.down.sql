@@ -1,0 +1,7 @@
+BEGIN;
+
+ALTER TABLE orders
+DROP COLUMN IF EXISTS quantity,
+DROP COLUMN IF EXISTS amount_item;
+
+COMMIT;

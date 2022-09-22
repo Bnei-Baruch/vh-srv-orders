@@ -28,6 +28,8 @@ type Order struct {
 	PaymentDate   null.Time   `json:"PaymentDate" gorm:"Column:PaymentDate"`
 	Note          null.String `json:"Note" gorm:"Column:Note;type:varchar(200)"`
 	Flag          null.String `json:"Flag" gorm:"Column:Flag;type:varchar(200)"`
+	Quantity      null.Int    `json:"Quantity"`
+	AmountItem    null.Int    `json:"AmountItem"`
 
 	Payments []Payment `json:"Payments" gorm:"foreignkey:OrderID"`
 }

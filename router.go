@@ -75,9 +75,16 @@ func initRouter() *gin.Engine {
 		userCardDetails.GET("/:id", handleCardDetailGetByID)
 		userCardDetails.DELETE("/:id", handleCardDetailSoftDeleteByID)
 		userCardDetails.PATCH("/:id", handleCardDetailUpdateByID)
-		userCardDetails.POST("/:id", handleCardDetailCreateByID)
+		userCardDetails.POST("/", handleCardDetailCreate)
 	}
 	baseV2Path.GET("/card_details", handleCardDetailsFetchAll)
+
+	transaction := baseV2Path.Group("/transaction")
+	{
+		transaction.GET("/:id", handleTransactionGetByID)
+		transaction.PATCH("/", handleTransactionPaid)
+		transaction.POST("/", handleTransactionOrderAndPay)
+	}
 
 	r.GET("/status/:email", Status)
 

@@ -110,6 +110,65 @@ func createOrder(c *gin.Context, req RequestOrder) (Order, error) {
 
 	return o, nil
 }
+func createOrderViaTransaction(c *gin.Context, req RequestOrder) (Order, error) {
+
+	order_status := "pending"
+	var account_id int64 = 0
+
+	o := Order{
+		Type:          req.Type,
+		ProductType:   req.ProductType,
+		RecuringFreq:  req.RecurringFreq,
+		Organization:  req.Organization,
+		Amount:        req.Amount,
+		SKU:           req.SKU,
+		Currency:      req.Currency,
+		Quantity:      req.Quantity,
+		AmountItem:    req.AmountItem,
+		Status:        null.NewString(order_status, true),
+		OrderLanguage: req.OrderLanguage,
+		AccountID:     null.NewInt(account_id, true),
+	}
+
+	accountType := "personal"
+
+	a := Account{
+		FirstName: req.FirstName,
+		LastName:  req.LastName,
+		Email:     req.Email,
+		Phone:     req.Phone,
+		Street:    req.Street,
+		City:      req.City,
+		State:     req.State,
+		Postcode:  req.Postcode,
+		Country:   req.Country,
+
+		AccountType: null.NewString(accountType, true),
+		UserKey:     req.UserKey,
+	}
+
+	accountID := CreateOrUpdateAccount(c, a)
+
+	if accountID == 0 {
+		return o, errors.New("null account")
+	}
+
+	o.AccountID = null.NewInt(accountID, true)
+
+	createString, numString, createQueryArgs := prepareOrderCreateQuery(o)
+
+	if err := DB.QueryRow(c, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+		createQueryArgs...).Scan(
+		&o.ID,
+	); err != nil {
+		if err == pgx.ErrNoRows {
+			return o, fmt.Errorf("no rows affected")
+		}
+		return o, err
+	}
+
+	return o, nil
+}
 
 func postJSON(method string, url string, payload []byte) (*http.Response, error) {
 	fmt.Println("POSTING TO ENDPOINT")
@@ -267,7 +326,6 @@ func updatePayment(ctx *gin.Context, req RequestPaid) (Payment, error) {
 		return p, errors.New(req.Error.String)
 	}
 
-	fmt.Println(">>> debug: reqUSERKEY - orderID: %s", req.UserKey.String)
 	orderid, err := strconv.ParseUint(strings.Split(req.UserKey.String, "-")[1], 10, 0)
 	if err != nil {
 		return p, err

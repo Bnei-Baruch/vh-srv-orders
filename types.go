@@ -106,6 +106,9 @@ type RequestOrder struct {
 	Installements null.Int    `json:"Installements"`
 	Organization  null.String `json:"Organization"`
 	OrderLanguage null.String `json:"OrderLanguage"`
+	Quantity      null.Int    `json:"Quantity"`
+	AmountItem    null.Int    `json:"AmountItem"`
+	TerminalId    null.String `json:"TerminalId"`
 
 	//Transaction data
 	SuccessURL null.String `json:"SuccessURL"`
@@ -430,4 +433,15 @@ type CardDetails struct {
 	CreatedAt       null.Time   `json:"created_at"`
 	UpdatedAt       null.Time   `json:"updated_at"`
 	DeletedAt       null.Time   `json:"deleted_at"`
+}
+
+type Transaction struct {
+	ID         uint        `json:"id"`
+	OrderID    null.Int    `json:"order_id"`
+	PaymentID  null.Int    `json:"payment_id"`
+	AccountID  null.Int    `json:"account_id"`
+	TerminalID null.String `json:"terminal_id"`
+	Status     null.Int    `json:"status"`
+	CreatedAt  null.Time   `json:"created_at"`
+	UpdatedAt  null.Time   `json:"updated_at"`
 }

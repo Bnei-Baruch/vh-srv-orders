@@ -64,7 +64,7 @@ func handleCardDetailSoftDeleteByID(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "Deleted!", "success": true})
 }
 
-func handleCardDetailCreateByID(ctx *gin.Context) {
+func handleCardDetailCreate(ctx *gin.Context) {
 	var req CardDetails
 	errRequest := ctx.BindJSON(&req)
 
@@ -73,7 +73,7 @@ func handleCardDetailCreateByID(ctx *gin.Context) {
 		return
 	}
 
-	accountId, err := createCardDetailsAndGetId(ctx, req)
+	cardDetailId, err := createCardDetailsAndGetId(ctx, req)
 
 	if err != nil {
 		if errors.Is(err, fmt.Errorf("invalid body")) {
@@ -84,7 +84,7 @@ func handleCardDetailCreateByID(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusCreated, gin.H{"message": "Created!", "data": accountId, "success": true})
+	ctx.JSON(http.StatusCreated, gin.H{"message": "Created!", "data": cardDetailId, "success": true})
 }
 
 func handleCardDetailUpdateByID(ctx *gin.Context) {

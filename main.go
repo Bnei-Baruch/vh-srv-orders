@@ -2,14 +2,16 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"log"
+	"orderservices/orders/utils"
 
 	"github.com/joho/godotenv"
 )
 
 var errInvalidBody = errors.New("invalid body")
 
-//Conf store all conf
+// Conf store all conf
 var Conf map[string]string
 
 func main() {
@@ -18,6 +20,13 @@ func main() {
 
 	//Database
 	initDB(Conf["DB"])
+
+	migErr := utils.SyncDBStructInsertionAndMigrations()
+	if migErr != nil {
+		log.Fatalf("Unable to migrate profile db: %s \n***\n %s \n ***", migErr, utils.GetDBURL())
+	}
+
+	fmt.Println("Migrated profile db")
 
 	//Setup router and run on PORT
 	r := initRouter()

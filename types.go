@@ -28,6 +28,8 @@ type Order struct {
 	PaymentDate   null.Time   `json:"PaymentDate" gorm:"Column:PaymentDate"`
 	Note          null.String `json:"Note" gorm:"Column:Note;type:varchar(200)"`
 	Flag          null.String `json:"Flag" gorm:"Column:Flag;type:varchar(200)"`
+	Quantity      null.Int    `json:"Quantity"`
+	AmountItem    null.Int    `json:"AmountItem"`
 
 	Payments []Payment `json:"Payments" gorm:"foreignkey:OrderID"`
 }
@@ -417,13 +419,14 @@ type PaymentActivitiesRes struct {
 	Country       null.String `json:"country"`
 }
 
-type PaymentDetails struct {
+type CardDetails struct {
 	ID              uint        `json:"id"`
 	AccountID       null.Int    `json:"account_id"`
 	GatewayProvider null.String `json:"gateway_provider"`
 	CCNumber        null.String `json:"cc_number"`
 	CCExpDate       null.String `json:"cc_expdate"`
 	Active          null.Bool   `json:"active"`
+	Token           null.String `json:"token"`
 	CreatedAt       null.Time   `json:"created_at"`
 	UpdatedAt       null.Time   `json:"updated_at"`
 	DeletedAt       null.Time   `json:"deleted_at"`

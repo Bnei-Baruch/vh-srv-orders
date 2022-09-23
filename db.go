@@ -3,55 +3,29 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"orderservices/orders/utils"
 	"time"
 
 	"github.com/jackc/pgx/v4/pgxpool"
 	_ "github.com/jinzhu/gorm/dialects/postgres"
 	_ "github.com/jinzhu/gorm/dialects/sqlite"
-	"github.com/kelseyhightower/envconfig"
 )
 
-//DB is globally available
+// DB is globally available
 var DB *pgxpool.Pool
 
 // cfg is the struct type that contains fields that stores the necessary configuration
 // gathered from the environment.
-var cfg struct {
-	PgHost   string `envconfig:"PGHOST" default:"localhost"`
-	PgPort   string `envconfig:"PGPORT" default:"5432"`
-	PgUser   string `envconfig:"PGUSER" default:"postgres"`
-	PgPass   string `envconfig:"PGPASSWORD" default:"pass"`
-	PgDbName string `envconfig:"PGDATABASE" default:"gorm"`
-}
-
-//Init DB
+// Init DB
 func initDB(dbtype string) {
 	connectPostgreSQL()
 }
 
 func connectPostgreSQL() {
 
-	if err := envconfig.Process("LIST", &cfg); err != nil {
-		log.Fatalln("Error while fetching env file")
-		return
-	}
+	connec := utils.GetDBURL()
 
-	connec := fmt.Sprintf("host=%s port=%s user=%s dbname=%s password=%s",
-		cfg.PgHost,
-		cfg.PgPort,
-		cfg.PgUser,
-		cfg.PgDbName,
-		cfg.PgPass,
-	)
-
-	fmt.Println("--cfg.PgHost: ", cfg.PgHost)
-	fmt.Println("--cfg.PgPort: ", cfg.PgPort)
-	fmt.Println("--cfg.PgUser: ", cfg.PgUser)
-	fmt.Println("--cfg.PgPass: ", cfg.PgPass)
-	fmt.Println("--cfg.PgDbName: ", cfg.PgDbName)
-
-	fmt.Println("--connection-string--", connec)
+	fmt.Println("Connecting to DB URL: ", connec)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

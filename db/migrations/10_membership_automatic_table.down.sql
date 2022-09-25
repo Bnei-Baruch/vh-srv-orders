@@ -1,5 +1,5 @@
 BEGIN;
 
-DROP TABLE IF EXISTS 10_membership_automatic_table;
+DROP TABLE IF EXISTS membership_automatic;
 
 COMMIT;

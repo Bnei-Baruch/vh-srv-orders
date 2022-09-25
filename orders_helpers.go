@@ -422,6 +422,15 @@ func updatePayment(ctx *gin.Context, req RequestPaid) (Payment, error) {
 			return p, fmt.Errorf("Payment not Updated")
 		}
 
+		toUpdatePelecard, toUpdateArgsPeleCard := preparePelecardPaymentUpdateViaPaymentStructQuery(p)
+
+		// update payments_pelecard table after payment
+		_, pelecardErr := DB.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdatePelecard, uint(paymentid)),
+			toUpdateArgsPeleCard...)
+		if pelecardErr != nil {
+			fmt.Errorf("problem updating payments: %w", err)
+		}
+
 	} else {
 		fmt.Println("invalid values")
 	}

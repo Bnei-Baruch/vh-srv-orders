@@ -16,6 +16,8 @@ COPY --from=base /app/orders /
 
 COPY ./.env /
 
+COPY --from=base /app/db /db
+
 EXPOSE 8185
 
 CMD ["./orders", "--port",  "8185"]

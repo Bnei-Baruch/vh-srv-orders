@@ -23,10 +23,10 @@ func main() {
 
 	migErr := utils.SyncDBStructInsertionAndMigrations()
 	if migErr != nil {
-		log.Fatalf("Unable to migrate profile db: %s \n***\n %s \n ***", migErr, utils.GetDBURL())
+		log.Fatalf("Unable to migrate order db: %s \n***\n %s \n ***", migErr, utils.GetDBURL())
 	}
 
-	fmt.Println("Migrated profile db")
+	fmt.Println("Migrated order db")
 
 	//Setup router and run on PORT
 	r := initRouter()

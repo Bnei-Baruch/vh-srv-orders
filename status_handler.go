@@ -7,7 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-//Status returns membership and status
+// Status returns membership and status
 func Status(c *gin.Context) {
 	filter := string(c.Params.ByName("email"))
 	paidmb := hasPaidMembership(c, filter)
@@ -23,20 +23,20 @@ func Status(c *gin.Context) {
 		mb = true
 		mbLabel = "active"
 		mbColor = "34A853"
-		c.JSON(http.StatusOK, gin.H{"membership": mb, "ticket": ticket, "status_name": mbLabel, "status_color": mbColor})
+		c.JSON(http.StatusOK, gin.H{"membership": mb, "ticket": ticket, "status_name": mbLabel, "status_color": mbColor, "is_special": false})
 		return
 	}
 	if specialmb {
 		mb = true
 		mbLabel = "active"
 		mbColor = "2980b9"
-		c.JSON(http.StatusOK, gin.H{"membership": mb, "ticket": ticket, "status_name": mbLabel, "status_color": mbColor})
+		c.JSON(http.StatusOK, gin.H{"membership": mb, "ticket": ticket, "status_name": mbLabel, "status_color": mbColor, "is_special": true})
 		return
 	}
 	mb = false
 	mbLabel = "inactive"
 	mbColor = "5F6368"
-	c.JSON(http.StatusOK, gin.H{"membership": mb, "ticket": ticket, "status_name": mbLabel, "status_color": mbColor})
+	c.JSON(http.StatusOK, gin.H{"membership": mb, "ticket": ticket, "status_name": mbLabel, "status_color": mbColor, "is_special": false})
 	return
 
 }

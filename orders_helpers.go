@@ -509,8 +509,9 @@ func updateOrderAfterPayment(ctx *gin.Context, p Payment) (Order, error) {
 		SET 
 		"Status"=$1,
 		"PaymentDate"=$2,
-		updated_at=$3 
-		WHERE id = $4`, o.Status.String, o.PaymentDate.Time, time.Now(), p.OrderID.Int64)
+		starting_date=$3,
+		updated_at=$4 
+		WHERE id = $5`, o.Status.String, o.PaymentDate.Time, o.PaymentDate.Time, time.Now(), p.OrderID.Int64)
 		if err != nil {
 			return o, fmt.Errorf("problem updating payments: %w", err)
 		}
@@ -557,6 +558,7 @@ func getOrderByID(ctx *gin.Context, orderID uint) Order {
 	"Status",
 	"OrderLanguage",
 	"PaymentDate",
+	starting_date,
 	"Flag",
 	quantity,
 	amount_item,
@@ -565,7 +567,7 @@ func getOrderByID(ctx *gin.Context, orderID uint) Order {
 	deleted_at 
 	FROM orders WHERE id=$1`, orderID).Scan(
 		&o.ID, &o.Type, &o.ProductType, &o.RecuringFreq, &o.AccountID, &o.Organization, &amount,
-		&o.Currency, &o.Status, &o.OrderLanguage, &o.PaymentDate, &o.Flag, &o.Quantity, &o.AmountItem,
+		&o.Currency, &o.Status, &o.OrderLanguage, &o.PaymentDate, &o.StartingDate, &o.Flag, &o.Quantity, &o.AmountItem,
 		&o.CreatedAt, &o.UpdatedAt, &o.DeletedAt,
 	); err != nil {
 		fmt.Println("--get-order-err", err)
@@ -1012,7 +1014,7 @@ func GetAllOrders(ctx *gin.Context, skip int, limit int, fromDate string, toDate
 
 	rows, err := DB.Query(ctx, `SELECT 
 		o.id, o."Type", o."ProductType", o."RecuringFreq", o."AccountID", o."Organization", o."Amount", 
-		"Currency", o."Status", o."OrderLanguage", o."PaymentDate", o."SKU", o."Note", o."Flag", o.quantity, o.amount_item,
+		"Currency", o."Status", o."OrderLanguage", o."PaymentDate", o.starting_date, o."SKU", o."Note", o."Flag", o.quantity, o.amount_item,
 		 o.created_at, o.updated_at, o.deleted_at
 	`+fromQuery+whereQuery+orderByQuery+limitOffsetString)
 
@@ -1025,7 +1027,7 @@ func GetAllOrders(ctx *gin.Context, skip int, limit int, fromDate string, toDate
 		var d Order
 		err := rows.Scan(
 			&d.ID, &d.Type, &d.ProductType, &d.RecuringFreq, &d.AccountID, &d.Organization, &d.Amount,
-			&d.Currency, &d.Status, &d.OrderLanguage, &d.PaymentDate, &d.SKU, &d.Note, &d.Flag, &d.Quantity, &d.AmountItem,
+			&d.Currency, &d.Status, &d.OrderLanguage, &d.PaymentDate, &d.StartingDate, &d.SKU, &d.Note, &d.Flag, &d.Quantity, &d.AmountItem,
 			&d.CreatedAt, &d.UpdatedAt, &d.DeletedAt)
 		if err != nil {
 			return &orders, err
@@ -1116,6 +1118,11 @@ func prepareOrderCreateQuery(req Order) (string, string, []interface{}) {
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.AmountItem.Int64)
 	}
+	if req.StartingDate.Valid {
+		createStrings = append(createStrings, "starting_date")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.StartingDate.Time)
+	}
 
 	if len(args) != 0 {
 		createStrings = append(createStrings, "created_at")
@@ -1180,6 +1187,10 @@ func prepareOrderUpdateQuery(req Order) (string, []interface{}) {
 	if req.PaymentDate.Valid {
 		updateStrings = append(updateStrings, fmt.Sprintf(`"PaymentDate"=$%d`, len(updateStrings)+1))
 		args = append(args, req.PaymentDate.Time)
+	}
+	if req.StartingDate.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf(`starting_date=$%d`, len(updateStrings)+1))
+		args = append(args, req.StartingDate.Time)
 	}
 	if req.Note.Valid {
 		updateStrings = append(updateStrings, fmt.Sprintf(`"Note"=$%d`, len(updateStrings)+1))

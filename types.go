@@ -30,6 +30,7 @@ type Order struct {
 	Flag          null.String `json:"Flag" gorm:"Column:Flag;type:varchar(200)"`
 	Quantity      null.Int    `json:"Quantity"`
 	AmountItem    null.Int    `json:"AmountItem"`
+	StartingDate  null.Time   `json:"StartingDate"`
 
 	Payments []Payment `json:"Payments" gorm:"foreignkey:OrderID"`
 }

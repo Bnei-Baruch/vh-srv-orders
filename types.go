@@ -446,3 +446,9 @@ type Transaction struct {
 	CreatedAt  null.Time   `json:"created_at"`
 	UpdatedAt  null.Time   `json:"updated_at"`
 }
+
+type Special struct {
+	Email       null.String `json:"email"`
+	Category    null.String `json:"category"`
+	SubCategory null.String `json:"subcategory"`
+}

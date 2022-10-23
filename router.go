@@ -89,6 +89,7 @@ func initRouter() *gin.Engine {
 	special := baseV2Path.Group("/special")
 	{
 		special.DELETE("/:email", handleSpecialHardDeleteByEmail)
+		special.GET("/:email", handleSpecialGetByEmail)
 	}
 
 	r.GET("/status/:email", Status)

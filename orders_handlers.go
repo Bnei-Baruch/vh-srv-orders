@@ -24,7 +24,7 @@ TODO: add payment method
 TODO: clean data
 **/
 
-//TODO: Rewrite and merge with new & pay
+// TODO: Rewrite and merge with new & pay
 func handleOrdersCreate(c *gin.Context) {
 	var req RequestOrder
 	err := c.BindJSON(&req)
@@ -121,6 +121,8 @@ func handleOrderUpdateByID(ctx *gin.Context) {
 	err = patchOrderByID(ctx, req, intID)
 
 	if err != nil {
+		fmt.Printf("Error while updating the order: %s\n", err)
+		fmt.Printf("Order body: %+v\n", req)
 		if errors.Is(err, errInvalidBody) {
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": err})
 			return
@@ -234,7 +236,18 @@ func handleOrderFetch(ctx *gin.Context) {
 	status := ctx.Query("status")
 	organisation := ctx.Query("org")
 	email := ctx.Query("email")
+	activeMembership := ctx.Query("active-membership")
 	accountID := ctx.Query("account-id")
+	orderByPaymentDate := ctx.Query("o-payment-date")
+	if orderByPaymentDate != "" && orderByPaymentDate != "desc" && orderByPaymentDate != "asc" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid o-created-at value! Accepted values are desc for descending & asc for ascending"})
+		return
+	}
+
+	if activeMembership != "" && activeMembership != "true" && activeMembership != "false" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid active-membership value! Accepted values are true or false"})
+		return
+	}
 
 	var (
 		intAccountID int
@@ -285,7 +298,7 @@ func handleOrderFetch(ctx *gin.Context) {
 		intAccountID = 0
 	}
 
-	orders, err := GetAllOrders(ctx, intSkip, intLimit, fromDate, &toDateParsed, productType, currency, status, organisation, email, intAccountID)
+	orders, err := GetAllOrders(ctx, intSkip, intLimit, fromDate, &toDateParsed, productType, currency, status, organisation, email, intAccountID, activeMembership, orderByPaymentDate)
 
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{

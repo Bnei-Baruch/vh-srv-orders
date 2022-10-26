@@ -249,11 +249,13 @@ func handlePaymentFetch(ctx *gin.Context) {
 	email := ctx.Query("email")
 	accountID := ctx.Query("account-id")
 	tokenExist := ctx.Query("token-exist")
+	orderID := ctx.Query("order-id")
 
 	var (
 		toDateParsed time.Time
 		err          error
 		intAccountID int
+		intOrderID   int
 	)
 
 	if toDate != "" {
@@ -299,7 +301,17 @@ func handlePaymentFetch(ctx *gin.Context) {
 		intAccountID = 0
 	}
 
-	payments, err := GetAllPayments(ctx, intSkip, intLimit, fromDate, &toDateParsed, paymentType, paymentStatus, orderType, email, intAccountID, tokenExist)
+	if orderID != "" {
+		intOrderID, err = strconv.Atoi(orderID)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit value! Accepted value is INTEGER", "success": false})
+			return
+		}
+	} else {
+		intOrderID = 0
+	}
+
+	payments, err := GetAllPayments(ctx, intSkip, intLimit, fromDate, &toDateParsed, paymentType, paymentStatus, orderType, email, intAccountID, tokenExist, intOrderID)
 
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{

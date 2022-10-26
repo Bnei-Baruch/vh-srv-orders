@@ -150,7 +150,7 @@ func addCardDetailsFromAllExistingOrders(ctx *gin.Context, orderType string) {
 
 	var terminalNumber string
 
-	payments, err = GetAllPayments(ctx, int(0), int(100), "", &timeNow, "", "", orderType, "", int(0), "true")
+	payments, err = GetAllPayments(ctx, int(0), int(100), "", &timeNow, "", "", orderType, "", int(0), "true", int(0))
 	if err != nil {
 		fmt.Println("error getting payments :: ", err.Error())
 		return

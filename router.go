@@ -51,6 +51,7 @@ func initRouter() *gin.Engine {
 		payment.DELETE("/:id", handlePaymentDelete)
 		payment.GET("/:id", handlePaymentFetchByID)
 	}
+	baseV2Path.GET("/payments", handlePaymentFetch)
 
 	account := baseV2Path.Group("/account")
 	{
@@ -59,7 +60,6 @@ func initRouter() *gin.Engine {
 		account.PATCH("/:id", handlePatchAccount)
 		account.DELETE("/:id", handleDeleteAccount)
 	}
-	baseV2Path.GET("/payments", handlePaymentFetch)
 
 	order := baseV2Path.Group("/order")
 	{

@@ -994,13 +994,13 @@ func flagOrdersByAccountID(ctx *gin.Context, aid int, flag string) int {
 
 }
 
-func GetAllOrders(ctx *gin.Context, skip int, limit int, fromDate string, toDate *time.Time, productType string, currency string, status string, organisation string, email string, accountID int, activeMembership string, orderByPaymentDate string) (*[]Order, error) {
+func GetAllOrders(ctx *gin.Context, skip int, limit int, fromDate string, toDate *time.Time, productType string, currency string, status string, organisation string, email string, accountID int, evaluateMembership string, orderByPaymentDate string) (*[]Order, error) {
 
 	orders := []Order{}
 
 	limitOffsetString := fmt.Sprintf(" LIMIT %d OFFSET %d", limit, skip)
 
-	whereQuery, orderByQuery, queryBuildErr := buildAndGetOrdersWhereQuery(fromDate, toDate, productType, currency, status, organisation, email, accountID, activeMembership, orderByPaymentDate)
+	whereQuery, orderByQuery, queryBuildErr := buildAndGetOrdersWhereQuery(fromDate, toDate, productType, currency, status, organisation, email, accountID, evaluateMembership, orderByPaymentDate)
 
 	if queryBuildErr != nil {
 		return &orders, queryBuildErr
@@ -1219,7 +1219,7 @@ func prepareOrderUpdateQuery(req Order) (string, []interface{}) {
 	return updateArgument, args
 }
 
-func buildAndGetOrdersWhereQuery(fromDate string, dateTo *time.Time, productType string, currency string, status string, organisation string, email string, accountID int, activeMembership string, orderByPaymentDate string) (string, string, error) {
+func buildAndGetOrdersWhereQuery(fromDate string, dateTo *time.Time, productType string, currency string, status string, organisation string, email string, accountID int, evaluateMembership string, orderByPaymentDate string) (string, string, error) {
 
 	var whereString strings.Builder
 	var orderBy strings.Builder
@@ -1264,9 +1264,9 @@ func buildAndGetOrdersWhereQuery(fromDate string, dateTo *time.Time, productType
 		whereCondition.WriteString(fmt.Sprintf(" AND o.\"AccountID\" = a.id AND LOWER(a.\"Email\")=LOWER('%s')", email))
 	}
 
-	if activeMembership != "" {
-		if activeMembership == "true" {
-			whereCondition.WriteString(" AND (o.\"Status\" = 'paid' OR o.\"Status\" = 'success' OR o.\"Status\" = 'nosuccess')")
+	if evaluateMembership != "" {
+		if evaluateMembership == "true" {
+			whereCondition.WriteString(" AND (o.\"Status\" = 'paid' OR o.\"Status\" = 'success' OR o.\"Status\" = 'nosuccess' OR o.\"Status\" = 'cancelled')")
 		}
 	}
 

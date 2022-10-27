@@ -236,7 +236,7 @@ func handleOrderFetch(ctx *gin.Context) {
 	status := ctx.Query("status")
 	organisation := ctx.Query("org")
 	email := ctx.Query("email")
-	activeMembership := ctx.Query("active-membership")
+	evaluateMembership := ctx.Query("evaluate-membership")
 	accountID := ctx.Query("account-id")
 	orderByPaymentDate := ctx.Query("o-payment-date")
 	if orderByPaymentDate != "" && orderByPaymentDate != "desc" && orderByPaymentDate != "asc" {
@@ -244,7 +244,7 @@ func handleOrderFetch(ctx *gin.Context) {
 		return
 	}
 
-	if activeMembership != "" && activeMembership != "true" && activeMembership != "false" {
+	if evaluateMembership != "" && evaluateMembership != "true" && evaluateMembership != "false" {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid active-membership value! Accepted values are true or false"})
 		return
 	}
@@ -298,7 +298,7 @@ func handleOrderFetch(ctx *gin.Context) {
 		intAccountID = 0
 	}
 
-	orders, err := GetAllOrders(ctx, intSkip, intLimit, fromDate, &toDateParsed, productType, currency, status, organisation, email, intAccountID, activeMembership, orderByPaymentDate)
+	orders, err := GetAllOrders(ctx, intSkip, intLimit, fromDate, &toDateParsed, productType, currency, status, organisation, email, intAccountID, evaluateMembership, orderByPaymentDate)
 
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{

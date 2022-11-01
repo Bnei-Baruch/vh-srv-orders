@@ -69,13 +69,13 @@ func getPaymentActivities(ctx *gin.Context, email string, productType string, pa
 	return PaymentActivities, nil
 }
 
-func GetAllPayments(ctx *gin.Context, skip int, limit int, fromDate string, toDate *time.Time, paymentType string, paymentStatus string, orderType string, email string, accountID int, paymentsWithToken string, intOrderID int) (*[]Payment, error) {
+func GetAllPayments(ctx *gin.Context, skip int, limit int, fromDate string, toDate *time.Time, paymentType string, paymentStatus string, orderType string, email string, accountID int, paymentsWithToken string, intOrderID int, orderByCreatedAt string) (*[]Payment, error) {
 
 	payments := []Payment{}
 
 	limitOffsetString := fmt.Sprintf(" LIMIT %d OFFSET %d", limit, skip)
 
-	whereQuery, orderByQuery, queryBuildErr := buildAndGetPaymentsWhereQuery(fromDate, toDate, paymentType, paymentStatus, orderType, email, accountID, paymentsWithToken, intOrderID)
+	whereQuery, orderByQuery, queryBuildErr := buildAndGetPaymentsWhereQuery(fromDate, toDate, paymentType, paymentStatus, orderType, email, accountID, paymentsWithToken, intOrderID, orderByCreatedAt)
 
 	if queryBuildErr != nil {
 		return &payments, queryBuildErr
@@ -930,7 +930,7 @@ func buildAndGetWherePaymentActQuery(email string, productType string, paymentTy
 	return whereString.String(), orderBy.String()
 }
 
-func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentType string, paymentStatus string, orderType string, email string, accontID int, paymentsWithToken string, intOrderID int) (string, string, error) {
+func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentType string, paymentStatus string, orderType string, email string, accontID int, paymentsWithToken string, intOrderID int, orderByCreatedAt string) (string, string, error) {
 
 	var whereString strings.Builder
 	var orderBy strings.Builder
@@ -993,7 +993,14 @@ func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentTy
 		whereCondition.WriteString(fmt.Sprintf(" AND o.id = p.\"OrderID\" AND LOWER(o.\"Type\")=LOWER('%s')", orderType))
 	}
 
-	orderBy.WriteString(fmt.Sprintf(" ORDER BY p.updated_at %s", "desc"))
+	if orderByCreatedAt != "" {
+		if strings.ToLower(orderByCreatedAt) != "desc" && strings.ToLower(orderByCreatedAt) != "asc" {
+			orderByCreatedAt = "asc"
+		}
+		orderBy.WriteString(fmt.Sprintf(" ORDER BY p.created_at %s", orderByCreatedAt))
+	} else {
+		orderBy.WriteString(fmt.Sprintf(" ORDER BY p.updated_at %s", "desc"))
+	}
 
 	if whereCondition.String() != "" {
 		whereString.WriteString(whereCondition.String())

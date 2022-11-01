@@ -250,6 +250,14 @@ func handlePaymentFetch(ctx *gin.Context) {
 	accountID := ctx.Query("account-id")
 	tokenExist := ctx.Query("token-exist")
 	orderID := ctx.Query("order-id")
+	orderByCreatedAt := ctx.Query("o-created-at")
+
+	if orderByCreatedAt != "" {
+		if orderByCreatedAt != "asc" && orderByCreatedAt != "desc" {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid order by created at"})
+			return
+		}
+	}
 
 	var (
 		toDateParsed time.Time
@@ -311,7 +319,7 @@ func handlePaymentFetch(ctx *gin.Context) {
 		intOrderID = 0
 	}
 
-	payments, err := GetAllPayments(ctx, intSkip, intLimit, fromDate, &toDateParsed, paymentType, paymentStatus, orderType, email, intAccountID, tokenExist, intOrderID)
+	payments, err := GetAllPayments(ctx, intSkip, intLimit, fromDate, &toDateParsed, paymentType, paymentStatus, orderType, email, intAccountID, tokenExist, intOrderID, orderByCreatedAt)
 
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{

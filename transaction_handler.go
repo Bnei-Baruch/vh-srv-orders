@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v4"
@@ -69,6 +70,23 @@ func handleTransactionOrderAndPay(c *gin.Context) {
 		log.Println("Err:", errPaymentCreation)
 		c.JSON(http.StatusBadRequest, gin.H{"Error": errPaymentCreation})
 		return
+	}
+
+	if req.TerminalId.String == "" {
+		if p.PaymentType.String == "pelecard" {
+			if strings.ToLower(req.Type.String) == "recurring" {
+				req.TerminalId = null.StringFrom("ben_recurring_pelecard")
+			} else {
+				req.TerminalId = null.StringFrom("ben_regular_pelecard")
+			}
+		}
+
+		if p.PaymentType.String == "helphaver" {
+			req.TerminalId = null.StringFrom("ben_helphaver")
+		}
+		if p.PaymentType.String == "offline" {
+			req.TerminalId = null.StringFrom("ben_offline")
+		}
 	}
 
 	int64PayId := int64(p.ID)

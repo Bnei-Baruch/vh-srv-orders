@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v4"
@@ -149,6 +150,11 @@ func handleTransactionOrderAndPay(c *gin.Context) {
 		Language:     req.OrderLanguage.String,
 		Reference:    paramx,
 		Organization: req.Organization.String,
+	}
+
+	if req.TerminalId.String == "ben_dummy_pelecard" {
+		c.JSON(http.StatusOK, gin.H{"url": "http://eurokab.info/pay/success/jan2022ticket?success=1&token=1111111111&authNo=2222222&additional_details_param_x=" + paramx + "&card_hebrew_name=xxxxx&confirmation_key=xxxxxxxxx&credit_card_abroad_card=1&credit_card_brand=2&credit_card_company_clearer=1&credit_card_company_issuer=0&credit_card_exp_date=0925&credit_card_number=xxxxxxxxxxxxxxxx&credit_type=1&debit_code=50&debit_currency=2&debit_total=" + strconv.FormatFloat(req.Amount.Float64, 'f', 2, 64) + "&debit_type=1&first_payment_total=0&fixed_payment_total=0&j_param=4&station_number=1&total_payments=1&transaction_id=xxxxx-xxxxx-xxxx-xxxx-xxxxxxxx&transaction_init_time=" + time.Now().Format("2006-01-02 15:04:05") + "&transaction_pelecard_id=11111111&transaction_update_time=" + time.Now().Format("2006-01-02 15:04:05") + "&user_key=" + ordkey + "&voucher_id=00-000-000"})
+		return
 	}
 
 	fmt.Println(extPay)

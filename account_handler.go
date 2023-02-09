@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v4"
+	uuid "github.com/satori/go.uuid"
 )
 
 func handleGetAccount(ctx *gin.Context) {
@@ -117,6 +118,35 @@ func handleDeleteAccount(ctx *gin.Context) {
 
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"message": "Deleted!", "success": true})
+}
+
+func handleHardDeleteAccount(ctx *gin.Context) {
+	id := ctx.Param("id")
+
+	// check if id is string or integer
+	var (
+		intID int
+		err   error
+	)
+
+	intID, err = strconv.Atoi(id)
+	if err != nil {
+		// if id is string, then check if it is uuid
+		_, err = uuid.FromString(id)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id! Accepted value is INTEGER or UUID", "success": false})
+			return
+		}
+	}
+
+	err = hardDeleteAllUserDataByAccountID(ctx, intID, id)
+
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 

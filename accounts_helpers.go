@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -89,6 +90,118 @@ func patchAccount(c *gin.Context, req Account, accountID int) error {
 func softDeleteAccount(c *gin.Context, accountID int) error {
 	_, err := DB.Exec(c, "UPDATE accounts SET deleted_at = $1 WHERE id = $2", time.Now(), accountID)
 	return err
+}
+
+func hardDeleteAllUserDataByAccountID(c *gin.Context, accountID int, kc_id string) error {
+
+	// start transaction
+	tx, err := DB.Begin(c)
+	if err != nil {
+		return err
+	}
+
+	defer tx.Rollback(c)
+
+	if accountID != 0 {
+		// delete all user data
+		_, err = tx.Exec(c, `DELETE FROM transaction WHERE account_id = $1`, accountID)
+		if err != nil {
+			return err
+		}
+
+		_, err = tx.Exec(c, `DELETE FROM card_details where account_id = $1`, accountID)
+		if err != nil {
+			return err
+		}
+
+		_, err = tx.Exec(c, `DELETE FROM payments_helphaver where payment_id in (SELECT id FROM payments where "OrderID" in (SELECT id FROM orders where "AccountID" = $1))`, accountID)
+		if err != nil {
+			return err
+		}
+
+		_, err = tx.Exec(c, `DELETE FROM payments_offline where payment_id in (SELECT id FROM payments where "OrderID" in (SELECT id FROM orders where "AccountID" = $1))`, accountID)
+		if err != nil {
+			return err
+		}
+
+		_, err = tx.Exec(c, `DELETE FROM payments_pelecard where payment_id in (SELECT id FROM payments where "OrderID" in (SELECT id FROM orders where "AccountID" = $1))`, accountID)
+		if err != nil {
+			return err
+		}
+
+		_, err = tx.Exec(c, `DELETE FROM specials where email = (SELECT "Email" FROM accounts WHERE id = $1)`, accountID)
+		if err != nil {
+			return err
+		}
+
+		_, err = tx.Exec(c, `DELETE FROM payments where "OrderID" in (SELECT id FROM orders where "AccountID" = $1)`, accountID)
+		if err != nil {
+			return err
+		}
+
+		_, err = tx.Exec(c, `DELETE FROM orders where "AccountID" = $1`, accountID)
+		if err != nil {
+			return err
+		}
+
+		_, err = tx.Exec(c, "DELETE FROM accounts WHERE id = $1", accountID)
+		if err != nil {
+			return err
+		}
+
+	} else if kc_id != "" {
+		// delete all user data
+		_, err = tx.Exec(c, `DELETE FROM transaction WHERE account_id in (SELECT id FROM accounts WHERE "UserKey" = $1)`, kc_id)
+		if err != nil {
+			return err
+		}
+
+		_, err = tx.Exec(c, `DELETE FROM card_details where account_id in (SELECT id FROM accounts WHERE "UserKey" = $1)`, kc_id)
+		if err != nil {
+			return err
+		}
+
+		_, err = tx.Exec(c, `DELETE FROM payments_helphaver where payment_id in (SELECT id FROM payments where "OrderID" in (SELECT id FROM orders where "AccountID" in (SELECT id FROM accounts WHERE "UserKey" = $1)))`, kc_id)
+		if err != nil {
+			return err
+		}
+
+		_, err = tx.Exec(c, `DELETE FROM payments_offline where payment_id in (SELECT id FROM payments where "OrderID" in (SELECT id FROM orders where "AccountID" in (SELECT id FROM accounts WHERE "UserKey" = $1)))`, kc_id)
+		if err != nil {
+			return err
+		}
+
+		_, err = tx.Exec(c, `DELETE FROM payments_pelecard where payment_id in (SELECT id FROM payments where "OrderID" in (SELECT id FROM orders where "AccountID" in (SELECT id FROM accounts WHERE "UserKey" = $1)))`, kc_id)
+		if err != nil {
+			return err
+		}
+
+		_, err = tx.Exec(c, `DELETE FROM specials where email in (SELECT "Email" FROM accounts WHERE "UserKey" = $1)`, kc_id)
+		if err != nil {
+			return err
+		}
+
+		_, err = tx.Exec(c, `DELETE FROM payments where "OrderID" in (SELECT id FROM orders where "AccountID" in (SELECT id FROM accounts WHERE "UserKey" = $1))`, kc_id)
+		if err != nil {
+			return err
+		}
+
+		_, err = tx.Exec(c, `DELETE FROM orders where "AccountID" in (SELECT id FROM accounts WHERE "UserKey" = $1)`, kc_id)
+		if err != nil {
+			return err
+		}
+
+		_, err = tx.Exec(c, `DELETE FROM accounts WHERE "UserKey" = $1`, kc_id)
+		if err != nil {
+			return err
+		}
+
+	} else {
+		return errors.New("accountID and kc_id are both empty")
+	}
+
+	return tx.Commit(c)
+
 }
 
 func getAllAccounts(c *gin.Context, limit int, skip int) ([]Account, error) {

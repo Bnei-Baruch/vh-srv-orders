@@ -16,5 +16,6 @@ require (
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/lib/pq v1.10.2
 	github.com/mattn/go-sqlite3 v2.0.3+incompatible // indirect
+	github.com/satori/go.uuid v1.2.0
 	gopkg.in/guregu/null.v4 v4.0.0
 )

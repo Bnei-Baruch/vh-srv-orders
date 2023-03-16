@@ -1227,7 +1227,8 @@ func buildAndGetOrdersWhereQuery(fromDate string, dateTo *time.Time, productType
 	whereString.WriteString(" WHERE")
 	whereCondition.WriteString("")
 
-	whereCondition.WriteString(fmt.Sprintf(" o.updated_at <= '%s'", dateTo.Format("2006-01-02 15:04:05")))
+	// time format with timezone
+	whereCondition.WriteString(fmt.Sprintf(" o.updated_at <= '%s'", dateTo.Format(time.RFC3339Nano)))
 
 	// WHERE query generation based on parameters
 	if fromDate != "" {

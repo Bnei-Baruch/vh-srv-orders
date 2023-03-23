@@ -61,6 +61,7 @@ func initRouter() *gin.Engine {
 		account.DELETE("/:id", handleDeleteAccount)
 		account.DELETE("/:id/hard", handleHardDeleteAccount)
 	}
+	baseV2Path.GET("/accounts", handleFetchAccounts)
 
 	order := baseV2Path.Group("/order")
 	{

@@ -65,6 +65,81 @@ func createAccount(ctx *gin.Context, a Account) (int, error) {
 
 }
 
+func GetAllAccounts(ctx *gin.Context, skip int, limit int, email string) (*[]Account, error) {
+
+	accounts := []Account{}
+
+	limitOffsetString := fmt.Sprintf(" LIMIT %d OFFSET %d", limit, skip)
+
+	whereQuery, orderByQuery, queryBuildErr := buildAndGetAccountsWhereQuery(email)
+
+	if queryBuildErr != nil {
+		return &accounts, queryBuildErr
+	}
+
+	rows, dbErr := DB.Query(ctx, `
+		SELECT
+		id,
+		"FirstName",
+		"LastName",
+		"Email",
+		"Phone",
+		"Street",
+		"City",
+		"State",
+		"Postcode",
+		"Country",
+		"AccountType",
+		"PaymentToken",
+		"PaymentCardID",
+		"PaymentCardExpMonth",
+		"PaymentCardExpYear",
+		"UserKey",
+		"AuthNo",
+		created_at,
+		updated_at,
+		deleted_at
+			FROM accounts`+whereQuery+orderByQuery+limitOffsetString)
+
+	if dbErr != nil {
+		fmt.Println("error in get all accounts", dbErr)
+		return &accounts, dbErr
+	}
+
+	defer rows.Close()
+	for rows.Next() {
+		var a Account
+		if err := rows.Scan(
+			&a.ID,
+			&a.FirstName,
+			&a.LastName,
+			&a.Email,
+			&a.Phone,
+			&a.Street,
+			&a.City,
+			&a.State,
+			&a.Postcode,
+			&a.Country,
+			&a.AccountType,
+			&a.PaymentToken,
+			&a.PaymentCardID,
+			&a.PaymentCardExpMonth,
+			&a.PaymentCardExpYear,
+			&a.UserKey,
+			&a.AuthNo,
+			&a.CreatedAt,
+			&a.UpdatedAt,
+			&a.DeletedAt,
+		); err != nil {
+			fmt.Println("error in get all accounts", err)
+			return &accounts, err
+		}
+		accounts = append(accounts, a)
+	}
+
+	return &accounts, nil
+}
+
 func patchAccount(c *gin.Context, req Account, accountID int) error {
 
 	toUpdate, toUpdateArgs := prepareAccountUpdateQuery(req)
@@ -475,4 +550,29 @@ func prepareAccountUpdateQuery(req Account) (string, []interface{}) {
 	updateArgument := strings.Join(updateStrings, ",")
 
 	return updateArgument, args
+}
+
+func buildAndGetAccountsWhereQuery(email string) (string, string, error) {
+
+	var whereString strings.Builder
+	var orderBy strings.Builder
+	var whereCondition strings.Builder
+	whereString.WriteString(" WHERE")
+	whereCondition.WriteString("")
+
+	if email != "" {
+		if whereCondition.String() != "" {
+			whereCondition.WriteString(" AND")
+		}
+		whereCondition.WriteString(fmt.Sprintf(` "Email" = '%s'`, email))
+	}
+
+	orderBy.WriteString(fmt.Sprintf(" ORDER BY updated_at %s", "desc"))
+
+	if whereCondition.String() != "" {
+		whereString.WriteString(whereCondition.String())
+	} else {
+		whereString.Reset()
+	}
+	return whereString.String(), orderBy.String(), nil
 }

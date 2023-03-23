@@ -64,6 +64,45 @@ func handleCreateAccount(ctx *gin.Context) {
 	ctx.JSON(http.StatusCreated, gin.H{"message": "Created!", "data": accountId, "success": true})
 }
 
+func handleFetchAccounts(ctx *gin.Context) {
+	skip := ctx.Query("skip")
+	limit := ctx.Query("limit")
+	email := ctx.Query("email")
+
+	if skip == "" {
+		skip = "0"
+	}
+
+	if limit == "" {
+		limit = "10"
+	}
+
+	// String conversion to int
+	intSkip, err := strconv.Atoi(skip)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid skip value! Accepted value is INTEGER", "success": false})
+		return
+	}
+
+	// String conversion to int
+	intLimit, err := strconv.Atoi(limit)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit value! Accepted value is INTEGER", "success": false})
+		return
+	}
+
+	accounts, err := GetAllAccounts(ctx, intSkip, intLimit, email)
+
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"error":   err.Error(),
+			"success": false,
+		})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": accounts, "success": true})
+}
+
 func handlePatchAccount(ctx *gin.Context) {
 	var req Account
 	errRequest := ctx.BindJSON(&req)

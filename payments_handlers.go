@@ -274,7 +274,8 @@ func handlePaymentFetch(ctx *gin.Context) {
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid date-from"})
 		}
 	} else {
-		toDateParsed = time.Now()
+		// set null value
+		toDateParsed = time.Time{}
 	}
 
 	if skip == "" {

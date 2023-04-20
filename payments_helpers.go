@@ -897,26 +897,26 @@ func buildAndGetWherePaymentActQuery(email string, productType string, paymentTy
 	whereString.WriteString(" WHERE")
 	whereCondition.WriteString("")
 
-	whereCondition.WriteString(" p.\"OrderID\" = o.id AND o.\"AccountID\" = a.id")
+	whereCondition.WriteString(` p."OrderID" = o.id AND o."AccountID" = a.id`)
 
 	// WHERE query generation based on parameters
 	if email != "" {
-		whereCondition.WriteString(fmt.Sprintf(" AND LOWER(a.\"Email\") LIKE LOWER('%%%s%%')", email))
+		whereCondition.WriteString(fmt.Sprintf(` AND LOWER(a."Email") LIKE LOWER('%%%s%%')`, email))
 	}
 
 	if productType != "" {
 		if whereCondition.String() != "" {
-			whereCondition.WriteString(fmt.Sprintf(" AND LOWER(o.\"ProductType\")=LOWER('%s')", productType))
+			whereCondition.WriteString(fmt.Sprintf(` AND LOWER(o."ProductType")=LOWER('%s')`, productType))
 		} else {
-			whereCondition.WriteString(fmt.Sprintf(" LOWER(o.\"ProductType\")=LOWER('%s')", productType))
+			whereCondition.WriteString(fmt.Sprintf(` LOWER(o."ProductType")=LOWER('%s')`, productType))
 		}
 	}
 
 	if paymentType != "" {
 		if whereCondition.String() != "" {
-			whereCondition.WriteString(fmt.Sprintf(" AND LOWER(p.\"PaymentType\")=LOWER('%s')", paymentType))
+			whereCondition.WriteString(fmt.Sprintf(` AND LOWER(p."PaymentType")=LOWER('%s')`, paymentType))
 		} else {
-			whereCondition.WriteString(fmt.Sprintf(" LOWER(p.\"PaymentType\")=LOWER('%s')", paymentType))
+			whereCondition.WriteString(fmt.Sprintf(` LOWER(p."PaymentType")=LOWER('%s')`, paymentType))
 		}
 	}
 
@@ -938,7 +938,9 @@ func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentTy
 	whereString.WriteString(" WHERE")
 	whereCondition.WriteString("")
 
-	whereCondition.WriteString(fmt.Sprintf(" p.updated_at <= '%s'", dateTo.Format("2006-01-02 15:04:05")))
+	if !dateTo.IsZero() {
+		whereCondition.WriteString(fmt.Sprintf(" p.updated_at <= '%s'", dateTo.Format("2006-01-02 15:04:05")))
+	}
 
 	// WHERE query generation based on parameters
 	if fromDate != "" {
@@ -948,15 +950,27 @@ func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentTy
 		if err != nil {
 			return "", "", err
 		}
-		whereCondition.WriteString(fmt.Sprintf(" AND p.updated_at >= '%s'", fromDateParsed.Format("2006-01-02 15:04:05")))
+		if whereCondition.String() != "" {
+			whereCondition.WriteString(fmt.Sprintf(" AND p.updated_at >= '%s'", fromDateParsed.Format("2006-01-02 15:04:05")))
+		} else {
+			whereCondition.WriteString(fmt.Sprintf(" p.updated_at >= '%s'", fromDateParsed.Format("2006-01-02 15:04:05")))
+		}
 	}
 
 	if paymentType != "" {
-		whereCondition.WriteString(fmt.Sprintf(" AND LOWER(p.\"PaymentType\")=LOWER('%s')", paymentType))
+		if whereCondition.String() != "" {
+			whereCondition.WriteString(fmt.Sprintf(` AND LOWER(p."PaymentType")=LOWER('%s')`, paymentType))
+		} else {
+			whereCondition.WriteString(fmt.Sprintf(` LOWER(p."PaymentType")=LOWER('%s')`, paymentType))
+		}
 	}
 
 	if paymentStatus != "" {
-		whereCondition.WriteString(fmt.Sprintf(" AND LOWER(p.\"PaymentStatus\")=LOWER('%s')", paymentStatus))
+		if whereCondition.String() != "" {
+			whereCondition.WriteString(fmt.Sprintf(` AND LOWER(p."PaymentStatus")=LOWER('%s')`, paymentStatus))
+		} else {
+			whereCondition.WriteString(fmt.Sprintf(` LOWER(p."PaymentStatus")=LOWER('%s')`, paymentStatus))
+		}
 	}
 
 	if paymentsWithToken != "" {
@@ -966,31 +980,61 @@ func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentTy
 			return "", "", err
 		}
 		if paymentsWithTokenBool {
-			whereCondition.WriteString(" AND p.pelecard_token != ''")
+			if whereCondition.String() != "" {
+				whereCondition.WriteString(" AND p.pelecard_token != ''")
+			} else {
+				whereCondition.WriteString(" p.pelecard_token != ''")
+			}
 		} else {
-			whereCondition.WriteString(" AND p.pelecard_token = ''")
+			if whereCondition.String() != "" {
+				whereCondition.WriteString(" AND p.pelecard_token = ''")
+			} else {
+				whereCondition.WriteString(" p.pelecard_token = ''")
+			}
+
 		}
 
 	}
 
 	if orderType != "" {
-		whereCondition.WriteString(fmt.Sprintf(" AND o.id = p.\"OrderID\" AND LOWER(o.\"Type\")=LOWER('%s')", orderType))
+		if whereCondition.String() != "" {
+			whereCondition.WriteString(fmt.Sprintf(` AND o.id = p."OrderID" AND LOWER(o."Type")=LOWER('%s')`, orderType))
+		} else {
+			whereCondition.WriteString(fmt.Sprintf(` o.id = p."OrderID" AND LOWER(o."Type")=LOWER('%s')`, orderType))
+		}
+
 	}
 
 	if email != "" || accontID != 0 {
 		if email != "" {
-			whereCondition.WriteString(fmt.Sprintf(" AND p.\"OrderID\" = o.id AND a.id = o.\"AccountID\" AND LOWER(a.\"Email\")=LOWER('%s')", email))
+			if whereCondition.String() != "" {
+				whereCondition.WriteString(fmt.Sprintf(` AND p."OrderID" = o.id AND a.id = o."AccountID" AND LOWER(a."Email")=LOWER('%s')`, email))
+			} else {
+				whereCondition.WriteString(fmt.Sprintf(` p."OrderID" = o.id AND a.id = o."AccountID" AND LOWER(a."Email")=LOWER('%s')`, email))
+			}
 		} else {
-			whereCondition.WriteString(fmt.Sprintf(" AND p.\"OrderID\" = o.id AND a.id = o.\"AccountID\" AND a.id=%d", accontID))
+			if whereCondition.String() != "" {
+				whereCondition.WriteString(fmt.Sprintf(` AND p."OrderID" = o.id AND a.id = o."AccountID" AND a.id=%d`, accontID))
+			} else {
+				whereCondition.WriteString(fmt.Sprintf(` p."OrderID" = o.id AND a.id = o."AccountID" AND a.id=%d`, accontID))
+			}
 		}
 	}
 
 	if intOrderID != 0 {
-		whereCondition.WriteString(fmt.Sprintf(" AND p.\"OrderID\" = %d", intOrderID))
+		if whereCondition.String() != "" {
+			whereCondition.WriteString(fmt.Sprintf(` AND p."OrderID" = %d`, intOrderID))
+		} else {
+			whereCondition.WriteString(fmt.Sprintf(` p."OrderID" = %d`, intOrderID))
+		}
 	}
 
 	if orderType != "" {
-		whereCondition.WriteString(fmt.Sprintf(" AND o.id = p.\"OrderID\" AND LOWER(o.\"Type\")=LOWER('%s')", orderType))
+		if whereCondition.String() != "" {
+			whereCondition.WriteString(fmt.Sprintf(` AND o.id = p."OrderID" AND LOWER(o."Type")=LOWER('%s')`, orderType))
+		} else {
+			whereCondition.WriteString(fmt.Sprintf(` o.id = p."OrderID" AND LOWER(o."Type")=LOWER('%s')`, orderType))
+		}
 	}
 
 	if orderByCreatedAt != "" {

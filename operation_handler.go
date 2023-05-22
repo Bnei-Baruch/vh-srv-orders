@@ -1,0 +1,74 @@
+package main
+
+import (
+	"fmt"
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+)
+
+func handleOperationCreate(c *gin.Context) {
+
+	var opr operationReq
+
+	if err := c.Bind(&opr); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if opr.Type == nil || *opr.Type != "email_update" ||
+		opr.NewEmail == nil || opr.NewKeycloakID == nil || opr.OldKeycloakID == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid type"})
+		return
+	}
+
+	if opr.NewKeycloakID == nil || opr.OldKeycloakID == nil {
+		if opr.NewKeycloakID == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "new keycloak id missing"})
+		} else {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "old keycloak id missing"})
+		}
+	}
+
+	// check if both keycloak ids are same
+
+	if *opr.NewKeycloakID == *opr.OldKeycloakID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "both keycloak ids are same"})
+		return
+	}
+
+	ID, dbErr := performOperation(c.Request.Context(), opr)
+
+	if dbErr != nil {
+		c.Status(http.StatusInternalServerError)
+		_ = c.Error(fmt.Errorf("error while creating grant: %w", dbErr))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": true, "message": "Created!", "data": ID})
+}
+
+func handleOperationRevert(c *gin.Context) {
+
+	var opr operationReq
+
+	if err := c.Bind(&opr); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if opr.NewEmail == nil || opr.OldEmail == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "new email and old email missing"})
+		return
+	}
+
+	revertErr := revertOperation(c.Request.Context(), *opr.NewEmail, *opr.OldEmail)
+
+	if revertErr != nil {
+		_ = c.Error(fmt.Errorf("error while reverting operation: %w", revertErr))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": revertErr.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": true, "message": "Reverted!"})
+}

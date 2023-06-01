@@ -94,6 +94,12 @@ func initRouter() *gin.Engine {
 		special.GET("/:email", handleSpecialGetByEmail)
 	}
 
+	operation := baseV2Path.Group("/operation")
+	{
+		operation.POST("/", handleOperationCreate)
+		operation.POST("/revert", handleOperationRevert)
+	}
+
 	r.GET("/status/:email", Status)
 
 	return r

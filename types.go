@@ -452,3 +452,25 @@ type Special struct {
 	Category    null.String `json:"category"`
 	SubCategory null.String `json:"subcategory"`
 }
+
+type operationReq struct {
+	ID            *int    `json:"id" form:"id"`
+	NewEmail      *string `json:"new_email" form:"new_email" binding:"required"`
+	OldEmail      *string `json:"old_email" form:"old_email" binding:"required"`
+	NewKeycloakID *string `json:"new_keycloak_id" form:"new_keycloak_id"`
+	OldKeycloakID *string `json:"old_keycloak_id" form:"old_keycloak_id"`
+	Input         *string `json:"input"`
+	Type          *string `json:"type" form:"type"`
+	Output        *string `json:"output"`
+	Status        *string `json:"status"`
+	Revert        *string `json:"revert"`
+}
+
+type operationTrace struct {
+	ID     *int    `json:"id"`
+	Input  *string `json:"input"`
+	Output *string `json:"output"`
+	Type   *string `json:"type"`
+	Status *string `json:"status"`
+	Revert *string `json:"revert"`
+}

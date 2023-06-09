@@ -17,23 +17,12 @@ func handleOperationCreate(c *gin.Context) {
 	}
 
 	if opr.Type == nil || *opr.Type != "email_update" ||
-		opr.NewEmail == nil || opr.NewKeycloakID == nil || opr.OldKeycloakID == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid type"})
-		return
-	}
-
-	if opr.NewKeycloakID == nil || opr.OldKeycloakID == nil {
-		if opr.NewKeycloakID == nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "new keycloak id missing"})
+		opr.NewEmail == nil || opr.NewKeycloakID == nil {
+		if opr.Type == nil || *opr.Type != "email_update" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "type should be email_update"})
 		} else {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "old keycloak id missing"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "new email or new keycloak id missing"})
 		}
-	}
-
-	// check if both keycloak ids are same
-
-	if *opr.NewKeycloakID == *opr.OldKeycloakID {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "both keycloak ids are same"})
 		return
 	}
 

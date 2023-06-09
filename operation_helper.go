@@ -38,29 +38,67 @@ func performOperation(ctx context.Context, req operationReq) (int, error) {
 	var input emailInput
 	var revert QueryLog
 
+	var (
+		updateAccountsQuery         string
+		revertAcccountsQuery        string
+		updateOrdersQuery           string
+		revertOrdersQuery           string
+		updatePaymentsPelecardQuery string
+		revertPaymentsPelecardQuery string
+		updatePaymentsQuery         string
+		revertPaymentsQuery         string
+		updateSpecialsQuery         string
+		revertSpecialsQuery         string
+		updateSpecialsSep2021Query  string
+		revertSpecialsSep2021Query  string
+
+		queryArr []string
+	)
+
 	tx, err := DB.Begin(ctx)
 	if err != nil {
 		return 0, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	updateAccountsQuery := `UPDATE accounts SET "Email" = '` + *newEmail + `', "UserKey" = '` + *newKcId + `' WHERE "Email" = '` + *oldEmail + `' AND "UserKey" = '` + *oldKcId + `';`
-	revertAcccountsQuery := `UPDATE accounts SET "Email" = '` + *oldEmail + `', "UserKey" = '` + *oldKcId + `' WHERE "Email" = '` + *newEmail + `' AND "UserKey" = '` + *newKcId + `';`
+	if oldKcId == nil {
+		updateAccountsQuery = `UPDATE accounts SET "Email" = '` + *newEmail + `' WHERE "Email" = '` + *oldEmail + ` AND "UserKey" = '` + *newKcId + `';`
+		revertAcccountsQuery = `UPDATE accounts SET "Email" = '` + *oldEmail + `' WHERE "Email" = '` + *newEmail + ` AND "UserKey" = '` + *newKcId + `';`
+		queryArr = append(queryArr, updateAccountsQuery)
 
-	updateOrdersQuery := `UPDATE orders SET userkey = '` + *newKcId + `' WHERE userkey = '` + *oldKcId + `';`
-	revertOrdersQuery := `UPDATE orders SET userkey = '` + *oldKcId + `' WHERE userkey = '` + *newKcId + `';`
+		// Order Table: no need to update orders table because it has no relation to email
+		// Pelecard Table: no need to update payments_pelecard table because it has no relation to email
+		// Payments Table: no need to update payments table because it has no relation to email
 
-	updatePaymentsPelecardQuery := `UPDATE payments_pelecard SET ord_key = '` + *newKcId + `' WHERE ord_key = '` + *oldKcId + `';`
-	revertPaymentsPelecardQuery := `UPDATE payments_pelecard SET ord_key = '` + *oldKcId + `' WHERE ord_key = '` + *newKcId + `';`
+		updateSpecialsQuery = `UPDATE specials SET email = '` + *newEmail + `' WHERE email = '` + *oldEmail + `';`
+		revertSpecialsQuery = `UPDATE specials SET email = '` + *oldEmail + `' WHERE email = '` + *newEmail + `';`
+		queryArr = append(queryArr, updateSpecialsQuery)
 
-	updatePaymentsQuery := `UPDATE payments SET "Ordkey" = '` + *newKcId + `' WHERE "Ordkey" = '` + *oldKcId + `';`
-	revertPaymentsQuery := `UPDATE payments SET "Ordkey" = '` + *oldKcId + `' WHERE "Ordkey" = '` + *newKcId + `';`
+	} else {
+		updateAccountsQuery = `UPDATE accounts SET "Email" = '` + *newEmail + `', "UserKey" = '` + *newKcId + `' WHERE "Email" = '` + *oldEmail + `' AND "UserKey" = '` + *oldKcId + `';`
+		revertAcccountsQuery = `UPDATE accounts SET "Email" = '` + *oldEmail + `', "UserKey" = '` + *oldKcId + `' WHERE "Email" = '` + *newEmail + `' AND "UserKey" = '` + *newKcId + `';`
+		queryArr = append(queryArr, updateAccountsQuery)
 
-	updateSpecialsQuery := `UPDATE specials SET email = '` + *newEmail + `' WHERE email = '` + *oldEmail + `';`
-	revertSpecialsQuery := `UPDATE specials SET email = '` + *oldEmail + `' WHERE email = '` + *newEmail + `';`
+		updateOrdersQuery = `UPDATE orders SET userkey = '` + *newKcId + `' WHERE userkey = '` + *oldKcId + `';`
+		revertOrdersQuery = `UPDATE orders SET userkey = '` + *oldKcId + `' WHERE userkey = '` + *newKcId + `';`
+		queryArr = append(queryArr, updateOrdersQuery)
 
-	updateSpecialsSep2021Query := `UPDATE specials_sep2021 SET email = '` + *newEmail + `' WHERE email = '` + *oldEmail + `';`
-	revertSpecialsSep2021Query := `UPDATE specials_sep2021 SET email = '` + *oldEmail + `' WHERE email = '` + *newEmail + `';`
+		updatePaymentsPelecardQuery = `UPDATE payments_pelecard SET ord_key = '` + *newKcId + `' WHERE ord_key = '` + *oldKcId + `';`
+		revertPaymentsPelecardQuery = `UPDATE payments_pelecard SET ord_key = '` + *oldKcId + `' WHERE ord_key = '` + *newKcId + `';`
+		queryArr = append(queryArr, updatePaymentsPelecardQuery)
+
+		updatePaymentsQuery = `UPDATE payments SET "Ordkey" = '` + *newKcId + `' WHERE "Ordkey" = '` + *oldKcId + `';`
+		revertPaymentsQuery = `UPDATE payments SET "Ordkey" = '` + *oldKcId + `' WHERE "Ordkey" = '` + *newKcId + `';`
+		queryArr = append(queryArr, updatePaymentsQuery)
+
+		updateSpecialsQuery = `UPDATE specials SET email = '` + *newEmail + `' WHERE email = '` + *oldEmail + `';`
+		revertSpecialsQuery = `UPDATE specials SET email = '` + *oldEmail + `' WHERE email = '` + *newEmail + `';`
+		queryArr = append(queryArr, updateSpecialsQuery)
+
+		updateSpecialsSep2021Query = `UPDATE specials_sep2021 SET email = '` + *newEmail + `' WHERE email = '` + *oldEmail + `';`
+		revertSpecialsSep2021Query = `UPDATE specials_sep2021 SET email = '` + *oldEmail + `' WHERE email = '` + *newEmail + `';`
+		queryArr = append(queryArr, updateSpecialsSep2021Query)
+	}
 
 	input.NewEmail = newEmail
 	input.NewKeycloakID = newKcId
@@ -68,7 +106,7 @@ func performOperation(ctx context.Context, req operationReq) (int, error) {
 	input.OldEmail = req.OldEmail
 
 	// run loop for all queries
-	for _, query := range []string{updateAccountsQuery, updateOrdersQuery, updatePaymentsPelecardQuery, updatePaymentsQuery, updateSpecialsQuery, updateSpecialsSep2021Query} {
+	for _, query := range queryArr {
 		updatedRes, err := tx.Exec(ctx, query)
 
 		if err != nil {

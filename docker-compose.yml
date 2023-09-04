@@ -3,6 +3,7 @@ services:
   ordersdb:
     container_name: 'ordersdb'
     image: postgres:9.6
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_DB: ${DB_DATABASE}
@@ -10,6 +11,9 @@ services:
     # volumes:
     #   - ./init.sql:/docker-entrypoint-initdb.d/init.sql
   vh-srv-orders:
+    container_name: 'vh-srv-orders'
+    image: "${IMAGE_NAME}"
+    restart: unless-stopped
     environment:
       PGUSER: ${DB_USER}
       PGPASSWORD: ${DB_PASSWORD}
@@ -25,8 +29,6 @@ services:
       PELECARD_USER: ${PELECARD_USER}
       PELECARD_PASSWORD: ${PELECARD_PASSWORD}
       SUFX: "${DEV_SUFX}"
-    container_name: 'vh-srv-orders'
-    image: "${IMAGE_NAME}"
     mem_limit: 250M
     ports:
       - 8185:8185

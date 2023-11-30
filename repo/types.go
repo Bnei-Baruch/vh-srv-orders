@@ -1,4 +1,4 @@
-package main
+package repo
 
 import (
 	"time"
@@ -297,45 +297,45 @@ type RequestPaid struct {
 }
 
 // Product is storing all product info
-type Product struct {
-	//Product data
-	Descriptions  []ProductDescription `json:"ProductDescription"` // arranged by language
-	Cost          []Price              `json:"Cost"`               // arranged by currency
-	Type          string               `json:"Type"`
-	ProductType   string               `json:"ProductType"`
-	SKU           string               `json:"SKU"`
-	RecurringFreq int                  `json:"RecurringFreq"`
-	Installements int                  `json:"Installements"`
-	Organization  string               `json:"Organization"`
-}
+//type Product struct {
+//	//Product data
+//	Descriptions  []ProductDescription `json:"ProductDescription"` // arranged by language
+//	Cost          []Price              `json:"Cost"`               // arranged by currency
+//	Type          string               `json:"Type"`
+//	ProductType   string               `json:"ProductType"`
+//	SKU           string               `json:"SKU"`
+//	RecurringFreq int                  `json:"RecurringFreq"`
+//	Installements int                  `json:"Installements"`
+//	Organization  string               `json:"Organization"`
+//}
 
 // Price for multicurrent products
-type Price struct {
-	Currency string  `json:"currency"`
-	Fixed    bool    `json:"fixed"`
-	Amount   float64 `json:"amount"`
-	Min      int     `json:"min"`
-	Max      int     `json:"max"`
-	Step     int     `json:"step"`
-}
+//type Price struct {
+//	Currency string  `json:"currency"`
+//	Fixed    bool    `json:"fixed"`
+//	Amount   float64 `json:"amount"`
+//	Min      int     `json:"min"`
+//	Max      int     `json:"max"`
+//	Step     int     `json:"step"`
+//}
 
 // ProductDescription specify product desc
-type ProductDescription struct {
-	Locale     string      `json:"locale"`
-	Header     Description `json:"header"`
-	Body       Description `json:"body"`
-	TosURL     string      `json:"TosURL"`
-	CancelURL  string      `json:"CancelURL"`
-	CancelText string      `json:"CancelText"`
-	ButtonText string      `json:"ButtonText"`
-}
+//type ProductTypeuctDescription struct {
+//	Locale     string      `json:"locale"`
+//	Header     Description `json:"header"`
+//	Body       Description `json:"body"`
+//	TosURL     string      `json:"TosURL"`
+//	CancelURL  string      `json:"CancelURL"`
+//	CancelText string      `json:"CancelText"`
+//	ButtonText string      `json:"ButtonText"`
+//}
 
 // Description generic  metadata
-type Description struct {
-	Title    string `json:"title"`
-	Subtitle string `json:"subtitle"`
-	Body     string `json:"body"`
-}
+//type Description struct {
+//	Title    string `json:"title"`
+//	Subtitle string `json:"subtitle"`
+//	Body     string `json:"body"`
+//}
 
 type OrderServiceEmvRes struct {
 	Status string `json:"status"`
@@ -343,7 +343,7 @@ type OrderServiceEmvRes struct {
 	Error  string `json:"error"`
 }
 
-type paymentWithFullName struct {
+type PaymentWithFullName struct {
 	AccountID   int    `json:"AccountID"`
 	UserKey     string `json:"UserKey"`
 	FirstName   string `json:"FirstName"`
@@ -453,7 +453,7 @@ type Special struct {
 	SubCategory null.String `json:"subcategory"`
 }
 
-type operationReq struct {
+type OperationReq struct {
 	ID            *int    `json:"id" form:"id"`
 	NewEmail      *string `json:"new_email" form:"new_email" binding:"required"`
 	OldEmail      *string `json:"old_email" form:"old_email" binding:"required"`
@@ -466,11 +466,17 @@ type operationReq struct {
 	Revert        *string `json:"revert"`
 }
 
-type operationTrace struct {
+type OperationTrace struct {
 	ID     *int    `json:"id"`
 	Input  *string `json:"input"`
 	Output *string `json:"output"`
 	Type   *string `json:"type"`
 	Status *string `json:"status"`
 	Revert *string `json:"revert"`
+}
+
+type PaidDetailC struct {
+	TotalPeoplePaid       int64 `json:"total_people_paid"`
+	TotalPeoplePaidWithCC int64 `json:"total_people_paid_with_cc"`
+	TotalTicketSold       int64 `json:"total_ticket_sold"`
 }

@@ -13,11 +13,8 @@ RUN CGO_ENABLED=0 go build -o orders .
 FROM alpine:latest
 
 COPY --from=base /app/orders /
-
-COPY ./.env /
-
 COPY --from=base /app/db /db
 
 EXPOSE 8185
 
-CMD ["./orders", "--port",  "8185"]
+CMD ["./orders", "server"]

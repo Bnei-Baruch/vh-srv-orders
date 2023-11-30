@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+
+	"gitlab.bbdev.team/vh/pay/orders/common"
 )
 
 type PelecardCardDetail struct {
@@ -16,15 +18,8 @@ type PelecardCardDetail struct {
 }
 
 func FetchPelecardCardDetailFromToken(token string, terminalNumber string) (PelecardCardDetail, error) {
-
 	if len(token) == 0 {
 		return PelecardCardDetail{}, fmt.Errorf("empty token passed")
-	}
-
-	envCgf, envCfgErr := getEnvVariables()
-
-	if envCfgErr != nil {
-		return PelecardCardDetail{}, envCfgErr
 	}
 
 	var postBody []byte
@@ -33,19 +28,17 @@ func FetchPelecardCardDetailFromToken(token string, terminalNumber string) (Pele
 
 	postBody, _ = json.Marshal(map[string]interface{}{
 		"terminalNumber": terminalNumber,
-		"user":           envCgf.PelecardUser,
-		"password":       envCgf.PelecardPassword,
+		"user":           common.Config.PelecardUser,
+		"password":       common.Config.PelecardPassword,
 		"token":          token,
 	})
 
 	buffPostBody := bytes.NewBuffer(postBody)
 
-	pelecardRes := HTTPCallAndGetBody(pelecardFullUrl, buffPostBody, "POST")
+	pelecardRes, _ := HTTPCallAndGetBody(pelecardFullUrl, "", buffPostBody, "POST")
+	// TODO (edo): handle status code
 
-	var (
-		pelecardResponse PelecardCardDetail
-	)
-
+	var pelecardResponse PelecardCardDetail
 	if err := json.Unmarshal(pelecardRes, &pelecardResponse); err != nil {
 		return pelecardResponse, err
 	}

@@ -269,3 +269,77 @@ and date_part('month', "PaymentDate") = 6
 -- select userkey, count(userkey) as qt from orders where "Flag" = 'torenew' group by userkey order by qt asc
 -- select count(*) from orders where "Flag" = 'renewed'
 -- where a."Email" like 'tabanova.0101@gmail.com'
+
+-- count recurring orders by country
+WITH updates as (select distinct on (o.userkey) o.id, o.userkey, "PaymentDate", "Amount", "Currency", a."Country"
+                 from orders o
+                          inner join accounts a on o."AccountID" = a.id
+                 where ("Status" = 'paid' or "Status" = 'success' or "Status" = 'nosuccess')
+                   and "ProductType" = 'globalmembership'
+                   and "Type" = 'recurring'
+                 order by userkey, "PaymentDate" desc)
+select "Country", count(*)
+from updates
+group by "Country"
+order by "Country";
+
+---
+select "Type", count(*) from orders where "ProductType" = 'globalmembership' group by "Type";
+select "Type", count(*) from orders where "ProductType" = 'globalmembership' and "Status" = 'nosuccess' group by "Type";
+
+select "Status", count(*) from orders where "ProductType" = 'globalmembership' group by "Status" order by count(*) desc;
+
+select distinct on (userkey)
+    id, "AccountID", created_at, updated_at, "RecuringFreq", "Amount", "Currency", "PaymentDate", "Flag", quantity,
+    amount_item, starting_date, DATE_PART('day', "PaymentDate" - starting_date)
+from orders
+where "Type" = 'regular'
+  and "ProductType" = 'globalmembership'
+  and "Status" = 'paid'
+order by userkey, "PaymentDate" desc;
+
+copy
+    (with emails as (select email
+                     from specials
+                     union all
+                     select a."Email" as email
+                     from accounts a
+                              inner join orders o on a.id = o."AccountID"
+                     where "ProductType" = 'globalmembership')
+     select distinct email
+     from emails
+     order by email)
+    to '/backup/accounts_emails.csv' csv;
+
+with last_order as (select distinct on (userkey) *
+                    from orders
+                    where "ProductType" = 'globalmembership'
+                    order by userkey, "PaymentDate" desc)
+select o.id, o."Type", o."Status", o."Flag", s.*
+from last_order o
+         inner join accounts a on o."AccountID" = a.id
+         inner join specials s on a."Email" = s.email
+where o."Status" = 'paid' or o."Status" = 'success' or o."Status" = 'nosuccess';
+
+copy (
+    with last_order as (select distinct on (userkey) *
+                        from orders
+                        where "ProductType" = 'globalmembership'
+                          and "Status" in ('paid', 'success', 'nosuccess', 'cancelled')
+                        order by userkey, "PaymentDate" desc)
+    select distinct a."Email"
+    from last_order o
+             inner join accounts a on o."AccountID" = a.id
+    where o."Status" = 'cancelled'
+    order by a."Email")
+    to '/backup/orders_cancelled_emails.csv' csv;
+
+with last_order as (select distinct on (userkey) *
+                    from orders
+                    where "ProductType" = 'globalmembership'
+                      and "Status" in ('paid', 'success', 'nosuccess', 'cancelled')
+                    order by userkey, "PaymentDate" desc)
+select "Flag", count(*)
+from last_order o
+group by "Flag"
+order by "Flag";

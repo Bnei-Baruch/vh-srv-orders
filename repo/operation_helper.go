@@ -1,4 +1,4 @@
-package main
+package repo
 
 import (
 	"context"
@@ -27,7 +27,7 @@ func convertStructToJSONString(input interface{}) string {
 	return string(jsonString)
 }
 
-func performOperation(ctx context.Context, req operationReq) (int, error) {
+func (o *OrdersDB) PerformOperation(ctx context.Context, req OperationReq) (int, error) {
 
 	newKcId := req.NewKeycloakID
 	oldKcId := req.OldKeycloakID
@@ -55,7 +55,7 @@ func performOperation(ctx context.Context, req operationReq) (int, error) {
 		queryArr []string
 	)
 
-	tx, err := DB.Begin(ctx)
+	tx, err := o.Begin(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -166,13 +166,13 @@ func performOperation(ctx context.Context, req operationReq) (int, error) {
 }
 
 // TODO; revert operation
-func revertOperation(ctx context.Context, newEmail string, oldEmail string) error {
+func (o *OrdersDB) RevertOperation(ctx context.Context, newEmail string, oldEmail string) error {
 	// get operation by id
-	var operation operationTrace
+	var operation OperationTrace
 
 	// get operation by newEmail and oldEmail
 
-	if err := DB.QueryRow(ctx, `SELECT id, status, revert FROM operation_trace WHERE input->>'new_email'=$1 AND input->>'old_email'=$2 ORDER BY id DESC LIMIT 1`, newEmail, oldEmail).Scan(
+	if err := o.QueryRow(ctx, `SELECT id, status, revert FROM operation_trace WHERE input->>'new_email'=$1 AND input->>'old_email'=$2 ORDER BY id DESC LIMIT 1`, newEmail, oldEmail).Scan(
 		&operation.ID,
 		&operation.Status,
 		&operation.Revert); err != nil {
@@ -189,7 +189,7 @@ func revertOperation(ctx context.Context, newEmail string, oldEmail string) erro
 		return fmt.Errorf("problem unmarshalling operation_trace: %w", err)
 	}
 
-	tx, err := DB.Begin(ctx)
+	tx, err := o.Begin(ctx)
 
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -235,7 +235,7 @@ func revertOperation(ctx context.Context, newEmail string, oldEmail string) erro
 
 }
 
-func prepareOperationCreateQuery(req operationReq) (string, string, []interface{}) {
+func prepareOperationCreateQuery(req OperationReq) (string, string, []interface{}) {
 	var createStrings []string
 	var numString []string
 	var args []interface{}
@@ -276,7 +276,7 @@ func prepareOperationCreateQuery(req operationReq) (string, string, []interface{
 	return concatedCreateString, concatedNumString, args
 }
 
-func prepareOperationTraceUpdateQuery(req operationTrace) (string, []interface{}) {
+func prepareOperationTraceUpdateQuery(req OperationTrace) (string, []interface{}) {
 	var updateStrings []string
 	var args []interface{}
 

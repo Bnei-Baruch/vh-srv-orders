@@ -1,4 +1,4 @@
-package main
+package api
 
 import (
 	"encoding/json"
@@ -10,10 +10,13 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+
+	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
+	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
-func handleCreateOrderAndPay(c *gin.Context) {
-	var req RequestOrder
+func (o *OrdersAPI) handleCreateOrderAndPay(c *gin.Context) {
+	var req repo.RequestOrder
 	errRequest := c.BindJSON(&req)
 
 	if errRequest != nil {
@@ -22,7 +25,7 @@ func handleCreateOrderAndPay(c *gin.Context) {
 		return
 	}
 
-	ord, errOrderCreation := createOrder(c, req)
+	ord, errOrderCreation := o.repo.CreateOrder(c, req)
 
 	if errOrderCreation != nil {
 		log.Println("Err:", errOrderCreation)
@@ -30,7 +33,7 @@ func handleCreateOrderAndPay(c *gin.Context) {
 		return
 	}
 
-	p, errPaymentCreation := createPayment(c, req, ord)
+	p, errPaymentCreation := o.repo.CreatePayment(c, req, ord)
 
 	if errPaymentCreation != nil {
 		log.Println("Err:", errPaymentCreation)
@@ -49,7 +52,7 @@ func handleCreateOrderAndPay(c *gin.Context) {
 	errorurl := req.ErrorURL.String + "/" + ordkey + "/" + paramx
 	cancelurl := req.CancelURL.String + "/" + ordkey + "/" + paramx
 
-	extPay := RequestPayment{
+	extPay := repo.RequestPayment{
 		UserKey: ordkey,
 
 		GoodURL:   req.SuccessURL.String,
@@ -94,7 +97,7 @@ func handleCreateOrderAndPay(c *gin.Context) {
 	}
 	fmt.Println(ENDPOINT)
 
-	resp, err := postJSON("POST", ENDPOINT, payload)
+	resp, err := utils.PostJSON("POST", ENDPOINT, payload)
 	if err != nil {
 		fmt.Println("Error wehn posting to ENDPOINT")
 		fmt.Println(err)
@@ -117,7 +120,7 @@ func handleCreateOrderAndPay(c *gin.Context) {
 			// if req.Type is regular - endpoint return some ass-shit string
 			// gota parse the m*fkr
 
-			var serRes OrderServiceEmvRes
+			var serRes repo.OrderServiceEmvRes
 			if err := json.Unmarshal(body, &serRes); err != nil {
 				log.Println("Err while parsing https://checkout.kbb1.com/emv/new response", err)
 			}

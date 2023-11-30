@@ -1,4 +1,4 @@
-package main
+package api
 
 import (
 	"encoding/json"
@@ -15,10 +15,13 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v4"
 	"gopkg.in/guregu/null.v4"
+
+	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
+	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
-func handleTransactionGetByID(ctx *gin.Context) {
-	id := ctx.Param("id")
+func (o *OrdersAPI) handleTransactionGetByID(c *gin.Context) {
+	id := c.Param("id")
 
 	var (
 		intID int
@@ -27,28 +30,28 @@ func handleTransactionGetByID(ctx *gin.Context) {
 
 	intID, err = strconv.Atoi(id)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id! Accepted value is INTEGER", "success": false})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id! Accepted value is INTEGER", "success": false})
 		return
 	}
 
-	transaction, err := getTransactionById(ctx, intID)
+	transaction, err := o.repo.GetTransactionById(c, intID)
 
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			ctx.JSON(http.StatusNotFound, gin.H{"error": "Transaction not found"})
+			c.JSON(http.StatusNotFound, gin.H{"error": "Transaction not found"})
 			return
 		}
 		fmt.Println("Error:", err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
 		return
 	} else {
-		ctx.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": transaction, "success": true})
+		c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": transaction, "success": true})
 		return
 	}
 }
 
-func handleTransactionOrderAndPay(c *gin.Context) {
-	var req RequestOrder
+func (o *OrdersAPI) handleTransactionOrderAndPay(c *gin.Context) {
+	var req repo.RequestOrder
 	errRequest := c.BindJSON(&req)
 
 	if errRequest != nil {
@@ -57,7 +60,7 @@ func handleTransactionOrderAndPay(c *gin.Context) {
 		return
 	}
 
-	ord, errOrderCreation := createOrderViaTransaction(c, req)
+	ord, errOrderCreation := o.repo.CreateOrderViaTransaction(c, req)
 
 	if errOrderCreation != nil {
 		log.Println("Err:", errOrderCreation)
@@ -65,7 +68,7 @@ func handleTransactionOrderAndPay(c *gin.Context) {
 		return
 	}
 
-	p, errPaymentCreation := createPayment(c, req, ord)
+	p, errPaymentCreation := o.repo.CreatePayment(c, req, ord)
 
 	if errPaymentCreation != nil {
 		log.Println("Err:", errPaymentCreation)
@@ -92,14 +95,14 @@ func handleTransactionOrderAndPay(c *gin.Context) {
 
 	int64PayId := int64(p.ID)
 
-	tran := Transaction{
+	tran := repo.Transaction{
 		OrderID:    null.NewInt(ord.ID, true),
 		AccountID:  ord.AccountID,
 		PaymentID:  null.NewInt(int64PayId, true),
 		TerminalID: req.TerminalId,
 	}
 
-	_, err := createTransactionAndGetId(c, tran)
+	_, err := o.repo.CreateTransactionAndGetId(c, tran)
 
 	if err != nil {
 		log.Println("Err:", err)
@@ -127,7 +130,7 @@ func handleTransactionOrderAndPay(c *gin.Context) {
 	errorurl := req.ErrorURL.String + "/" + ordkey + "/" + paramx
 	cancelurl := req.CancelURL.String + "/" + ordkey + "/" + paramx
 
-	extPay := RequestPayment{
+	extPay := repo.RequestPayment{
 		UserKey: ordkey,
 
 		GoodURL:   req.SuccessURL.String,
@@ -183,7 +186,7 @@ func handleTransactionOrderAndPay(c *gin.Context) {
 	}
 	fmt.Println(ENDPOINT)
 
-	resp, err := postJSON("POST", ENDPOINT, payload)
+	resp, err := utils.PostJSON("POST", ENDPOINT, payload)
 	if err != nil {
 		fmt.Println("Error wehn posting to ENDPOINT")
 		fmt.Println(err)
@@ -206,7 +209,7 @@ func handleTransactionOrderAndPay(c *gin.Context) {
 			// if req.Type is regular - endpoint return some ass-shit string
 			// gota parse the m*fkr
 
-			var serRes OrderServiceEmvRes
+			var serRes repo.OrderServiceEmvRes
 			if err := json.Unmarshal(body, &serRes); err != nil {
 				log.Println("Err while parsing https://checkout.kbb1.com/emv/new response", err)
 			}
@@ -230,8 +233,8 @@ func handleTransactionOrderAndPay(c *gin.Context) {
 	}
 }
 
-func handleTransactionPaid(c *gin.Context) {
-	var rp RequestPaid
+func (o *OrdersAPI) handleTransactionPaid(c *gin.Context) {
+	var rp repo.RequestPaid
 	err := c.BindJSON(&rp)
 
 	if err != nil {
@@ -247,7 +250,7 @@ func handleTransactionPaid(c *gin.Context) {
 		return
 	}
 
-	p, err := updatePayment(c, rp)
+	p, err := o.repo.UpdatePayment(c, rp)
 
 	if err != nil {
 		// TODO : ask grisha to return more info on error
@@ -255,11 +258,11 @@ func handleTransactionPaid(c *gin.Context) {
 		return
 	}
 
-	o, err := updateOrderAfterPayment(c, p)
+	order, err := o.repo.UpdateOrderAfterPayment(c, p)
 
-	if p.PaymentStatus.String == "success" && o.ProductType.String == "jan2022ticket" {
+	if p.PaymentStatus.String == "success" && order.ProductType.String == "jan2022ticket" {
 		log.Println("Synch with Registration")
-		err := syncServiceRegistration(c, p, o)
+		err := o.repo.SyncServiceRegistration(c, p, order)
 
 		if err != nil {
 			log.Println("we have an error")

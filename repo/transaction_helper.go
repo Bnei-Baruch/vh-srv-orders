@@ -1,19 +1,18 @@
-package main
+package repo
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/gin-gonic/gin"
 )
 
-func getTransactionById(ctx *gin.Context, id int) (Transaction, error) {
+func (o *OrdersDB) GetTransactionById(ctx context.Context, id int) (Transaction, error) {
 	var (
 		transaction Transaction
 	)
 
-	if err := DB.QueryRow(ctx, `SELECT 
+	if err := o.QueryRow(ctx, `SELECT 
 		id,
 		order_id,
 		payment_id,
@@ -37,14 +36,14 @@ func getTransactionById(ctx *gin.Context, id int) (Transaction, error) {
 
 }
 
-func createTransactionAndGetId(ctx *gin.Context, p Transaction) (int, error) {
+func (o *OrdersDB) CreateTransactionAndGetId(ctx context.Context, p Transaction) (int, error) {
 
 	createString, numString, createQueryArgs := prepareTransactionCreateQuery(p)
 
 	var ID int
 
 	if len(createQueryArgs) != 0 {
-		if err := DB.QueryRow(ctx, fmt.Sprintf(`INSERT INTO transaction (%s) VALUES (%s) RETURNING id`, createString, numString),
+		if err := o.QueryRow(ctx, fmt.Sprintf(`INSERT INTO transaction (%s) VALUES (%s) RETURNING id`, createString, numString),
 			createQueryArgs...).Scan(
 			&ID,
 		); err != nil {

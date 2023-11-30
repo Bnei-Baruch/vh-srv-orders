@@ -1,15 +1,17 @@
-package main
+package api
 
 import (
 	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+
+	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
-func handleOperationCreate(c *gin.Context) {
+func (o *OrdersAPI) handleOperationCreate(c *gin.Context) {
 
-	var opr operationReq
+	var opr repo.OperationReq
 
 	if err := c.Bind(&opr); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -26,7 +28,7 @@ func handleOperationCreate(c *gin.Context) {
 		return
 	}
 
-	ID, dbErr := performOperation(c.Request.Context(), opr)
+	ID, dbErr := o.repo.PerformOperation(c.Request.Context(), opr)
 
 	if dbErr != nil {
 		c.Status(http.StatusInternalServerError)
@@ -37,9 +39,9 @@ func handleOperationCreate(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": true, "message": "Created!", "data": ID})
 }
 
-func handleOperationRevert(c *gin.Context) {
+func (o *OrdersAPI) handleOperationRevert(c *gin.Context) {
 
-	var opr operationReq
+	var opr repo.OperationReq
 
 	if err := c.Bind(&opr); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -51,7 +53,7 @@ func handleOperationRevert(c *gin.Context) {
 		return
 	}
 
-	revertErr := revertOperation(c.Request.Context(), *opr.NewEmail, *opr.OldEmail)
+	revertErr := o.repo.RevertOperation(c.Request.Context(), *opr.NewEmail, *opr.OldEmail)
 
 	if revertErr != nil {
 		_ = c.Error(fmt.Errorf("error while reverting operation: %w", revertErr))

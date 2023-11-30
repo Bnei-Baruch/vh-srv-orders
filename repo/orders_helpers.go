@@ -1,64 +1,37 @@
-package main
+package repo
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
-	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v4"
 	"gopkg.in/guregu/null.v4"
+
+	"gitlab.bbdev.team/vh/pay/orders/common"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 )
 
-func countsAllOrders(c *gin.Context) int64 {
-	var result int64
-
-	if err := DB.QueryRow(c, "SELECT COUNT(*) FROM orders").Scan(
-		&result,
-	); err != nil {
-		log.Println(err)
-		return 0
-	}
-
-	return result
-}
-
-func countsFilteredOrders(c *gin.Context, filter string) int64 {
-
-	var result int64
-
-	if err := DB.QueryRow(c, `SELECT COUNT(*) FROM orders WHERE "Status"=$1`, filter).Scan(
-		&result,
-	); err != nil {
-		log.Println(err)
-		return 0
-	}
-
-	return result
-
-}
-
-func updateOrderStatusByOrderID(c *gin.Context, oid int64, status string) error {
-	if _, err := DB.Exec(c, `UPDATE orders SET "Status"=$1 WHERE id=$2`, status, oid); err != nil {
+func (o *OrdersDB) UpdateOrderStatusByOrderID(ctx context.Context, oid int64, status string) error {
+	if _, err := o.Exec(ctx, `UPDATE orders SET "Status"=$1 WHERE id=$2`, status, oid); err != nil {
 		return err
 	}
 	return nil
 }
 
-func createOrder(c *gin.Context, req RequestOrder) (Order, error) {
+func (o *OrdersDB) CreateOrder(ctx context.Context, req RequestOrder) (Order, error) {
 
 	order_status := "pending"
 	var account_id int64 = 0
 
-	o := Order{
+	order := Order{
 		Type:          req.Type,
 		ProductType:   req.ProductType,
 		RecuringFreq:  req.RecurringFreq,
@@ -88,34 +61,34 @@ func createOrder(c *gin.Context, req RequestOrder) (Order, error) {
 		UserKey:     req.UserKey,
 	}
 
-	accountID := CreateOrUpdateAccount(c, a)
+	accountID := o.CreateOrUpdateAccount(ctx, a)
 
 	if accountID == 0 {
-		return o, errors.New("null account")
+		return order, errors.New("null account")
 	}
 
-	o.AccountID = null.NewInt(accountID, true)
+	order.AccountID = null.NewInt(accountID, true)
 
-	createString, numString, createQueryArgs := prepareOrderCreateQuery(o)
+	createString, numString, createQueryArgs := prepareOrderCreateQuery(order)
 
-	if err := DB.QueryRow(c, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	if err := o.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(
-		&o.ID,
+		&order.ID,
 	); err != nil {
 		if err == pgx.ErrNoRows {
-			return o, fmt.Errorf("no rows affected")
+			return order, fmt.Errorf("no rows affected")
 		}
-		return o, err
+		return order, err
 	}
 
-	return o, nil
+	return order, nil
 }
-func createOrderViaTransaction(c *gin.Context, req RequestOrder) (Order, error) {
+func (o *OrdersDB) CreateOrderViaTransaction(ctx context.Context, req RequestOrder) (Order, error) {
 
 	order_status := "pending"
 	var account_id int64 = 0
 
-	o := Order{
+	order := Order{
 		Type:          req.Type,
 		ProductType:   req.ProductType,
 		RecuringFreq:  req.RecurringFreq,
@@ -147,44 +120,30 @@ func createOrderViaTransaction(c *gin.Context, req RequestOrder) (Order, error) 
 		UserKey:     req.UserKey,
 	}
 
-	accountID := CreateOrUpdateAccount(c, a)
+	accountID := o.CreateOrUpdateAccount(ctx, a)
 
 	if accountID == 0 {
-		return o, errors.New("null account")
+		return order, errors.New("null account")
 	}
 
-	o.AccountID = null.NewInt(accountID, true)
+	order.AccountID = null.NewInt(accountID, true)
 
-	createString, numString, createQueryArgs := prepareOrderCreateQuery(o)
+	createString, numString, createQueryArgs := prepareOrderCreateQuery(order)
 
-	if err := DB.QueryRow(c, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	if err := o.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(
-		&o.ID,
+		&order.ID,
 	); err != nil {
 		if err == pgx.ErrNoRows {
-			return o, fmt.Errorf("no rows affected")
+			return order, fmt.Errorf("no rows affected")
 		}
-		return o, err
+		return order, err
 	}
 
-	return o, nil
+	return order, nil
 }
 
-func postJSON(method string, url string, payload []byte) (*http.Response, error) {
-	fmt.Println("POSTING TO ENDPOINT")
-	payReq, _ := http.NewRequest(method, url, bytes.NewReader(payload))
-	payReq.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{}
-	resp, err := client.Do(payReq)
-	if err != nil {
-		return nil, err
-	}
-	return resp, err
-
-}
-
-func createPayment(c *gin.Context, req RequestOrder, o Order) (Payment, error) {
+func (o *OrdersDB) CreatePayment(ctx context.Context, req RequestOrder, order Order) (Payment, error) {
 
 	payment_status := "pending"
 	payment_type := "pelecard"
@@ -199,13 +158,13 @@ func createPayment(c *gin.Context, req RequestOrder, o Order) (Payment, error) {
 	p := Payment{
 		Amount:        req.Amount,
 		PaymentType:   null.NewString(payment_type, true),
-		OrderID:       null.NewInt(o.ID, true),
+		OrderID:       null.NewInt(order.ID, true),
 		PaymentStatus: null.NewString(payment_status, true),
 	}
 
 	createString, numString, createQueryArgs := preparePaymentCreateQuery(p)
 
-	if err := DB.QueryRow(c, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createString, numString),
+	if err := o.QueryRow(ctx, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(
 		&p.ID,
 	); err != nil {
@@ -213,14 +172,14 @@ func createPayment(c *gin.Context, req RequestOrder, o Order) (Payment, error) {
 	}
 
 	if req.PaymentType.String == "offline" && req.PaymentType.Valid {
-		offlinePaymentErr := createOfflinePayment(c, req, p.ID, payment_status)
+		offlinePaymentErr := o.createOfflinePayment(ctx, req, p.ID, payment_status)
 
 		if offlinePaymentErr != nil {
 			return p, offlinePaymentErr
 		}
 	}
 	if req.PaymentType.String == "helphaver" && req.PaymentType.Valid {
-		offlinePaymentErr := createHelpHaverPayment(c, req, p.ID, payment_status)
+		offlinePaymentErr := o.createHelpHaverPayment(ctx, req, p.ID, payment_status)
 
 		if offlinePaymentErr != nil {
 			return p, offlinePaymentErr
@@ -228,7 +187,7 @@ func createPayment(c *gin.Context, req RequestOrder, o Order) (Payment, error) {
 	}
 
 	if payment_type == "pelecard" {
-		pelecardPaymentErr := createPelecardPayment(c, req, p.ID, p)
+		pelecardPaymentErr := o.createPelecardPayment(ctx, req, p.ID, p)
 
 		if pelecardPaymentErr != nil {
 			return p, pelecardPaymentErr
@@ -239,7 +198,7 @@ func createPayment(c *gin.Context, req RequestOrder, o Order) (Payment, error) {
 
 }
 
-func createPendingPayment(c *gin.Context, sum null.Float, oid int64, pmx null.String) (Payment, error) {
+func (o *OrdersDB) createPendingPayment(ctx context.Context, sum null.Float, oid int64, pmx null.String) (Payment, error) {
 
 	p := Payment{
 		Amount:        sum,
@@ -251,7 +210,7 @@ func createPendingPayment(c *gin.Context, sum null.Float, oid int64, pmx null.St
 	createString, numString, createQueryArgs := preparePaymentCreateQuery(p)
 
 	// Add new account if not exist
-	if err := DB.QueryRow(c, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createString, numString),
+	if err := o.QueryRow(ctx, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(
 		&p.ID,
 	); err != nil {
@@ -260,7 +219,7 @@ func createPendingPayment(c *gin.Context, sum null.Float, oid int64, pmx null.St
 
 	createPelecardString, numPelecardString, createPelecardQueryArgs := preparePelecardPaymentCreateQuery(p, p.ID)
 
-	_, err := DB.Exec(c, fmt.Sprintf(`INSERT INTO payments_pelecard (%s) VALUES (%s)`, createPelecardString, numPelecardString),
+	_, err := o.Exec(ctx, fmt.Sprintf(`INSERT INTO payments_pelecard (%s) VALUES (%s)`, createPelecardString, numPelecardString),
 		createPelecardQueryArgs...)
 	if err != nil {
 		return p, err
@@ -276,7 +235,7 @@ func createPendingPayment(c *gin.Context, sum null.Float, oid int64, pmx null.St
 	toUpdate, toUpdateArgs := preparePaymentUpdateQuery(p)
 
 	if len(toUpdateArgs) != 0 {
-		updateRes, err := DB.Exec(c, fmt.Sprintf(`UPDATE payments SET %s WHERE id=%d`, toUpdate, p.ID),
+		updateRes, err := o.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=%d`, toUpdate, p.ID),
 			toUpdateArgs...)
 		if err != nil {
 			fmt.Println("problem updating payment: %w", err)
@@ -300,7 +259,7 @@ func createPendingPayment(c *gin.Context, sum null.Float, oid int64, pmx null.St
 		toUpdatePelecard, toUpdatePelecardArgs := preparePelecardPaymentUpdateQuery(pu)
 
 		if len(toUpdatePelecardArgs) != 0 {
-			_, err := DB.Exec(c, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdatePelecard, paymentId),
+			_, err := o.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdatePelecard, paymentId),
 				toUpdatePelecardArgs...)
 			if err != nil {
 				fmt.Println("problem updating payments_pelecard: %w", err)
@@ -319,7 +278,7 @@ func createPendingPayment(c *gin.Context, sum null.Float, oid int64, pmx null.St
 	return p, nil
 }
 
-func updatePayment(ctx *gin.Context, req RequestPaid) (Payment, error) {
+func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (Payment, error) {
 	var p Payment
 
 	if len(req.Error.String) > 0 {
@@ -336,7 +295,7 @@ func updatePayment(ctx *gin.Context, req RequestPaid) (Payment, error) {
 	}
 
 	// Get payment
-	if err := DB.QueryRow(ctx, `SELECT 
+	if err := o.QueryRow(ctx, `SELECT 
 	"OrderID",
 	"PaymentStatus",
 	"PaymentType",
@@ -412,7 +371,7 @@ func updatePayment(ctx *gin.Context, req RequestPaid) (Payment, error) {
 	toUpdate, toUpdateArgs := preparePaymentUpdateQuery(p)
 
 	if len(toUpdateArgs) != 0 {
-		updateRes, err := DB.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=%d`, toUpdate, uint(paymentid)),
+		updateRes, err := o.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=%d`, toUpdate, uint(paymentid)),
 			toUpdateArgs...)
 		if err != nil {
 			return p, fmt.Errorf("problem updating payments: %w", err)
@@ -425,7 +384,7 @@ func updatePayment(ctx *gin.Context, req RequestPaid) (Payment, error) {
 		toUpdatePelecard, toUpdateArgsPeleCard := preparePelecardPaymentUpdateViaPaymentStructQuery(p)
 
 		// update payments_pelecard table after payment
-		_, pelecardErr := DB.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdatePelecard, uint(paymentid)),
+		_, pelecardErr := o.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdatePelecard, uint(paymentid)),
 			toUpdateArgsPeleCard...)
 		if pelecardErr != nil {
 			fmt.Errorf("problem updating payments: %w", err)
@@ -439,7 +398,7 @@ func updatePayment(ctx *gin.Context, req RequestPaid) (Payment, error) {
 
 }
 
-func syncServiceRegistration(ctx *gin.Context, p Payment, o Order) error {
+func (o *OrdersDB) SyncServiceRegistration(ctx context.Context, p Payment, order Order) error {
 	type RequestSyncRegistration struct {
 		FirstName             string `json:"first_name"`
 		LastName              string `json:"last_name"`
@@ -456,12 +415,12 @@ func syncServiceRegistration(ctx *gin.Context, p Payment, o Order) error {
 
 	var a Account
 
-	if err := DB.QueryRow(ctx, `SELECT 
+	if err := o.QueryRow(ctx, `SELECT 
 	"FirstName",
 	"LastName",
 	"Email",
 	"UserKey" 
-	FROM accounts WHERE id=$1`, o.AccountID.Int64).Scan(
+	FROM accounts WHERE id=$1`, order.AccountID.Int64).Scan(
 		&a.FirstName, &a.LastName, &a.Email, &a.UserKey,
 	); err != nil {
 		return errors.New("cannot find related Order for Payment")
@@ -472,9 +431,9 @@ func syncServiceRegistration(ctx *gin.Context, p Payment, o Order) error {
 	payload.Email = a.Email.String
 	payload.Event = "jan2022"
 	payload.Choice = "ticket"
-	payload.Lang = o.OrderLanguage.String
-	payload.CommunicationLanguage = o.OrderLanguage.String
-	payload.TicketStatus = o.ProductType.String
+	payload.Lang = order.OrderLanguage.String
+	payload.CommunicationLanguage = order.OrderLanguage.String
+	payload.TicketStatus = order.ProductType.String
 	payload.KeycloakID = a.UserKey.String
 
 	log.Println(">>> order/synch/payload::")
@@ -482,7 +441,7 @@ func syncServiceRegistration(ctx *gin.Context, p Payment, o Order) error {
 
 	marshaledPayload, _ := json.Marshal(payload)
 	url := "http://vh-srv-registration:3200/choice/kc/" + a.UserKey.String
-	_, err := postJSON("POST", url, marshaledPayload)
+	_, err := utils.PostJSON("POST", url, marshaledPayload)
 
 	if err != nil {
 		return err
@@ -491,62 +450,62 @@ func syncServiceRegistration(ctx *gin.Context, p Payment, o Order) error {
 	return nil
 }
 
-func updateOrderAfterPayment(ctx *gin.Context, p Payment) (Order, error) {
-	var o Order
+func (o *OrdersDB) UpdateOrderAfterPayment(ctx context.Context, p Payment) (Order, error) {
+	var order Order
 
-	if err := DB.QueryRow(ctx, `SELECT 
+	if err := o.QueryRow(ctx, `SELECT 
 	id, "ProductType", "AccountID", "OrderLanguage" FROM orders WHERE id=$1`, p.OrderID.Int64).Scan(
-		&o.ID, &o.ProductType, &o.AccountID, &o.OrderLanguage,
+		&order.ID, &order.ProductType, &order.AccountID, &order.OrderLanguage,
 	); err != nil {
-		return o, err
+		return order, err
 	}
 
 	if p.Success.String == "1" {
-		o.Status = null.NewString("paid", true)
-		o.PaymentDate = null.NewTime(time.Now(), true)
+		order.Status = null.NewString("paid", true)
+		order.PaymentDate = null.NewTime(time.Now(), true)
 
-		updateRes, err := DB.Exec(ctx, `UPDATE orders 
+		updateRes, err := o.Exec(ctx, `UPDATE orders 
 		SET 
 		"Status"=$1,
 		"PaymentDate"=$2,
 		starting_date=$3,
 		updated_at=$4 
-		WHERE id = $5`, o.Status.String, o.PaymentDate.Time, o.PaymentDate.Time, time.Now(), p.OrderID.Int64)
+		WHERE id = $5`, order.Status.String, order.PaymentDate.Time, order.PaymentDate.Time, time.Now(), p.OrderID.Int64)
 		if err != nil {
-			return o, fmt.Errorf("problem updating payments: %w", err)
+			return order, fmt.Errorf("problem updating payments: %w", err)
 		}
 
 		if updateRes.RowsAffected() != 1 {
-			return o, fmt.Errorf("orders not Updated")
+			return order, fmt.Errorf("orders not Updated")
 		}
 
 	} else {
-		o.Status = null.NewString("nosuccess", true)
-		updateRes, err := DB.Exec(ctx, `UPDATE orders 
+		order.Status = null.NewString("nosuccess", true)
+		updateRes, err := o.Exec(ctx, `UPDATE orders 
 		SET 
 		"Status"=$1,
 		updated_at=$2 
-		WHERE id = $3`, o.Status.String, time.Now(), p.OrderID.Int64)
+		WHERE id = $3`, order.Status.String, time.Now(), p.OrderID.Int64)
 		if err != nil {
-			return o, fmt.Errorf("problem updating payments: %w", err)
+			return order, fmt.Errorf("problem updating payments: %w", err)
 		}
 
 		if updateRes.RowsAffected() != 1 {
-			return o, fmt.Errorf("orders not Updated")
+			return order, fmt.Errorf("orders not Updated")
 		}
 	}
 
-	return o, nil
+	return order, nil
 }
 
 // Renewal function
 
 // Get Order
-func getOrderByID(ctx *gin.Context, orderID uint) Order {
-	var o Order
+func (o *OrdersDB) GetOrderByID(ctx context.Context, orderID uint) Order {
+	var order Order
 	var amount string
 
-	if err := DB.QueryRow(ctx, `SELECT 
+	if err := o.QueryRow(ctx, `SELECT 
 	id,
 	"Type",
 	"ProductType",
@@ -566,35 +525,35 @@ func getOrderByID(ctx *gin.Context, orderID uint) Order {
 	updated_at,
 	deleted_at 
 	FROM orders WHERE id=$1`, orderID).Scan(
-		&o.ID, &o.Type, &o.ProductType, &o.RecuringFreq, &o.AccountID, &o.Organization, &amount,
-		&o.Currency, &o.Status, &o.OrderLanguage, &o.PaymentDate, &o.StartingDate, &o.Flag, &o.Quantity, &o.AmountItem,
-		&o.CreatedAt, &o.UpdatedAt, &o.DeletedAt,
+		&order.ID, &order.Type, &order.ProductType, &order.RecuringFreq, &order.AccountID, &order.Organization, &amount,
+		&order.Currency, &order.Status, &order.OrderLanguage, &order.PaymentDate, &order.StartingDate, &order.Flag, &order.Quantity, &order.AmountItem,
+		&order.CreatedAt, &order.UpdatedAt, &order.DeletedAt,
 	); err != nil {
 		fmt.Println("--get-order-err", err)
 		log.Printf("\n## ERROR - NO ORDER %v\n", orderID)
-		return o
+		return order
 	}
 
 	value, err := strconv.ParseFloat(amount, 32)
 
 	if err != nil {
 		fmt.Println("error converting amount string to float")
-		return o
+		return order
 	}
 
 	floatAmount := float64(value)
 
-	o.Amount = null.NewFloat(floatAmount, true)
+	order.Amount = null.NewFloat(floatAmount, true)
 
-	return o
+	return order
 }
 
 // Get Payment
-func getPaymentForOrderID(ctx *gin.Context, orderID uint) Payment {
+func (o *OrdersDB) GetPaymentForOrderID(ctx context.Context, orderID uint) Payment {
 	var p Payment
 	// result := DB.Where(&Payment{OrderID: orderID, PaymentStatus: "success"}).First(&p)
 	// Get payment
-	if err := DB.QueryRow(ctx, `SELECT 
+	if err := o.QueryRow(ctx, `SELECT 
 	id,
 	"Amount",
 	"PaymentStatus",
@@ -645,12 +604,12 @@ func getPaymentForOrderID(ctx *gin.Context, orderID uint) Payment {
 }
 
 // Get Account
-func getAccountForOrderID(ctx *gin.Context, orderID uint) Account {
+func (o *OrdersDB) GetAccountForOrderID(ctx context.Context, orderID uint) Account {
 	var a Account
-	o := getOrderByID(ctx, orderID)
+	order := o.GetOrderByID(ctx, orderID)
 	// result := DB.Where(&Account{ID: o.AccountID}).First(&a)
 
-	if err := DB.QueryRow(ctx, `SELECT 
+	if err := o.QueryRow(ctx, `SELECT 
 	id,
 	"FirstName",
 	"LastName",
@@ -671,7 +630,7 @@ func getAccountForOrderID(ctx *gin.Context, orderID uint) Account {
 	created_at,
 	updated_at,
 	deleted_at 
-	FROM accounts WHERE id=$1`, o.AccountID.Int64).Scan(
+	FROM accounts WHERE id=$1`, order.AccountID.Int64).Scan(
 		&a.ID, &a.FirstName, &a.LastName, &a.Email, &a.Phone, &a.Street, &a.City, &a.State, &a.Postcode, &a.Country,
 		&a.AccountType, &a.PaymentToken, &a.PaymentCardID, &a.PaymentCardExpMonth, &a.PaymentCardExpYear, &a.UserKey,
 		&a.AuthNo, &a.CreatedAt, &a.UpdatedAt, &a.DeletedAt,
@@ -683,8 +642,8 @@ func getAccountForOrderID(ctx *gin.Context, orderID uint) Account {
 }
 
 // TODO: REFACTOR
-func createRequestPayByToken(c *gin.Context, a Account, o Order, p Payment, pmx null.String) (RequestPayment, Payment) {
-	newp, _ := createPendingPayment(c, o.Amount, o.ID, pmx)
+func (o *OrdersDB) createRequestPayByToken(c context.Context, a Account, order Order, p Payment, pmx null.String) (RequestPayment, Payment) {
+	newp, _ := o.createPendingPayment(c, order.Amount, order.ID, pmx)
 	newp.PelecardToken = p.PelecardToken
 	newp.AuthNo = p.AuthNo
 
@@ -700,8 +659,8 @@ func createRequestPayByToken(c *gin.Context, a Account, o Order, p Payment, pmx 
 		Token:      p.PelecardToken.String,
 
 		Name:         userFullName,
-		Price:        o.Amount.Float64,
-		Currency:     o.Currency.String,
+		Price:        order.Amount.Float64,
+		Currency:     order.Currency.String,
 		Email:        a.Email.String,
 		Phone:        "+NA",
 		Street:       a.Street.String,
@@ -712,7 +671,7 @@ func createRequestPayByToken(c *gin.Context, a Account, o Order, p Payment, pmx 
 		SKU:          "40037",
 		VAT:          "f",
 		Installments: 1,
-		Language:     o.OrderLanguage.String,
+		Language:     order.OrderLanguage.String,
 		Reference:    newp.ParamX.String,
 		Organization: "ben2",
 	}
@@ -720,7 +679,7 @@ func createRequestPayByToken(c *gin.Context, a Account, o Order, p Payment, pmx 
 	return extPay, newp
 }
 
-func renewPaymentByToken(extPay RequestPayment, pmx string) (interface{}, error) {
+func (o *OrdersDB) renewPaymentByToken(extPay RequestPayment, pmx string) (interface{}, error) {
 	payload, _ := json.Marshal(extPay)
 	var url string
 	if pmx == "t" {
@@ -728,7 +687,7 @@ func renewPaymentByToken(extPay RequestPayment, pmx string) (interface{}, error)
 	} else if pmx == "e" {
 		url = "https://checkout.kbb1.com/emv/charge"
 	}
-	resp, err := postJSON("POST", url, payload)
+	resp, err := utils.PostJSON("POST", url, payload)
 	defer resp.Body.Close()
 	fmt.Println("response Status:", resp.Status)
 	fmt.Println("response Headers:", resp.Header)
@@ -743,7 +702,7 @@ func renewPaymentByToken(extPay RequestPayment, pmx string) (interface{}, error)
 	return i, err
 }
 
-func renewOrder(c *gin.Context, orderID uint, pmx string) string {
+func (o *OrdersDB) renewOrder(ctx context.Context, orderID uint, pmx string) string {
 	/*
 			get account by order
 			if no token in account
@@ -757,18 +716,12 @@ func renewOrder(c *gin.Context, orderID uint, pmx string) string {
 		var a Account
 
 	*/
-	o := getOrderByID(c, orderID)
-	p := getPaymentForOrderID(c, orderID)
-	a := getAccountForOrderID(c, orderID)
+	order := o.GetOrderByID(ctx, orderID)
+	p := o.GetPaymentForOrderID(ctx, orderID)
+	a := o.GetAccountForOrderID(ctx, orderID)
 
-	// if a.PaymentToken == "" {
-	// 	fmt.Printf("##\nTOKEN IS NULL \n##\n")
-	// 	a.PaymentToken = p.PelecardToken
-	// 	// add other parameter
-	// 	// parse payment card stuff (split and convert to int)
-	// 	DB.Model(&a).Uoken(a, o, p, pmx)
-	pr, newp := createRequestPayByToken(c, a, o, p, null.NewString(pmx, true))
-	resp, err := renewPaymentByToken(pr, pmx)
+	pr, newp := o.createRequestPayByToken(ctx, a, order, p, null.NewString(pmx, true))
+	resp, err := o.renewPaymentByToken(pr, pmx)
 	if err != nil {
 		newp.PaymentStatus = null.NewString("failed", true)
 		newp.Success = null.NewString("0", true)
@@ -781,7 +734,7 @@ func renewOrder(c *gin.Context, orderID uint, pmx string) string {
 		newp.Success = null.NewString(oneTxt, true)
 		data := answers["data"].(string)
 		fmt.Println(data)
-		flagOrderAsRenewed(c, orderID)
+		o.flagOrderAsRenewed(ctx, orderID)
 	} else {
 		newp.PaymentStatus = null.NewString("failed", true)
 		newp.Success = null.NewString("0", true)
@@ -790,7 +743,7 @@ func renewOrder(c *gin.Context, orderID uint, pmx string) string {
 	toUpdate, toUpdateArgs := preparePaymentUpdateQuery(newp)
 
 	if len(toUpdateArgs) != 0 {
-		updateRes, err := DB.Exec(c, fmt.Sprintf(`UPDATE payments SET %s WHERE id=%d`, toUpdate, newp.ID),
+		updateRes, err := o.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=%d`, toUpdate, newp.ID),
 			toUpdateArgs...)
 		if err != nil {
 			fmt.Errorf("problem updating payments: %w", err)
@@ -799,7 +752,7 @@ func renewOrder(c *gin.Context, orderID uint, pmx string) string {
 		toUpdatePelecard, toUpdateArgsPeleCard := preparePelecardPaymentUpdateViaPaymentStructQuery(newp)
 
 		// update payments_pelecard table after payment
-		_, pelecardErr := DB.Exec(c, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdatePelecard, newp.ID),
+		_, pelecardErr := o.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdatePelecard, newp.ID),
 			toUpdateArgsPeleCard...)
 		if pelecardErr != nil {
 			fmt.Errorf("problem updating payments: %w", err)
@@ -812,18 +765,12 @@ func renewOrder(c *gin.Context, orderID uint, pmx string) string {
 	} else {
 		fmt.Println("invalid values")
 	}
-	updateOrderAfterPayment(c, newp)
+	o.UpdateOrderAfterPayment(ctx, newp)
 	return newp.Success.String
 }
 
-func flagOrderAsRenewed(ctx *gin.Context, orderID uint) {
-	// req := `update orders
-	// 	set "Flag" = 'renewed'
-	// 	where id = ?`
-
-	// res := DB.Exec(req, orderID)
-
-	updateRes, err := DB.Exec(ctx, `UPDATE orders 
+func (o *OrdersDB) flagOrderAsRenewed(ctx context.Context, orderID uint) {
+	updateRes, err := o.Exec(ctx, `UPDATE orders 
 		SET 
 		"Flag"=$1,
 		updated_at=$2 
@@ -838,14 +785,14 @@ func flagOrderAsRenewed(ctx *gin.Context, orderID uint) {
 	}
 }
 
-func chargeOrdersToRenew(c *gin.Context, pmx string) int {
+func (o *OrdersDB) ChargeOrdersToRenew(ctx context.Context, pmx string) int {
 	sqlQuery := `
 	Select id from orders 
 	Where ("Status" = 'paid' or "Status" = 'nosuccess')
 	and "Type" = 'recurring'
 	and "Flag" = 'torenew'
 	`
-	rows, err := DB.Query(c, sqlQuery)
+	rows, err := o.Query(ctx, sqlQuery)
 
 	if err != nil {
 		return -1
@@ -862,8 +809,7 @@ func chargeOrdersToRenew(c *gin.Context, pmx string) int {
 			return -1
 		}
 		fmt.Printf(">>> Renewing %d\n", id)
-		status := renewOrder(c, uint(id), pmx)
-		//status := "1"
+		status := o.renewOrder(ctx, uint(id), pmx)
 		if status == "1" {
 			count++
 		} else {
@@ -873,7 +819,7 @@ func chargeOrdersToRenew(c *gin.Context, pmx string) int {
 	return count
 }
 
-func flagDuplicateOrders(ctx *gin.Context, ProductType string) int {
+func (o *OrdersDB) FlagDuplicateOrders(ctx context.Context, ProductType string) int {
 	req := `select "AccountID" as id, count(*) as "duplicate" 
 from orders where "Status" = 'paid' 
 group by "AccountID" 
@@ -881,7 +827,7 @@ having count(*) > 1
 order by duplicate desc`
 
 	// rows, err := DB.Raw(req).Rows() // (*sql.Rows, error)
-	rows, err := DB.Query(ctx, req)
+	rows, err := o.Query(ctx, req)
 	if err != nil {
 		return -1
 	}
@@ -895,20 +841,20 @@ order by duplicate desc`
 		if err != nil {
 			return -1
 		}
-		flagOrdersByAccountID(ctx, id, "duplicate")
+		o.flagOrdersByAccountID(ctx, id, "duplicate")
 		count++
 	}
 	return count
 }
 
-func createV2Order(ctx *gin.Context, o Order) (int, error) {
+func (o *OrdersDB) CreateV2Order(ctx context.Context, order Order) (int, error) {
 
-	createString, numString, createQueryArgs := prepareOrderCreateQuery(o)
+	createString, numString, createQueryArgs := prepareOrderCreateQuery(order)
 
 	var ID int
 
 	if len(createQueryArgs) != 0 {
-		if err := DB.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+		if err := o.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 			createQueryArgs...).Scan(
 			&ID,
 		); err != nil {
@@ -916,22 +862,22 @@ func createV2Order(ctx *gin.Context, o Order) (int, error) {
 		}
 		return ID, nil
 	} else {
-		return 0, errInvalidBody
+		return 0, common.ErrInvalidBody
 	}
 
 }
 
-func softDeleteOrderByID(c *gin.Context, orderID int) error {
-	_, err := DB.Exec(c, "UPDATE orders SET deleted_at = $1 WHERE id = $2", time.Now(), orderID)
+func (o *OrdersDB) SoftDeleteOrderByID(ctx context.Context, orderID int) error {
+	_, err := o.Exec(ctx, "UPDATE orders SET deleted_at = $1 WHERE id = $2", time.Now(), orderID)
 	return err
 }
 
-func patchOrderByID(c *gin.Context, req Order, orderId int) error {
+func (o *OrdersDB) PatchOrderByID(c context.Context, order Order, orderId int) error {
 
-	toUpdate, toUpdateArgs := prepareOrderUpdateQuery(req)
+	toUpdate, toUpdateArgs := prepareOrderUpdateQuery(order)
 
 	if len(toUpdateArgs) != 0 {
-		updateRes, err := DB.Exec(c, fmt.Sprintf(`UPDATE orders SET %s WHERE id=%d`, toUpdate, orderId),
+		updateRes, err := o.Exec(c, fmt.Sprintf(`UPDATE orders SET %s WHERE id=%d`, toUpdate, orderId),
 			toUpdateArgs...)
 		if err != nil {
 			return fmt.Errorf("problem updating order: %w", err)
@@ -942,25 +888,25 @@ func patchOrderByID(c *gin.Context, req Order, orderId int) error {
 		}
 
 	} else {
-		return errInvalidBody
+		return common.ErrInvalidBody
 	}
 
 	return nil
 }
 
-func addFlagToOrder(ctx *gin.Context, oid uint, flag string) {
-	o := getOrderByID(ctx, uint(oid))
-	o.Flag = null.NewString(flag, true)
+func (o *OrdersDB) addFlagToOrder(ctx context.Context, oid uint, flag string) {
+	order := o.GetOrderByID(ctx, oid)
+	order.Flag = null.NewString(flag, true)
 
-	if o.ID == 0 {
+	if order.ID == 0 {
 		fmt.Println("order not found")
 		return
 	}
 
-	toUpdate, toUpdateArgs := prepareOrderUpdateQuery(o)
+	toUpdate, toUpdateArgs := prepareOrderUpdateQuery(order)
 
 	if len(toUpdateArgs) != 0 {
-		updateRes, err := DB.Exec(ctx, fmt.Sprintf(`UPDATE orders SET %s WHERE id=%d`, toUpdate, o.ID),
+		updateRes, err := o.Exec(ctx, fmt.Sprintf(`UPDATE orders SET %s WHERE id=%d`, toUpdate, order.ID),
 			toUpdateArgs...)
 		if err != nil {
 			fmt.Println("problem updating orders: %w", err)
@@ -975,9 +921,9 @@ func addFlagToOrder(ctx *gin.Context, oid uint, flag string) {
 	}
 }
 
-func flagOrdersByAccountID(ctx *gin.Context, aid int, flag string) int {
+func (o *OrdersDB) flagOrdersByAccountID(ctx context.Context, aid int, flag string) int {
 	req := `select id from orders where "AccountID" = $1 and "Status" = 'paid'`
-	rows, err := DB.Query(ctx, req, aid)
+	rows, err := o.Query(ctx, req, aid)
 	if err != nil {
 		return -1
 	}
@@ -987,14 +933,16 @@ func flagOrdersByAccountID(ctx *gin.Context, aid int, flag string) int {
 	count = 0
 	for rows.Next() {
 		rows.Scan(&id)
-		addFlagToOrder(ctx, uint(id), flag)
+		o.addFlagToOrder(ctx, uint(id), flag)
 		count++
 	}
 	return count
 
 }
 
-func GetAllOrders(ctx *gin.Context, skip int, limit int, fromDate string, toDate *time.Time, productType string, currency string, status string, organisation string, email string, accountID int, evaluateMembership string, orderByPaymentDate string) (*[]Order, error) {
+func (o *OrdersDB) GetAllOrders(ctx context.Context, skip int, limit int, fromDate string, toDate *time.Time, productType string,
+	currency string, status string, organisation string, email string, accountID int, evaluateMembership string,
+	orderByPaymentDate string) (*[]Order, error) {
 
 	orders := []Order{}
 
@@ -1012,7 +960,7 @@ func GetAllOrders(ctx *gin.Context, skip int, limit int, fromDate string, toDate
 		fromQuery = fromQuery + ", accounts as a"
 	}
 
-	rows, err := DB.Query(ctx, `SELECT 
+	rows, err := o.Query(ctx, `SELECT 
 		o.id, o."Type", o."ProductType", o."RecuringFreq", o."AccountID", o."Organization", o."Amount", 
 		"Currency", o."Status", o."OrderLanguage", o."PaymentDate", o.starting_date, o."SKU", o."Note", o."Flag", o.quantity, o.amount_item,
 		 o.created_at, o.updated_at, o.deleted_at
@@ -1275,7 +1223,7 @@ func buildAndGetOrdersWhereQuery(fromDate string, dateTo *time.Time, productType
 		if strings.ToLower(orderByPaymentDate) != "desc" && strings.ToLower(orderByPaymentDate) != "asc" {
 			orderByPaymentDate = "asc"
 		}
-		orderBy.WriteString(fmt.Sprintf(" ORDER BY o.\"PaymentDate\" %s", orderByPaymentDate))
+		orderBy.WriteString(fmt.Sprintf(" ORDER BY o.\"PaymentDate\" %s, o.starting_date %s", orderByPaymentDate, orderByPaymentDate))
 	} else {
 		orderBy.WriteString(fmt.Sprintf(" ORDER BY updated_at %s", "desc"))
 	}
@@ -1286,4 +1234,55 @@ func buildAndGetOrdersWhereQuery(fromDate string, dateTo *time.Time, productType
 		whereString.Reset()
 	}
 	return whereString.String(), orderBy.String(), nil
+}
+
+func (o *OrdersDB) HasPaidMembership(ctx context.Context, email string) bool {
+	query := `
+select count(o.*) as total
+from orders as o, accounts as a
+where a."Email" = $1
+and o."AccountID" = a.id
+and o."ProductType" = 'globalmembership'
+and (o."Status" = 'paid' or o."Status" = 'success' or o."Status" = 'nosuccess')
+`
+	type Results struct {
+		Total int
+	}
+	var r Results
+	//var count map[string]interface{}
+	//DB.Raw(query, email).Scan(&r)
+	if err := o.QueryRow(ctx, query, email).Scan(
+		&r.Total,
+	); err != nil {
+		fmt.Println("--error--", err)
+	}
+
+	return r.Total > 0
+}
+
+func (o *OrdersDB) HasTicket(ctx context.Context, email string) bool {
+	query := `
+select count(o.*) as total
+from orders as o, accounts as a
+where a."Email" = $1
+and o."AccountID" = a.id
+and (o."ProductType" = 'jan2022ticket' or
+     o."ProductType" = 'jan2022ticket10' or
+     o."ProductType" = 'jan2022ticket30')
+and (o."Status" = 'paid' or o."Status" = 'success')
+`
+	type Results struct {
+		Total int
+	}
+	var r Results
+	//var count map[string]interface{}
+	//DB.Raw(query, email).Scan(&r)
+	// DB.Raw(query, email).Scan(&r)
+	if err := o.QueryRow(ctx, query, email).Scan(
+		&r.Total,
+	); err != nil {
+		fmt.Println("--error--", err)
+	}
+
+	return r.Total > 0
 }

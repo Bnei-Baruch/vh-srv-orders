@@ -1,43 +1,11 @@
-package main
+package repo
 
 import (
+	"context"
 	"fmt"
-	"net/http"
-
-	"github.com/gin-gonic/gin"
 )
 
-// routed here from Entrypoint
-func handleOrdersFlag(c *gin.Context) {
-	type req struct {
-		Flag  string `json:"flag"`
-		Month int64  `json:"month"`
-		Year  int64  `json:"year"`
-	}
-
-	var body req
-
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"Error": err.Error()})
-	}
-
-	switch body.Flag {
-	case "torenew":
-		count := flagOrdersToRenew(c, body.Month, body.Year)
-		c.JSON(http.StatusOK, gin.H{"count": count})
-		return
-	case "duplicates":
-		count := flagDuplicateOrders(c, body.Flag)
-		c.JSON(http.StatusOK, gin.H{"count": count})
-		return
-	default:
-		c.JSON(http.StatusNotFound, gin.H{"error": "flag unknown"})
-		return
-	}
-}
-
-// flagging
-func flagOrdersToRenew(c *gin.Context, month int64, year int64) int64 {
+func (o *OrdersDB) FlagOrdersToRenew(ctx context.Context, month int64, year int64) int64 {
 
 	// Select all unique individuals who have
 	// an active renewable order
@@ -49,7 +17,7 @@ func flagOrdersToRenew(c *gin.Context, month int64, year int64) int64 {
 	group by userkey
 	order by qt desc
 	`
-	rows, qOerr := DB.Query(c, qOPotentialStr)
+	rows, qOerr := o.Query(ctx, qOPotentialStr)
 
 	if qOerr != nil {
 		fmt.Println("error queries orders")
@@ -95,7 +63,7 @@ func flagOrdersToRenew(c *gin.Context, month int64, year int64) int64 {
 		order by "PaymentDate" desc
 		limit 1
 		`
-		oselected, qOSelectStrErr := DB.Query(c, qOSelectStr, *aOPotential.Userkey)
+		oselected, qOSelectStrErr := o.Query(ctx, qOSelectStr, *aOPotential.Userkey)
 
 		if qOSelectStrErr != nil {
 			fmt.Println("error 2")
@@ -130,7 +98,7 @@ func flagOrdersToRenew(c *gin.Context, month int64, year int64) int64 {
 
 			// if not this month and not regular, go ahead
 			fmt.Printf("Mark Order %d for renewal\n", aOSelect.ID)
-			flagOrderForRenewal(c, uint(aOSelect.ID))
+			o.flagOrderForRenewal(ctx, uint(aOSelect.ID))
 			counter++
 
 		}
@@ -138,13 +106,13 @@ func flagOrdersToRenew(c *gin.Context, month int64, year int64) int64 {
 	return counter
 }
 
-func flagOrderForRenewal(ctx *gin.Context, id uint) {
+func (o *OrdersDB) flagOrderForRenewal(ctx context.Context, id uint) {
 	req := `
 		update orders
 		set "Flag" = 'torenew'
 		where id = $1`
 
-	_, err := DB.Exec(ctx, req, id)
+	_, err := o.Exec(ctx, req, id)
 
 	if err != nil {
 		fmt.Println(err)

@@ -20,7 +20,7 @@ services:
       PGHOST: ${DB_HOST}
       PGPORT: ${DB_PORT}
       PGDATABASE: ${DB_DATABASE}
-      PORT: 8185
+      PORT: ":8185"
       S3_SECRET_KEY: ${S3_SECRET_KEY}
       S3_ACCESS_KEY: ${S3_ACCESS_KEY}
       S3_REGION: ${S3_REGION}

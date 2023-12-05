@@ -15,7 +15,7 @@ services:
     image: "${IMAGE_NAME}"
     restart: unless-stopped
     volumes:
-      - ${GOOGLE_APPLICATION_CREDENTIALS}:/vh_google_app_creds.json
+      - /root/google_application_credentials.json:/vh_google_app_creds.json:ro
     environment:
       PGUSER: ${DB_USER}
       PGPASSWORD: ${DB_PASSWORD}
@@ -31,7 +31,7 @@ services:
       PELECARD_USER: ${PELECARD_USER}
       PELECARD_PASSWORD: ${PELECARD_PASSWORD}
       SUFX: "${DEV_SUFX}"
-      KEYCLOAK_SERVER_URL: ${KEYCLOAK_SERVER_BASE_URL}
+      KEYCLOAK_SERVER_URL: ${KEYCLOAK_SERVER_URL}
       KEYCLOAK_REALM: ${KEYCLOAK_REALM}
       KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID}
       KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET}

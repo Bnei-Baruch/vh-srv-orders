@@ -45,7 +45,6 @@ deploy_staging:
     KEYCLOAK_CLIENT_ID: ${DYN_STAGING_KEYCLOAK_CONFIDENTIAL_CLIENT_ID}
     KEYCLOAK_CLIENT_SECRET: ${DYN_STAGING_KEYCLOAK_CONFIDENTIAL_CLIENT_SECRET}
     PROFILE_SERVICE_URL: ${DYN_STAGING_PROFILE_SERVICE_URL}
-    GOOGLE_APPLICATION_CREDENTIALS: "/google_application_credentials.json"
   image: gitlab.bbdev.team:5050/vh/buildutils/buildutil:0.7.0
   stage: deploy
   tags:
@@ -66,7 +65,6 @@ build_production:
   services:
     - docker:19.03.12-dind
   script:
-    - env
     - docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY
     - docker build -t $PROD_IMAGE .
     - docker push $PROD_IMAGE
@@ -90,9 +88,7 @@ deploy_production:
     KEYCLOAK_CLIENT_ID: ${DYN_PROD_KEYCLOAK_CONFIDENTIAL_CLIENT_ID}
     KEYCLOAK_CLIENT_SECRET: ${DYN_PROD_KEYCLOAK_CONFIDENTIAL_CLIENT_SECRET}
     PROFILE_SERVICE_URL: ${DYN_PROD_PROFILE_SERVICE_URL}
-    GOOGLE_APPLICATION_CREDENTIALS: "/google_application_credentials.json"
   script:
-    - env
     - docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY
     - IMAGE_NAME=$PROD_IMAGE docker-compose up -d vh-srv-orders
   only:

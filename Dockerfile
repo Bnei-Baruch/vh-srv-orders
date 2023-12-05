@@ -1,4 +1,4 @@
-FROM golang:1.19.0-buster AS base
+FROM golang:1.21.4-bookworm AS base
 
 RUN apt-get update && apt-get upgrade -y
 

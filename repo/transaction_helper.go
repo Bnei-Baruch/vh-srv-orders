@@ -64,19 +64,19 @@ func prepareTransactionCreateQuery(req Transaction) (string, string, []interface
 	if req.AccountID.Valid {
 		createStrings = append(createStrings, "account_id")
 		numString = append(numString, fmt.Sprintf(`$%d`, len(numString)+1))
-		args = append(args, req.AccountID.Int64)
+		args = append(args, req.AccountID.Int)
 	}
 
 	if req.OrderID.Valid {
 		createStrings = append(createStrings, "order_id")
 		numString = append(numString, fmt.Sprintf(`$%d`, len(numString)+1))
-		args = append(args, req.OrderID.Int64)
+		args = append(args, req.OrderID.Int)
 	}
 
 	if req.PaymentID.Valid {
 		createStrings = append(createStrings, "payment_id")
 		numString = append(numString, fmt.Sprintf(`$%d`, len(numString)+1))
-		args = append(args, req.PaymentID.Int64)
+		args = append(args, req.PaymentID.Int)
 	}
 
 	if req.TerminalID.Valid {
@@ -88,7 +88,7 @@ func prepareTransactionCreateQuery(req Transaction) (string, string, []interface
 	if req.Status.Valid {
 		createStrings = append(createStrings, "status")
 		numString = append(numString, fmt.Sprintf(`$%d`, len(numString)+1))
-		args = append(args, req.Status.Int64)
+		args = append(args, req.Status.Int)
 	}
 
 	if len(args) != 0 {

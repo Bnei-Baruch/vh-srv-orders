@@ -1,0 +1,81 @@
+package profiles
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+
+	"github.com/go-resty/resty/v2"
+
+	"gitlab.bbdev.team/vh/pay/orders/common"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/keycloak"
+)
+
+type ProfileService interface {
+	LookupProfile(ctx context.Context, email string) (*Profile, error)
+}
+
+type ProfileServiceAPI struct {
+	client      *resty.Client
+	tokenSource keycloak.TokenSource
+}
+
+func NewProfileServiceAPI(tokenSource keycloak.TokenSource) *ProfileServiceAPI {
+	client := resty.New()
+	client.SetBaseURL(common.Config.ProfileServiceUrl)
+	client.SetHeaders(map[string]string{
+		"Content-Type": "application/json",
+		"User-Agent":   "vh-srv-orders",
+	})
+	client.SetError(APIError{})
+	//client.EnableTrace()
+
+	return &ProfileServiceAPI{
+		client:      client,
+		tokenSource: tokenSource,
+	}
+}
+
+func (p *ProfileServiceAPI) LookupProfile(ctx context.Context, email string) (*Profile, error) {
+	req, err := p.baseRequest(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("p.baseRequest: %w", err)
+	}
+
+	resp, err := req.
+		SetQueryParam("email", email).
+		SetResult([]Profile{}).
+		Get("/v1/profiles")
+	if err != nil {
+		return nil, fmt.Errorf("req.Get: %w", err)
+	}
+
+	if resp.IsError() {
+		if resp.StatusCode() == http.StatusNotFound {
+			return nil, nil
+		}
+		apiErr := resp.Error().(*APIError)
+		return nil, errors.New(apiErr.Error)
+	}
+
+	results := resp.Result().(*[]Profile)
+	if results == nil || len(*results) == 0 {
+		return nil, nil
+	}
+
+	return &(*results)[0], nil
+}
+
+func (p *ProfileServiceAPI) baseRequest(ctx context.Context) (*resty.Request, error) {
+	r := p.client.NewRequest()
+	r.SetContext(ctx)
+
+	token, err := p.tokenSource.Token()
+	if err != nil {
+		return nil, fmt.Errorf("tokenSource.Token(): %w", err)
+	}
+	r.SetAuthToken(token)
+
+	return r, nil
+}

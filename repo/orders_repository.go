@@ -9,7 +9,7 @@ import (
 )
 
 type OrdersRepository interface {
-	CreateOrUpdateAccount(ctx context.Context, a Account) int64
+	CreateOrUpdateAccount(ctx context.Context, a Account) int
 	CreateAccount(ctx context.Context, a Account) (int, error)
 	GetAllAccounts(ctx context.Context, skip int, limit int, email string) (*[]Account, error)
 	PatchAccount(ctx context.Context, req Account, accountID int) error
@@ -17,11 +17,9 @@ type OrdersRepository interface {
 	HardDeleteAllUserDataByAccountID(ctx context.Context, accountID int, kc_id string) error
 	GetAccount(ctx context.Context, id int, email string) (Account, error)
 
-	UpdateOrderStatusByOrderID(ctx context.Context, oid int64, status string) error
+	UpdateOrderStatusByOrderID(ctx context.Context, oid int, status string) error
 	CreateOrder(ctx context.Context, req RequestOrder) (Order, error)
 	CreateOrderViaTransaction(ctx context.Context, req RequestOrder) (Order, error)
-	CreatePayment(ctx context.Context, req RequestOrder, order Order) (Payment, error)
-	UpdatePayment(ctx context.Context, req RequestPaid) (Payment, error)
 	SyncServiceRegistration(ctx context.Context, p Payment, order Order) error
 	UpdateOrderAfterPayment(ctx context.Context, p Payment) (Order, error)
 	GetOrderByID(ctx context.Context, orderID uint) Order
@@ -46,11 +44,14 @@ type OrdersRepository interface {
 	GetTotalParticipationStatusCount(ctx context.Context, email string, productType string,
 		paymentType string) (int, error)
 	GetPaymentByEmail(ctx context.Context, email string) ([]PaymentByEmail, error)
+	GetOfflinePayments(ctx context.Context, skip int, limit int, method string, orderByCreatedAt string) ([]*OfflinePayment, error)
 	FetchPaymentByParamX(ctx context.Context, paramX string) (PaymentWithFullName, error)
+	CreatePayment(ctx context.Context, req RequestOrder, orderID int) (Payment, error)
+	UpdatePayment(ctx context.Context, req RequestPaid) (Payment, error)
 	UpdatePelecardPayment(c context.Context, req PaymentUpdate) error
 	UpdateOfflinePayment(c context.Context, req PaymentUpdate) error
 	UpdateHelpHavePayment(c context.Context, req PaymentUpdate) error
-	UpdateParentPaymentTableStatusAndReturnOrderId(c context.Context, status string, paymentID int64) (int64, error)
+	UpdateParentPaymentTableStatusAndReturnOrderId(c context.Context, status string, paymentID int) (int, error)
 
 	CountsAllOrders(ctx context.Context) int64
 	CountsFilteredOrders(ctx context.Context, filter string) int64

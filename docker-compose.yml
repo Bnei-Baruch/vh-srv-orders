@@ -14,6 +14,8 @@ services:
     container_name: 'vh-srv-orders'
     image: "${IMAGE_NAME}"
     restart: unless-stopped
+    volumes:
+      - ${GOOGLE_APPLICATION_CREDENTIALS}:/vh_google_app_creds.json
     environment:
       PGUSER: ${DB_USER}
       PGPASSWORD: ${DB_PASSWORD}
@@ -29,6 +31,12 @@ services:
       PELECARD_USER: ${PELECARD_USER}
       PELECARD_PASSWORD: ${PELECARD_PASSWORD}
       SUFX: "${DEV_SUFX}"
+      KEYCLOAK_SERVER_URL: ${KEYCLOAK_SERVER_BASE_URL}
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM}
+      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID}
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET}
+      PROFILE_SERVICE_URL: ${PROFILE_SERVICE_URL}
+      GOOGLE_APPLICATION_CREDENTIALS: /vh_google_app_creds.json
     mem_limit: 250M
     ports:
       - 8185:8185

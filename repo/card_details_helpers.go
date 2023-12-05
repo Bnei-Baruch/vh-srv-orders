@@ -202,7 +202,7 @@ func prepareCardDetailsUpdateQuery(req CardDetails) (string, []interface{}) {
 
 	if req.AccountID.Valid {
 		updateStrings = append(updateStrings, fmt.Sprintf("account_id=$%d", len(updateStrings)+1))
-		args = append(args, req.AccountID.Int64)
+		args = append(args, req.AccountID.Int)
 	}
 	if req.GatewayProvider.Valid {
 		updateStrings = append(updateStrings, fmt.Sprintf("gateway_provider=$%d", len(updateStrings)+1))
@@ -247,7 +247,7 @@ func prepareCardDetailsCreateQuery(req CardDetails) (string, string, []interface
 	if req.AccountID.Valid {
 		createStrings = append(createStrings, "account_id")
 		numString = append(numString, fmt.Sprintf(`$%d`, len(numString)+1))
-		args = append(args, req.AccountID.Int64)
+		args = append(args, req.AccountID.Int)
 	}
 
 	if req.GatewayProvider.Valid {

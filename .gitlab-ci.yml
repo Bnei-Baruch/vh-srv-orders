@@ -57,8 +57,6 @@ deploy_staging:
 build_production:
   image: docker:latest
   stage: build
-  tags:
-    - dockerbuild
   services:
     - docker:19.03.12-dind
   script:

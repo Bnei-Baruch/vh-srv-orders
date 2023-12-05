@@ -21,7 +21,7 @@ type envConfig struct {
 	PelecardUser     string `envconfig:"PELECARD_USER"`
 	PelecardPassword string `envconfig:"PELECARD_PASSWORD"`
 
-	KeycloakServerUrl    string `envconfig:"KEYCLOAK_SERVER_BASE_URL"`
+	KeycloakServerUrl    string `envconfig:"KEYCLOAK_SERVER_URL"`
 	KeycloakRealm        string `envconfig:"KEYCLOAK_REALM"`
 	KeycloakClientID     string `envconfig:"KEYCLOAK_CLIENT_ID"`
 	KeycloakClientSecret string `envconfig:"KEYCLOAK_CLIENT_SECRET"`

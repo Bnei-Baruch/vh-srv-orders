@@ -14,7 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v4"
-	"gopkg.in/guregu/null.v4"
+	"github.com/volatiletech/null/v9"
 
 	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 	"gitlab.bbdev.team/vh/pay/orders/repo"
@@ -68,7 +68,7 @@ func (o *OrdersAPI) handleTransactionOrderAndPay(c *gin.Context) {
 		return
 	}
 
-	p, errPaymentCreation := o.repo.CreatePayment(c, req, ord)
+	p, errPaymentCreation := o.repo.CreatePayment(c, req, ord.ID)
 
 	if errPaymentCreation != nil {
 		log.Println("Err:", errPaymentCreation)
@@ -93,12 +93,10 @@ func (o *OrdersAPI) handleTransactionOrderAndPay(c *gin.Context) {
 		}
 	}
 
-	int64PayId := int64(p.ID)
-
 	tran := repo.Transaction{
 		OrderID:    null.NewInt(ord.ID, true),
 		AccountID:  ord.AccountID,
-		PaymentID:  null.NewInt(int64PayId, true),
+		PaymentID:  null.NewInt(p.ID, true),
 		TerminalID: req.TerminalId,
 	}
 

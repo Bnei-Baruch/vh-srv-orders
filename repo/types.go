@@ -3,12 +3,12 @@ package repo
 import (
 	"time"
 
-	"gopkg.in/guregu/null.v4"
+	"github.com/volatiletech/null/v9"
 )
 
 // Order is defined by
 type Order struct {
-	ID        int64     `json:"ID" gorm:"primary_key"`
+	ID        int       `json:"ID" gorm:"primary_key"`
 	CreatedAt null.Time `json:"created_at"`
 	UpdatedAt null.Time `json:"updated_at"`
 	DeletedAt null.Time `json:"deleted_at" sql:"index"`
@@ -20,29 +20,29 @@ type Order struct {
 	AccountID    null.Int    `json:"AccountID" gorm:"Column:AccountID;"`
 	Organization null.String `json:"Organization" gorm:"Column:Organization;type:varchar(10)"`
 
-	Amount        null.Float  `json:"Amount" gorm:"Column:Amount;type:varchar(85)"`
-	Currency      null.String `json:"Currency"  gorm:"Column:Currency;type:varchar(10)"`
-	SKU           null.String `json:"SKU"  gorm:"Column:SKU;type:varchar(30)"`
-	Status        null.String `json:"Status,omitempty" gorm:"Column:Status;type:varchar(85)"`
-	OrderLanguage null.String `json:"OrderLanguage,omitempty" gorm:"Column:OrderLanguage;type:varchar(10)"`
-	PaymentDate   null.Time   `json:"PaymentDate" gorm:"Column:PaymentDate"`
-	Note          null.String `json:"Note" gorm:"Column:Note;type:varchar(200)"`
-	Flag          null.String `json:"Flag" gorm:"Column:Flag;type:varchar(200)"`
-	Quantity      null.Int    `json:"Quantity"`
-	AmountItem    null.Int    `json:"AmountItem"`
-	StartingDate  null.Time   `json:"StartingDate"`
+	Amount        null.Float64 `json:"Amount" gorm:"Column:Amount;type:varchar(85)"`
+	Currency      null.String  `json:"Currency"  gorm:"Column:Currency;type:varchar(10)"`
+	SKU           null.String  `json:"SKU"  gorm:"Column:SKU;type:varchar(30)"`
+	Status        null.String  `json:"Status,omitempty" gorm:"Column:Status;type:varchar(85)"`
+	OrderLanguage null.String  `json:"OrderLanguage,omitempty" gorm:"Column:OrderLanguage;type:varchar(10)"`
+	PaymentDate   null.Time    `json:"PaymentDate" gorm:"Column:PaymentDate"`
+	Note          null.String  `json:"Note" gorm:"Column:Note;type:varchar(200)"`
+	Flag          null.String  `json:"Flag" gorm:"Column:Flag;type:varchar(200)"`
+	Quantity      null.Int     `json:"Quantity"`
+	AmountItem    null.Int     `json:"AmountItem"`
+	StartingDate  null.Time    `json:"StartingDate"`
 
 	Payments []Payment `json:"Payments" gorm:"foreignkey:OrderID"`
 }
 
 // Payment is defined by
 type Payment struct {
-	ID        uint      `json:"ID" gorm:"primary_key"`
+	ID        int       `json:"ID" gorm:"primary_key"`
 	CreatedAt null.Time `json:"created_at"`
 	UpdatedAt null.Time `json:"updated_at"`
 	DeletedAt null.Time `json:"deleted_at" sql:"index"`
 
-	Amount null.Float `json:"Amount" gorm:"Column:Amount"`
+	Amount null.Float64 `json:"Amount" gorm:"Column:Amount"`
 
 	PaymentStatus null.String `json:"PaymentStatus" gorm:"Column:PaymentStatus"`
 	PaymentType   null.String `json:"PaymentType" gorm:"Column:PaymentType;type:varchar(100)"`
@@ -97,31 +97,35 @@ type RequestOrder struct {
 	UserKey   null.String `json:"UserKey"`
 
 	//Product data
-	Amount        null.Float  `json:"Amount"`
-	Currency      null.String `json:"Currency"`
-	Reference     null.String `json:"Reference"`
-	Type          null.String `json:"Type"`
-	ProductType   null.String `json:"ProductType"`
-	SKU           null.String `json:"SKU"`
-	RecurringFreq null.Int    `json:"RecurringFreq"`
-	Installements null.Int    `json:"Installements"`
-	Organization  null.String `json:"Organization"`
-	OrderLanguage null.String `json:"OrderLanguage"`
-	Quantity      null.Int    `json:"Quantity"`
-	AmountItem    null.Int    `json:"AmountItem"`
-	TerminalId    null.String `json:"TerminalId"`
+	Amount        null.Float64 `json:"Amount"`
+	Currency      null.String  `json:"Currency"`
+	Reference     null.String  `json:"Reference"`
+	Type          null.String  `json:"Type"`
+	ProductType   null.String  `json:"ProductType"`
+	SKU           null.String  `json:"SKU"`
+	RecurringFreq null.Int     `json:"RecurringFreq"`
+	Installements null.Int     `json:"Installements"`
+	Organization  null.String  `json:"Organization"`
+	OrderLanguage null.String  `json:"OrderLanguage"`
+	Quantity      null.Int     `json:"Quantity"`
+	AmountItem    null.Int     `json:"AmountItem"`
+	TerminalId    null.String  `json:"TerminalId"`
 
 	//Transaction data
 	SuccessURL null.String `json:"SuccessURL"`
 	ErrorURL   null.String `json:"ErrorURL"`
 	CancelURL  null.String `json:"CancelURL"`
 
+	// Payment data
+	PaymentType   null.String `json:"PaymentType,omitempty"`
+	PaymentStatus null.String `json:"PaymentStatus,omitempty"`
+
 	//Offline Payment
-	PaymentType          null.String `json:"PaymentType,omitempty"`
 	PaymentMethod        null.String `json:"PaymentMethod,omitempty"`
 	Receipt              null.String `json:"Receipt,omitempty"`
 	ExtraInfo            null.String `json:"ExtraInfo,omitempty"`
 	OfflinePaymentStatus null.String `json:"OfflinePaymentStatus,omitempty"`
+	Properties           null.JSON   `json:"Properties,omitempty"`
 
 	//Helphaver Payment
 	ValidationMessage null.String `json:"ValidationMessage,omitempty"`
@@ -139,6 +143,7 @@ type PaymentUpdate struct {
 	PaymentMethod null.String `json:"PaymentMethod"`
 	Receipt       null.String `json:"Receipt"`
 	ExtraInfo     null.String `json:"ExtraInfo"`
+	Properties    null.JSON   `json:"Properties,omitempty"`
 
 	// HelpHaver Payment
 	ValidationMessage null.String `json:"ValidationMessage"`
@@ -147,7 +152,7 @@ type PaymentUpdate struct {
 	// Pelecard Payment
 	DeletedAt null.Time `json:"deleted_at"`
 
-	Amount null.Float `json:"Amount"`
+	Amount null.Float64 `json:"Amount"`
 
 	PaymentStatus null.String `json:"PaymentStatus"`
 	OrderID       null.Int    `json:"OrderID"`
@@ -187,12 +192,17 @@ type PaymentUpdate struct {
 }
 
 type OfflinePayment struct {
-	PaymentType   null.String `json:"PaymentType,omitempty"`
+	ID        int       `json:"id"`
+	CreatedAt null.Time `json:"created_at"`
+	UpdatedAt null.Time `json:"updated_at"`
+	DeletedAt null.Time `json:"deleted_at"`
+
 	PaymentMethod null.String `json:"PaymentMethod"`
 	Receipt       null.String `json:"Receipt"`
 	ExtraInfo     null.String `json:"ExtraInfo"`
 	Status        null.String `json:"Status"`
 	PaymentID     null.Int    `json:"PaymentID"`
+	Properties    null.JSON   `json:"Properties"`
 }
 
 type HelpHavedPayment struct {
@@ -205,7 +215,7 @@ type HelpHavedPayment struct {
 
 // Account is defined by
 type Account struct {
-	ID        int64      `json:"ID" gorm:"primary_key"`
+	ID        int        `json:"ID" gorm:"primary_key"`
 	CreatedAt *time.Time `json:"created_at"`
 	UpdatedAt *time.Time `json:"updated_at"`
 	DeletedAt *time.Time `json:"deleted_at" sql:"index"`
@@ -355,72 +365,72 @@ type PaymentWithFullName struct {
 	OrderAmount int    `json:"OrderAmount"`
 	Currency    string `json:"Currency"`
 
-	ID                    uint        `json:"ID"`
-	Amount                null.Float  `json:"Amount"`
-	PaymentStatus         null.String `json:"PaymentStatus"`
-	PaymentType           null.String `json:"PaymentType"`
-	OrderID               null.Int    `json:"OrderID"`
-	ParamX                null.String `json:"additional_details_param_x"`
-	SKU                   null.String `json:"SKU"`
-	AuthNo                null.String `json:"authNo"`
-	ConfirmationKey       null.String `json:"confirmation_key"`
-	Success               null.String `json:"success"`
-	PelecardToken         null.String `json:"token"`
-	TransactionID         null.String `json:"transaction_id"`
-	ErrorMsg              null.String `json:"ErrorMsg"`
-	CardHebrewName        null.String `json:"card_hebrew_name"`
-	CCAbroadCard          null.String `json:"CCAbroadCard"`
-	CCBrand               null.String `json:"CCBrand"`
-	CCCompanyClearer      null.String `json:"CCCompanyClearer"`
-	CCCompanyIssuer       null.String `json:"CCCompanyIssuer"`
-	CreditType            null.String `json:"credit_type"`
-	CCExpDate             null.String `json:"CCExpDate"`
-	CCNumber              null.String `json:"CCNumber"`
-	DebitCode             null.String `json:"DebitCode"`
-	DebitCurrency         null.String `json:"DebitCurrency"`
-	DebitTotal            null.String `json:"DebitTotal"`
-	DebitType             null.String `json:"DebitType"`
-	FirstPaymentTotal     null.String `json:"FirstPaymentTotal"`
-	FixedPaymentTotal     null.String `json:"FixedPaymentTotal"`
-	JParam                null.String `json:"j_param"`
-	TotalPayments         null.String `json:"TotalPayments"`
-	TransactionInitTime   null.String `json:"TransactionInitTime"`
-	TransactionUpdateTime null.String `json:"TransactionUpdateTime"`
-	VoucherID             null.String `json:"VoucherID"`
-	Ordkey                null.String `json:"user_key"`
-	CreatedAt             null.Time   `json:"-"`
-	UpdatedAt             null.Time   `json:"-"`
-	DeletedAt             null.Time   `json:"-"`
+	ID                    uint         `json:"ID"`
+	Amount                null.Float64 `json:"Amount"`
+	PaymentStatus         null.String  `json:"PaymentStatus"`
+	PaymentType           null.String  `json:"PaymentType"`
+	OrderID               null.Int     `json:"OrderID"`
+	ParamX                null.String  `json:"additional_details_param_x"`
+	SKU                   null.String  `json:"SKU"`
+	AuthNo                null.String  `json:"authNo"`
+	ConfirmationKey       null.String  `json:"confirmation_key"`
+	Success               null.String  `json:"success"`
+	PelecardToken         null.String  `json:"token"`
+	TransactionID         null.String  `json:"transaction_id"`
+	ErrorMsg              null.String  `json:"ErrorMsg"`
+	CardHebrewName        null.String  `json:"card_hebrew_name"`
+	CCAbroadCard          null.String  `json:"CCAbroadCard"`
+	CCBrand               null.String  `json:"CCBrand"`
+	CCCompanyClearer      null.String  `json:"CCCompanyClearer"`
+	CCCompanyIssuer       null.String  `json:"CCCompanyIssuer"`
+	CreditType            null.String  `json:"credit_type"`
+	CCExpDate             null.String  `json:"CCExpDate"`
+	CCNumber              null.String  `json:"CCNumber"`
+	DebitCode             null.String  `json:"DebitCode"`
+	DebitCurrency         null.String  `json:"DebitCurrency"`
+	DebitTotal            null.String  `json:"DebitTotal"`
+	DebitType             null.String  `json:"DebitType"`
+	FirstPaymentTotal     null.String  `json:"FirstPaymentTotal"`
+	FixedPaymentTotal     null.String  `json:"FixedPaymentTotal"`
+	JParam                null.String  `json:"j_param"`
+	TotalPayments         null.String  `json:"TotalPayments"`
+	TransactionInitTime   null.String  `json:"TransactionInitTime"`
+	TransactionUpdateTime null.String  `json:"TransactionUpdateTime"`
+	VoucherID             null.String  `json:"VoucherID"`
+	Ordkey                null.String  `json:"user_key"`
+	CreatedAt             null.Time    `json:"-"`
+	UpdatedAt             null.Time    `json:"-"`
+	DeletedAt             null.Time    `json:"-"`
 }
 
 type PaymentByEmail struct {
-	CreatedAt     time.Time   `json:"created_at"`
-	PaymentDate   null.Time   `json:"payment_date"`
-	Type          null.String `json:"type"`
-	ProductType   null.String `json:"product_type"`
-	PaymentID     null.String `json:"payment_id"`
-	Currency      null.String `json:"currency"`
-	Amount        null.Float  `json:"amount"`
-	CCNumber      null.String `json:"cc_number"`
-	PaymentStatus null.String `json:"payment_status"`
+	CreatedAt     time.Time    `json:"created_at"`
+	PaymentDate   null.Time    `json:"payment_date"`
+	Type          null.String  `json:"type"`
+	ProductType   null.String  `json:"product_type"`
+	PaymentID     null.String  `json:"payment_id"`
+	Currency      null.String  `json:"currency"`
+	Amount        null.Float64 `json:"amount"`
+	CCNumber      null.String  `json:"cc_number"`
+	PaymentStatus null.String  `json:"payment_status"`
 }
 
 type PaymentActivitiesRes struct {
-	CreatedAt     null.Time   `json:"created_at"`
-	Amount        null.Float  `json:"amount"`
-	PaymentType   null.String `json:"payment_type"`
-	OrderID       null.Int    `json:"order_id"`
-	ParamX        null.String `json:"additional_details_param_x" gorm:"Column:ParamX"`
-	PaymentStatus null.String `json:"payment_status"`
-	CCNumber      null.String `json:"cc_number"`
-	CCExpDate     null.String `json:"cc_exp_date"`
-	ProductType   null.String `json:"product_type"`
-	Type          null.String `json:"type"`
-	Currency      null.String `json:"currency"`
-	FirstName     null.String `json:"first_name"`
-	LastName      null.String `json:"last_name"`
-	Email         null.String `json:"email"`
-	Country       null.String `json:"country"`
+	CreatedAt     null.Time    `json:"created_at"`
+	Amount        null.Float64 `json:"amount"`
+	PaymentType   null.String  `json:"payment_type"`
+	OrderID       null.Int     `json:"order_id"`
+	ParamX        null.String  `json:"additional_details_param_x" gorm:"Column:ParamX"`
+	PaymentStatus null.String  `json:"payment_status"`
+	CCNumber      null.String  `json:"cc_number"`
+	CCExpDate     null.String  `json:"cc_exp_date"`
+	ProductType   null.String  `json:"product_type"`
+	Type          null.String  `json:"type"`
+	Currency      null.String  `json:"currency"`
+	FirstName     null.String  `json:"first_name"`
+	LastName      null.String  `json:"last_name"`
+	Email         null.String  `json:"email"`
+	Country       null.String  `json:"country"`
 }
 
 type CardDetails struct {

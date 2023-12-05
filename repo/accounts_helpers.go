@@ -11,20 +11,18 @@ import (
 )
 
 // CreateOrUpdateAccount account
-func (o *OrdersDB) CreateOrUpdateAccount(ctx context.Context, a Account) int64 {
+func (o *OrdersDB) CreateOrUpdateAccount(ctx context.Context, a Account) int {
 	var b Account
 	reqAccountExist := `
 		select id from accounts where "UserKey" = $1 ORDER BY id DESC LIMIT 1
 	`
 	fmt.Println("--account-struct--", a)
-	if err := o.QueryRow(ctx, reqAccountExist, a.UserKey.String).Scan(
-		&b.ID,
-	); err != nil {
+	if err := o.QueryRow(ctx, reqAccountExist, a.UserKey.String).Scan(&b.ID); err != nil {
 		if err == pgx.ErrNoRows {
 
 			createString, numString, createQueryArgs := prepareAccountCreateQuery(a)
 
-			var ID int64
+			var ID int
 			// Add new account if not exist
 			if len(createQueryArgs) != 0 {
 				if err := o.QueryRow(ctx, fmt.Sprintf(`INSERT INTO accounts (%s) VALUES (%s) RETURNING id`, createString, numString),
@@ -288,7 +286,7 @@ func (o *OrdersDB) GetAccount(ctx context.Context, id int, email string) (Accoun
 	if id != 0 {
 		whereQuery = fmt.Sprintf("where id = %d", id)
 	} else {
-		whereQuery = fmt.Sprintf("where \"Email\" = '%s'", email)
+		whereQuery = fmt.Sprintf("where LOWER(\"Email\") = LOWER('%s')", email)
 	}
 
 	if err := o.QueryRow(ctx, `SELECT 
@@ -391,12 +389,12 @@ func prepareAccountCreateQuery(req Account) (string, string, []interface{}) {
 	if req.PaymentCardExpMonth.Valid {
 		createStrings = append(createStrings, `"PaymentCardExpMonth"`)
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.PaymentCardExpMonth.Int64)
+		args = append(args, req.PaymentCardExpMonth.Int)
 	}
 	if req.PaymentCardExpYear.Valid {
 		createStrings = append(createStrings, `"PaymentCardExpYear"`)
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.PaymentCardExpYear.Int64)
+		args = append(args, req.PaymentCardExpYear.Int)
 	}
 	if req.AuthNo.Valid {
 		createStrings = append(createStrings, `"AuthNo"`)
@@ -479,11 +477,11 @@ func prepareAccountUpdateQuery(req Account) (string, []interface{}) {
 	}
 	if req.PaymentCardExpMonth.Valid {
 		updateStrings = append(updateStrings, fmt.Sprintf(`""PaymentCardExpMonth""=$%d`, len(updateStrings)+1))
-		args = append(args, req.PaymentCardExpMonth.Int64)
+		args = append(args, req.PaymentCardExpMonth.Int)
 	}
 	if req.PaymentCardExpYear.Valid {
 		updateStrings = append(updateStrings, fmt.Sprintf(`""PaymentCardExpYear""=$%d`, len(updateStrings)+1))
-		args = append(args, req.PaymentCardExpYear.Int64)
+		args = append(args, req.PaymentCardExpYear.Int)
 	}
 	if req.AuthNo.Valid {
 		updateStrings = append(updateStrings, fmt.Sprintf(`""UserKey""=$%d`, len(updateStrings)+1))

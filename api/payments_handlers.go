@@ -9,7 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/goji/param"
 	"github.com/jackc/pgx/v4"
-	"gopkg.in/guregu/null.v4"
+	"github.com/volatiletech/null/v9"
 
 	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 	"gitlab.bbdev.team/vh/pay/orders/repo"
@@ -104,7 +104,7 @@ func (o *OrdersAPI) handlePaymentUpdate(c *gin.Context) {
 		return
 	}
 
-	if req.PaymentID.Int64 == 0 {
+	if req.PaymentID.IsZero() {
 		c.JSON(http.StatusNotAcceptable, gin.H{"error": "Missing PaymentID"})
 		return
 	}
@@ -191,7 +191,7 @@ func (o *OrdersAPI) handlePaymentUpdate(c *gin.Context) {
 
 	// Updating the status of the parent payment table.
 	if paymentStatus != "" {
-		orderId, parentPaymentUpdateErr := o.repo.UpdateParentPaymentTableStatusAndReturnOrderId(c, paymentStatus, req.PaymentID.Int64)
+		orderId, parentPaymentUpdateErr := o.repo.UpdateParentPaymentTableStatusAndReturnOrderId(c, paymentStatus, req.PaymentID.Int)
 
 		if parentPaymentUpdateErr != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"Error": parentPaymentUpdateErr.Error()})

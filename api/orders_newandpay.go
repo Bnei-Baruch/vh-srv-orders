@@ -33,7 +33,7 @@ func (o *OrdersAPI) handleCreateOrderAndPay(c *gin.Context) {
 		return
 	}
 
-	p, errPaymentCreation := o.repo.CreatePayment(c, req, ord)
+	p, errPaymentCreation := o.repo.CreatePayment(c, req, ord.ID)
 
 	if errPaymentCreation != nil {
 		log.Println("Err:", errPaymentCreation)

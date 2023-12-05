@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"gopkg.in/guregu/null.v4"
+	"github.com/volatiletech/null/v9"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/repo"
@@ -98,7 +98,7 @@ func (o *OrdersAPI) handleV2OrderCreate(c *gin.Context) {
 		return
 	}
 
-	if req.AccountID.Int64 == 0 {
+	if req.AccountID.IsZero() {
 		c.JSON(http.StatusNotAcceptable, gin.H{"error": "Missing AccountID"})
 		return
 	}

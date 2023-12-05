@@ -1,0 +1,6 @@
+BEGIN;
+
+ALTER TABLE payments_offline
+    ADD COLUMN IF NOT EXISTS properties JSONB DEFAULT null;
+
+COMMIT;

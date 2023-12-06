@@ -37,6 +37,7 @@ services:
       KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET}
       PROFILE_SERVICE_URL: ${PROFILE_SERVICE_URL}
       GOOGLE_APPLICATION_CREDENTIALS: /vh_google_app_creds.json
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY}
     mem_limit: 250M
     ports:
       - 8185:8185

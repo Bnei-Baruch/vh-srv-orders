@@ -1,0 +1,5 @@
+# vh-srv-orders cron tasks
+
+# import robocasa payments
+0 0 * * * root docker exec  vh-srv-orders ./robokasa.sh
+

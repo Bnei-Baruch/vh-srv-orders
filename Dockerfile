@@ -11,8 +11,11 @@ RUN CGO_ENABLED=0 go build -o orders .
 
 FROM alpine:latest
 
+RUN apk --no-cache add curl
+
+COPY misc/robokasa.sh ./
+COPY db /db
 COPY --from=base /app/orders /
-COPY --from=base /app/db /db
 
 EXPOSE 8185
 

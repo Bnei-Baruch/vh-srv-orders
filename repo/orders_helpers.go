@@ -212,9 +212,8 @@ func (o *OrdersDB) UpdateOrderAfterPayment(ctx context.Context, p Payment) (Orde
 		SET 
 		"Status"=$1,
 		"PaymentDate"=$2,
-		starting_date=$3,
-		updated_at=$4 
-		WHERE id = $5`, order.Status.String, order.PaymentDate.Time, order.PaymentDate.Time, time.Now(), p.OrderID.Int)
+		updated_at=$3 
+		WHERE id = $4`, order.Status.String, order.PaymentDate.Time, time.Now(), p.OrderID.Int)
 		if err != nil {
 			return order, fmt.Errorf("problem updating payments: %w", err)
 		}

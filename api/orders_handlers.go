@@ -80,7 +80,7 @@ func (o *OrdersAPI) handleUpdateOrders(c *gin.Context) {
 		oi.Flag = null.NewString("renewed", true)
 	}
 
-	err = o.repo.PatchOrderByID(c, oi, int(order.ID))
+	err = o.repo.PatchOrderByID(c, oi, order.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Errorf("problem updating orders: %w", err)})
 		return

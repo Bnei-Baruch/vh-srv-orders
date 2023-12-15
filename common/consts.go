@@ -17,15 +17,12 @@ const (
 	OrderTypeRecurring = "recurring"
 	OrderTypeRegular   = "regular"
 
-	OrderStatusCancelled       = "cancelled"
-	OrderStatusCancelledFailed = "cancelledFailed"
-	OrderStatusNoSuccess       = "nosuccess"
-	OrderStatusNulled          = "nulled"
-	OrderStatusPaid            = "paid"
-	OrderStatusPaused          = "paused"
-	OrderStatusPending         = "pending"
-	OrderStatusRemoved         = "removed"
-	OrderStatusStopped         = "stopped"
+	OrderStatusCancelled = "cancelled"
+	//OrderStatusCancelledFailed = "cancelledFailed"
+	OrderStatusNoSuccess = "nosuccess"
+	OrderStatusPaid      = "paid"
+	OrderStatusPending   = "pending"
+	OrderStatusRefunded  = "refunded"
 
 	OrderLanguageEnglish = "EN"
 	OrderLanguageHebrew  = "HE"
@@ -48,4 +45,6 @@ const (
 
 	OfflinePaymentMethodRobokasa       = "robokasa"
 	OfflinePaymentPropertiesRobokasaID = "robokasa_id"
+
+	CtxEventBuilder = "EVENT_BUILDER"
 )

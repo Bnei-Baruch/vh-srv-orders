@@ -28,6 +28,8 @@ type envConfig struct {
 
 	ProfileServiceUrl    string `envconfig:"PROFILE_SERVICE_URL"`
 	GoogleAppCredentials string `envconfig:"GOOGLE_APPLICATION_CREDENTIALS"`
+
+	NatsUrl string `envconfig:"NATS_URL"`
 }
 
 var Config = new(envConfig)

@@ -3,16 +3,20 @@ package repo
 import (
 	"context"
 	"fmt"
+
+	"gitlab.bbdev.team/vh/pay/orders/events"
 )
 
 func (o *OrdersDB) HardDeleteSpecialByEmail(ctx context.Context, email string) (error, int64) {
 	hardDeleteSpecialRes, err := o.Exec(ctx, "DELETE FROM specials WHERE email = $1", email)
-
 	if err != nil {
 		return err, 0
 	}
 
 	rowsAffected := hardDeleteSpecialRes.RowsAffected()
+	if rowsAffected > 0 {
+		o.emitEvent(ctx, events.TypeDeleteSpecial, map[string]interface{}{"email": email})
+	}
 
 	return nil, rowsAffected
 }

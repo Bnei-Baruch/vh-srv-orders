@@ -11,14 +11,17 @@ import (
 	"github.com/gin-contrib/location"
 	"github.com/gin-gonic/gin"
 
+	"gitlab.bbdev.team/vh/pay/orders/api/middleware"
 	"gitlab.bbdev.team/vh/pay/orders/common"
+	"gitlab.bbdev.team/vh/pay/orders/events"
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
 type App struct {
-	OrdersAPI *OrdersAPI
-	DB        repo.OrdersRepository
-	gEngine   *gin.Engine
+	repo         repo.OrdersRepository
+	eventEmitter events.EventEmitter
+	ordersAPI    *OrdersAPI
+	gEngine      *gin.Engine
 }
 
 func NewApp() *App {
@@ -28,10 +31,15 @@ func NewApp() *App {
 func (a *App) Initialize() {
 	var err error
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	a.DB, err = repo.NewOrdersDB(ctx)
+	a.eventEmitter, err = events.CreateEmitter()
+	if err != nil {
+		log.Fatalf("Error creating event emitter: %v\n", err)
+	}
+
+	a.repo, err = repo.NewOrdersDB(ctx, a.eventEmitter)
 	if err != nil {
 		log.Fatalf("Error connecting to orders db: %s \n***\n %s \n ***", err, repo.GetDBURL())
 	}
@@ -43,7 +51,7 @@ func (a *App) Initialize() {
 	}
 	fmt.Println("Migrated orders db")
 
-	a.OrdersAPI = NewOrdersAPI(a.DB)
+	a.ordersAPI = NewOrdersAPI(a.repo)
 	a.initGinEngine()
 }
 
@@ -54,6 +62,7 @@ func (a *App) initGinEngine() {
 
 	r := gin.Default()
 	r.Use(location.Default())
+	r.Use(middleware.EventsBuilder())
 
 	if os.Getenv("CORSISON") == "YES" {
 		fmt.Println("CORS ACTIVE")
@@ -63,83 +72,77 @@ func (a *App) initGinEngine() {
 	// routes
 	orders := r.Group("/orders")
 	{
-		orders.POST("/new", a.OrdersAPI.handleOrdersCreate)
-		orders.POST("/update", a.OrdersAPI.handleUpdateOrders)
-		orders.POST("/paid", a.OrdersAPI.handleOrdersPaid)
-		orders.POST("/newandpay", a.OrdersAPI.handleCreateOrderAndPay)
-		orders.POST("/renew", a.OrdersAPI.handleOrdersRenew)
-		orders.GET("/count/:filter", a.OrdersAPI.handleOrdersCount)
-		orders.POST("/flag", a.OrdersAPI.handleOrdersFlag)
+		orders.POST("/paid", a.ordersAPI.handleTransactionPaid)     // vh-payments (deprecated in favor of PATCH /v2/transaction)
+		orders.POST("/renew", a.ordersAPI.handleOrdersRenew)        // charge (python)
+		orders.GET("/count/:filter", a.ordersAPI.handleOrdersCount) // charge (python)
+		orders.POST("/flag", a.ordersAPI.handleOrdersFlag)          // charge (python)
 	}
 
 	payments := r.Group("/payments")
 	{
-		payments.GET("/all/:email", a.OrdersAPI.handlePaymentFetchByEmail)
-		//payments.POST("/", a.OrdersAPI.handleCreatePayment)
-		payments.GET("/payment/:paramx", a.OrdersAPI.handlePaymentFetchViaParamX)
-		//payments.POST("/update", a.OrdersAPI.handleUpdatePayment)
-		payments.GET("/activities", a.OrdersAPI.handleGetActivities)
+		payments.GET("/all/:email", a.ordersAPI.handlePaymentFetchByEmail)
+		payments.GET("/payment/:paramx", a.ordersAPI.handlePaymentFetchViaParamX)
+		payments.GET("/activities", a.ordersAPI.handleGetActivities)
 	}
 
 	baseV2Path := r.Group("/v2")
 
-	payment := baseV2Path.Group("/payment")
-	{
-		// payments.POST("/", handleCreatePayment) // uncomment when endpoint defined about /payments [POST] is no longer used
-		payment.PATCH("/", a.OrdersAPI.handlePaymentUpdate)
-		payment.DELETE("/:id", a.OrdersAPI.handlePaymentDelete)
-		payment.GET("/:id", a.OrdersAPI.handlePaymentFetchByID)
-	}
-	baseV2Path.GET("/payments", a.OrdersAPI.handlePaymentFetch)
-
 	account := baseV2Path.Group("/account")
 	{
-		account.POST("/", a.OrdersAPI.handleCreateAccount)
-		account.GET("/:id", a.OrdersAPI.handleGetAccount)
-		account.PATCH("/:id", a.OrdersAPI.handlePatchAccount)
-		account.DELETE("/:id", a.OrdersAPI.handleDeleteAccount)
-		account.DELETE("/:id/hard", a.OrdersAPI.handleHardDeleteAccount)
+		account.POST("/", a.ordersAPI.handleCreateAccount)
+		account.GET("/:id", a.ordersAPI.handleGetAccount)
+		account.PATCH("/:id", a.ordersAPI.handlePatchAccount)
+		account.DELETE("/:id", a.ordersAPI.handleDeleteAccount)
+		account.DELETE("/:id/hard", a.ordersAPI.handleHardDeleteAccount)
 	}
-	baseV2Path.GET("/accounts", a.OrdersAPI.handleFetchAccounts)
+	baseV2Path.GET("/accounts", a.ordersAPI.handleFetchAccounts)
 
 	order := baseV2Path.Group("/order")
 	{
-		order.GET("/:id", a.OrdersAPI.handleOrderGetByID)
-		order.DELETE("/:id", a.OrdersAPI.handleOrderDeleteByID)
-		order.POST("/", a.OrdersAPI.handleV2OrderCreate)
-		order.PATCH("/:id", a.OrdersAPI.handleOrderUpdateByID)
+		order.GET("/:id", a.ordersAPI.handleOrderGetByID)
+		order.DELETE("/:id", a.ordersAPI.handleOrderDeleteByID)
+		order.POST("/", a.ordersAPI.handleV2OrderCreate)
+		order.PATCH("/:id", a.ordersAPI.handleOrderUpdateByID)
 	}
-	baseV2Path.GET("/orders", a.OrdersAPI.handleOrderFetch)
+	baseV2Path.GET("/orders", a.ordersAPI.handleOrderFetch)
 
-	userCardDetails := baseV2Path.Group("/card_detail")
+	payment := baseV2Path.Group("/payment")
 	{
-		userCardDetails.GET("/:id", a.OrdersAPI.handleCardDetailGetByID)
-		userCardDetails.DELETE("/:id", a.OrdersAPI.handleCardDetailSoftDeleteByID)
-		userCardDetails.PATCH("/:id", a.OrdersAPI.handleCardDetailUpdateByID)
-		userCardDetails.POST("/", a.OrdersAPI.handleCardDetailCreate)
+		payment.PATCH("/", a.ordersAPI.handlePaymentUpdate)
+		payment.DELETE("/:id", a.ordersAPI.handlePaymentDelete)
+		payment.GET("/:id", a.ordersAPI.handlePaymentFetchByID)
 	}
-	baseV2Path.GET("/card_details", a.OrdersAPI.handleCardDetailsFetchAll)
+	baseV2Path.GET("/payments", a.ordersAPI.handlePaymentFetch)
 
 	transaction := baseV2Path.Group("/transaction")
 	{
-		transaction.GET("/:id", a.OrdersAPI.handleTransactionGetByID)
-		transaction.PATCH("/", a.OrdersAPI.handleTransactionPaid)
-		transaction.POST("/", a.OrdersAPI.handleTransactionOrderAndPay)
+		transaction.GET("/:id", a.ordersAPI.handleTransactionGetByID)
+		transaction.PATCH("/", a.ordersAPI.handleTransactionPaid)
+		transaction.POST("/", a.ordersAPI.handleTransactionOrderAndPay)
 	}
+
+	userCardDetails := baseV2Path.Group("/card_detail")
+	{
+		userCardDetails.GET("/:id", a.ordersAPI.handleCardDetailGetByID)
+		userCardDetails.DELETE("/:id", a.ordersAPI.handleCardDetailSoftDeleteByID)
+		userCardDetails.PATCH("/:id", a.ordersAPI.handleCardDetailUpdateByID)
+		userCardDetails.POST("/", a.ordersAPI.handleCardDetailCreate)
+	}
+	baseV2Path.GET("/card_details", a.ordersAPI.handleCardDetailsFetchAll)
 
 	special := baseV2Path.Group("/special")
 	{
-		special.DELETE("/:email", a.OrdersAPI.handleSpecialHardDeleteByEmail)
-		special.GET("/:email", a.OrdersAPI.handleSpecialGetByEmail)
+		special.DELETE("/:email", a.ordersAPI.handleSpecialHardDeleteByEmail)
+		special.GET("/:email", a.ordersAPI.handleSpecialGetByEmail)
 	}
 
 	operation := baseV2Path.Group("/operation")
 	{
-		operation.POST("/", a.OrdersAPI.handleOperationCreate)
-		operation.POST("/revert", a.OrdersAPI.handleOperationRevert)
+		operation.POST("/", a.ordersAPI.handleOperationCreate)
+		operation.POST("/revert", a.ordersAPI.handleOperationRevert)
 	}
 
-	r.GET("/status/:email", a.OrdersAPI.status)
+	r.GET("/status/:email", a.ordersAPI.status)
 
 	a.gEngine = r
 }
@@ -151,5 +154,7 @@ func (a *App) Run() {
 }
 
 func (a *App) Shutdown() {
-	a.DB.Close()
+	a.repo.Close()
+	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
+	a.eventEmitter.Close(ctx)
 }

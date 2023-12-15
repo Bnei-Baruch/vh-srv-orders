@@ -9,9 +9,9 @@ import (
 // Status returns membership and status
 func (o *OrdersAPI) status(c *gin.Context) {
 	filter := string(c.Params.ByName("email"))
-	paidmb := o.repo.HasPaidMembership(c, filter)
-	ticket := o.repo.HasTicket(c, filter)
-	specialmb := o.repo.HasSpecialMembership(c, filter)
+	paidmb := o.repo.HasPaidMembership(c.Request.Context(), filter)
+	ticket := o.repo.HasTicket(c.Request.Context(), filter)
+	specialmb := o.repo.HasSpecialMembership(c.Request.Context(), filter)
 
 	var mb bool
 

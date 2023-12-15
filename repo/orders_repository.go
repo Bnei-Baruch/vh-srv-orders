@@ -6,6 +6,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v4/pgxpool"
+
+	"gitlab.bbdev.team/vh/pay/orders/common"
+	"gitlab.bbdev.team/vh/pay/orders/events"
 )
 
 type OrdersRepository interface {
@@ -18,7 +21,6 @@ type OrdersRepository interface {
 	GetAccount(ctx context.Context, id int, email string) (Account, error)
 
 	UpdateOrderStatusByOrderID(ctx context.Context, oid int, status string) error
-	CreateOrder(ctx context.Context, req RequestOrder) (Order, error)
 	CreateOrderViaTransaction(ctx context.Context, req RequestOrder) (Order, error)
 	SyncServiceRegistration(ctx context.Context, p Payment, order Order) error
 	UpdateOrderAfterPayment(ctx context.Context, p Payment) (Order, error)
@@ -85,12 +87,22 @@ type OrdersRepository interface {
 
 type OrdersDB struct {
 	*pgxpool.Pool
+	eventEmitter events.EventEmitter
 }
 
-func NewOrdersDB(ctx context.Context) (OrdersRepository, error) {
+func NewOrdersDB(ctx context.Context, eventEmitter events.EventEmitter) (OrdersRepository, error) {
 	pool, err := pgxpool.Connect(ctx, GetDBURL())
 	if err != nil {
 		return nil, fmt.Errorf("pgxpool.Connect: %w", err)
 	}
-	return &OrdersDB{pool}, nil
+	return &OrdersDB{
+		Pool:         pool,
+		eventEmitter: eventEmitter,
+	}, nil
+}
+
+func (o *OrdersDB) emitEvent(ctx context.Context, eventType string, payload map[string]interface{}) {
+	builder := ctx.Value(common.CtxEventBuilder).(events.EventBuilder)
+	event := builder.BuildEvent(eventType, payload)
+	o.eventEmitter.Emit(event)
 }

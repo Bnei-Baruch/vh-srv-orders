@@ -29,7 +29,7 @@ func (o *OrdersAPI) handlePaymentFetchByID(c *gin.Context) {
 		return
 	}
 
-	account, err := o.repo.GetPaymentByID(c, intID)
+	account, err := o.repo.GetPaymentByID(c.Request.Context(), intID)
 
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -59,7 +59,7 @@ func (o *OrdersAPI) handlePaymentDelete(c *gin.Context) {
 		return
 	}
 
-	err = o.repo.SoftDeletePayment(c, intID)
+	err = o.repo.SoftDeletePayment(c.Request.Context(), intID)
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
@@ -73,7 +73,7 @@ func (o *OrdersAPI) handlePaymentFetchViaParamX(c *gin.Context) {
 
 	var paramx = c.Param("paramx")
 
-	payment, err := o.repo.FetchPaymentByParamX(c, paramx)
+	payment, err := o.repo.FetchPaymentByParamX(c.Request.Context(), paramx)
 
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -141,7 +141,7 @@ func (o *OrdersAPI) handlePaymentUpdate(c *gin.Context) {
 			req.Receipt = null.NewString(fileUrl, true)
 		}
 
-		err := o.repo.UpdateOfflinePayment(c, req)
+		err := o.repo.UpdateOfflinePayment(c.Request.Context(), req)
 
 		if err != nil {
 			if err == pgx.ErrNoRows {
@@ -157,7 +157,7 @@ func (o *OrdersAPI) handlePaymentUpdate(c *gin.Context) {
 			paymentStatus = req.Status.String
 		}
 
-		err := o.repo.UpdateHelpHavePayment(c, req)
+		err := o.repo.UpdateHelpHavePayment(c.Request.Context(), req)
 
 		if err != nil {
 			if err == pgx.ErrNoRows {
@@ -173,7 +173,7 @@ func (o *OrdersAPI) handlePaymentUpdate(c *gin.Context) {
 			paymentStatus = req.PaymentStatus.String
 		}
 
-		err := o.repo.UpdatePelecardPayment(c, req)
+		err := o.repo.UpdatePelecardPayment(c.Request.Context(), req)
 
 		if err != nil {
 			if err == pgx.ErrNoRows {
@@ -199,7 +199,7 @@ func (o *OrdersAPI) handlePaymentUpdate(c *gin.Context) {
 		}
 
 		if orderId != 0 && !req.RestrictOrderUpdate.Bool {
-			o.repo.UpdateOrderStatusByOrderID(c, orderId, paymentStatus)
+			o.repo.UpdateOrderStatusByOrderID(c.Request.Context(), orderId, paymentStatus)
 		}
 
 		c.JSON(http.StatusOK, gin.H{"message": "Updated!", "success": true})
@@ -289,7 +289,8 @@ func (o *OrdersAPI) handlePaymentFetch(c *gin.Context) {
 		intOrderID = 0
 	}
 
-	payments, err := o.repo.GetAllPayments(c, intSkip, intLimit, fromDate, &toDateParsed, paymentType, paymentStatus, orderType, email, intAccountID, tokenExist, intOrderID, orderByCreatedAt)
+	payments, err := o.repo.GetAllPayments(c.Request.Context(), intSkip, intLimit, fromDate, &toDateParsed, paymentType,
+		paymentStatus, orderType, email, intAccountID, tokenExist, intOrderID, orderByCreatedAt)
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -304,7 +305,7 @@ func (o *OrdersAPI) handlePaymentFetch(c *gin.Context) {
 func (o *OrdersAPI) handlePaymentFetchByEmail(c *gin.Context) {
 	var email = c.Param("email")
 
-	ord, err := o.repo.GetPaymentByEmail(c, email)
+	ord, err := o.repo.GetPaymentByEmail(c.Request.Context(), email)
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"Error": err})
@@ -342,8 +343,8 @@ func (o *OrdersAPI) handleGetActivities(c *gin.Context) {
 		return
 	}
 
-	payAct, err := o.repo.GetPaymentActivities(c, email, productType, paymentType, intSkip, intLimit)
-	count, _ := o.repo.GetTotalParticipationStatusCount(c, email, productType, paymentType)
+	payAct, err := o.repo.GetPaymentActivities(c.Request.Context(), email, productType, paymentType, intSkip, intLimit)
+	count, _ := o.repo.GetTotalParticipationStatusCount(c.Request.Context(), email, productType, paymentType)
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"Error": err})

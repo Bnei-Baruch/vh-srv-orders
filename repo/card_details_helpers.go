@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"gitlab.bbdev.team/vh/pay/orders/common"
 )
 
 func (o *OrdersDB) GetCardDetailById(ctx context.Context, id int) (CardDetails, error) {
@@ -81,7 +83,7 @@ func (o *OrdersDB) PatchCardDetailsById(ctx context.Context, req CardDetails, id
 		}
 
 	} else {
-		fmt.Println("invalid values")
+		return common.ErrInvalidValues
 	}
 
 	return nil

@@ -14,6 +14,7 @@ import (
 	"github.com/volatiletech/null/v9"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
+	"gitlab.bbdev.team/vh/pay/orders/events"
 )
 
 func (o *OrdersDB) GetPaymentByID(ctx context.Context, id int) (Payment, error) {
@@ -34,9 +35,13 @@ func (o *OrdersDB) GetPaymentByID(ctx context.Context, id int) (Payment, error) 
 
 }
 
-func (o *OrdersDB) SoftDeletePayment(c context.Context, paymentID int) error {
-	_, err := o.Exec(c, "UPDATE payments SET deleted_at = $1 WHERE id = $2", time.Now(), paymentID)
-	return err
+func (o *OrdersDB) SoftDeletePayment(ctx context.Context, paymentID int) error {
+	_, err := o.Exec(ctx, "UPDATE payments SET deleted_at = $1 WHERE id = $2", time.Now(), paymentID)
+	if err != nil {
+		return err
+	}
+	o.emitEvent(ctx, events.TypeDeletePayment, map[string]interface{}{"payment_id": paymentID})
+	return nil
 }
 
 func (o *OrdersDB) GetPaymentActivities(ctx context.Context, email string, productType string, paymentType string, skip int, limit int) ([]PaymentActivitiesRes, error) {
@@ -263,6 +268,8 @@ func (o *OrdersDB) CreatePayment(ctx context.Context, req RequestOrder, orderID 
 		}
 	}
 
+	o.emitEvent(ctx, events.TypeCreatePayment, map[string]interface{}{"payment_id": p.ID})
+
 	return p, nil
 }
 
@@ -277,7 +284,6 @@ func (o *OrdersDB) createPendingPayment(ctx context.Context, sum null.Float64, o
 
 	createString, numString, createQueryArgs := preparePaymentCreateQuery(p)
 
-	// Add new account if not exist
 	if err := o.QueryRow(ctx, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(
 		&p.ID,
@@ -328,8 +334,7 @@ func (o *OrdersDB) createPendingPayment(ctx context.Context, sum null.Float64, o
 			_, err := o.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdatePelecard, int(p.ID)),
 				toUpdatePelecardArgs...)
 			if err != nil {
-				fmt.Println("problem updating payments_pelecard: %w", err)
-				return p, err
+				return p, fmt.Errorf("problem updating payments_pelecard: %w", err)
 			}
 		}
 
@@ -338,8 +343,10 @@ func (o *OrdersDB) createPendingPayment(ctx context.Context, sum null.Float64, o
 		}
 
 	} else {
-		fmt.Println("invalid values")
+		return p, common.ErrInvalidValues
 	}
+
+	o.emitEvent(ctx, events.TypeCreatePayment, map[string]interface{}{"payment_id": p.ID})
 
 	return p, nil
 }
@@ -453,23 +460,24 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (Payment,
 		_, pelecardErr := o.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdatePelecard, uint(paymentid)),
 			toUpdateArgsPeleCard...)
 		if pelecardErr != nil {
-			fmt.Errorf("problem updating payments: %w", err)
+			return p, fmt.Errorf("problem updating payments: %w", err)
 		}
 
 	} else {
-		fmt.Println("invalid values")
+		return p, common.ErrInvalidValues
 	}
 
-	return p, nil
+	o.emitEvent(ctx, events.TypeUpdatePayment, map[string]interface{}{"payment_id": p.ID})
 
+	return p, nil
 }
 
-func (o *OrdersDB) createOfflinePayment(c context.Context, req RequestOrder, paymentID int, status string) error {
+func (o *OrdersDB) createOfflinePayment(ctx context.Context, req RequestOrder, paymentID int, status string) error {
 
 	createString, numString, createQueryArgs := prepareOfflinePaymentCreateQuery(req, paymentID, status)
 
 	if len(createQueryArgs) != 0 {
-		_, err := o.Exec(c, fmt.Sprintf(`INSERT INTO payments_offline (%s) VALUES (%s)`, createString, numString),
+		_, err := o.Exec(ctx, fmt.Sprintf(`INSERT INTO payments_offline (%s) VALUES (%s)`, createString, numString),
 			createQueryArgs...)
 		if err != nil {
 			return fmt.Errorf("problem creating offline payment: %w", err)
@@ -477,17 +485,17 @@ func (o *OrdersDB) createOfflinePayment(c context.Context, req RequestOrder, pay
 
 		return nil
 	} else {
-		return fmt.Errorf("invalid values")
+		return common.ErrInvalidValues
 	}
 
 }
 
-func (o *OrdersDB) createPelecardPayment(c context.Context, req RequestOrder, paymentID int, p Payment) error {
+func (o *OrdersDB) createPelecardPayment(ctx context.Context, req RequestOrder, paymentID int, p Payment) error {
 
 	createString, numString, createQueryArgs := preparePelecardPaymentCreateQuery(p, paymentID)
 
 	if len(createQueryArgs) != 0 {
-		_, err := o.Exec(c, fmt.Sprintf(`INSERT INTO payments_pelecard (%s) VALUES (%s)`, createString, numString),
+		_, err := o.Exec(ctx, fmt.Sprintf(`INSERT INTO payments_pelecard (%s) VALUES (%s)`, createString, numString),
 			createQueryArgs...)
 		if err != nil {
 			return fmt.Errorf("problem creating offline payment: %w", err)
@@ -495,17 +503,17 @@ func (o *OrdersDB) createPelecardPayment(c context.Context, req RequestOrder, pa
 
 		return nil
 	} else {
-		return fmt.Errorf("invalid values")
+		return common.ErrInvalidValues
 	}
 
 }
 
-func (o *OrdersDB) createHelpHaverPayment(c context.Context, req RequestOrder, paymentID int, status string) error {
+func (o *OrdersDB) createHelpHaverPayment(ctx context.Context, req RequestOrder, paymentID int, status string) error {
 
 	createString, numString, createQueryArgs := prepareHelpHaverPaymentCreateQuery(req, paymentID, status)
 
 	if len(createQueryArgs) != 0 {
-		_, err := o.Exec(c, fmt.Sprintf(`INSERT INTO payments_helphaver (%s) VALUES (%s)`, createString, numString),
+		_, err := o.Exec(ctx, fmt.Sprintf(`INSERT INTO payments_helphaver (%s) VALUES (%s)`, createString, numString),
 			createQueryArgs...)
 		if err != nil {
 			return fmt.Errorf("problem creating helphaver payment: %w", err)
@@ -513,79 +521,74 @@ func (o *OrdersDB) createHelpHaverPayment(c context.Context, req RequestOrder, p
 
 		return nil
 	} else {
-		return fmt.Errorf("invalid values")
+		return common.ErrInvalidValues
 	}
 
 }
 
-func (o *OrdersDB) UpdatePelecardPayment(c context.Context, req PaymentUpdate) error {
-
+func (o *OrdersDB) UpdatePelecardPayment(ctx context.Context, req PaymentUpdate) error {
 	toUpdate, toUpdateArgs := preparePelecardPaymentUpdateQuery(req)
-
-	if len(toUpdateArgs) != 0 {
-		updateRes, err := o.Exec(c, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdate, req.PaymentID.Int),
-			toUpdateArgs...)
-		if err != nil {
-			return fmt.Errorf("problem updating pelecard payments: %w", err)
-		}
-
-		if updateRes.RowsAffected() == 0 {
-			return fmt.Errorf("pelecard payment not updated as no rows affected")
-		}
-
-	} else {
+	if len(toUpdateArgs) == 0 {
 		return common.ErrInvalidBody
 	}
+
+	updateRes, err := o.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdate, req.PaymentID.Int),
+		toUpdateArgs...)
+	if err != nil {
+		return fmt.Errorf("problem updating pelecard payments: %w", err)
+	}
+	if updateRes.RowsAffected() == 0 {
+		return fmt.Errorf("payment not updated")
+	}
+
+	o.emitEvent(ctx, events.TypeUpdatePayment, map[string]interface{}{"payment_id": req.PaymentID.Int})
 
 	return nil
 }
 
-func (o *OrdersDB) UpdateOfflinePayment(c context.Context, req PaymentUpdate) error {
-
+func (o *OrdersDB) UpdateOfflinePayment(ctx context.Context, req PaymentUpdate) error {
 	toUpdate, toUpdateArgs := prepareOfflinePaymentUpdateQuery(req)
-
-	if len(toUpdateArgs) != 0 {
-		updateRes, err := o.Exec(c, fmt.Sprintf(`UPDATE payments_offline SET %s WHERE payment_id=%d`, toUpdate, req.PaymentID.Int),
-			toUpdateArgs...)
-		if err != nil {
-			return fmt.Errorf("problem updating payments: %w", err)
-		}
-
-		if updateRes.RowsAffected() == 0 {
-			return fmt.Errorf("Payment not Updated")
-		}
-	} else {
+	if len(toUpdateArgs) == 0 {
 		return common.ErrInvalidBody
 	}
+
+	updateRes, err := o.Exec(ctx, fmt.Sprintf(`UPDATE payments_offline SET %s WHERE payment_id=%d`, toUpdate, req.PaymentID.Int),
+		toUpdateArgs...)
+	if err != nil {
+		return fmt.Errorf("problem updating payments: %w", err)
+	}
+	if updateRes.RowsAffected() == 0 {
+		return fmt.Errorf("payment not updated")
+	}
+
+	o.emitEvent(ctx, events.TypeUpdatePayment, map[string]interface{}{"payment_id": req.PaymentID.Int})
 
 	return nil
 }
 
-func (o *OrdersDB) UpdateHelpHavePayment(c context.Context, req PaymentUpdate) error {
-
+func (o *OrdersDB) UpdateHelpHavePayment(ctx context.Context, req PaymentUpdate) error {
 	toUpdate, toUpdateArgs := prepareHelpHaverPaymentUpdateQuery(req)
-
-	if len(toUpdateArgs) != 0 {
-		updateRes, err := o.Exec(c, fmt.Sprintf(`UPDATE payments_helphaver SET %s WHERE payment_id=%d`, toUpdate, req.PaymentID.Int),
-			toUpdateArgs...)
-		if err != nil {
-			return fmt.Errorf("problem updating payments: %w", err)
-		}
-
-		if updateRes.RowsAffected() == 0 {
-			return fmt.Errorf("Payment not Updated")
-		}
-
-	} else {
+	if len(toUpdateArgs) == 0 {
 		return common.ErrInvalidBody
 	}
+
+	updateRes, err := o.Exec(ctx, fmt.Sprintf(`UPDATE payments_helphaver SET %s WHERE payment_id=%d`, toUpdate, req.PaymentID.Int),
+		toUpdateArgs...)
+	if err != nil {
+		return fmt.Errorf("problem updating payments: %w", err)
+	}
+	if updateRes.RowsAffected() == 0 {
+		return fmt.Errorf("payment not updated")
+	}
+
+	o.emitEvent(ctx, events.TypeUpdatePayment, map[string]interface{}{"payment_id": req.PaymentID.Int})
 
 	return nil
 }
 
-func (o *OrdersDB) UpdateParentPaymentTableStatusAndReturnOrderId(c context.Context, status string, paymentID int) (int, error) {
+func (o *OrdersDB) UpdateParentPaymentTableStatusAndReturnOrderId(ctx context.Context, status string, paymentID int) (int, error) {
 	var orderId int
-	if err := o.QueryRow(c, `UPDATE payments SET "PaymentStatus"=$1 WHERE id=$2 RETURNING "OrderID"`, status, paymentID).Scan(
+	if err := o.QueryRow(ctx, `UPDATE payments SET "PaymentStatus"=$1 WHERE id=$2 RETURNING "OrderID"`, status, paymentID).Scan(
 		&orderId,
 	); err != nil {
 		return 0, fmt.Errorf("problem updating parent payment table: %w", err)

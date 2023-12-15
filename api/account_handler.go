@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v4"
 	uuid "github.com/satori/go.uuid"
 
+	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
@@ -27,7 +28,7 @@ func (o *OrdersAPI) handleGetAccount(c *gin.Context) {
 		return
 	}
 
-	account, err := o.repo.GetAccount(c, intID, "")
+	account, err := o.repo.GetAccount(c.Request.Context(), intID, "")
 
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -46,16 +47,14 @@ func (o *OrdersAPI) handleGetAccount(c *gin.Context) {
 func (o *OrdersAPI) handleCreateAccount(c *gin.Context) {
 	var req repo.Account
 	errRequest := c.BindJSON(&req)
-
 	if errRequest != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"Error": errRequest.Error()})
 		return
 	}
 
-	accountId, err := o.repo.CreateAccount(c, req)
-
+	accountId, err := o.repo.CreateAccount(c.Request.Context(), req)
 	if err != nil {
-		if errors.Is(err, fmt.Errorf("invalid body")) {
+		if errors.Is(err, common.ErrInvalidBody) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err})
 			return
 		}
@@ -93,7 +92,7 @@ func (o *OrdersAPI) handleFetchAccounts(c *gin.Context) {
 		return
 	}
 
-	accounts, err := o.repo.GetAllAccounts(c, intSkip, intLimit, email)
+	accounts, err := o.repo.GetAllAccounts(c.Request.Context(), intSkip, intLimit, email)
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -127,7 +126,7 @@ func (o *OrdersAPI) handlePatchAccount(c *gin.Context) {
 		return
 	}
 
-	err = o.repo.PatchAccount(c, req, intID)
+	err = o.repo.PatchAccount(c.Request.Context(), req, intID)
 
 	if err != nil {
 		if errors.Is(err, fmt.Errorf("invalid body")) {
@@ -155,7 +154,7 @@ func (o *OrdersAPI) handleDeleteAccount(c *gin.Context) {
 		return
 	}
 
-	err = o.repo.SoftDeleteAccount(c, intID)
+	err = o.repo.SoftDeleteAccount(c.Request.Context(), intID)
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
@@ -184,7 +183,7 @@ func (o *OrdersAPI) handleHardDeleteAccount(c *gin.Context) {
 		}
 	}
 
-	err = o.repo.HardDeleteAllUserDataByAccountID(c, intID, id)
+	err = o.repo.HardDeleteAllUserDataByAccountID(c.Request.Context(), intID, id)
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

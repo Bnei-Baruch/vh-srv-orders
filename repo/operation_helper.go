@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"gitlab.bbdev.team/vh/pay/orders/common"
 )
 
 type QueryLog struct {
@@ -161,7 +163,7 @@ func (o *OrdersDB) PerformOperation(ctx context.Context, req OperationReq) (int,
 
 		return ID, tx.Commit(ctx)
 	} else {
-		return 0, fmt.Errorf("invalid values")
+		return 0, common.ErrInvalidValues
 	}
 }
 
@@ -230,7 +232,7 @@ func (o *OrdersDB) RevertOperation(ctx context.Context, newEmail string, oldEmai
 
 		return tx.Commit(ctx)
 	} else {
-		return fmt.Errorf("invalid values")
+		return common.ErrInvalidValues
 	}
 
 }

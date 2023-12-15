@@ -11,7 +11,7 @@ import (
 func (o *OrdersAPI) handleSpecialHardDeleteByEmail(c *gin.Context) {
 	email := c.Param("email")
 
-	err, rowsAffected := o.repo.HardDeleteSpecialByEmail(c, email)
+	err, rowsAffected := o.repo.HardDeleteSpecialByEmail(c.Request.Context(), email)
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
@@ -29,7 +29,7 @@ func (o *OrdersAPI) handleSpecialGetByEmail(c *gin.Context) {
 		return
 	}
 
-	special, err := o.repo.GetSpecialByEmail(c, email)
+	special, err := o.repo.GetSpecialByEmail(c.Request.Context(), email)
 
 	if err != nil {
 		if err == pgx.ErrNoRows {

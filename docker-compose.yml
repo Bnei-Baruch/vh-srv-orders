@@ -8,8 +8,16 @@ services:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_DB: ${DB_DATABASE}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
-    # volumes:
-    #   - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+  nats:
+    container_name: 'nats'
+    image: nats:2.10
+    restart: unless-stopped
+    volumes:
+      - nats_data:/storage
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    command: ["--jetstream", "--store_dir", "/storage", "--user", "${NATS_USER}", "--pass", "${NATS_PASSWORD}", "--http_port", "8222"]
   vh-srv-orders:
     container_name: 'vh-srv-orders'
     image: "${IMAGE_NAME}"
@@ -17,12 +25,13 @@ services:
     volumes:
       - /root/google_application_credentials.json:/vh_google_app_creds.json:ro
     environment:
+      PORT: ":8185"
       PGUSER: ${DB_USER}
       PGPASSWORD: ${DB_PASSWORD}
       PGHOST: ${DB_HOST}
       PGPORT: ${DB_PORT}
       PGDATABASE: ${DB_DATABASE}
-      PORT: ":8185"
+      NATS_URL: ${NATS_URL}
       S3_SECRET_KEY: ${S3_SECRET_KEY}
       S3_ACCESS_KEY: ${S3_ACCESS_KEY}
       S3_REGION: ${S3_REGION}
@@ -40,8 +49,10 @@ services:
       SENDGRID_API_KEY: ${SENDGRID_API_KEY}
     mem_limit: 250M
     ports:
-      - 8185:8185
+      - "8185:8185"
 networks:
   default:
     external:
       name: vh
+volumes:
+  nats_data:

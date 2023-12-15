@@ -8,59 +8,46 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v4"
+
+	"gitlab.bbdev.team/vh/pay/orders/common"
+	"gitlab.bbdev.team/vh/pay/orders/events"
 )
 
-// CreateOrUpdateAccount account
 func (o *OrdersDB) CreateOrUpdateAccount(ctx context.Context, a Account) int {
 	var b Account
-	reqAccountExist := `
-		select id from accounts where "UserKey" = $1 ORDER BY id DESC LIMIT 1
-	`
-	fmt.Println("--account-struct--", a)
-	if err := o.QueryRow(ctx, reqAccountExist, a.UserKey.String).Scan(&b.ID); err != nil {
-		if err == pgx.ErrNoRows {
+	reqAccountExist := `select id from accounts where "UserKey" = $1 ORDER BY id DESC LIMIT 1`
 
-			createString, numString, createQueryArgs := prepareAccountCreateQuery(a)
-
-			var ID int
-			// Add new account if not exist
-			if len(createQueryArgs) != 0 {
-				if err := o.QueryRow(ctx, fmt.Sprintf(`INSERT INTO accounts (%s) VALUES (%s) RETURNING id`, createString, numString),
-					createQueryArgs...).Scan(
-					&ID,
-				); err != nil {
-					return 0
-				}
-				return ID
-			} else {
-				return 0
-			}
-
-		} else {
-			return 0
-		}
+	err := o.QueryRow(ctx, reqAccountExist, a.UserKey.String).Scan(&b.ID)
+	if err == nil {
+		return b.ID
 	}
-	return b.ID
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return 0
+	}
+
+	ID, err := o.CreateAccount(ctx, a)
+	if err != nil {
+		return 0
+	}
+
+	return ID
 }
 
 func (o *OrdersDB) CreateAccount(ctx context.Context, a Account) (int, error) {
-
 	createString, numString, createQueryArgs := prepareAccountCreateQuery(a)
-
-	var ID int
-
-	if len(createQueryArgs) != 0 {
-		if err := o.QueryRow(ctx, fmt.Sprintf(`INSERT INTO accounts (%s) VALUES (%s) RETURNING id`, createString, numString),
-			createQueryArgs...).Scan(
-			&ID,
-		); err != nil {
-			return 0, err
-		}
-		return ID, nil
-	} else {
-		return 0, fmt.Errorf("invalid body")
+	if len(createQueryArgs) == 0 {
+		return 0, common.ErrInvalidBody
 	}
 
+	var ID int
+	if err := o.QueryRow(ctx, fmt.Sprintf(`INSERT INTO accounts (%s) VALUES (%s) RETURNING id`, createString, numString),
+		createQueryArgs...).Scan(&ID); err != nil {
+		return 0, err
+	}
+
+	o.emitEvent(ctx, events.TypeCreateAccount, map[string]interface{}{"account_id": ID})
+
+	return ID, nil
 }
 
 func (o *OrdersDB) GetAllAccounts(ctx context.Context, skip int, limit int, email string) (*[]Account, error) {
@@ -139,34 +126,36 @@ func (o *OrdersDB) GetAllAccounts(ctx context.Context, skip int, limit int, emai
 }
 
 func (o *OrdersDB) PatchAccount(ctx context.Context, req Account, accountID int) error {
-
 	toUpdate, toUpdateArgs := prepareAccountUpdateQuery(req)
-
-	if len(toUpdateArgs) != 0 {
-		updateRes, err := o.Exec(ctx, fmt.Sprintf(`UPDATE accounts SET %s WHERE id=%d`, toUpdate, accountID),
-			toUpdateArgs...)
-		if err != nil {
-			return fmt.Errorf("problem updating account: %w", err)
-		}
-
-		if updateRes.RowsAffected() == 0 {
-			return fmt.Errorf("account not updated as no rows affected")
-		}
-
-	} else {
-		fmt.Println("invalid values")
+	if len(toUpdateArgs) == 0 {
+		return common.ErrInvalidValues
 	}
+
+	updateRes, err := o.Exec(ctx, fmt.Sprintf(`UPDATE accounts SET %s WHERE id=%d`, toUpdate, accountID),
+		toUpdateArgs...)
+	if err != nil {
+		return fmt.Errorf("problem updating account: %w", err)
+	}
+
+	if updateRes.RowsAffected() == 0 {
+		return fmt.Errorf("account not updated as no rows affected")
+	}
+
+	o.emitEvent(ctx, events.TypeUpdateAccount, map[string]interface{}{"account_id": accountID})
 
 	return nil
 }
 
 func (o *OrdersDB) SoftDeleteAccount(ctx context.Context, accountID int) error {
 	_, err := o.Exec(ctx, "UPDATE accounts SET deleted_at = $1 WHERE id = $2", time.Now(), accountID)
-	return err
+	if err != nil {
+		return err
+	}
+	o.emitEvent(ctx, events.TypeDeleteAccount, map[string]interface{}{"account_id": accountID})
+	return nil
 }
 
 func (o *OrdersDB) HardDeleteAllUserDataByAccountID(ctx context.Context, accountID int, kc_id string) error {
-
 	// start transaction
 	tx, err := o.Begin(ctx)
 	if err != nil {
@@ -175,106 +164,81 @@ func (o *OrdersDB) HardDeleteAllUserDataByAccountID(ctx context.Context, account
 
 	defer tx.Rollback(ctx)
 
-	if accountID != 0 {
-		// delete all user data
-		_, err = tx.Exec(ctx, `DELETE FROM transaction WHERE account_id = $1`, accountID)
+	if accountID == 0 {
+		if kc_id == "" {
+			return errors.New("accountID and kc_id are both empty")
+		}
+
+		err := tx.QueryRow(ctx, `SELECT id FROM accounts WHERE "UserKey" = $1`, kc_id).Scan(&accountID)
 		if err != nil {
 			return err
 		}
-
-		_, err = tx.Exec(ctx, `DELETE FROM card_details where account_id = $1`, accountID)
-		if err != nil {
-			return err
-		}
-
-		_, err = tx.Exec(ctx, `DELETE FROM payments_helphaver where payment_id in (SELECT id FROM payments where "OrderID" in (SELECT id FROM orders where "AccountID" = $1))`, accountID)
-		if err != nil {
-			return err
-		}
-
-		_, err = tx.Exec(ctx, `DELETE FROM payments_offline where payment_id in (SELECT id FROM payments where "OrderID" in (SELECT id FROM orders where "AccountID" = $1))`, accountID)
-		if err != nil {
-			return err
-		}
-
-		_, err = tx.Exec(ctx, `DELETE FROM payments_pelecard where payment_id in (SELECT id FROM payments where "OrderID" in (SELECT id FROM orders where "AccountID" = $1))`, accountID)
-		if err != nil {
-			return err
-		}
-
-		_, err = tx.Exec(ctx, `DELETE FROM specials where email = (SELECT "Email" FROM accounts WHERE id = $1)`, accountID)
-		if err != nil {
-			return err
-		}
-
-		_, err = tx.Exec(ctx, `DELETE FROM payments where "OrderID" in (SELECT id FROM orders where "AccountID" = $1)`, accountID)
-		if err != nil {
-			return err
-		}
-
-		_, err = tx.Exec(ctx, `DELETE FROM orders where "AccountID" = $1`, accountID)
-		if err != nil {
-			return err
-		}
-
-		_, err = tx.Exec(ctx, "DELETE FROM accounts WHERE id = $1", accountID)
-		if err != nil {
-			return err
-		}
-
-	} else if kc_id != "" {
-		// delete all user data
-		_, err = tx.Exec(ctx, `DELETE FROM transaction WHERE account_id in (SELECT id FROM accounts WHERE "UserKey" = $1)`, kc_id)
-		if err != nil {
-			return err
-		}
-
-		_, err = tx.Exec(ctx, `DELETE FROM card_details where account_id in (SELECT id FROM accounts WHERE "UserKey" = $1)`, kc_id)
-		if err != nil {
-			return err
-		}
-
-		_, err = tx.Exec(ctx, `DELETE FROM payments_helphaver where payment_id in (SELECT id FROM payments where "OrderID" in (SELECT id FROM orders where "AccountID" in (SELECT id FROM accounts WHERE "UserKey" = $1)))`, kc_id)
-		if err != nil {
-			return err
-		}
-
-		_, err = tx.Exec(ctx, `DELETE FROM payments_offline where payment_id in (SELECT id FROM payments where "OrderID" in (SELECT id FROM orders where "AccountID" in (SELECT id FROM accounts WHERE "UserKey" = $1)))`, kc_id)
-		if err != nil {
-			return err
-		}
-
-		_, err = tx.Exec(ctx, `DELETE FROM payments_pelecard where payment_id in (SELECT id FROM payments where "OrderID" in (SELECT id FROM orders where "AccountID" in (SELECT id FROM accounts WHERE "UserKey" = $1)))`, kc_id)
-		if err != nil {
-			return err
-		}
-
-		_, err = tx.Exec(ctx, `DELETE FROM specials where email in (SELECT "Email" FROM accounts WHERE "UserKey" = $1)`, kc_id)
-		if err != nil {
-			return err
-		}
-
-		_, err = tx.Exec(ctx, `DELETE FROM payments where "OrderID" in (SELECT id FROM orders where "AccountID" in (SELECT id FROM accounts WHERE "UserKey" = $1))`, kc_id)
-		if err != nil {
-			return err
-		}
-
-		_, err = tx.Exec(ctx, `DELETE FROM orders where "AccountID" in (SELECT id FROM accounts WHERE "UserKey" = $1)`, kc_id)
-		if err != nil {
-			return err
-		}
-
-		_, err = tx.Exec(ctx, `DELETE FROM accounts WHERE "UserKey" = $1`, kc_id)
-		if err != nil {
-			return err
-		}
-
-	} else {
-		return errors.New("accountID and kc_id are both empty")
 	}
 
-	return tx.Commit(ctx)
+	var email string
+	err = tx.QueryRow(ctx, `SELECT "UserKey", "Email" FROM accounts WHERE id = $1`, accountID).Scan(&kc_id, &email)
+	if err != nil {
+		return err
+	}
 
+	// delete all user data
+	_, err = tx.Exec(ctx, `DELETE FROM transaction WHERE account_id = $1`, accountID)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(ctx, `DELETE FROM card_details where account_id = $1`, accountID)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(ctx, `DELETE FROM payments_helphaver where payment_id in (SELECT id FROM payments where "OrderID" in (SELECT id FROM orders where "AccountID" = $1))`, accountID)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(ctx, `DELETE FROM payments_offline where payment_id in (SELECT id FROM payments where "OrderID" in (SELECT id FROM orders where "AccountID" = $1))`, accountID)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(ctx, `DELETE FROM payments_pelecard where payment_id in (SELECT id FROM payments where "OrderID" in (SELECT id FROM orders where "AccountID" = $1))`, accountID)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(ctx, `DELETE FROM specials where email = (SELECT "Email" FROM accounts WHERE id = $1)`, accountID)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(ctx, `DELETE FROM payments where "OrderID" in (SELECT id FROM orders where "AccountID" = $1)`, accountID)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(ctx, `DELETE FROM orders where "AccountID" = $1`, accountID)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(ctx, "DELETE FROM accounts WHERE id = $1", accountID)
+	if err != nil {
+		return err
+	}
+
+	err = tx.Commit(ctx)
+	if err != nil {
+		return err
+	}
+
+	o.emitEvent(ctx, events.TypeHardDeleteAccount, map[string]interface{}{
+		"account_id":  accountID,
+		"keycloak_id": kc_id,
+		"email":       email,
+	})
+
+	return nil
 }
 
 func (o *OrdersDB) GetAccount(ctx context.Context, id int, email string) (Account, error) {

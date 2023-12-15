@@ -3,91 +3,15 @@ package api
 import (
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/volatiletech/null/v9"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
-
-/**
-TODO: add update route (POST) taking a JSON
-TODO: change price and currency
-TODO: Add log of operations
-TODO: add field for end
-TODO: add route has active order for account - yes / no / data
-TODO: update muhlafim
-TODO: add invoice
-TODO: fix issues in DB
-TODO: add payment method
-TODO: clean data
-**/
-
-// TODO: Rewrite and merge with new & pay
-func (o *OrdersAPI) handleOrdersCreate(c *gin.Context) {
-	var req repo.RequestOrder
-	err := c.BindJSON(&req)
-
-	if err != nil {
-		log.Println("Err:", err)
-		c.JSON(http.StatusBadRequest, gin.H{"Error": err})
-		return
-	}
-
-	ord, err := o.repo.CreateOrder(c, req)
-
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"Error": err})
-	} else {
-		c.JSON(http.StatusOK, ord)
-	}
-}
-
-func (o *OrdersAPI) handleUpdateOrders(c *gin.Context) {
-	var order repo.Order
-	err := c.BindJSON(&order)
-
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err})
-		return
-	}
-
-	if order.AccountID == null.NewInt(0, true) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing AccountID"})
-		return
-	}
-
-	// TODO (edo): this is ugly. repo.GetOrderByID should return some error not found
-	oi := o.repo.GetOrderByID(c, uint(order.ID))
-	if !oi.CreatedAt.Valid {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err, "msg": "error finding order"})
-		return
-	}
-
-	if order.AccountID != oi.AccountID {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Account ID mismatch"})
-		return
-	}
-
-	oi.Status = order.Status
-	if oi.Status == null.NewString("success", true) || oi.Status == null.NewString("paid", true) {
-		oi.PaymentDate = null.NewTime(time.Now(), true)
-		oi.Flag = null.NewString("renewed", true)
-	}
-
-	err = o.repo.PatchOrderByID(c, oi, order.ID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Errorf("problem updating orders: %w", err)})
-		return
-	}
-
-	c.JSON(http.StatusOK, oi)
-}
 
 func (o *OrdersAPI) handleV2OrderCreate(c *gin.Context) {
 	var req repo.Order
@@ -103,7 +27,7 @@ func (o *OrdersAPI) handleV2OrderCreate(c *gin.Context) {
 		return
 	}
 
-	orderID, err := o.repo.CreateV2Order(c, req)
+	orderID, err := o.repo.CreateV2Order(c.Request.Context(), req)
 
 	if err != nil {
 		if errors.Is(err, common.ErrInvalidBody) {
@@ -131,7 +55,7 @@ func (o *OrdersAPI) handleOrderDeleteByID(c *gin.Context) {
 		return
 	}
 
-	err = o.repo.SoftDeleteOrderByID(c, intID)
+	err = o.repo.SoftDeleteOrderByID(c.Request.Context(), intID)
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
@@ -163,7 +87,7 @@ func (o *OrdersAPI) handleOrderUpdateByID(c *gin.Context) {
 		return
 	}
 
-	err = o.repo.PatchOrderByID(c, req, intID)
+	err = o.repo.PatchOrderByID(c.Request.Context(), req, intID)
 
 	if err != nil {
 		fmt.Printf("Error while updating the order: %s\n", err)
@@ -195,7 +119,7 @@ func (o *OrdersAPI) handleOrderGetByID(c *gin.Context) {
 
 	uIntId := uint(intID)
 
-	order := o.repo.GetOrderByID(c, uIntId)
+	order := o.repo.GetOrderByID(c.Request.Context(), uIntId)
 
 	if order.ID == 0 {
 		// Need to return proper error before this implementation
@@ -211,45 +135,6 @@ func (o *OrdersAPI) handleOrderGetByID(c *gin.Context) {
 	}
 }
 
-func (o *OrdersAPI) handleOrdersPaid(c *gin.Context) {
-	var rp repo.RequestPaid
-	err := c.BindJSON(&rp)
-
-	if err != nil {
-		log.Println("Err:", err)
-		c.JSON(http.StatusBadRequest, gin.H{"Error": err})
-		return
-	}
-
-	if len(rp.UserKey.String) == 0 {
-		log.Println("Err: No Order ID provided")
-		log.Println(">> ParamX: " + rp.ParamX.String)
-		c.JSON(http.StatusBadRequest, gin.H{"Error": "No order id provided in UserKey"})
-		return
-	}
-
-	p, err := o.repo.UpdatePayment(c, rp)
-
-	if err != nil {
-		// TODO : ask grisha to return more info on error
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"Error": err})
-		return
-	}
-
-	order, err := o.repo.UpdateOrderAfterPayment(c, p)
-
-	if p.PaymentStatus.String == "success" && order.ProductType.String == "jan2022ticket" {
-		log.Println("Synch with Registration")
-		err := o.repo.SyncServiceRegistration(c, p, order)
-
-		if err != nil {
-			log.Println("we have an error")
-			log.Println(err)
-		}
-	}
-	c.JSON(http.StatusOK, nil)
-}
-
 func (o *OrdersAPI) handleOrdersRenew(c *gin.Context) {
 	type req struct {
 		User string `json:"user"`
@@ -263,7 +148,7 @@ func (o *OrdersAPI) handleOrdersRenew(c *gin.Context) {
 	} else {
 		if body.User == "admin" && (body.Key == "t" || body.Key == "e") {
 			fmt.Printf("Renewing with key : %s\n", body.Key)
-			count := o.repo.ChargeOrdersToRenew(c, body.Key)
+			count := o.repo.ChargeOrdersToRenew(c.Request.Context(), body.Key)
 			c.JSON(http.StatusOK, gin.H{"count": count})
 		} else {
 			c.JSON(http.StatusUnauthorized, gin.H{"Error": "You are not allowed here"})
@@ -343,8 +228,8 @@ func (o *OrdersAPI) handleOrderFetch(c *gin.Context) {
 		intAccountID = 0
 	}
 
-	orders, err := o.repo.GetAllOrders(c, intSkip, intLimit, fromDate, &toDateParsed, productType, currency, status,
-		organisation, email, intAccountID, evaluateMembership, orderByPaymentDate)
+	orders, err := o.repo.GetAllOrders(c.Request.Context(), intSkip, intLimit, fromDate, &toDateParsed, productType,
+		currency, status, organisation, email, intAccountID, evaluateMembership, orderByPaymentDate)
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{

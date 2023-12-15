@@ -34,7 +34,7 @@ func (o *OrdersAPI) handleTransactionGetByID(c *gin.Context) {
 		return
 	}
 
-	transaction, err := o.repo.GetTransactionById(c, intID)
+	transaction, err := o.repo.GetTransactionById(c.Request.Context(), intID)
 
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -60,7 +60,7 @@ func (o *OrdersAPI) handleTransactionOrderAndPay(c *gin.Context) {
 		return
 	}
 
-	ord, errOrderCreation := o.repo.CreateOrderViaTransaction(c, req)
+	ord, errOrderCreation := o.repo.CreateOrderViaTransaction(c.Request.Context(), req)
 
 	if errOrderCreation != nil {
 		log.Println("Err:", errOrderCreation)
@@ -68,7 +68,7 @@ func (o *OrdersAPI) handleTransactionOrderAndPay(c *gin.Context) {
 		return
 	}
 
-	p, errPaymentCreation := o.repo.CreatePayment(c, req, ord.ID)
+	p, errPaymentCreation := o.repo.CreatePayment(c.Request.Context(), req, ord.ID)
 
 	if errPaymentCreation != nil {
 		log.Println("Err:", errPaymentCreation)
@@ -100,7 +100,7 @@ func (o *OrdersAPI) handleTransactionOrderAndPay(c *gin.Context) {
 		TerminalID: req.TerminalId,
 	}
 
-	_, err := o.repo.CreateTransactionAndGetId(c, tran)
+	_, err := o.repo.CreateTransactionAndGetId(c.Request.Context(), tran)
 
 	if err != nil {
 		log.Println("Err:", err)
@@ -248,7 +248,7 @@ func (o *OrdersAPI) handleTransactionPaid(c *gin.Context) {
 		return
 	}
 
-	p, err := o.repo.UpdatePayment(c, rp)
+	p, err := o.repo.UpdatePayment(c.Request.Context(), rp)
 
 	if err != nil {
 		// TODO : ask grisha to return more info on error
@@ -256,11 +256,12 @@ func (o *OrdersAPI) handleTransactionPaid(c *gin.Context) {
 		return
 	}
 
-	order, err := o.repo.UpdateOrderAfterPayment(c, p)
+	order, err := o.repo.UpdateOrderAfterPayment(c.Request.Context(), p)
 
+	// TODO (edo): not sure jan2022ticket is relevant anymore. Anyhow, use events instead of webhooks
 	if p.PaymentStatus.String == "success" && order.ProductType.String == "jan2022ticket" {
-		log.Println("Synch with Registration")
-		err := o.repo.SyncServiceRegistration(c, p, order)
+		log.Println("Sync with Registration")
+		err := o.repo.SyncServiceRegistration(c.Request.Context(), p, order)
 
 		if err != nil {
 			log.Println("we have an error")

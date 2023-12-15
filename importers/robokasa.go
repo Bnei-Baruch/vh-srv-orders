@@ -15,6 +15,7 @@ import (
 	"google.golang.org/api/sheets/v4"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
+	"gitlab.bbdev.team/vh/pay/orders/events"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/keycloak"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
 	"gitlab.bbdev.team/vh/pay/orders/repo"
@@ -36,6 +37,7 @@ func ImportRobokasa() {
 
 type RobokasaImporter struct {
 	repo           repo.OrdersRepository
+	eventEmitter   events.EventEmitter
 	profileService profiles.ProfileService
 }
 
@@ -45,7 +47,13 @@ func NewRobokasaImporter() *RobokasaImporter {
 
 func (im *RobokasaImporter) Init() error {
 	var err error
-	im.repo, err = repo.NewOrdersDB(context.Background())
+
+	im.eventEmitter, err = events.CreateEmitter()
+	if err != nil {
+		log.Fatalf("Error creating events emitter: %v\n", err)
+	}
+
+	im.repo, err = repo.NewOrdersDB(context.Background(), im.eventEmitter)
 	if err != nil {
 		return fmt.Errorf("repo.NewOrdersDB: %v", err)
 	}
@@ -57,6 +65,8 @@ func (im *RobokasaImporter) Init() error {
 
 func (im *RobokasaImporter) Close() {
 	im.repo.Close()
+	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
+	im.eventEmitter.Close(ctx)
 }
 
 // Import fetches all robokasa orders and import the ones we don't have.
@@ -195,7 +205,7 @@ func (im *RobokasaImporter) getExistingPayments() (map[string]*repo.OfflinePayme
 
 // createOrderAndPayments will create a fresh Order, Payment and OfflinePayment for the given robokasa order
 func (im *RobokasaImporter) createOrderAndPayments(rOrder *RobokasaOrder) error {
-	ctx := context.Background()
+	ctx := context.WithValue(context.Background(), common.CtxEventBuilder, im)
 
 	accountID, err := im.getOrCreateAccount(ctx, rOrder.Email)
 	if err != nil {
@@ -212,8 +222,6 @@ func (im *RobokasaImporter) createOrderAndPayments(rOrder *RobokasaOrder) error 
 	if err != nil {
 		return fmt.Errorf("create payment: %w", err)
 	}
-
-	// TODO (edo): trigger evalMembership ?
 
 	return nil
 }
@@ -304,4 +312,10 @@ func (im *RobokasaImporter) createPayment(ctx context.Context, rOrder *RobokasaO
 	}
 
 	return nil
+}
+
+func (im *RobokasaImporter) BuildEvent(eventType string, payload map[string]interface{}) events.Event {
+	event := events.MakeEvent(eventType, payload)
+	event.Component = events.ComponentRobokasaImporter
+	return event
 }

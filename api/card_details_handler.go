@@ -26,7 +26,7 @@ func (o *OrdersAPI) handleCardDetailGetByID(c *gin.Context) {
 		return
 	}
 
-	cardDetail, err := o.repo.GetCardDetailById(c, intID)
+	cardDetail, err := o.repo.GetCardDetailById(c.Request.Context(), intID)
 
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -56,7 +56,7 @@ func (o *OrdersAPI) handleCardDetailSoftDeleteByID(c *gin.Context) {
 		return
 	}
 
-	err = o.repo.SoftDeleteCardDetailById(c, intID)
+	err = o.repo.SoftDeleteCardDetailById(c.Request.Context(), intID)
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
@@ -75,7 +75,7 @@ func (o *OrdersAPI) handleCardDetailCreate(c *gin.Context) {
 		return
 	}
 
-	cardDetailId, err := o.repo.CreateCardDetailsAndGetId(c, req)
+	cardDetailId, err := o.repo.CreateCardDetailsAndGetId(c.Request.Context(), req)
 
 	if err != nil {
 		if errors.Is(err, fmt.Errorf("invalid body")) {
@@ -111,7 +111,7 @@ func (o *OrdersAPI) handleCardDetailUpdateByID(c *gin.Context) {
 		return
 	}
 
-	err = o.repo.PatchCardDetailsById(c, req, intID)
+	err = o.repo.PatchCardDetailsById(c.Request.Context(), req, intID)
 
 	if err != nil {
 		if errors.Is(err, fmt.Errorf("invalid body")) {
@@ -151,7 +151,7 @@ func (o *OrdersAPI) handleCardDetailsFetchAll(c *gin.Context) {
 		return
 	}
 
-	orders, err := o.repo.GetAllCardDetails(c, intSkip, intLimit)
+	orders, err := o.repo.GetAllCardDetails(c.Request.Context(), intSkip, intLimit)
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{

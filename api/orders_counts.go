@@ -15,26 +15,26 @@ func (o *OrdersAPI) handleOrdersCount(c *gin.Context) {
 	filter := string(c.Params.ByName("filter"))
 	switch filter {
 	case "all":
-		total = o.repo.CountsAllOrders(c)
+		total = o.repo.CountsAllOrders(c.Request.Context())
 	case "paid":
-		total = o.repo.CountsFilteredOrders(c, filter)
+		total = o.repo.CountsFilteredOrders(c.Request.Context(), filter)
 	case "failed":
-		total = o.repo.CountsFilteredOrders(c, filter)
+		total = o.repo.CountsFilteredOrders(c.Request.Context(), filter)
 	case "pending":
-		total = o.repo.CountsFilteredOrders(c, filter)
+		total = o.repo.CountsFilteredOrders(c.Request.Context(), filter)
 	case "tickets":
-		total = o.repo.CountsTicketsOrders(c)
+		total = o.repo.CountsTicketsOrders(c.Request.Context())
 	case "tickets10":
-		total = o.repo.CountsTickets10Orders(c)
+		total = o.repo.CountsTickets10Orders(c.Request.Context())
 	case "tickets30":
-		total = o.repo.CountsTickets30Orders(c)
+		total = o.repo.CountsTickets30Orders(c.Request.Context())
 	case "convention":
-		total = o.repo.CountsConventionOrders(c)
+		total = o.repo.CountsConventionOrders(c.Request.Context())
 	// for event in may2022
 	case "0522":
-		res = o.repo.PaidDetailCount(c)
+		res = o.repo.PaidDetailCount(c.Request.Context())
 	default:
-		total = o.repo.CountsAllOrders(c)
+		total = o.repo.CountsAllOrders(c.Request.Context())
 	}
 
 	if filter == "0522" {

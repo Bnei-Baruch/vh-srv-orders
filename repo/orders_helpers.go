@@ -15,6 +15,7 @@ import (
 	"github.com/volatiletech/null/v9"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
+	"gitlab.bbdev.team/vh/pay/orders/events"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 )
 
@@ -25,63 +26,6 @@ func (o *OrdersDB) UpdateOrderStatusByOrderID(ctx context.Context, oid int, stat
 	return nil
 }
 
-func (o *OrdersDB) CreateOrder(ctx context.Context, req RequestOrder) (Order, error) {
-
-	order_status := "pending"
-	account_id := 0
-
-	order := Order{
-		Type:          req.Type,
-		ProductType:   req.ProductType,
-		RecuringFreq:  req.RecurringFreq,
-		Organization:  req.Organization,
-		Amount:        req.Amount,
-		SKU:           req.SKU,
-		Currency:      req.Currency,
-		Status:        null.NewString(order_status, true),
-		OrderLanguage: req.OrderLanguage,
-		AccountID:     null.NewInt(account_id, true),
-	}
-
-	accountType := "personal"
-
-	a := Account{
-		FirstName: req.FirstName,
-		LastName:  req.LastName,
-		Email:     req.Email,
-		Phone:     req.Phone,
-		Street:    req.Street,
-		City:      req.City,
-		State:     req.State,
-		Postcode:  req.Postcode,
-		Country:   req.Country,
-
-		AccountType: null.NewString(accountType, true),
-		UserKey:     req.UserKey,
-	}
-
-	accountID := o.CreateOrUpdateAccount(ctx, a)
-
-	if accountID == 0 {
-		return order, errors.New("null account")
-	}
-
-	order.AccountID = null.NewInt(int(accountID), true)
-
-	createString, numString, createQueryArgs := prepareOrderCreateQuery(order)
-
-	if err := o.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
-		createQueryArgs...).Scan(
-		&order.ID,
-	); err != nil {
-		if err == pgx.ErrNoRows {
-			return order, fmt.Errorf("no rows affected")
-		}
-		return order, err
-	}
-
-	return order, nil
-}
 func (o *OrdersDB) CreateOrderViaTransaction(ctx context.Context, req RequestOrder) (Order, error) {
 
 	order_status := "pending"
@@ -138,6 +82,8 @@ func (o *OrdersDB) CreateOrderViaTransaction(ctx context.Context, req RequestOrd
 		}
 		return order, err
 	}
+
+	o.emitEvent(ctx, events.TypeCreateOrder, map[string]interface{}{"order_id": order.ID})
 
 	return order, nil
 }
@@ -237,6 +183,8 @@ func (o *OrdersDB) UpdateOrderAfterPayment(ctx context.Context, p Payment) (Orde
 			return order, fmt.Errorf("orders not Updated")
 		}
 	}
+
+	o.emitEvent(ctx, events.TypeUpdateOrder, map[string]interface{}{"order_id": order.ID})
 
 	return order, nil
 }
@@ -587,48 +535,48 @@ order by duplicate desc`
 }
 
 func (o *OrdersDB) CreateV2Order(ctx context.Context, order Order) (int, error) {
-
 	createString, numString, createQueryArgs := prepareOrderCreateQuery(order)
-
-	var ID int
-
-	if len(createQueryArgs) != 0 {
-		if err := o.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
-			createQueryArgs...).Scan(
-			&ID,
-		); err != nil {
-			return 0, err
-		}
-		return ID, nil
-	} else {
+	if len(createQueryArgs) == 0 {
 		return 0, common.ErrInvalidBody
 	}
 
+	var ID int
+	if err := o.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+		createQueryArgs...).Scan(
+		&ID,
+	); err != nil {
+		return 0, err
+	}
+
+	o.emitEvent(ctx, events.TypeCreateOrder, map[string]interface{}{"order_id": ID})
+
+	return ID, nil
 }
 
 func (o *OrdersDB) SoftDeleteOrderByID(ctx context.Context, orderID int) error {
 	_, err := o.Exec(ctx, "UPDATE orders SET deleted_at = $1 WHERE id = $2", time.Now(), orderID)
-	return err
+	if err != nil {
+		return err
+	}
+	o.emitEvent(ctx, events.TypeDeleteOrder, map[string]interface{}{"order_id": orderID})
+	return nil
 }
 
-func (o *OrdersDB) PatchOrderByID(c context.Context, order Order, orderId int) error {
-
+func (o *OrdersDB) PatchOrderByID(ctx context.Context, order Order, orderId int) error {
 	toUpdate, toUpdateArgs := prepareOrderUpdateQuery(order)
-
-	if len(toUpdateArgs) != 0 {
-		updateRes, err := o.Exec(c, fmt.Sprintf(`UPDATE orders SET %s WHERE id=%d`, toUpdate, orderId),
-			toUpdateArgs...)
-		if err != nil {
-			return fmt.Errorf("problem updating order: %w", err)
-		}
-
-		if updateRes.RowsAffected() == 0 {
-			return fmt.Errorf("order not updated as no rows affected")
-		}
-
-	} else {
+	if len(toUpdateArgs) == 0 {
 		return common.ErrInvalidBody
 	}
+
+	updateRes, err := o.Exec(ctx, fmt.Sprintf(`UPDATE orders SET %s WHERE id=%d`, toUpdate, orderId), toUpdateArgs...)
+	if err != nil {
+		return fmt.Errorf("problem updating order: %w", err)
+	}
+	if updateRes.RowsAffected() == 0 {
+		return fmt.Errorf("order not updated as no rows affected")
+	}
+
+	o.emitEvent(ctx, events.TypeUpdateOrder, map[string]interface{}{"order_id": orderId})
 
 	return nil
 }

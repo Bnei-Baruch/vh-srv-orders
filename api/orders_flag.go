@@ -21,11 +21,11 @@ func (o *OrdersAPI) handleOrdersFlag(c *gin.Context) {
 
 	switch body.Flag {
 	case "torenew":
-		count := o.repo.FlagOrdersToRenew(c, body.Month, body.Year)
+		count := o.repo.FlagOrdersToRenew(c.Request.Context(), body.Month, body.Year)
 		c.JSON(http.StatusOK, gin.H{"count": count})
 		return
 	case "duplicates":
-		count := o.repo.FlagDuplicateOrders(c, body.Flag)
+		count := o.repo.FlagDuplicateOrders(c.Request.Context(), body.Flag)
 		c.JSON(http.StatusOK, gin.H{"count": count})
 		return
 	default:

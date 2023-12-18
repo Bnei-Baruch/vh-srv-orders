@@ -5,6 +5,7 @@ import "time"
 const (
 	ComponentAPI              = "api"
 	ComponentRobokasaImporter = "robokasa_importer"
+	ComponentGenericImporter  = "generic_importer"
 
 	TypeCreateAccount     = "create_account"
 	TypeUpdateAccount     = "update_account"

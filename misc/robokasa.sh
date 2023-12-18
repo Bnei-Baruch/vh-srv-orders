@@ -12,7 +12,7 @@ cleanup() {
 }
 
 cd ${BASE_DIR} &&
-  ./orders robokasa >>"${LOG_FILE}" 2>&1
+  ./orders import robokasa >>"${LOG_FILE}" 2>&1
 
 WARNINGS="$(grep -Eic "warning|error:" ${LOG_FILE})"
 if [ "$WARNINGS" = "0" ]; then

@@ -300,9 +300,9 @@ func (im *RobokasaImporter) createPayment(ctx context.Context, rOrder *RobokasaO
 	req := repo.RequestOrder{
 		Amount:               order.Amount,
 		PaymentType:          null.StringFrom(common.PaymentTypeOffline),
-		PaymentStatus:        null.StringFrom(common.PaymentStatusPaid),
+		PaymentStatus:        null.StringFrom(common.PaymentStatusSuccess),
 		PaymentMethod:        null.StringFrom(common.OfflinePaymentMethodRobokasa),
-		OfflinePaymentStatus: null.StringFrom(common.PaymentStatusPaid),
+		OfflinePaymentStatus: null.StringFrom(common.PaymentStatusSuccess),
 		Properties:           null.JSONFrom(propsB),
 	}
 

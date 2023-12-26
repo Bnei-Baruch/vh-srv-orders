@@ -261,9 +261,9 @@ func (im *GenericOfflineImporter) createPayment(ctx context.Context, rOrder *Gen
 	req := repo.RequestOrder{
 		Amount:               order.Amount,
 		PaymentType:          null.StringFrom(common.PaymentTypeOffline),
-		PaymentStatus:        null.StringFrom(common.PaymentStatusPaid),
+		PaymentStatus:        null.StringFrom(common.PaymentStatusSuccess),
 		PaymentMethod:        null.StringFrom(rOrder.PaymentMethod),
-		OfflinePaymentStatus: null.StringFrom(common.PaymentStatusPaid),
+		OfflinePaymentStatus: null.StringFrom(common.PaymentStatusSuccess),
 		ExtraInfo:            null.StringFrom(rOrder.Comment),
 	}
 

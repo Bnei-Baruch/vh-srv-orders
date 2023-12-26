@@ -38,7 +38,6 @@ const (
 	PaymentStatusFailed    = "failed"
 	PaymentStatusInvalid   = "invalid"
 	PaymentStatusNoSuccess = "nosuccess"
-	PaymentStatusPaid      = "paid"
 	PaymentStatusPending   = "pending"
 	PaymentStatusRefunded  = "refunded"
 	PaymentStatusSuccess   = "success"

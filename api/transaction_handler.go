@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v4"
 	"github.com/volatiletech/null/v9"
 
+	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
@@ -68,6 +69,7 @@ func (o *OrdersAPI) handleTransactionOrderAndPay(c *gin.Context) {
 		return
 	}
 
+	req.PaymentStatus = null.StringFrom(common.PaymentStatusPending) // don't let anybody fool us
 	p, errPaymentCreation := o.repo.CreatePayment(c.Request.Context(), req, ord.ID)
 
 	if errPaymentCreation != nil {

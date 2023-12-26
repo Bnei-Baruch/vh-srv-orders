@@ -221,7 +221,7 @@ func (o *OrdersDB) GetOfflinePayments(ctx context.Context, skip int, limit int, 
 }
 
 func (o *OrdersDB) CreatePayment(ctx context.Context, req RequestOrder, orderID int) (Payment, error) {
-	paymentStatus := "pending"
+	paymentStatus := common.PaymentStatusPending
 	if req.PaymentStatus.IsValid() {
 		paymentStatus = req.PaymentStatus.String
 	}

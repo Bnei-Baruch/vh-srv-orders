@@ -152,7 +152,6 @@ func (o *OrdersDB) GetTotalParticipationStatusCount(ctx context.Context, email s
 }
 
 func (o *OrdersDB) GetPaymentByEmail(ctx context.Context, email string) ([]PaymentByEmail, error) {
-
 	paymentData := []PaymentByEmail{}
 
 	rows, err := o.Query(ctx, `select p.created_at, o."PaymentDate", o."Type", o."ProductType", p."Amount", p."Currency", p."CCNumber", p."ParamX", p."PaymentStatus"
@@ -168,22 +167,13 @@ func (o *OrdersDB) GetPaymentByEmail(ctx context.Context, email string) ([]Payme
 	defer rows.Close()
 
 	for rows.Next() {
-
 		var p PaymentByEmail
-		var amount string
 
-		err := rows.Scan(&p.CreatedAt, &p.PaymentDate, &p.Type, &p.ProductType, &amount, &p.Currency, &p.CCNumber, &p.PaymentID, &p.PaymentStatus)
-
+		err := rows.Scan(&p.CreatedAt, &p.PaymentDate, &p.Type, &p.ProductType, &p.Amount, &p.Currency, &p.CCNumber,
+			&p.PaymentID, &p.PaymentStatus)
 		if err != nil {
 			return paymentData, err
 		}
-
-		value, err := strconv.ParseFloat(amount, 64)
-		if err != nil {
-			fmt.Println("error converting amount string to float")
-			return paymentData, err
-		}
-		p.Amount = null.NewFloat64(value, true)
 
 		paymentData = append(paymentData, p)
 	}

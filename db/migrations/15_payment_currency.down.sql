@@ -1,0 +1,6 @@
+BEGIN;
+
+ALTER TABLE payments
+    DROP COLUMN IF EXISTS "Currency";
+
+COMMIT;

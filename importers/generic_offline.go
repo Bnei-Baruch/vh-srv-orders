@@ -260,6 +260,7 @@ func (im *GenericOfflineImporter) createOrder(ctx context.Context, rOrder *Gener
 func (im *GenericOfflineImporter) createPayment(ctx context.Context, rOrder *GenericOrder, order *repo.Order) error {
 	req := repo.RequestOrder{
 		Amount:               order.Amount,
+		Currency:             order.Currency,
 		PaymentType:          null.StringFrom(common.PaymentTypeOffline),
 		PaymentStatus:        null.StringFrom(common.PaymentStatusSuccess),
 		PaymentMethod:        null.StringFrom(rOrder.PaymentMethod),

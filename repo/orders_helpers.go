@@ -238,11 +238,10 @@ func (o *OrdersDB) GetOrderByID(ctx context.Context, orderID uint) Order {
 // Get Payment
 func (o *OrdersDB) GetPaymentForOrderID(ctx context.Context, orderID uint) Payment {
 	var p Payment
-	// result := DB.Where(&Payment{OrderID: orderID, PaymentStatus: "success"}).First(&p)
-	// Get payment
 	if err := o.QueryRow(ctx, `SELECT 
 	id,
 	"Amount",
+	"Currency",
 	"PaymentStatus",
 	"PaymentType",
 	"OrderID",
@@ -277,12 +276,12 @@ func (o *OrdersDB) GetPaymentForOrderID(ctx context.Context, orderID uint) Payme
 	updated_at,
 	deleted_at 
 	FROM payments WHERE "OrderID"=$1 AND "PaymentStatus"=$2`, orderID, "success").Scan(
-		&p.ID, &p.Amount, &p.PaymentStatus, &p.PaymentType, &p.OrderID, &p.ParamX, &p.AuthNo, &p.ConfirmationKey, &p.Success, &p.PelecardToken,
-		&p.TransactionID, &p.ErrorMsg, &p.CardHebrewName, &p.CCAbroadCard, &p.CCBrand, &p.CCCompanyClearer,
-		&p.CCCompanyIssuer, &p.CreditType, &p.CCExpDate, &p.CCNumber, &p.DebitCode,
-		&p.DebitCurrency, &p.DebitTotal, &p.DebitType, &p.FirstPaymentTotal, &p.FixedPaymentTotal, &p.JParam,
-		&p.TotalPayments, &p.TransactionInitTime, &p.TransactionUpdateTime, &p.VoucherID,
-		&p.Ordkey, &p.CreatedAt, &p.UpdatedAt, &p.DeletedAt,
+		&p.ID, &p.Amount, &p.Currency, &p.PaymentStatus, &p.PaymentType, &p.OrderID, &p.ParamX, &p.AuthNo,
+		&p.ConfirmationKey, &p.Success, &p.PelecardToken, &p.TransactionID, &p.ErrorMsg, &p.CardHebrewName,
+		&p.CCAbroadCard, &p.CCBrand, &p.CCCompanyClearer, &p.CCCompanyIssuer, &p.CreditType, &p.CCExpDate, &p.CCNumber,
+		&p.DebitCode, &p.DebitCurrency, &p.DebitTotal, &p.DebitType, &p.FirstPaymentTotal, &p.FixedPaymentTotal,
+		&p.JParam, &p.TotalPayments, &p.TransactionInitTime, &p.TransactionUpdateTime, &p.VoucherID, &p.Ordkey,
+		&p.CreatedAt, &p.UpdatedAt, &p.DeletedAt,
 	); err != nil {
 		log.Printf("\n## ERROR - NO PAYMENT for ORDER %v\n", orderID)
 	}
@@ -330,7 +329,7 @@ func (o *OrdersDB) GetAccountForOrderID(ctx context.Context, orderID uint) Accou
 
 // TODO: REFACTOR
 func (o *OrdersDB) createRequestPayByToken(c context.Context, a Account, order Order, p Payment, pmx null.String) (RequestPayment, Payment) {
-	newp, _ := o.createPendingPayment(c, order.Amount, order.ID, pmx)
+	newp, _ := o.createPendingPayment(c, order, pmx)
 	newp.PelecardToken = p.PelecardToken
 	newp.AuthNo = p.AuthNo
 

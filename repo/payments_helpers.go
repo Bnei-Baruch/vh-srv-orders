@@ -21,14 +21,17 @@ func (o *OrdersDB) GetPaymentByID(ctx context.Context, id int) (Payment, error) 
 	var pay Payment
 
 	if err := o.QueryRow(ctx, `SELECT 
-	id, created_at, updated_at, deleted_at, "Amount", "PaymentStatus", "PaymentType", "OrderID", "ParamX", "Ordkey", "AuthNo", 
-	confirmation_key, success, pelecard_token, "TransactionID", "ErrorMsg", "CardHebrewName", "CCAbroadCard", "CCBrand", 
-	"CCCompanyClearer", "CCCompanyIssuer", credit_type, "CCExpDate", "CCNumber", "DebitCode", "DebitCurrency", "DebitTotal", "DebitType", 
-	"FirstPaymentTotal", "FixedPaymentTotal", "TotalPayments", j_param, "TransactionInitTime", "TransactionUpdateTime", "VoucherID" from payments where id = $1`, id).Scan(
-		&pay.ID, &pay.CreatedAt, &pay.UpdatedAt, &pay.DeletedAt, &pay.Amount, &pay.PaymentStatus, &pay.PaymentType, &pay.OrderID, &pay.ParamX, &pay.Ordkey, &pay.AuthNo,
-		&pay.ConfirmationKey, &pay.Success, &pay.PelecardToken, &pay.TransactionID, &pay.ErrorMsg, &pay.CardHebrewName, &pay.CCAbroadCard, &pay.CCBrand,
-		&pay.CCCompanyClearer, &pay.CCCompanyIssuer, &pay.CreditType, &pay.CCExpDate, &pay.CCNumber, &pay.DebitCode, &pay.DebitCurrency, &pay.DebitTotal, &pay.DebitType,
-		&pay.FirstPaymentTotal, &pay.FixedPaymentTotal, &pay.TotalPayments, &pay.JParam, &pay.TransactionInitTime, &pay.TransactionUpdateTime, &pay.VoucherID); err != nil {
+	id, created_at, updated_at, deleted_at, "Amount", "Currency", "PaymentStatus", "PaymentType", "OrderID", "ParamX", 
+	"Ordkey", "AuthNo", confirmation_key, success, pelecard_token, "TransactionID", "ErrorMsg", "CardHebrewName", 
+	"CCAbroadCard", "CCBrand", "CCCompanyClearer", "CCCompanyIssuer", credit_type, "CCExpDate", "CCNumber", "DebitCode", 
+	"DebitCurrency", "DebitTotal", "DebitType", "FirstPaymentTotal", "FixedPaymentTotal", "TotalPayments", j_param, 
+	"TransactionInitTime", "TransactionUpdateTime", "VoucherID" from payments where id = $1`, id).Scan(
+		&pay.ID, &pay.CreatedAt, &pay.UpdatedAt, &pay.DeletedAt, &pay.Amount, &pay.Currency, &pay.PaymentStatus,
+		&pay.PaymentType, &pay.OrderID, &pay.ParamX, &pay.Ordkey, &pay.AuthNo, &pay.ConfirmationKey, &pay.Success,
+		&pay.PelecardToken, &pay.TransactionID, &pay.ErrorMsg, &pay.CardHebrewName, &pay.CCAbroadCard, &pay.CCBrand,
+		&pay.CCCompanyClearer, &pay.CCCompanyIssuer, &pay.CreditType, &pay.CCExpDate, &pay.CCNumber, &pay.DebitCode,
+		&pay.DebitCurrency, &pay.DebitTotal, &pay.DebitType, &pay.FirstPaymentTotal, &pay.FixedPaymentTotal,
+		&pay.TotalPayments, &pay.JParam, &pay.TransactionInitTime, &pay.TransactionUpdateTime, &pay.VoucherID); err != nil {
 		return pay, err
 	}
 	return pay, nil
@@ -104,11 +107,12 @@ func (o *OrdersDB) GetAllPayments(ctx context.Context, skip int, limit int, from
 	}
 
 	rows, err := o.Query(ctx, `SELECT 
-	p.id, p.created_at, p.updated_at, p.deleted_at, p."Amount", p."PaymentStatus", p."PaymentType", p."OrderID", p."ParamX", p."Ordkey", p."AuthNo", p.
-	confirmation_key, p.success, p.pelecard_token, p."TransactionID", p."ErrorMsg", p."CardHebrewName", p."CCAbroadCard", p."CCBrand", p.
-	"CCCompanyClearer", p."CCCompanyIssuer", p.credit_type, p."CCExpDate", p."CCNumber", p."DebitCode", p."DebitCurrency", p."DebitTotal", p."DebitType", p.
-	"FirstPaymentTotal", p."FixedPaymentTotal", p."TotalPayments", p.j_param, p."TransactionInitTime", p."TransactionUpdateTime", p."VoucherID"
-	`+fromQuery+whereQuery+orderByQuery+limitOffsetString)
+	p.id, p.created_at, p.updated_at, p.deleted_at, p."Amount", p."Currency", p."PaymentStatus", p."PaymentType", 
+	p."OrderID", p."ParamX", p."Ordkey", p."AuthNo", p.confirmation_key, p.success, p.pelecard_token, p."TransactionID", 
+	p."ErrorMsg", p."CardHebrewName", p."CCAbroadCard", p."CCBrand", p."CCCompanyClearer", p."CCCompanyIssuer", 
+	p.credit_type, p."CCExpDate", p."CCNumber", p."DebitCode", p."DebitCurrency", p."DebitTotal", p."DebitType", 
+	p."FirstPaymentTotal", p."FixedPaymentTotal", p."TotalPayments", p.j_param, p."TransactionInitTime", 
+	p."TransactionUpdateTime", p."VoucherID"`+fromQuery+whereQuery+orderByQuery+limitOffsetString)
 	if err != nil {
 		fmt.Println("--error-while-executing-query", err)
 		return &payments, err
@@ -117,10 +121,12 @@ func (o *OrdersDB) GetAllPayments(ctx context.Context, skip int, limit int, from
 	for rows.Next() {
 		var d Payment
 		err := rows.Scan(
-			&d.ID, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt, &d.Amount, &d.PaymentStatus, &d.PaymentType, &d.OrderID, &d.ParamX, &d.Ordkey, &d.AuthNo,
-			&d.ConfirmationKey, &d.Success, &d.PelecardToken, &d.TransactionID, &d.ErrorMsg, &d.CardHebrewName, &d.CCAbroadCard, &d.CCBrand,
-			&d.CCCompanyClearer, &d.CCCompanyIssuer, &d.CreditType, &d.CCExpDate, &d.CCNumber, &d.DebitCode, &d.DebitCurrency, &d.DebitTotal, &d.DebitType,
-			&d.FirstPaymentTotal, &d.FixedPaymentTotal, &d.TotalPayments, &d.JParam, &d.TransactionInitTime, &d.TransactionUpdateTime, &d.VoucherID,
+			&d.ID, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt, &d.Amount, &d.Currency, &d.PaymentStatus, &d.PaymentType,
+			&d.OrderID, &d.ParamX, &d.Ordkey, &d.AuthNo, &d.ConfirmationKey, &d.Success, &d.PelecardToken,
+			&d.TransactionID, &d.ErrorMsg, &d.CardHebrewName, &d.CCAbroadCard, &d.CCBrand, &d.CCCompanyClearer,
+			&d.CCCompanyIssuer, &d.CreditType, &d.CCExpDate, &d.CCNumber, &d.DebitCode, &d.DebitCurrency, &d.DebitTotal,
+			&d.DebitType, &d.FirstPaymentTotal, &d.FixedPaymentTotal, &d.TotalPayments, &d.JParam,
+			&d.TransactionInitTime, &d.TransactionUpdateTime, &d.VoucherID,
 		)
 		if err != nil {
 			return &payments, err
@@ -149,7 +155,7 @@ func (o *OrdersDB) GetPaymentByEmail(ctx context.Context, email string) ([]Payme
 
 	paymentData := []PaymentByEmail{}
 
-	rows, err := o.Query(ctx, `select p.created_at, o."PaymentDate", o."Type", o."ProductType", o."Amount", o."Currency", p."CCNumber", p."ParamX", p."PaymentStatus"
+	rows, err := o.Query(ctx, `select p.created_at, o."PaymentDate", o."Type", o."ProductType", p."Amount", p."Currency", p."CCNumber", p."ParamX", p."PaymentStatus"
 	from payments as p, orders as o, accounts as a
 	where a."Email" = $1
 	and a.id = o."AccountID"
@@ -233,6 +239,7 @@ func (o *OrdersDB) CreatePayment(ctx context.Context, req RequestOrder, orderID 
 
 	p := Payment{
 		Amount:        req.Amount,
+		Currency:      req.Currency,
 		PaymentType:   null.NewString(paymentType, true),
 		OrderID:       null.NewInt(orderID, true),
 		PaymentStatus: null.NewString(paymentStatus, true),
@@ -273,12 +280,13 @@ func (o *OrdersDB) CreatePayment(ctx context.Context, req RequestOrder, orderID 
 	return p, nil
 }
 
-func (o *OrdersDB) createPendingPayment(ctx context.Context, sum null.Float64, oid int, pmx null.String) (Payment, error) {
+func (o *OrdersDB) createPendingPayment(ctx context.Context, order Order, pmx null.String) (Payment, error) {
 
 	p := Payment{
-		Amount:        sum,
+		Amount:        order.Amount,
+		Currency:      order.Currency,
 		PaymentType:   null.NewString("pelecard", true),
-		OrderID:       null.NewInt(oid, true),
+		OrderID:       null.NewInt(order.ID, true),
 		PaymentStatus: null.NewString("pending", true),
 	}
 
@@ -300,7 +308,7 @@ func (o *OrdersDB) createPendingPayment(ctx context.Context, sum null.Float64, o
 	}
 
 	paramx := "m-" + strconv.FormatUint(uint64(p.ID), 10) + os.Getenv("SUFX") + pmx.String
-	ordkey := "ord-" + strconv.FormatUint(uint64(oid), 10) + os.Getenv("SUFX")
+	ordkey := "ord-" + strconv.FormatUint(uint64(order.ID), 10) + os.Getenv("SUFX")
 	fmt.Printf(">>>> ParamX: %s\n", paramx)
 
 	p.ParamX = null.NewString(paramx, true)
@@ -1399,6 +1407,11 @@ func preparePaymentCreateQuery(req Payment) (string, string, []interface{}) {
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.Amount.Float64)
 	}
+	if req.Currency.Valid {
+		createStrings = append(createStrings, `"Currency"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.Currency.String)
+	}
 	if req.PaymentStatus.Valid {
 		createStrings = append(createStrings, `"PaymentStatus"`)
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
@@ -1572,6 +1585,10 @@ func preparePaymentUpdateQuery(req Payment) (string, []interface{}) {
 	if req.Amount.Valid {
 		updateStrings = append(updateStrings, fmt.Sprintf(`"Amount"=$%d`, len(updateStrings)+1))
 		args = append(args, req.Amount.Float64)
+	}
+	if req.Currency.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"Currency"=$%d`, len(updateStrings)+1))
+		args = append(args, req.Currency.String)
 	}
 	if req.PaymentStatus.Valid {
 		updateStrings = append(updateStrings, fmt.Sprintf(`"PaymentStatus"=$%d`, len(updateStrings)+1))

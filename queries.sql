@@ -343,3 +343,274 @@ select "Flag", count(*)
 from last_order o
 group by "Flag"
 order by "Flag";
+
+
+-- data standardization
+
+-- currency
+select "Currency", count(*) from orders group by "Currency" order by "Currency";
+
+update orders set "Currency"= 'USD' where "Currency" in ('dollar', 'usd');
+update orders set "Currency"= 'EUR' where "Currency" = 'EURO';
+update orders set "Currency"= 'USD' where id in (10523,10538,10534,10539,10537,10525,10522,10526,10524);
+
+delete from orders where id=18300;
+
+-- status
+select "Status", count(*) from orders group by "Status" order by "Status";
+
+update orders set "Status"= 'paid' where "Status" = 'april';
+update orders set "Status"= 'paid' where "Status" = 'double12';
+update orders set "Status"= 'paid' where "Status" = 'group';
+update orders set "Status"= 'paid' where "Status" = 'manualtransfer';
+update orders set "Status"= 'paid' where "Status" = 'test';
+update orders set "Status"= 'cancelled' where "Status" = 'canceled';
+update orders set "Status"= 'cancelled' where "Status" = 'nulled';
+update orders set "Status"= 'cancelled' where "Status" = 'paused';
+update orders set "Status"= 'cancelled' where "Status" = 'removed';
+update orders set "Status"= 'cancelled' where "Status" = 'stopped';
+update orders set "Status"= 'pending' where "Status" = 'failed';
+
+
+select o."Status", p."PaymentType", p."PaymentStatus", count(o.id), count(p.id)
+from orders o
+         left join payments p on o.id = p."OrderID"
+where o."Status" in ('april', 'double12', 'failed', 'group', 'manualtransfer', 'refunded', 'test')
+group by o."Status", p."PaymentType", p."PaymentStatus"
+order by o."Status", p."PaymentType", p."PaymentStatus";
+
+select o."Status", p."PaymentType", p."PaymentStatus", count(o.id), count(p.id)
+from orders o
+         left join payments p on o.id = p."OrderID"
+group by o."Status", p."PaymentType", p."PaymentStatus"
+order by o."Status", p."PaymentType", p."PaymentStatus";
+
+
+-- OrderLanguage
+select "OrderLanguage", count(*) from orders group by "OrderLanguage" order by "OrderLanguage";
+
+update orders set "OrderLanguage"= 'EN' where "OrderLanguage" in ('en', '');
+update orders set "OrderLanguage"= 'ES' where "OrderLanguage" = 'SP';
+
+
+-- payment "PaymentStatus"
+select "PaymentStatus", count(*) from payments group by "PaymentStatus" order by "PaymentStatus";
+
+update payments set "PaymentStatus"= 'success' where "PaymentStatus" = 'sucess';
+update payments set "PaymentStatus"= 'success' where "PaymentStatus" = 'paid';
+
+-- payment "DebitCurrency"
+--TODO (payment currency)
+update payments set "DebitCurrency"= null where "DebitCurrency" = '';
+
+-- specials cleanup
+
+select count(*) from specials;
+select count(*) from specials where subcategory <> 'rav';
+delete from specials where subcategory <> 'rav';
+
+
+--- group status
+select "Status", count(*)
+from orders
+where id in (9996,3598,3052,7469,11927,10658,14906,8075,3734,5198,3288,1706,3625,8957,3254,10215,5182,6834,9455,5070,1323,6154,9662,11136,9195,4061,2060,1542,12787,2723,98,10945,9443,10211,10892,16169,7821,6469,6176,10456,14984,5195,16621,8077,30,10059,5227,10314,6944,14920,8385,10268,12398,15815,1051,14956,18050,2759,11923,17798,10354,10098,6396,555,11924,2560,14781,7093,4450,1698,1640,1476,616,683,9734,3066,16049,9521,14990,4286,3565,7539,9078,11993,15335,6263,8984,7490,16480,7636,10532,8779,4636,7134,12278,11289,18513,2522,4855,671,14752,8421,15429,2180,2125,7151,17926,2573,2666,14487,11744,16650,15294,11813,116,13153,16046,3058,5317,5200,9368,5944,14218,17819,8088,6814,3717,13148,6635,3468,10003,2530,5736,8906,8362,9109,3133,18014,4467,15932,17846,2097,3990,1840,6918,9733,18095,9967,4218,10815,1857,5933,10294,13409)
+group by "Status";
+
+SELECT rank_filter.*
+FROM (SELECT a."Email",
+             a."Country",
+             o.id              o_id,
+             o.created_at      o_created_at,
+             o."Type"          o_type,
+             o."Amount"        o_amount,
+             o."Currency"      o_currency,
+             o."Status"        o_status,
+             o."PaymentDate"   o_payment_date,
+             p.id              p_id,
+             p.created_at      p_created_at,
+             p."PaymentType"   p_payment_type,
+             p."Amount"        p_amount,
+             p."PaymentStatus" p_status,
+             row_number() OVER (
+                 PARTITION BY o.id
+                 ORDER BY p.created_at DESC
+                 )             row_num
+      FROM orders o
+               inner join payments p on o.id = p."OrderID"
+               inner join accounts a on o."AccountID" = a.id
+      WHERE o.id in
+            (9996, 3598, 3052, 7469, 11927, 10658, 14906, 8075, 3734, 5198, 3288, 1706, 3625, 8957, 3254, 10215, 5182,
+             6834, 9455, 5070, 1323, 6154, 9662, 11136, 9195, 4061, 2060, 1542, 12787, 2723, 98, 10945, 9443, 10211,
+             10892, 16169, 7821, 6469, 6176, 10456, 14984, 5195, 16621, 8077, 30, 10059, 5227, 10314, 6944, 14920, 8385,
+             10268, 12398, 15815, 1051, 14956, 18050, 2759, 11923, 17798, 10354, 10098, 6396, 555, 11924, 2560, 14781,
+             7093, 4450, 1698, 1640, 1476, 616, 683, 9734, 3066, 16049, 9521, 14990, 4286, 3565, 7539, 9078, 11993,
+             15335, 6263, 8984, 7490, 16480, 7636, 10532, 8779, 4636, 7134, 12278, 11289, 18513, 2522, 4855, 671, 14752,
+             8421, 15429, 2180, 2125, 7151, 17926, 2573, 2666, 14487, 11744, 16650, 15294, 11813, 116, 13153, 16046,
+             3058, 5317, 5200, 9368, 5944, 14218, 17819, 8088, 6814, 3717, 13148, 6635, 3468, 10003, 2530, 5736, 8906,
+             8362, 9109, 3133, 18014, 4467, 15932, 17846, 2097, 3990, 1840, 6918, 9733, 18095, 9967, 4218, 10815, 1857,
+             5933, 10294, 13409)) rank_filter
+WHERE row_num = 1 and p_created_at > '01-12-2023' order by p_status;
+
+
+select rank_filter.*
+from (select o."AccountID",
+             o.id,
+             o.created_at    o_created_at,
+             o."Type"        o_type,
+             o."Amount"      o_amount,
+             o."Currency"    o_currency,
+             o."Status"      o_status,
+             o."PaymentDate" o_payment_date,
+             row_number() OVER (
+                 PARTITION BY o."AccountID"
+                 ORDER BY o.created_at DESC
+                 )           row_num
+      from orders o
+      where o."ProductType" = 'globalmembership'
+        and (o."Status" = 'paid' or o."Status" = 'nosuccess')
+        and o."AccountID" in
+            (SELECT distinct o."AccountID"
+             FROM orders o
+             WHERE o.id in
+                   (9996, 3598, 3052, 7469, 11927, 10658, 14906, 8075, 3734, 5198, 3288, 1706, 3625, 8957, 3254, 10215,
+                    5182,
+                    6834, 9455, 5070, 1323, 6154, 9662, 11136, 9195, 4061, 2060, 1542, 12787, 2723, 98, 10945, 9443,
+                    10211,
+                    10892, 16169, 7821, 6469, 6176, 10456, 14984, 5195, 16621, 8077, 30, 10059, 5227, 10314, 6944,
+                    14920, 8385,
+                    10268, 12398, 15815, 1051, 14956, 18050, 2759, 11923, 17798, 10354, 10098, 6396, 555, 11924, 2560,
+                    14781,
+                    7093, 4450, 1698, 1640, 1476, 616, 683, 9734, 3066, 16049, 9521, 14990, 4286, 3565, 7539, 9078,
+                    11993,
+                    15335, 6263, 8984, 7490, 16480, 7636, 10532, 8779, 4636, 7134, 12278, 11289, 18513, 2522, 4855, 671,
+                    14752,
+                    8421, 15429, 2180, 2125, 7151, 17926, 2573, 2666, 14487, 11744, 16650, 15294, 11813, 116, 13153,
+                    16046,
+                    3058, 5317, 5200, 9368, 5944, 14218, 17819, 8088, 6814, 3717, 13148, 6635, 3468, 10003, 2530, 5736,
+                    8906,
+                    8362, 9109, 3133, 18014, 4467, 15932, 17846, 2097, 3990, 1840, 6918, 9733, 18095, 9967, 4218, 10815,
+                    1857,
+                    5933, 10294, 13409))) rank_filter
+WHERE row_num < 4;
+
+-- double12
+SELECT rank_filter.*
+FROM (SELECT a."Email",
+             a."Country",
+             o.id              o_id,
+             o.created_at      o_created_at,
+             o."Type"          o_type,
+             o."Amount"        o_amount,
+             o."Currency"      o_currency,
+             o."Status"        o_status,
+             o."PaymentDate"   o_payment_date,
+             p.id              p_id,
+             p.created_at      p_created_at,
+             p."PaymentType"   p_payment_type,
+             p."Amount"        p_amount,
+             p."PaymentStatus" p_status,
+             row_number() OVER (
+                 PARTITION BY o.id
+                 ORDER BY p.created_at DESC
+                 )             row_num
+      FROM orders o
+               inner join payments p on o.id = p."OrderID"
+               inner join accounts a on o."AccountID" = a.id
+      WHERE o.id in
+            (8258, 8982, 8027, 8254, 7479, 8873, 8760, 8217, 7438, 8989, 8675, 8996, 8844, 8109, 7973, 9006, 8846, 8960,
+             8603, 5651, 8697, 7805, 8545, 4885, 7049, 8600, 9019, 6654, 6552, 1600, 8586, 8983, 7141, 8788, 8588, 7832,
+             8001, 8926, 8634, 7997, 7994, 8647, 8755, 8346, 8618, 8465, 8116, 8676, 8594, 8939, 8746, 8953, 7965, 6386,
+             9017, 2482, 5496, 5901, 8942, 3516, 7988, 8985, 8905, 5541, 8975, 8665, 8925, 8546, 8108, 8107, 8699, 8436,
+             9002, 8771, 802, 8002, 8087, 974)) rank_filter
+WHERE row_num < 4;
+
+-- april
+SELECT rank_filter.*
+FROM (SELECT a."Email",
+             a."Country",
+             o.id              o_id,
+             o.created_at      o_created_at,
+             o."Type"          o_type,
+             o."Amount"        o_amount,
+             o."Currency"      o_currency,
+             o."Status"        o_status,
+             o."PaymentDate"   o_payment_date,
+             p.id              p_id,
+             p.created_at      p_created_at,
+             p."PaymentType"   p_payment_type,
+             p."Amount"        p_amount,
+             p."PaymentStatus" p_status,
+             row_number() OVER (
+                 PARTITION BY o.id
+                 ORDER BY p.created_at DESC
+                 )             row_num
+      FROM orders o
+               inner join payments p on o.id = p."OrderID"
+               inner join accounts a on o."AccountID" = a.id
+      WHERE o.id in
+            (14481)) rank_filter
+WHERE row_num = 1 and p_created_at > '01-12-2023' order by p_status;
+
+-- manualtransfer
+
+SELECT rank_filter.*
+FROM (SELECT a."Email",
+             a."Country",
+             o.id              o_id,
+             o.created_at      o_created_at,
+             o."Type"          o_type,
+             o."Amount"        o_amount,
+             o."Currency"      o_currency,
+             o."Status"        o_status,
+             o."PaymentDate"   o_payment_date,
+             p.id              p_id,
+             p.created_at      p_created_at,
+             p."PaymentType"   p_payment_type,
+             p."Amount"        p_amount,
+             p."PaymentStatus" p_status,
+             row_number() OVER (
+                 PARTITION BY o.id
+                 ORDER BY p.created_at DESC
+                 )             row_num
+      FROM orders o
+               inner join payments p on o.id = p."OrderID"
+               inner join accounts a on o."AccountID" = a.id
+      WHERE o.id in
+            (5759,5007,2566,3210,3215,1866,4610,438,2565,1112,530,342)) rank_filter
+WHERE row_num = 1 and p_created_at > '01-12-2023' order by p_status;
+
+
+-- payment currency
+
+select *
+from (select p.id,
+             p."OrderID",
+             p."Amount",
+             p."DebitCurrency",
+             o."Currency" as o_currency,
+             case
+                 when (p."DebitCurrency" = '1') then 'NIS'
+                 when (p."DebitCurrency" = '2') then 'USD'
+                 when (p."DebitCurrency" = '978') then 'EUR'
+                 when (p."DebitCurrency" = '0') then 'EUR'
+                 when (p."DebitCurrency" is null or p."DebitCurrency" = '') then o."Currency"
+                 end      as currency
+      from payments p
+               inner join orders o on p."OrderID" = o.id) as tmp
+where currency <> o_currency;
+
+with updates as (select p.id,
+                        case
+                            when (p."DebitCurrency" = '1') then 'NIS'
+                            when (p."DebitCurrency" = '2') then 'USD'
+                            when (p."DebitCurrency" = '978') then 'EUR'
+                            when (p."DebitCurrency" = '0') then 'EUR'
+                            when (p."DebitCurrency" is null or p."DebitCurrency" = '') then o."Currency"
+                            end as currency
+                 from payments p
+                          inner join orders o on p."OrderID" = o.id)
+update payments
+set "Currency" = updates.currency
+from updates
+where updates.id = payments.id;
+

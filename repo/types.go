@@ -42,7 +42,8 @@ type Payment struct {
 	UpdatedAt null.Time `json:"updated_at"`
 	DeletedAt null.Time `json:"deleted_at" sql:"index"`
 
-	Amount null.Float64 `json:"Amount" gorm:"Column:Amount"`
+	Amount   null.Float64 `json:"Amount" gorm:"Column:Amount"`
+	Currency null.String  `json:"Currency"`
 
 	PaymentStatus null.String `json:"PaymentStatus" gorm:"Column:PaymentStatus"`
 	PaymentType   null.String `json:"PaymentType" gorm:"Column:PaymentType;type:varchar(100)"`

@@ -465,7 +465,7 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (Payment,
 		return p, common.ErrInvalidValues
 	}
 
-	o.emitEvent(ctx, events.TypeUpdatePayment, map[string]interface{}{"payment_id": p.ID})
+	o.emitEvent(ctx, events.TypeUpdatePayment, map[string]interface{}{"payment_id": paymentid})
 
 	return p, nil
 }

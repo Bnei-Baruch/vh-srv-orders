@@ -909,7 +909,8 @@ func buildAndGetOrdersWhereQuery(fromDate string, dateTo *time.Time, productType
 		if strings.ToLower(orderByPaymentDate) != "desc" && strings.ToLower(orderByPaymentDate) != "asc" {
 			orderByPaymentDate = "asc"
 		}
-		orderBy.WriteString(fmt.Sprintf(" ORDER BY o.\"PaymentDate\" %s, o.starting_date %s", orderByPaymentDate, orderByPaymentDate))
+		orderBy.WriteString(fmt.Sprintf(" ORDER BY COALESCE(o.\"PaymentDate\", o.created_at) %s, o.starting_date %s",
+			orderByPaymentDate, orderByPaymentDate))
 	} else {
 		orderBy.WriteString(fmt.Sprintf(" ORDER BY updated_at %s", "desc"))
 	}

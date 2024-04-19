@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v4"
+	"github.com/volatiletech/null/v9"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/repo"
@@ -239,4 +241,83 @@ func (o *OrdersAPI) handleOrderFetch(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": orders, "success": true})
+}
+
+func (o *OrdersAPI) handleCreateOffline(c *gin.Context) {
+	var req repo.OfflinePaymentRequest
+	err := c.ShouldBindJSON(&req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"Error": err.Error(), "success": false})
+		return
+	}
+	if !req.KeycloakID.Valid {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing KeycloakID.", "success": false})
+		return
+	}
+	if !req.Currency.Valid {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing Currency.", "success": false})
+		return
+	}
+	if !req.PaymentMethod.Valid {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing PaymentMethod.", "success": false})
+		return
+	}
+	if !req.PaymentDate.Valid {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing PaymentDate.", "success": false})
+		return
+	}
+	if req.Amount <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Amount must be postive and not zero.", "success": false})
+		return
+	}
+	if req.Quantity < 1 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "The quantity must be a minimum of one.", "success": false})
+		return
+	}
+
+	accountID, err := o.repo.GetAccountIDByKeycloakID(c, req.KeycloakID.String)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "The given KeycloakID is not found.", "success": false})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("repo.GetAccountIDByKeycloakID: %v", err.Error()), "success": false})
+		}
+		return
+	}
+
+	order := repo.Order{
+		Type:          null.StringFrom(common.OrderTypeRegular),
+		ProductType:   null.StringFrom(common.ProductTypeGlobalMembership),
+		AccountID:     null.IntFrom(accountID),
+		Amount:        null.Float64From(req.Amount),
+		Currency:      req.Currency,
+		SKU:           null.StringFrom(common.ProductSKU40037),
+		Status:        null.StringFrom(common.OrderStatusPaid),
+		OrderLanguage: req.Language,
+		PaymentDate:   req.PaymentDate,
+		Quantity:      null.IntFrom(req.Quantity),
+		Note:          req.Note,
+	}
+	orderId, err := o.repo.CreateV2Order(c.Request.Context(), order)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("repo.CreateV2Order: %v", err.Error()), "success": false})
+		return
+	}
+
+	payment := repo.RequestOrder{
+		Amount:               null.Float64From(req.Amount),
+		Currency:             req.Currency,
+		PaymentType:          null.StringFrom(common.PaymentTypeOffline),
+		PaymentStatus:        null.StringFrom(common.PaymentStatusSuccess),
+		PaymentMethod:        req.PaymentMethod,
+		OfflinePaymentStatus: null.StringFrom(common.PaymentStatusSuccess),
+	}
+
+	_, err = o.repo.CreatePayment(c.Request.Context(), payment, orderId)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("repo.CreatePayment: %v", err.Error()), "success": false})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Created!", "success": true})
 }

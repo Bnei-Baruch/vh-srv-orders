@@ -27,6 +27,7 @@ type OrdersRepository interface {
 	GetOrderByID(ctx context.Context, orderID uint) Order
 	GetPaymentForOrderID(ctx context.Context, orderID uint) Payment
 	GetAccountForOrderID(ctx context.Context, orderID uint) Account
+	GetAccountIDByKeycloakID(ctx context.Context, keycloakId string) (int, error)
 	ChargeOrdersToRenew(ctx context.Context, pmx string) int
 	FlagDuplicateOrders(ctx context.Context, ProductType string) int
 	FlagOrdersToRenew(ctx context.Context, month int64, year int64) int64

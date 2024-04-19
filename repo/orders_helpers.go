@@ -327,6 +327,17 @@ func (o *OrdersDB) GetAccountForOrderID(ctx context.Context, orderID uint) Accou
 	return a
 }
 
+func (o *OrdersDB) GetAccountIDByKeycloakID(ctx context.Context, keycloakId string) (int, error) {
+	var accountID int
+	if err := o.QueryRow(ctx, `SELECT id
+	FROM accounts WHERE "UserKey"=$1`, keycloakId).Scan(
+		&accountID,
+	); err != nil {
+		return 0, err
+	}
+	return accountID, nil
+}
+
 // TODO: REFACTOR
 func (o *OrdersDB) createRequestPayByToken(c context.Context, a Account, order Order, p Payment, pmx null.String) (RequestPayment, Payment) {
 	newp, _ := o.createPendingPayment(c, order, pmx)

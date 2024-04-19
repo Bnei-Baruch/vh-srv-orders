@@ -206,6 +206,17 @@ type OfflinePayment struct {
 	Properties    null.JSON   `json:"Properties"`
 }
 
+type OfflinePaymentRequest struct {
+	KeycloakID    null.String `json:"keycloak_id"`
+	Currency      null.String `json:"currency"`
+	Amount        float64     `json:"amount"`
+	PaymentDate   null.Time   `json:"payment_date"`
+	Language      null.String `json:"language"`
+	PaymentMethod null.String `json:"payment_method"`
+	Note          null.String `json:"note"`
+	Quantity      int         `json:"quantity"`
+}
+
 type HelpHavedPayment struct {
 	PaymentType       null.String `json:"PaymentType,omitempty"`
 	Status            null.String `json:"Status"`

@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"gitlab.bbdev.team/vh/pay/orders/common"
 )
 
-func (o *OrdersDB) GetTransactionById(ctx context.Context, id int) (Transaction, error) {
-	var (
-		transaction Transaction
-	)
+func (o *OrdersDB) GetTransactionById(ctx context.Context, id int) (*Transaction, error) {
+	var transaction Transaction
 
 	if err := o.QueryRow(ctx, `SELECT 
 		id,
@@ -30,30 +30,24 @@ func (o *OrdersDB) GetTransactionById(ctx context.Context, id int) (Transaction,
 		&transaction.CreatedAt,
 		&transaction.UpdatedAt,
 	); err != nil {
-		return transaction, err
+		return nil, err
 	}
-	return transaction, nil
+	return &transaction, nil
 
 }
 
 func (o *OrdersDB) CreateTransactionAndGetId(ctx context.Context, p Transaction) (int, error) {
-
 	createString, numString, createQueryArgs := prepareTransactionCreateQuery(p)
-
-	var ID int
-
-	if len(createQueryArgs) != 0 {
-		if err := o.QueryRow(ctx, fmt.Sprintf(`INSERT INTO transaction (%s) VALUES (%s) RETURNING id`, createString, numString),
-			createQueryArgs...).Scan(
-			&ID,
-		); err != nil {
-			return 0, err
-		}
-		return ID, nil
-	} else {
-		return 0, fmt.Errorf("invalid body")
+	if len(createQueryArgs) == 0 {
+		return 0, common.ErrInvalidValues
 	}
 
+	var ID int
+	if err := o.QueryRow(ctx, fmt.Sprintf(`INSERT INTO transaction (%s) VALUES (%s) RETURNING id`, createString, numString),
+		createQueryArgs...).Scan(&ID); err != nil {
+		return 0, err
+	}
+	return ID, nil
 }
 
 func prepareTransactionCreateQuery(req Transaction) (string, string, []interface{}) {

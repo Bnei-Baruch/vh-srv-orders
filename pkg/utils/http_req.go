@@ -50,15 +50,10 @@ func HTTPCallAndGetBody(fullUrl string, authHeader string, bodyBuffer *bytes.Buf
 }
 
 func PostJSON(method string, url string, payload []byte) (*http.Response, error) {
-	fmt.Println("POSTING TO ENDPOINT")
-	payReq, _ := http.NewRequest(method, url, bytes.NewReader(payload))
-	payReq.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{}
-	resp, err := client.Do(payReq)
+	req, err := http.NewRequest(method, url, bytes.NewReader(payload))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("http.NewRequest: %w", err)
 	}
-	return resp, err
-
+	req.Header.Set("Content-Type", "application/json")
+	return new(http.Client).Do((req))
 }

@@ -3,8 +3,9 @@ package common
 import "github.com/kelseyhightower/envconfig"
 
 type envConfig struct {
-	Mode string `envconfig:"MODE"`
-	Port string `envconfig:"PORT"`
+	Mode string `envconfig:"APP_MODE"`
+	Port string `envconfig:"APP_PORT"`
+	Env  string `envconfig:"APP_ENV"`
 
 	PgHost   string `envconfig:"PGHOST"`
 	PgPort   string `envconfig:"PGPORT"`

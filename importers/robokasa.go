@@ -3,113 +3,72 @@ package importers
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"strconv"
 	"time"
 
-	"github.com/jackc/pgx/v4"
 	"github.com/volatiletech/null/v9"
 	"google.golang.org/api/option"
 	"google.golang.org/api/sheets/v4"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/events"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/keycloak"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
 func ImportRobokasa() {
-	importer := NewRobokasaImporter()
-
-	if err := importer.Init(); err != nil {
-		log.Fatal("importer.Init", err)
-	}
-
-	if err := importer.Import(); err != nil {
-		log.Fatal("importer.Import", err)
-	}
-
-	importer.Close()
+	doImport(NewRobokasaImporter())
 }
 
 type RobokasaImporter struct {
-	repo           repo.OrdersRepository
-	eventEmitter   events.EventEmitter
-	profileService profiles.ProfileService
+	BaseImporter
 }
 
 func NewRobokasaImporter() *RobokasaImporter {
 	return new(RobokasaImporter)
 }
 
-func (im *RobokasaImporter) Init() error {
-	var err error
-
-	im.eventEmitter, err = events.CreateEmitter()
-	if err != nil {
-		log.Fatalf("Error creating events emitter: %v\n", err)
-	}
-
-	im.repo, err = repo.NewOrdersDB(context.Background(), im.eventEmitter)
-	if err != nil {
-		return fmt.Errorf("repo.NewOrdersDB: %v", err)
-	}
-
-	im.profileService = profiles.NewProfileServiceAPI(keycloak.NewClient())
-
-	return nil
-}
-
-func (im *RobokasaImporter) Close() {
-	im.repo.Close()
-	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
-	im.eventEmitter.Close(ctx)
+func (im *RobokasaImporter) String() string {
+	return "robokasa"
 }
 
 // Import fetches all robokasa orders and import the ones we don't have.
 // Idempotency is guaranteed by robokasa order_id being stored in our DB as well.
 func (im *RobokasaImporter) Import() error {
-	log.Println("Importing payments from robokasa")
-
 	var err error
 
-	log.Println("Getting all rows from spreadsheet")
 	var sheetValues []*RobokasaOrder
 	sheetValues, err = im.getSheetValues()
 	if err != nil {
-		return fmt.Errorf("getting sheet values: %w", err)
+		return fmt.Errorf("importer.getSheetValues: %w", err)
 	}
-	log.Printf("Got %d rows from spreadsheet\n", len(sheetValues))
+	slog.Info("importer.getSheetValues", slog.Int("count", len(sheetValues)))
 
-	log.Println("Getting existing payments from db")
 	var existingPayments map[string]*repo.OfflinePayment
 	existingPayments, err = im.getExistingPayments()
 	if err != nil {
-		return fmt.Errorf("getting existing payments: %w", err)
+		return fmt.Errorf("importer.getExistingPayments: %w", err)
 	}
-	log.Printf("Got %d existing payments from db\n", len(existingPayments))
+	slog.Info("importer.getExistingPayments", slog.Int("count", len(existingPayments)))
 
-	log.Println("Creating new orders")
 	newOrders := 0
 	skippedOrders := 0
 	errOrders := 0
-	for _, row := range sheetValues {
+	for i, row := range sheetValues {
 		if _, ok := existingPayments[row.OrderID]; ok {
 			skippedOrders++
 			continue
 		}
 
 		if err := im.createOrderAndPayments(row); err != nil {
-			log.Printf("WARNING: error creating order and payments [robokasa_id: %s]: %v\n", row.OrderID, err)
+			slog.Error("importer.createOrderAndPayments", slog.Int("line", i+1), slog.String("robokasa_id", row.OrderID), slog.Any("err", err))
 			errOrders++
 			continue
 		}
 		newOrders++
 	}
-	log.Printf("Created %d new orders, skipped %d existing. %d had errors \n", newOrders, skippedOrders, errOrders)
+	slog.Info("import summary", slog.Int("new_orders", newOrders), slog.Int("skipped_orders", skippedOrders), slog.Int("with_errors", errOrders))
 
 	return nil
 }
@@ -126,14 +85,14 @@ func (im *RobokasaImporter) getSheetValues() ([]*RobokasaOrder, error) {
 		option.WithCredentialsFile(common.Config.GoogleAppCredentials),
 		option.WithScopes(sheets.SpreadsheetsReadonlyScope))
 	if err != nil {
-		return nil, fmt.Errorf("initialize google sheets service: %w", err)
+		return nil, fmt.Errorf("sheets.NewService: %w", err)
 	}
 
 	call := sheetsService.Spreadsheets.Values.Get("1w2kn2rHKMp63lcmYZcWZwEiEW5AgcwS6eGdyNEghNZU", "ArvutRus")
 	call.Context(context.TODO())
 	resp, err := call.Do()
 	if err != nil {
-		return nil, fmt.Errorf("get sheet values: %w", err)
+		return nil, fmt.Errorf("sheetsService.Spreadsheets.Values.Get: %w", err)
 	}
 
 	orders := make([]*RobokasaOrder, 0)
@@ -146,13 +105,13 @@ func (im *RobokasaImporter) getSheetValues() ([]*RobokasaOrder, error) {
 		var err error
 		order.Amount, err = strconv.ParseFloat(row[2].(string), 10)
 		if err != nil {
-			log.Printf("WARNING: malformed row %d [amount]: %v\n", i+1, err)
+			slog.Warn("malformed row", slog.Int("row", i+1), slog.String("column", "amount"), slog.Any("err", err))
 			continue
 		}
 
 		order.Timestamp, err = time.Parse(time.DateTime, row[3].(string))
 		if err != nil {
-			log.Printf("WARNING: malformed row %d [timestamp]: %v\n", i+1, err)
+			slog.Warn("malformed row", slog.Int("row", i+1), slog.String("column", "timestamp"), slog.Any("err", err))
 			continue
 		}
 
@@ -175,19 +134,19 @@ func (im *RobokasaImporter) getExistingPayments() (map[string]*repo.OfflinePayme
 
 		for _, payment := range payments {
 			if !payment.Properties.Valid {
-				log.Printf("WARNING: missing offline payment properties [id: %d]\n", payment.ID)
+				slog.Warn("missing offline payment properties", slog.Int("payment_id", payment.ID))
 				continue
 			}
 
 			var props map[string]interface{}
 			if err := payment.Properties.Unmarshal(&props); err != nil {
-				log.Printf("WARNING: json.Unmarshal offline payment properties [id: %d]: %v\n", payment.ID, err)
+				slog.Warn("json.Unmarshal offline payment properties", slog.Int("payment_id", payment.ID), slog.Any("err", err))
 				continue
 			}
 
 			rID, ok := props[common.OfflinePaymentPropertiesRobokasaID]
 			if !ok {
-				log.Printf("WARNING: offline payment missing robokasa_id [id: %d]\n", payment.ID)
+				slog.Warn("offline payment missing robokasa_id", slog.Int("payment_id", payment.ID))
 				continue
 			}
 
@@ -209,64 +168,21 @@ func (im *RobokasaImporter) createOrderAndPayments(rOrder *RobokasaOrder) error 
 
 	accountID, err := im.getOrCreateAccount(ctx, rOrder.Email)
 	if err != nil {
-		return fmt.Errorf("get or create account: %w", err)
+		return fmt.Errorf("importer.getOrCreateAccount: %w", err)
 	}
 
 	var order *repo.Order
 	order, err = im.createOrder(ctx, rOrder, accountID)
 	if err != nil {
-		return fmt.Errorf("create order: %w", err)
+		return fmt.Errorf("importer.createOrder: %w", err)
 	}
 
 	err = im.createPayment(ctx, rOrder, order)
 	if err != nil {
-		return fmt.Errorf("create payment: %w", err)
+		return fmt.Errorf("importer.createPayment: %w", err)
 	}
 
 	return nil
-}
-
-func (im *RobokasaImporter) getOrCreateAccount(ctx context.Context, email string) (int, error) {
-	var account repo.Account
-	account, err := im.repo.GetAccount(ctx, 0, email)
-	if err == nil {
-		return account.ID, nil
-	}
-
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return 0, fmt.Errorf("get account: %w", err)
-	}
-
-	log.Printf("INFO: account not found for %s\n", email)
-	profile, err := im.profileService.LookupProfile(ctx, email)
-	if err != nil {
-		return 0, fmt.Errorf("lookup profile by email: %w", err)
-	}
-
-	if profile == nil {
-		return 0, errors.New("email not found in profile service")
-	}
-
-	log.Printf("INFO: found profile, creating account for %s\n", email)
-	account = repo.Account{
-		FirstName:   null.StringFromPtr(profile.FirstNameVernacular),
-		LastName:    null.StringFromPtr(profile.LastNameVernacular),
-		Email:       null.StringFromPtr(profile.PrimaryEmail),
-		Phone:       null.StringFromPtr(profile.MobileNumber),
-		Street:      null.StringFromPtr(profile.StreetAddress),
-		City:        null.StringFromPtr(profile.City),
-		State:       null.StringFromPtr(profile.StateOrRegion),
-		Postcode:    null.StringFromPtr(profile.PostalCode),
-		Country:     null.StringFromPtr(profile.Country),
-		AccountType: null.StringFrom(common.AccountTypePersonal),
-		UserKey:     null.StringFrom(profile.KeycloakID.String()),
-	}
-
-	account.ID, err = im.repo.CreateAccount(ctx, account)
-	if err != nil {
-		return 0, fmt.Errorf("repo.CreateAccount: %w", err)
-	}
-	return account.ID, nil
 }
 
 func (im *RobokasaImporter) createOrder(ctx context.Context, rOrder *RobokasaOrder, accountID int) (*repo.Order, error) {

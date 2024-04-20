@@ -26,6 +26,7 @@ type Event struct {
 	Timestamp time.Time              `json:"timestamp"`
 	Component string                 `json:"component"`
 	Actor     string                 `json:"actor"`
+	RequestID string                 `json:"request_id,omitempty"`
 	Payload   map[string]interface{} `json:"payload"`
 }
 

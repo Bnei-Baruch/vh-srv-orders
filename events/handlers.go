@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -12,17 +12,23 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 )
 
 type EventHandler interface {
-	Handle(Event)
+	Handle(context.Context, Event)
 	Close(context.Context) error
 }
 
 type LoggerEventHandler struct{}
 
-func (eh *LoggerEventHandler) Handle(event Event) {
-	log.Printf("INFO: event ID %s, Type %s, Payload %v\n", event.ID, event.Type, event.Payload)
+func (eh *LoggerEventHandler) Handle(ctx context.Context, event Event) {
+	utils.LogFor(ctx).Debug("Handle event", slog.Group("event",
+		slog.String("id", event.ID),
+		slog.String("type", event.Type),
+		slog.String("request_id", event.RequestID),
+		slog.Any("payload", event.Payload),
+	))
 }
 
 func (eh *LoggerEventHandler) Close(_ context.Context) error {
@@ -67,18 +73,20 @@ func NewNatsEventHandler() (*NatsEventHandler, error) {
 	return eh, nil
 }
 
-func (eh *NatsEventHandler) Handle(event Event) {
+func (eh *NatsEventHandler) Handle(ctx context.Context, event Event) {
 	payload, err := json.Marshal(event)
 	if err != nil {
-		log.Printf("ERROR: NatsEventHandler.Handle: json.Marshal event [%s]: %s\n", event.ID, err.Error())
+		utils.LogFor(ctx).Error("NatsEventHandler.Handle: json.Marshal", slog.String("event_id", event.ID), slog.Any("err", err))
+		utils.SentryFor(ctx).CaptureException(err)
 		return
 	}
 
 	subject := fmt.Sprintf("vh-srv-orders.%s", strings.ToLower(event.Type))
 
-	_, err = eh.js.Publish(context.Background(), subject, payload, jetstream.WithRetryAttempts(3))
+	_, err = eh.js.Publish(ctx, subject, payload, jetstream.WithRetryAttempts(3))
 	if err != nil {
-		log.Printf("ERROR: NatsEventHandler.Handle: jetstream.Publish: %v\n", err)
+		utils.LogFor(ctx).Error("NatsEventHandler.Handle: jetstream.Publish", slog.String("event_id", event.ID), slog.Any("err", err))
+		utils.SentryFor(ctx).CaptureException(err)
 	}
 }
 
@@ -96,6 +104,6 @@ func (eh *NatsEventHandler) Close(ctx context.Context) error {
 }
 
 func (eh *NatsEventHandler) closedCallback(conn *nats.Conn) {
-	log.Println("nats connection closed")
+	slog.Info("nats connection closed")
 	eh.ncClosed <- struct{}{}
 }

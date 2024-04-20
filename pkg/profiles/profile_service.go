@@ -26,7 +26,7 @@ func NewProfileServiceAPI(tokenSource keycloak.TokenSource) *ProfileServiceAPI {
 	client.SetBaseURL(common.Config.ProfileServiceUrl)
 	client.SetHeaders(map[string]string{
 		"Content-Type": "application/json",
-		"User-Agent":   "vh-srv-orders",
+		"User-Agent":   common.ServiceName,
 	})
 	client.SetError(APIError{})
 	//client.EnableTrace()

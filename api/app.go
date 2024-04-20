@@ -2,18 +2,18 @@ package api
 
 import (
 	"context"
-	"fmt"
-	"log"
-	"os"
+	"log/slog"
 	"time"
 
+	"github.com/getsentry/sentry-go"
+	sentrygin "github.com/getsentry/sentry-go/gin"
 	"github.com/gin-contrib/cors"
-	"github.com/gin-contrib/location"
 	"github.com/gin-gonic/gin"
 
 	"gitlab.bbdev.team/vh/pay/orders/api/middleware"
 	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/events"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
@@ -29,30 +29,51 @@ func NewApp() *App {
 }
 
 func (a *App) Initialize() {
-	var err error
+	a.initSentry()
+	a.initEventEmitter()
+	a.initDB()
+	a.ordersAPI = NewOrdersAPI(a.repo)
+	a.initGinEngine()
+}
 
+func (a *App) initEventEmitter() {
+	if common.Config.NatsUrl != "" {
+		slog.Info("initializing events emitter")
+		var err error
+		a.eventEmitter, err = events.CreateEmitter()
+		if err != nil {
+			utils.LogFatal("events.CreateEmitter", slog.Any("err", err))
+		}
+	}
+}
+
+func (a *App) initDB() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	a.eventEmitter, err = events.CreateEmitter()
-	if err != nil {
-		log.Fatalf("Error creating event emitter: %v\n", err)
-	}
-
+	var err error
 	a.repo, err = repo.NewOrdersDB(ctx, a.eventEmitter)
 	if err != nil {
-		log.Fatalf("Error connecting to orders db: %s \n***\n %s \n ***", err, repo.GetDBURL())
+		utils.LogFatal("connect to db", slog.Any("err", err))
 	}
-	fmt.Println("Connected to orders db")
 
 	err = repo.SyncDBStructInsertionAndMigrations()
 	if err != nil {
-		log.Fatalf("Error migrating orders db: %s \n***\n %s \n ***", err, repo.GetDBURL())
+		utils.LogFatal("db migrations", slog.Any("err", err))
 	}
-	fmt.Println("Migrated orders db")
 
-	a.ordersAPI = NewOrdersAPI(a.repo)
-	a.initGinEngine()
+	slog.Info("db connected and migrated")
+}
+
+func (a *App) initSentry() {
+	err := sentry.Init(sentry.ClientOptions{
+		Release:          common.GitSHA,
+		Environment:      common.Config.Env,
+		AttachStacktrace: true,
+	})
+	if err != nil {
+		utils.LogFatal("sentry.Init", slog.Any("err", err))
+	}
 }
 
 func (a *App) initGinEngine() {
@@ -60,17 +81,22 @@ func (a *App) initGinEngine() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
-	r := gin.Default()
-	r.Use(location.Default())
-	r.Use(middleware.EventsBuilder())
+	a.gEngine = gin.New()
 
-	if os.Getenv("CORSISON") == "YES" {
-		fmt.Println("CORS ACTIVE")
-		r.Use(cors.Default())
+	// middleware
+	a.gEngine.Use(
+		middleware.Logging(),
+		middleware.Recovery(),
+		sentrygin.New(sentrygin.Options{Repanic: true}),
+		middleware.Sentry(),
+		middleware.EventsBuilder(),
+	)
+	if gin.IsDebugging() {
+		a.gEngine.Use(cors.Default())
 	}
 
 	// routes
-	orders := r.Group("/orders")
+	orders := a.gEngine.Group("/orders")
 	{
 		orders.POST("/paid", a.ordersAPI.handleTransactionPaid)     // vh-payments (deprecated in favor of PATCH /v2/transaction)
 		orders.POST("/renew", a.ordersAPI.handleOrdersRenew)        // charge (python)
@@ -78,14 +104,14 @@ func (a *App) initGinEngine() {
 		orders.POST("/flag", a.ordersAPI.handleOrdersFlag)          // charge (python)
 	}
 
-	payments := r.Group("/payments")
+	payments := a.gEngine.Group("/payments")
 	{
 		payments.GET("/all/:email", a.ordersAPI.handlePaymentFetchByEmail)
 		payments.GET("/payment/:paramx", a.ordersAPI.handlePaymentFetchViaParamX)
 		payments.GET("/activities", a.ordersAPI.handleGetActivities)
 	}
 
-	baseV2Path := r.Group("/v2")
+	baseV2Path := a.gEngine.Group("/v2")
 
 	account := baseV2Path.Group("/account")
 	{
@@ -143,14 +169,12 @@ func (a *App) initGinEngine() {
 		operation.POST("/revert", a.ordersAPI.handleOperationRevert)
 	}
 
-	r.GET("/status/:email", a.ordersAPI.status)
-
-	a.gEngine = r
+	a.gEngine.GET("/status/:email", a.ordersAPI.status)
 }
 
 func (a *App) Run() {
-	if err := a.gEngine.Run(common.Config.Port); err != nil {
-		log.Fatalf("server stopped: %s", err)
+	if err := a.gEngine.Run(":" + common.Config.Port); err != nil {
+		utils.LogFatal("gin.Run", slog.Any("err", err))
 	}
 }
 
@@ -158,4 +182,5 @@ func (a *App) Shutdown() {
 	a.repo.Close()
 	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
 	a.eventEmitter.Close(ctx)
+	sentry.Flush(2 * time.Second)
 }

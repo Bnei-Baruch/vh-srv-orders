@@ -2,6 +2,7 @@ package repo
 
 import (
 	"fmt"
+	"log/slog"
 	"net/url"
 
 	"github.com/golang-migrate/migrate/v4"
@@ -22,23 +23,21 @@ func GetDBURL() string {
 }
 
 func SyncDBStructInsertionAndMigrations() error {
-	fmt.Println("Starting DB Migration")
+	slog.Info("running db migrations")
 	m, err := migrate.New(
 		"file://./db/migrations", GetDBURL()+"?sslmode=disable")
 	if err != nil {
-		fmt.Println("Error while creating migration instance ::", err)
-		return err
+		return fmt.Errorf("migrate.New: %w", err)
 	}
-	// Syncing Table struct (UP Mig), Insertion ( Up Mig ) & UP Migrations
+	defer m.Close()
+
 	if err := m.Up(); err != nil {
-		m.Close()
 		if err == migrate.ErrNoChange {
-			fmt.Println("No changes in UP migration")
+			slog.Info("no changes in migrations")
 			return nil
 		}
-		return err
+		return fmt.Errorf("migrate.Up: %w", err)
 	}
-	m.Close()
-	fmt.Println("UP Migration Done!")
+
 	return nil
 }

@@ -1,7 +1,9 @@
 package api
 
 import (
+	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -11,58 +13,43 @@ import (
 	"github.com/jackc/pgx/v4"
 	"github.com/volatiletech/null/v9"
 
+	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
 func (o *OrdersAPI) handlePaymentFetchByID(c *gin.Context) {
-	id := c.Param("id")
-
-	var (
-		intID int
-		err   error
-	)
-
-	intID, err = strconv.Atoi(id)
+	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id! Accepted value is INTEGER", "success": false})
 		return
 	}
 
-	account, err := o.repo.GetPaymentByID(c.Request.Context(), intID)
-
+	account, err := o.repo.GetPaymentByID(c.Request.Context(), id)
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Account not found"})
-			return
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.Status(http.StatusNotFound)
+		} else {
+			c.Status(http.StatusInternalServerError)
+			_ = c.Error(fmt.Errorf("repo.GetPaymentByID: %w", err))
 		}
-		fmt.Println("Error:", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
-		return
-	} else {
-		c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": account, "success": true})
 		return
 	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": account, "success": true})
 }
 
 func (o *OrdersAPI) handlePaymentDelete(c *gin.Context) {
-	id := c.Param("id")
-
-	var (
-		intID int
-		err   error
-	)
-
-	intID, err = strconv.Atoi(id)
+	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id! Accepted value is INTEGER", "success": false})
 		return
 	}
 
-	err = o.repo.SoftDeletePayment(c.Request.Context(), intID)
-
+	err = o.repo.SoftDeletePayment(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+		c.Status(http.StatusInternalServerError)
+		_ = c.Error(fmt.Errorf("repo.SoftDeletePayment: %w", err))
 		return
 	}
 
@@ -70,24 +57,23 @@ func (o *OrdersAPI) handlePaymentDelete(c *gin.Context) {
 }
 
 func (o *OrdersAPI) handlePaymentFetchViaParamX(c *gin.Context) {
-
-	var paramx = c.Param("paramx")
+	paramx := c.Param("paramx")
 
 	payment, err := o.repo.FetchPaymentByParamX(c.Request.Context(), paramx)
-
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Payment not found"})
-			return
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.Status(http.StatusNotFound)
+		} else {
+			c.Status(http.StatusInternalServerError)
+			_ = c.Error(fmt.Errorf("repo.FetchPaymentByParamX: %w", err))
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"Error": err})
-	} else {
-		c.JSON(http.StatusOK, payment)
+		return
 	}
+
+	c.JSON(http.StatusOK, payment)
 }
 
 func (o *OrdersAPI) handlePaymentUpdate(c *gin.Context) {
-
 	var req repo.PaymentUpdate
 	var paymentStatus string
 
@@ -99,18 +85,16 @@ func (o *OrdersAPI) handlePaymentUpdate(c *gin.Context) {
 
 	parseErr := param.Parse(c.Request.MultipartForm.Value, &req)
 	if parseErr != nil {
-		fmt.Println(parseErr)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": parseErr.Error()})
 		return
 	}
 
 	if req.PaymentID.IsZero() {
-		c.JSON(http.StatusNotAcceptable, gin.H{"error": "Missing PaymentID"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing PaymentID"})
 		return
 	}
 
 	if req.PaymentType.String == "offline" {
-
 		if req.Status.String != "" {
 			paymentStatus = req.Status.String
 		}
@@ -131,10 +115,13 @@ func (o *OrdersAPI) handlePaymentUpdate(c *gin.Context) {
 			file.Read(buffer)
 
 			// Uploading the file to AWS S3 bucket.
-			fileUrl, uploadErr := utils.UploadFileToS3(buffer, fileName)
+			utils.LogFor(c.Request.Context()).Info("upload file to storage",
+				slog.Group("file", slog.String("name", fileName), slog.Int64("size", size)))
 
+			fileUrl, uploadErr := utils.UploadFileToS3(buffer, fileName)
 			if uploadErr != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": uploadErr.Error()})
+				c.Status(http.StatusInternalServerError)
+				_ = c.Error(fmt.Errorf("utils.UploadFileToS3: %w", uploadErr))
 				return
 			}
 
@@ -142,64 +129,72 @@ func (o *OrdersAPI) handlePaymentUpdate(c *gin.Context) {
 		}
 
 		err := o.repo.UpdateOfflinePayment(c.Request.Context(), req)
-
 		if err != nil {
-			if err == pgx.ErrNoRows {
-				c.JSON(http.StatusNotFound, gin.H{"error": "Payment not found"})
-				return
+			if errors.Is(err, common.ErrNoRowsAffected) {
+				c.Status(http.StatusNotFound)
+			} else if errors.Is(err, common.ErrInvalidValues) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			} else {
+				c.Status(http.StatusInternalServerError)
+				_ = c.Error(fmt.Errorf("repo.UpdateOfflinePayment: %w", err))
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"Error": err})
 			return
 		}
 	} else if req.PaymentType.String == "helphaver" {
-
 		if req.Status.String != "" {
 			paymentStatus = req.Status.String
 		}
 
 		err := o.repo.UpdateHelpHavePayment(c.Request.Context(), req)
-
 		if err != nil {
-			if err == pgx.ErrNoRows {
-				c.JSON(http.StatusNotFound, gin.H{"error": "Helphaver payment not found"})
-				return
+			if errors.Is(err, common.ErrNoRowsAffected) {
+				c.Status(http.StatusNotFound)
+			} else if errors.Is(err, common.ErrInvalidValues) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			} else {
+				c.Status(http.StatusInternalServerError)
+				_ = c.Error(fmt.Errorf("repo.UpdateHelpHavePayment: %w", err))
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"Error": err})
 			return
 		}
 	} else if req.PaymentType.String == "pelecard" {
-
 		if req.PaymentStatus.String != "" {
 			paymentStatus = req.PaymentStatus.String
 		}
 
 		err := o.repo.UpdatePelecardPayment(c.Request.Context(), req)
-
 		if err != nil {
-			if err == pgx.ErrNoRows {
-				c.JSON(http.StatusNotFound, gin.H{"error": "Pelecard payment not found"})
-				return
+			if errors.Is(err, common.ErrNoRowsAffected) {
+				c.Status(http.StatusNotFound)
+			} else if errors.Is(err, common.ErrInvalidValues) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			} else {
+				c.Status(http.StatusInternalServerError)
+				_ = c.Error(fmt.Errorf("repo.UpdatePelecardPayment: %w", err))
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"Error": err})
 			return
 		}
-
 	} else {
-		c.JSON(http.StatusBadRequest, gin.H{"Error": "Invalid payment type"})
+		c.JSON(http.StatusBadRequest, gin.H{"קrror": "Invalid payment type"})
 		return
 	}
 
 	// Updating the status of the parent payment table.
 	if paymentStatus != "" {
-		orderId, parentPaymentUpdateErr := o.repo.UpdateParentPaymentTableStatusAndReturnOrderId(c, paymentStatus, req.PaymentID.Int)
-
-		if parentPaymentUpdateErr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"Error": parentPaymentUpdateErr.Error()})
+		orderId, err := o.repo.UpdateParentPaymentTableStatusAndReturnOrderId(c, paymentStatus, req.PaymentID.Int)
+		if err != nil {
+			c.Status(http.StatusInternalServerError)
+			_ = c.Error(fmt.Errorf("repo.UpdateParentPaymentTableStatusAndReturnOrderId: %w", err))
 			return
 		}
 
 		if orderId != 0 && !req.RestrictOrderUpdate.Bool {
-			o.repo.UpdateOrderStatusByOrderID(c.Request.Context(), orderId, paymentStatus)
+			err = o.repo.UpdateOrderStatusByOrderID(c.Request.Context(), orderId, paymentStatus)
+			if err != nil {
+				c.Status(http.StatusInternalServerError)
+				_ = c.Error(fmt.Errorf("repo.UpdateOrderStatusByOrderID: %w", err))
+				return
+			}
 		}
 
 		c.JSON(http.StatusOK, gin.H{"message": "Updated!", "success": true})
@@ -255,14 +250,12 @@ func (o *OrdersAPI) handlePaymentFetch(c *gin.Context) {
 		limit = "10"
 	}
 
-	// String conversion to int
 	intSkip, err := strconv.Atoi(skip)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid skip value! Accepted value is INTEGER", "success": false})
 		return
 	}
 
-	// String conversion to int
 	intLimit, err := strconv.Atoi(limit)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit value! Accepted value is INTEGER", "success": false})
@@ -291,14 +284,12 @@ func (o *OrdersAPI) handlePaymentFetch(c *gin.Context) {
 
 	payments, err := o.repo.GetAllPayments(c.Request.Context(), intSkip, intLimit, fromDate, &toDateParsed, paymentType,
 		paymentStatus, orderType, email, intAccountID, tokenExist, intOrderID, orderByCreatedAt)
-
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   err.Error(),
-			"success": false,
-		})
+		c.Status(http.StatusInternalServerError)
+		_ = c.Error(fmt.Errorf("repo.GetAllPayments: %w", err))
 		return
 	}
+
 	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": payments, "success": true})
 }
 
@@ -306,12 +297,13 @@ func (o *OrdersAPI) handlePaymentFetchByEmail(c *gin.Context) {
 	var email = c.Param("email")
 
 	ord, err := o.repo.GetPaymentByEmail(c.Request.Context(), email)
-
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"Error": err})
-	} else {
-		c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": ord, "success": true})
+		c.Status(http.StatusInternalServerError)
+		_ = c.Error(fmt.Errorf("repo.GetPaymentByEmail: %w", err))
+		return
 	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": ord, "success": true})
 }
 
 func (o *OrdersAPI) handleGetActivities(c *gin.Context) {
@@ -329,14 +321,12 @@ func (o *OrdersAPI) handleGetActivities(c *gin.Context) {
 		limit = "10"
 	}
 
-	// String conversion to int
 	intSkip, err := strconv.Atoi(skip)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid skip value! Accepted value is INTEGER", "success": false})
 		return
 	}
 
-	// String conversion to int
 	intLimit, err := strconv.Atoi(limit)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit value! Accepted value is INTEGER", "success": false})
@@ -344,11 +334,18 @@ func (o *OrdersAPI) handleGetActivities(c *gin.Context) {
 	}
 
 	payAct, err := o.repo.GetPaymentActivities(c.Request.Context(), email, productType, paymentType, intSkip, intLimit)
-	count, _ := o.repo.GetTotalParticipationStatusCount(c.Request.Context(), email, productType, paymentType)
-
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"Error": err})
-	} else {
-		c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": payAct, "totalCount": count, "success": true})
+		c.Status(http.StatusInternalServerError)
+		_ = c.Error(fmt.Errorf("repo.GetPaymentActivities: %w", err))
+		return
 	}
+
+	count, err := o.repo.GetTotalParticipationStatusCount(c.Request.Context(), email, productType, paymentType)
+	if err != nil {
+		c.Status(http.StatusInternalServerError)
+		_ = c.Error(fmt.Errorf("repo.GetTotalParticipationStatusCount: %w", err))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": payAct, "totalCount": count, "success": true})
 }

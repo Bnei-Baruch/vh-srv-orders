@@ -15,6 +15,7 @@ import (
 
 // UploadFileToS3 will upload a single file to S3, it will require a file buffer and filename
 // It'll will set file info like content type and encryption on the uploaded file.
+// TODO (edo): use io.Reader instead of []byte
 func UploadFileToS3(buffer []byte, fileName string) (string, error) {
 	// Creating a new session with the given configuration.
 	s3Config := &aws.Config{

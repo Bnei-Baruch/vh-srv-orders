@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 
 	"github.com/Nerzal/gocloak/v13"
 	"github.com/golang-jwt/jwt/v4"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 )
 
 // Client is a base for authenticated service to service communication via Keycloak.
@@ -47,7 +48,7 @@ func (c *Client) AccessToken(ctx context.Context) string {
 	// we have no token, let's login
 	if c.token == nil {
 		if err = c.login(ctx); err != nil {
-			log.Printf("WARNING: keycloak.Client.AccessToken() error login: %v\n", err)
+			utils.LogFor(ctx).Warn("keycloak.Client.AccessToken() error login", slog.Any("err", err))
 			return ""
 		}
 	}
@@ -63,15 +64,15 @@ func (c *Client) AccessToken(ctx context.Context) string {
 			return c.token.AccessToken
 		}
 	}
-	log.Printf("WARNING: keycloak.Client.AccessToken() error refreshing token: %v\n", err)
+	utils.LogFor(ctx).Warn("keycloak.Client.AccessToken() error refreshing token", slog.Any("err", err))
 
 	// we are not able to refresh, we'll have to try and login again
 	if err = c.login(ctx); err != nil {
-		log.Printf("WARNING: keycloak.Client.AccessToken() error login after failed refresh: %v\n", err)
+		utils.LogFor(ctx).Warn("keycloak.Client.AccessToken() error login after failed refresh", slog.Any("err", err))
 		return ""
 	}
 	if err = c.claims.Valid(); err != nil {
-		log.Printf("WARNING: keycloak.Client.AccessToken() login after failed refresh got invalid claims: %v\n", err)
+		utils.LogFor(ctx).Warn("keycloak.Client.AccessToken() login after failed refresh got invalid claims", slog.Any("err", err))
 		return ""
 	}
 

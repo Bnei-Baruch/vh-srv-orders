@@ -11,7 +11,9 @@ import (
 
 func EventsBuilder() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		builder := NewApiEventBuilder(c.Request.UserAgent())
+		builder := NewApiEventBuilder(
+			c.Request.UserAgent(),
+			c.Request.Context().Value(common.CtxRequestID).(string))
 		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), common.CtxEventBuilder, builder))
 
 		c.Next()
@@ -19,16 +21,18 @@ func EventsBuilder() gin.HandlerFunc {
 }
 
 type ApiEventBuilder struct {
-	actor string
+	actor     string
+	requestID string
 }
 
-func NewApiEventBuilder(actor string) *ApiEventBuilder {
-	return &ApiEventBuilder{actor: actor}
+func NewApiEventBuilder(actor string, requestID string) *ApiEventBuilder {
+	return &ApiEventBuilder{actor: actor, requestID: requestID}
 }
 
 func (a *ApiEventBuilder) BuildEvent(eventType string, payload map[string]interface{}) events.Event {
 	event := events.MakeEvent(eventType, payload)
 	event.Component = events.ComponentAPI
 	event.Actor = a.actor
+	event.RequestID = a.requestID
 	return event
 }

@@ -15,7 +15,7 @@ build_staging:
   script:
     - docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY
     - docker pull $STAGING_LATEST_IMAGE
-    - docker build --cache-from $STAGING_LATEST_IMAGE -build-arg GIT_SHA=$CI_COMMIT_SHA -t $STAGING_IMAGE .
+    - docker build --cache-from $STAGING_LATEST_IMAGE --build-arg GIT_SHA=$CI_COMMIT_SHA -t $STAGING_IMAGE .
     - docker tag $STAGING_IMAGE $STAGING_LATEST_IMAGE
     - docker push $STAGING_IMAGE
     - docker push $STAGING_LATEST_IMAGE
@@ -71,7 +71,7 @@ build_production:
     - docker:26.0.0-dind
   script:
     - docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY
-    - docker build -build-arg GIT_SHA=$CI_COMMIT_SHA -t $PROD_IMAGE .
+    - docker build --build-arg GIT_SHA=$CI_COMMIT_SHA -t $PROD_IMAGE .
     - docker push $PROD_IMAGE
   only:
     - tags

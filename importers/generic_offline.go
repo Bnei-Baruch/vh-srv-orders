@@ -2,99 +2,59 @@ package importers
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"strconv"
 	"time"
 
-	"github.com/jackc/pgx/v4"
 	"github.com/volatiletech/null/v9"
 	"google.golang.org/api/option"
 	"google.golang.org/api/sheets/v4"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/events"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/keycloak"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
 func ImportGeneric() {
-	importer := NewGenericOfflineImporter()
-
-	if err := importer.Init(); err != nil {
-		log.Fatal("importer.Init", err)
-	}
-
-	if err := importer.Import(); err != nil {
-		log.Fatal("importer.Import", err)
-	}
-
-	importer.Close()
+	doImport(NewGenericOfflineImporter())
 }
 
 type GenericOfflineImporter struct {
-	repo           repo.OrdersRepository
-	eventEmitter   events.EventEmitter
-	profileService profiles.ProfileService
+	BaseImporter
 }
 
 func NewGenericOfflineImporter() *GenericOfflineImporter {
 	return new(GenericOfflineImporter)
 }
 
-func (im *GenericOfflineImporter) Init() error {
-	var err error
-
-	im.eventEmitter, err = events.CreateEmitter()
-	if err != nil {
-		log.Fatalf("Error creating events emitter: %v\n", err)
-	}
-
-	im.repo, err = repo.NewOrdersDB(context.Background(), im.eventEmitter)
-	if err != nil {
-		return fmt.Errorf("repo.NewOrdersDB: %v", err)
-	}
-
-	im.profileService = profiles.NewProfileServiceAPI(keycloak.NewClient())
-
-	return nil
-}
-
-func (im *GenericOfflineImporter) Close() {
-	im.repo.Close()
-	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
-	im.eventEmitter.Close(ctx)
+func (im *GenericOfflineImporter) String() string {
+	return "generic offline"
 }
 
 // Import fetches all orders and import them.
 // No idempotency is guaranteed, user carefully.
 func (im *GenericOfflineImporter) Import() error {
-	log.Println("Importing payments")
-
 	var err error
 
-	log.Println("Getting all rows from spreadsheet")
 	var sheetValues []*GenericOrder
 	sheetValues, err = im.getSheetValues()
 	if err != nil {
-		return fmt.Errorf("getting sheet values: %w", err)
+		return fmt.Errorf("importer.getSheetValues: %w", err)
 	}
-	log.Printf("Got %d rows from spreadsheet\n", len(sheetValues))
+	slog.Info("importer.getSheetValues", slog.Int("count", len(sheetValues)))
 
-	log.Println("Creating new orders")
 	newOrders := 0
 	errOrders := 0
 	for i, row := range sheetValues {
 		if err := im.createOrderAndPayments(row); err != nil {
-			log.Printf("WARNING: error creating order and payments [row %d]: %v\n", i, err)
+			slog.Error("importer.createOrderAndPayments", slog.Int("line", i+1), slog.Any("err", err))
 			errOrders++
 			continue
 		}
 		newOrders++
 	}
-	log.Printf("Created %d new orders. %d had errors \n", newOrders, errOrders)
+	slog.Info("import summary", slog.Int("new_orders", newOrders), slog.Int("with_errors", errOrders))
 
 	return nil
 }
@@ -114,7 +74,7 @@ func (im *GenericOfflineImporter) getSheetValues() ([]*GenericOrder, error) {
 		option.WithCredentialsFile(common.Config.GoogleAppCredentials),
 		option.WithScopes(sheets.SpreadsheetsReadonlyScope))
 	if err != nil {
-		return nil, fmt.Errorf("initialize google sheets service: %w", err)
+		return nil, fmt.Errorf("sheets.NewService: %w", err)
 	}
 
 	const spreadsheetId = "1jRygsoYqD_tUpEKXxVHY2_nAS52F3cdGp5spxFw8Uak"
@@ -123,7 +83,7 @@ func (im *GenericOfflineImporter) getSheetValues() ([]*GenericOrder, error) {
 	call.Context(context.TODO())
 	resp, err := call.Do()
 	if err != nil {
-		return nil, fmt.Errorf("get sheet values: %w", err)
+		return nil, fmt.Errorf("sheetsService.Spreadsheets.Values.Get: %w", err)
 	}
 
 	orders := make([]*GenericOrder, 0)
@@ -139,26 +99,26 @@ func (im *GenericOfflineImporter) getSheetValues() ([]*GenericOrder, error) {
 			order.Currency != common.CurrencyEUR &&
 			order.Currency != common.CurrencyNIS &&
 			order.Currency != common.CurrencyRUR {
-			log.Printf("WARNING: malformed row %d [currency]: %v\n", i+1, err)
+			slog.Warn("malformed row", slog.Int("row", i+1), slog.String("column", "currency"), slog.Any("err", err))
 			continue
 		}
 
 		var err error
 		order.Amount, err = strconv.ParseFloat(row[1].(string), 10)
 		if err != nil {
-			log.Printf("WARNING: malformed row %d [amount]: %v\n", i+1, err)
+			slog.Warn("malformed row", slog.Int("row", i+1), slog.String("column", "amount"), slog.Any("err", err))
 			continue
 		}
 
 		order.Quantity, err = strconv.ParseInt(row[3].(string), 10, 64)
 		if err != nil {
-			log.Printf("WARNING: malformed row %d [quantity]: %v\n", i+1, err)
+			slog.Warn("malformed row", slog.Int("row", i+1), slog.String("column", "quantity"), slog.Any("err", err))
 			continue
 		}
 
 		order.Timestamp, err = time.Parse(time.DateTime, row[4].(string))
 		if err != nil {
-			log.Printf("WARNING: malformed row %d [timestamp]: %v\n", i+1, err)
+			slog.Warn("malformed row", slog.Int("row", i+1), slog.String("column", "timestamp"), slog.Any("err", err))
 			continue
 		}
 
@@ -174,64 +134,21 @@ func (im *GenericOfflineImporter) createOrderAndPayments(rOrder *GenericOrder) e
 
 	accountID, err := im.getOrCreateAccount(ctx, rOrder.Email)
 	if err != nil {
-		return fmt.Errorf("get or create account: %w", err)
+		return fmt.Errorf("importer.getOrCreateAccount: %w", err)
 	}
 
 	var order *repo.Order
 	order, err = im.createOrder(ctx, rOrder, accountID)
 	if err != nil {
-		return fmt.Errorf("create order: %w", err)
+		return fmt.Errorf("importer.createOrder: %w", err)
 	}
 
 	err = im.createPayment(ctx, rOrder, order)
 	if err != nil {
-		return fmt.Errorf("create payment: %w", err)
+		return fmt.Errorf("importer.createPayment: %w", err)
 	}
 
 	return nil
-}
-
-func (im *GenericOfflineImporter) getOrCreateAccount(ctx context.Context, email string) (int, error) {
-	var account repo.Account
-	account, err := im.repo.GetAccount(ctx, 0, email)
-	if err == nil {
-		return account.ID, nil
-	}
-
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return 0, fmt.Errorf("get account: %w", err)
-	}
-
-	log.Printf("INFO: account not found for %s\n", email)
-	profile, err := im.profileService.LookupProfile(ctx, email)
-	if err != nil {
-		return 0, fmt.Errorf("lookup profile by email: %w", err)
-	}
-
-	if profile == nil {
-		return 0, errors.New("email not found in profile service")
-	}
-
-	log.Printf("INFO: found profile, creating account for %s\n", email)
-	account = repo.Account{
-		FirstName:   null.StringFromPtr(profile.FirstNameVernacular),
-		LastName:    null.StringFromPtr(profile.LastNameVernacular),
-		Email:       null.StringFromPtr(profile.PrimaryEmail),
-		Phone:       null.StringFromPtr(profile.MobileNumber),
-		Street:      null.StringFromPtr(profile.StreetAddress),
-		City:        null.StringFromPtr(profile.City),
-		State:       null.StringFromPtr(profile.StateOrRegion),
-		Postcode:    null.StringFromPtr(profile.PostalCode),
-		Country:     null.StringFromPtr(profile.Country),
-		AccountType: null.StringFrom(common.AccountTypePersonal),
-		UserKey:     null.StringFrom(profile.KeycloakID.String()),
-	}
-
-	account.ID, err = im.repo.CreateAccount(ctx, account)
-	if err != nil {
-		return 0, fmt.Errorf("repo.CreateAccount: %w", err)
-	}
-	return account.ID, nil
 }
 
 func (im *GenericOfflineImporter) createOrder(ctx context.Context, rOrder *GenericOrder, accountID int) (*repo.Order, error) {

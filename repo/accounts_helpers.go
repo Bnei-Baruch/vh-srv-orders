@@ -13,30 +13,29 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/events"
 )
 
-func (o *OrdersDB) CreateOrUpdateAccount(ctx context.Context, a Account) int {
-	var b Account
-	reqAccountExist := `select id from accounts where "UserKey" = $1 ORDER BY id DESC LIMIT 1`
-
-	err := o.QueryRow(ctx, reqAccountExist, a.UserKey.String).Scan(&b.ID)
+func (o *OrdersDB) CreateOrUpdateAccount(ctx context.Context, a Account) (int, error) {
+	var id int
+	err := o.QueryRow(ctx, `select id from accounts where "UserKey" = $1 ORDER BY id DESC LIMIT 1`, a.UserKey.String).
+		Scan(&id)
 	if err == nil {
-		return b.ID
+		return id, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
-		return 0
+		return 0, fmt.Errorf("o.QueryRow: %w", err)
 	}
 
-	ID, err := o.CreateAccount(ctx, a)
+	id, err = o.CreateAccount(ctx, a)
 	if err != nil {
-		return 0
+		return 0, fmt.Errorf("o.CreateAccount: %w", err)
 	}
 
-	return ID
+	return id, nil
 }
 
 func (o *OrdersDB) CreateAccount(ctx context.Context, a Account) (int, error) {
 	createString, numString, createQueryArgs := prepareAccountCreateQuery(a)
 	if len(createQueryArgs) == 0 {
-		return 0, common.ErrInvalidBody
+		return 0, common.ErrInvalidValues
 	}
 
 	var ID int
@@ -50,19 +49,13 @@ func (o *OrdersDB) CreateAccount(ctx context.Context, a Account) (int, error) {
 	return ID, nil
 }
 
-func (o *OrdersDB) GetAllAccounts(ctx context.Context, skip int, limit int, email string) (*[]Account, error) {
-
+func (o *OrdersDB) GetAllAccounts(ctx context.Context, skip int, limit int, email string) ([]Account, error) {
 	accounts := []Account{}
 
 	limitOffsetString := fmt.Sprintf(" LIMIT %d OFFSET %d", limit, skip)
+	whereQuery, orderByQuery := buildAndGetAccountsWhereQuery(email)
 
-	whereQuery, orderByQuery, queryBuildErr := buildAndGetAccountsWhereQuery(email)
-
-	if queryBuildErr != nil {
-		return &accounts, queryBuildErr
-	}
-
-	rows, dbErr := o.Query(ctx, `
+	rows, err := o.Query(ctx, `
 		SELECT
 		id,
 		"FirstName",
@@ -85,13 +78,11 @@ func (o *OrdersDB) GetAllAccounts(ctx context.Context, skip int, limit int, emai
 		updated_at,
 		deleted_at
 			FROM accounts`+whereQuery+orderByQuery+limitOffsetString)
-
-	if dbErr != nil {
-		fmt.Println("error in get all accounts", dbErr)
-		return &accounts, dbErr
+	if err != nil {
+		return nil, fmt.Errorf("o.Query: %w", err)
 	}
-
 	defer rows.Close()
+
 	for rows.Next() {
 		var a Account
 		if err := rows.Scan(
@@ -116,13 +107,15 @@ func (o *OrdersDB) GetAllAccounts(ctx context.Context, skip int, limit int, emai
 			&a.UpdatedAt,
 			&a.DeletedAt,
 		); err != nil {
-			fmt.Println("error in get all accounts", err)
-			return &accounts, err
+			return nil, fmt.Errorf("rows.Scan: %w", err)
 		}
 		accounts = append(accounts, a)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows.Err: %w", err)
+	}
 
-	return &accounts, nil
+	return accounts, nil
 }
 
 func (o *OrdersDB) PatchAccount(ctx context.Context, req Account, accountID int) error {
@@ -131,14 +124,12 @@ func (o *OrdersDB) PatchAccount(ctx context.Context, req Account, accountID int)
 		return common.ErrInvalidValues
 	}
 
-	updateRes, err := o.Exec(ctx, fmt.Sprintf(`UPDATE accounts SET %s WHERE id=%d`, toUpdate, accountID),
-		toUpdateArgs...)
+	updateRes, err := o.Exec(ctx, fmt.Sprintf(`UPDATE accounts SET %s WHERE id=%d`, toUpdate, accountID), toUpdateArgs...)
 	if err != nil {
-		return fmt.Errorf("problem updating account: %w", err)
+		return fmt.Errorf("o.Exec: %w", err)
 	}
-
 	if updateRes.RowsAffected() == 0 {
-		return fmt.Errorf("account not updated as no rows affected")
+		return common.ErrNoRowsAffected
 	}
 
 	o.emitEvent(ctx, events.TypeUpdateAccount, map[string]interface{}{"account_id": accountID})
@@ -159,7 +150,7 @@ func (o *OrdersDB) HardDeleteAllUserDataByAccountID(ctx context.Context, account
 	// start transaction
 	tx, err := o.Begin(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("o.Begin: %w", err)
 	}
 
 	defer tx.Rollback(ctx)
@@ -171,65 +162,65 @@ func (o *OrdersDB) HardDeleteAllUserDataByAccountID(ctx context.Context, account
 
 		err := tx.QueryRow(ctx, `SELECT id FROM accounts WHERE "UserKey" = $1`, kc_id).Scan(&accountID)
 		if err != nil {
-			return err
+			return fmt.Errorf("account.id from UserKey: %w", err)
 		}
 	}
 
 	var email string
 	err = tx.QueryRow(ctx, `SELECT "UserKey", "Email" FROM accounts WHERE id = $1`, accountID).Scan(&kc_id, &email)
 	if err != nil {
-		return err
+		return fmt.Errorf("Email from account.id: %w", err)
 	}
 
 	// delete all user data
 	_, err = tx.Exec(ctx, `DELETE FROM transaction WHERE account_id = $1`, accountID)
 	if err != nil {
-		return err
+		return fmt.Errorf("delete from transaction: %w", err)
 	}
 
 	_, err = tx.Exec(ctx, `DELETE FROM card_details where account_id = $1`, accountID)
 	if err != nil {
-		return err
+		return fmt.Errorf("delete from card_details: %w", err)
 	}
 
 	_, err = tx.Exec(ctx, `DELETE FROM payments_helphaver where payment_id in (SELECT id FROM payments where "OrderID" in (SELECT id FROM orders where "AccountID" = $1))`, accountID)
 	if err != nil {
-		return err
+		return fmt.Errorf("delete from payments_helphaver: %w", err)
 	}
 
 	_, err = tx.Exec(ctx, `DELETE FROM payments_offline where payment_id in (SELECT id FROM payments where "OrderID" in (SELECT id FROM orders where "AccountID" = $1))`, accountID)
 	if err != nil {
-		return err
+		return fmt.Errorf("delete from payments_offline: %w", err)
 	}
 
 	_, err = tx.Exec(ctx, `DELETE FROM payments_pelecard where payment_id in (SELECT id FROM payments where "OrderID" in (SELECT id FROM orders where "AccountID" = $1))`, accountID)
 	if err != nil {
-		return err
+		return fmt.Errorf("delete from payments_pelecard: %w", err)
 	}
 
 	_, err = tx.Exec(ctx, `DELETE FROM specials where email = (SELECT "Email" FROM accounts WHERE id = $1)`, accountID)
 	if err != nil {
-		return err
+		return fmt.Errorf("delete from specials: %w", err)
 	}
 
 	_, err = tx.Exec(ctx, `DELETE FROM payments where "OrderID" in (SELECT id FROM orders where "AccountID" = $1)`, accountID)
 	if err != nil {
-		return err
+		return fmt.Errorf("delete from payments: %w", err)
 	}
 
 	_, err = tx.Exec(ctx, `DELETE FROM orders where "AccountID" = $1`, accountID)
 	if err != nil {
-		return err
+		return fmt.Errorf("delete from orders: %w", err)
 	}
 
 	_, err = tx.Exec(ctx, "DELETE FROM accounts WHERE id = $1", accountID)
 	if err != nil {
-		return err
+		return fmt.Errorf("delete from accounts: %w", err)
 	}
 
 	err = tx.Commit(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("tx.Commit: %w", err)
 	}
 
 	o.emitEvent(ctx, events.TypeHardDeleteAccount, map[string]interface{}{
@@ -241,18 +232,15 @@ func (o *OrdersDB) HardDeleteAllUserDataByAccountID(ctx context.Context, account
 	return nil
 }
 
-func (o *OrdersDB) GetAccount(ctx context.Context, id int, email string) (Account, error) {
-	var (
-		acc        Account
-		whereQuery string
-	)
-
+func (o *OrdersDB) GetAccount(ctx context.Context, id int, email string) (*Account, error) {
+	var whereQuery string
 	if id != 0 {
 		whereQuery = fmt.Sprintf("where id = %d", id)
 	} else {
 		whereQuery = fmt.Sprintf("where LOWER(\"Email\") = LOWER('%s')", email)
 	}
 
+	var acc Account
 	if err := o.QueryRow(ctx, `SELECT 
 			id,
 			"FirstName",
@@ -279,10 +267,18 @@ func (o *OrdersDB) GetAccount(ctx context.Context, id int, email string) (Accoun
 		&acc.PaymentToken, &acc.PaymentCardID, &acc.PaymentCardExpMonth, &acc.PaymentCardExpYear,
 		&acc.UserKey, &acc.AuthNo, &acc.CreatedAt, &acc.UpdatedAt, &acc.DeletedAt,
 	); err != nil {
-		return acc, err
+		return nil, err
 	}
-	return acc, nil
 
+	return &acc, nil
+}
+
+func (o *OrdersDB) GetAccountIDByKeycloakID(ctx context.Context, keycloakId string) (int, error) {
+	var accountID int
+	if err := o.QueryRow(ctx, `SELECT id FROM accounts WHERE "UserKey"=$1`, keycloakId).Scan(&accountID); err != nil {
+		return 0, err
+	}
+	return accountID, nil
 }
 
 func prepareAccountCreateQuery(req Account) (string, string, []interface{}) {
@@ -466,8 +462,7 @@ func prepareAccountUpdateQuery(req Account) (string, []interface{}) {
 	return updateArgument, args
 }
 
-func buildAndGetAccountsWhereQuery(email string) (string, string, error) {
-
+func buildAndGetAccountsWhereQuery(email string) (string, string) {
 	var whereString strings.Builder
 	var orderBy strings.Builder
 	var whereCondition strings.Builder
@@ -488,5 +483,6 @@ func buildAndGetAccountsWhereQuery(email string) (string, string, error) {
 	} else {
 		whereString.Reset()
 	}
-	return whereString.String(), orderBy.String(), nil
+
+	return whereString.String(), orderBy.String()
 }

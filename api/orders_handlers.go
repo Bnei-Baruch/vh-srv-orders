@@ -17,26 +17,24 @@ import (
 
 func (o *OrdersAPI) handleV2OrderCreate(c *gin.Context) {
 	var req repo.Order
-	errRequest := c.BindJSON(&req)
-
-	if errRequest != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"Error": errRequest.Error()})
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	if req.AccountID.IsZero() {
-		c.JSON(http.StatusNotAcceptable, gin.H{"error": "Missing AccountID"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing AccountID"})
 		return
 	}
 
 	orderID, err := o.repo.CreateV2Order(c.Request.Context(), req)
-
 	if err != nil {
-		if errors.Is(err, common.ErrInvalidBody) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err})
-			return
+		if errors.Is(err, common.ErrInvalidValues) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		} else {
+			c.Status(http.StatusInternalServerError)
+			_ = c.Error(fmt.Errorf("repo.CreateV2Order: %w", err))
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
 		return
 	}
 
@@ -44,23 +42,16 @@ func (o *OrdersAPI) handleV2OrderCreate(c *gin.Context) {
 }
 
 func (o *OrdersAPI) handleOrderDeleteByID(c *gin.Context) {
-	id := c.Param("id")
-
-	var (
-		intID int
-		err   error
-	)
-
-	intID, err = strconv.Atoi(id)
+	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id! Accepted value is INTEGER", "success": false})
 		return
 	}
 
-	err = o.repo.SoftDeleteOrderByID(c.Request.Context(), intID)
-
+	err = o.repo.SoftDeleteOrderByID(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+		c.Status(http.StatusInternalServerError)
+		_ = c.Error(fmt.Errorf("repo.SoftDeleteOrderByID: %w", err))
 		return
 	}
 
@@ -68,37 +59,28 @@ func (o *OrdersAPI) handleOrderDeleteByID(c *gin.Context) {
 }
 
 func (o *OrdersAPI) handleOrderUpdateByID(c *gin.Context) {
-	var req repo.Order
-	errRequest := c.BindJSON(&req)
-
-	id := c.Param("id")
-
-	if errRequest != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"Error": errRequest.Error()})
-		return
-	}
-
-	var (
-		intID int
-		err   error
-	)
-
-	intID, err = strconv.Atoi(id)
+	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id! Accepted value is INTEGER", "success": false})
 		return
 	}
 
-	err = o.repo.PatchOrderByID(c.Request.Context(), req, intID)
+	var req repo.Order
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
+	err = o.repo.PatchOrderByID(c.Request.Context(), req, id)
 	if err != nil {
-		fmt.Printf("Error while updating the order: %s\n", err)
-		fmt.Printf("Order body: %+v\n", req)
-		if errors.Is(err, common.ErrInvalidBody) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err})
-			return
+		if errors.Is(err, common.ErrInvalidValues) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		} else if errors.Is(err, common.ErrNoRowsAffected) {
+			c.Status(http.StatusNotFound)
+		} else {
+			c.Status(http.StatusInternalServerError)
+			_ = c.Error(fmt.Errorf("repo.PatchOrderByID: %w", err))
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
 		return
 	}
 
@@ -106,35 +88,24 @@ func (o *OrdersAPI) handleOrderUpdateByID(c *gin.Context) {
 }
 
 func (o *OrdersAPI) handleOrderGetByID(c *gin.Context) {
-	id := c.Param("id")
-
-	var (
-		intID int
-		err   error
-	)
-
-	intID, err = strconv.Atoi(id)
+	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id! Accepted value is INTEGER", "success": false})
 		return
 	}
 
-	uIntId := uint(intID)
-
-	order := o.repo.GetOrderByID(c.Request.Context(), uIntId)
-
-	if order.ID == 0 {
-		// Need to return proper error before this implementation
-		/* if err == pgx.ErrNoRows {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Order not found"})
-			return
-		} */
-		c.JSON(http.StatusNotFound, gin.H{"error": "order not found"})
-		return
-	} else {
-		c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": order, "success": true})
+	order, err := o.repo.GetOrderByID(c.Request.Context(), uint(id))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.Status(http.StatusNotFound)
+		} else {
+			c.Status(http.StatusInternalServerError)
+			_ = c.Error(fmt.Errorf("repo.GetOrderByID: %w", err))
+		}
 		return
 	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": order, "success": true})
 }
 
 func (o *OrdersAPI) handleOrdersRenew(c *gin.Context) {
@@ -144,17 +115,22 @@ func (o *OrdersAPI) handleOrdersRenew(c *gin.Context) {
 	}
 
 	var body req
-
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"Error": err.Error()})
-	} else {
-		if body.User == "admin" && (body.Key == "t" || body.Key == "e") {
-			fmt.Printf("Renewing with key : %s\n", body.Key)
-			count := o.repo.ChargeOrdersToRenew(c.Request.Context(), body.Key)
-			c.JSON(http.StatusOK, gin.H{"count": count})
-		} else {
-			c.JSON(http.StatusUnauthorized, gin.H{"Error": "You are not allowed here"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if body.User == "admin" && (body.Key == "t" || body.Key == "e") {
+		count, err := o.repo.ChargeOrdersToRenew(c.Request.Context(), body.Key)
+		if err != nil {
+			c.Status(http.StatusInternalServerError)
+			_ = c.Error(fmt.Errorf("repo.ChargeOrdersToRenew: %w", err))
+			return
 		}
+
+		c.JSON(http.StatusOK, gin.H{"count": count})
+	} else {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "You are not allowed here"})
 	}
 }
 
@@ -171,6 +147,7 @@ func (o *OrdersAPI) handleOrderFetch(c *gin.Context) {
 	evaluateMembership := c.Query("evaluate-membership")
 	accountID := c.Query("account-id")
 	orderByPaymentDate := c.Query("o-payment-date")
+
 	if orderByPaymentDate != "" && orderByPaymentDate != "desc" && orderByPaymentDate != "asc" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid o-created-at value! Accepted values are desc for descending & asc for ascending"})
 		return
@@ -206,14 +183,12 @@ func (o *OrdersAPI) handleOrderFetch(c *gin.Context) {
 		limit = "10"
 	}
 
-	// String conversion to int
 	intSkip, err := strconv.Atoi(skip)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid skip value! Accepted value is INTEGER", "success": false})
 		return
 	}
 
-	// String conversion to int
 	intLimit, err := strconv.Atoi(limit)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit value! Accepted value is INTEGER", "success": false})
@@ -234,12 +209,11 @@ func (o *OrdersAPI) handleOrderFetch(c *gin.Context) {
 		currency, status, organisation, email, intAccountID, evaluateMembership, orderByPaymentDate)
 
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   err.Error(),
-			"success": false,
-		})
+		c.Status(http.StatusInternalServerError)
+		_ = c.Error(fmt.Errorf("repo.GetAllOrders: %w", err))
 		return
 	}
+
 	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": orders, "success": true})
 }
 
@@ -277,10 +251,11 @@ func (o *OrdersAPI) handleCreateOffline(c *gin.Context) {
 
 	accountID, err := o.repo.GetAccountIDByKeycloakID(c, req.KeycloakID.String)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "The given KeycloakID is not found.", "success": false})
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("repo.GetAccountIDByKeycloakID: %v", err.Error()), "success": false})
+			c.Status(http.StatusInternalServerError)
+			_ = c.Error(fmt.Errorf("repo.GetAccountIDByKeycloakID: %w", err))
 		}
 		return
 	}
@@ -300,7 +275,8 @@ func (o *OrdersAPI) handleCreateOffline(c *gin.Context) {
 	}
 	orderId, err := o.repo.CreateV2Order(c.Request.Context(), order)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("repo.CreateV2Order: %v", err.Error()), "success": false})
+		c.Status(http.StatusInternalServerError)
+		_ = c.Error(fmt.Errorf("repo.CreateV2Order: %w", err))
 		return
 	}
 
@@ -315,7 +291,8 @@ func (o *OrdersAPI) handleCreateOffline(c *gin.Context) {
 
 	_, err = o.repo.CreatePayment(c.Request.Context(), payment, orderId)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("repo.CreatePayment: %v", err.Error()), "success": false})
+		c.Status(http.StatusInternalServerError)
+		_ = c.Error(fmt.Errorf("repo.CreatePayment: %w", err))
 		return
 	}
 

@@ -1,6 +1,12 @@
 package common
 
 const (
+	ServiceName = "vh-srv-orders"
+
+	CtxEventBuilder = "EVENT_BUILDER"
+	CtxRequestID    = "REQUEST_ID"
+	CtxLogger       = "LOGGER"
+
 	CurrencyUSD = "USD"
 	CurrencyEUR = "EUR"
 	CurrencyNIS = "NIS"
@@ -44,6 +50,7 @@ const (
 
 	OfflinePaymentMethodRobokasa       = "robokasa"
 	OfflinePaymentPropertiesRobokasaID = "robokasa_id"
-
-	CtxEventBuilder = "EVENT_BUILDER"
 )
+
+// This gets set at build time via `-ldflags "-X ..."`
+var GitSHA string = "local"

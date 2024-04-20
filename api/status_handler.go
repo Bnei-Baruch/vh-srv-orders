@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -9,12 +10,29 @@ import (
 // Status returns membership and status
 func (o *OrdersAPI) status(c *gin.Context) {
 	filter := string(c.Params.ByName("email"))
-	paidmb := o.repo.HasPaidMembership(c.Request.Context(), filter)
-	ticket := o.repo.HasTicket(c.Request.Context(), filter)
-	specialmb := o.repo.HasSpecialMembership(c.Request.Context(), filter)
+
+	paidmb, err := o.repo.HasPaidMembership(c.Request.Context(), filter)
+	if err != nil {
+		c.Status(http.StatusInternalServerError)
+		_ = c.Error(fmt.Errorf("repo.HasPaidMembership: %w", err))
+		return
+	}
+
+	ticket, err := o.repo.HasTicket(c.Request.Context(), filter)
+	if err != nil {
+		c.Status(http.StatusInternalServerError)
+		_ = c.Error(fmt.Errorf("repo.HasTicket: %w", err))
+		return
+	}
+
+	specialmb, err := o.repo.HasSpecialMembership(c.Request.Context(), filter)
+	if err != nil {
+		c.Status(http.StatusInternalServerError)
+		_ = c.Error(fmt.Errorf("repo.HasSpecialMembership: %w", err))
+		return
+	}
 
 	var mb bool
-
 	mbLabel := ""
 	mbColor := ""
 

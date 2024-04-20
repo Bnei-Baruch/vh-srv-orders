@@ -9,10 +9,8 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/common"
 )
 
-func (o *OrdersDB) GetCardDetailById(ctx context.Context, id int) (CardDetails, error) {
-	var (
-		payDetail CardDetails
-	)
+func (o *OrdersDB) GetCardDetailById(ctx context.Context, id int) (*CardDetails, error) {
+	var card CardDetails
 
 	if err := o.QueryRow(ctx, `SELECT 
 			id,
@@ -25,41 +23,36 @@ func (o *OrdersDB) GetCardDetailById(ctx context.Context, id int) (CardDetails, 
 			created_at,
 			updated_at,
 			deleted_at from card_details `+fmt.Sprintf("where id = %d", id)).Scan(
-		&payDetail.ID,
-		&payDetail.AccountID,
-		&payDetail.GatewayProvider,
-		&payDetail.CCNumber,
-		&payDetail.CCExpDate,
-		&payDetail.Active,
-		&payDetail.Token,
-		&payDetail.CreatedAt,
-		&payDetail.UpdatedAt,
-		&payDetail.DeletedAt,
+		&card.ID,
+		&card.AccountID,
+		&card.GatewayProvider,
+		&card.CCNumber,
+		&card.CCExpDate,
+		&card.Active,
+		&card.Token,
+		&card.CreatedAt,
+		&card.UpdatedAt,
+		&card.DeletedAt,
 	); err != nil {
-		return payDetail, err
+		return nil, err
 	}
-	return payDetail, nil
 
+	return &card, nil
 }
 
 func (o *OrdersDB) CreateCardDetailsAndGetId(ctx context.Context, p CardDetails) (int, error) {
-
 	createString, numString, createQueryArgs := prepareCardDetailsCreateQuery(p)
-
-	var ID int
-
-	if len(createQueryArgs) != 0 {
-		if err := o.QueryRow(ctx, fmt.Sprintf(`INSERT INTO card_details (%s) VALUES (%s) RETURNING id`, createString, numString),
-			createQueryArgs...).Scan(
-			&ID,
-		); err != nil {
-			return 0, err
-		}
-		return ID, nil
-	} else {
-		return 0, fmt.Errorf("invalid body")
+	if len(createQueryArgs) == 0 {
+		return 0, common.ErrInvalidValues
 	}
 
+	var ID int
+	if err := o.QueryRow(ctx, fmt.Sprintf(`INSERT INTO card_details (%s) VALUES (%s) RETURNING id`, createString, numString),
+		createQueryArgs...).Scan(&ID); err != nil {
+		return 0, err
+	}
+
+	return ID, nil
 }
 
 func (o *OrdersDB) SoftDeleteCardDetailById(ctx context.Context, id int) error {
@@ -68,38 +61,25 @@ func (o *OrdersDB) SoftDeleteCardDetailById(ctx context.Context, id int) error {
 }
 
 func (o *OrdersDB) PatchCardDetailsById(ctx context.Context, req CardDetails, id int) error {
-
 	toUpdate, toUpdateArgs := prepareCardDetailsUpdateQuery(req)
-
-	if len(toUpdateArgs) != 0 {
-		updateRes, err := o.Exec(ctx, fmt.Sprintf(`UPDATE card_details SET %s WHERE id=%d`, toUpdate, id),
-			toUpdateArgs...)
-		if err != nil {
-			return fmt.Errorf("problem updating card_details: %w", err)
-		}
-
-		if updateRes.RowsAffected() == 0 {
-			return fmt.Errorf("card_details not updated as no rows affected")
-		}
-
-	} else {
+	if len(toUpdateArgs) == 0 {
 		return common.ErrInvalidValues
+	}
+
+	updateRes, err := o.Exec(ctx, fmt.Sprintf(`UPDATE card_details SET %s WHERE id=%d`, toUpdate, id), toUpdateArgs...)
+	if err != nil {
+		return fmt.Errorf("o.Exec: %w", err)
+	}
+	if updateRes.RowsAffected() == 0 {
+		return common.ErrNoRowsAffected
 	}
 
 	return nil
 }
 
-func (o *OrdersDB) GetAllCardDetails(ctx context.Context, skip int, limit int) (*[]CardDetails, error) {
-
-	cardDetails := []CardDetails{}
-
+func (o *OrdersDB) GetAllCardDetails(ctx context.Context, skip int, limit int) ([]CardDetails, error) {
 	limitOffsetString := fmt.Sprintf(" LIMIT %d OFFSET %d", limit, skip)
-
-	whereQuery, orderByQuery, queryBuildErr := buildAndGetCardDetailsWhereQuery()
-
-	if queryBuildErr != nil {
-		return &cardDetails, queryBuildErr
-	}
+	whereQuery, orderByQuery := buildAndGetCardDetailsWhereQuery()
 
 	rows, err := o.Query(ctx, `
 		SELECT 
@@ -114,10 +94,11 @@ func (o *OrdersDB) GetAllCardDetails(ctx context.Context, skip int, limit int) (
 			updated_at,
 			deleted_at from card_details`+whereQuery+orderByQuery+limitOffsetString)
 	if err != nil {
-		fmt.Println("--error-while-executing-query", err)
-		return &cardDetails, err
+		return nil, fmt.Errorf("o.Query: %w", err)
 	}
 	defer rows.Close()
+
+	cardDetails := []CardDetails{}
 	for rows.Next() {
 		var d CardDetails
 		err := rows.Scan(
@@ -133,12 +114,15 @@ func (o *OrdersDB) GetAllCardDetails(ctx context.Context, skip int, limit int) (
 			&d.DeletedAt,
 		)
 		if err != nil {
-			return &cardDetails, err
+			return nil, fmt.Errorf("rows.Scan: %w", err)
 		}
 		cardDetails = append(cardDetails, d)
 	}
-	return &cardDetails, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows.Err: %w", err)
+	}
 
+	return cardDetails, rows.Err()
 }
 
 //func addCardDetailsFromAllExistingOrders(ctx *gin.Context, orderType string) {
@@ -298,8 +282,7 @@ func prepareCardDetailsCreateQuery(req CardDetails) (string, string, []interface
 	return concatedCreateString, concatedNumString, args
 }
 
-func buildAndGetCardDetailsWhereQuery() (string, string, error) {
-
+func buildAndGetCardDetailsWhereQuery() (string, string) {
 	var whereString strings.Builder
 	var orderBy strings.Builder
 	var whereCondition strings.Builder
@@ -313,5 +296,6 @@ func buildAndGetCardDetailsWhereQuery() (string, string, error) {
 	} else {
 		whereString.Reset()
 	}
-	return whereString.String(), orderBy.String(), nil
+
+	return whereString.String(), orderBy.String()
 }

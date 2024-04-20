@@ -4,17 +4,18 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"math/rand"
 	"time"
 
 	"github.com/oklog/ulid/v2"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 )
 
 type EventEmitter interface {
-	Emit(...Event)
+	Emit(ctx context.Context, events ...Event)
 	Close(ctx context.Context)
 }
 
@@ -49,20 +50,21 @@ func NewSimpleEmitter(handlers ...EventHandler) *SimpleEmitter {
 	return e
 }
 
-func (e *SimpleEmitter) Emit(events ...Event) {
+func (e *SimpleEmitter) Emit(ctx context.Context, events ...Event) {
 	for _, event := range events {
 		event.ID = ulid.MustNew(ulid.Now(), e.entropy).String()
 		for _, handler := range e.handlers {
-			handler.Handle(event)
+			handler.Handle(ctx, event)
 		}
 	}
 }
 
 func (e *SimpleEmitter) Close(ctx context.Context) {
-	log.Println("Closing event emitter")
+	slog.Info("Closing event emitter")
 	for _, handler := range e.handlers {
 		if err := handler.Close(ctx); err != nil {
-			log.Printf("ERROR: close event handler: %v\n", err)
+			slog.Error("close event handler", slog.Any("err", err))
+			utils.SentryFor(ctx).CaptureException(err)
 		}
 	}
 }

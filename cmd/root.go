@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -25,4 +27,7 @@ func Execute() {
 
 func init() {
 	cobra.OnInitialize(common.LoadConfig)
+	rootCmd.SetVersionTemplate(fmt.Sprintf("%s -- %s", common.ServiceName, common.GitSHA))
+
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, nil)))
 }

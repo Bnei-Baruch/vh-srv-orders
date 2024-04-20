@@ -10,14 +10,12 @@ variables:
 build_staging:
   image: docker:latest
   stage: build
-  tags:
-    - staging
   services:
-    - docker:19.03.12-dind
+    - docker:26.0.0-dind
   script:
     - docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY
     - docker pull $STAGING_LATEST_IMAGE
-    - docker build --cache-from $STAGING_LATEST_IMAGE -t $STAGING_IMAGE .
+    - docker build --cache-from $STAGING_LATEST_IMAGE -build-arg GIT_SHA=$CI_COMMIT_SHA -t $STAGING_IMAGE .
     - docker tag $STAGING_IMAGE $STAGING_LATEST_IMAGE
     - docker push $STAGING_IMAGE
     - docker push $STAGING_LATEST_IMAGE
@@ -26,12 +24,14 @@ build_staging:
 
 deploy_staging:
   variables:
-    # we want to use the db in staging server itself.
-    DB_HOST: "ordersdb" #"${DEV_PG_HOST}"
+    DB_HOST: "ordersdb"
     DB_PORT: ${DEV_PG_PORT}
     DB_USER: ${DEV_ORDER_PG_USER}
     DB_DATABASE: ${DEV_ORDER_PG_DBNAME}
     DB_PASSWORD: ${DEV_PG_PWD}
+    APP_PORT: "8185"
+    APP_MODE: "release"
+    APP_ENV: "staging"
     NATS_USER: ${DYN_STAGING_NATS_USER}
     NATS_PASSWORD: ${DYN_STAGING_NATS_PASSWORD}
     NATS_URL: "nats://${DYN_STAGING_NATS_USER}:${DYN_STAGING_NATS_PASSWORD}@nats:4222"
@@ -49,6 +49,7 @@ deploy_staging:
     KEYCLOAK_CLIENT_SECRET: ${DYN_STAGING_KEYCLOAK_CONFIDENTIAL_CLIENT_SECRET}
     PROFILE_SERVICE_URL: ${DYN_STAGING_PROFILE_SERVICE_URL}
     SENDGRID_API_KEY: ${SENDGRID_API_KEY}
+    SENTRY_DSN: ${STAGING_ORDERS_SENTRY_DSN}
   image: gitlab.bbdev.team:5050/vh/buildutils/buildutil:0.7.0
   stage: deploy
   tags:
@@ -67,10 +68,10 @@ build_production:
   image: docker:latest
   stage: build
   services:
-    - docker:19.03.12-dind
+    - docker:26.0.0-dind
   script:
     - docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY
-    - docker build -t $PROD_IMAGE .
+    - docker build -build-arg GIT_SHA=$CI_COMMIT_SHA -t $PROD_IMAGE .
     - docker push $PROD_IMAGE
   only:
     - tags
@@ -86,6 +87,9 @@ deploy_production:
     DB_USER: ${PROD_ORDER_PG_USER}
     DB_DATABASE: ${PROD_ORDER_PG_DBNAME}
     DB_PASSWORD: ${PROD_PG_PWD}
+    APP_PORT: "8185"
+    APP_MODE: "release"
+    APP_ENV: "production"
     NATS_USER: ${DYN_PROD_NATS_USER}
     NATS_PASSWORD: ${DYN_PROD_NATS_PASSWORD}
     NATS_URL: "nats://${DYN_PROD_NATS_USER}:${DYN_PROD_NATS_PASSWORD}@nats:4222"
@@ -96,6 +100,7 @@ deploy_production:
     KEYCLOAK_CLIENT_SECRET: ${DYN_PROD_KEYCLOAK_CONFIDENTIAL_CLIENT_SECRET}
     PROFILE_SERVICE_URL: ${DYN_PROD_PROFILE_SERVICE_URL}
     SENDGRID_API_KEY: ${SENDGRID_API_KEY}
+    SENTRY_DSN: ${PROD_ORDERS_SENTRY_DSN}
   script:
     - docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY
     - IMAGE_NAME=$PROD_IMAGE docker-compose up -d nats

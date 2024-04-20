@@ -15,50 +15,47 @@ import (
 )
 
 func (o *OrdersAPI) handleGetAccount(c *gin.Context) {
-	id := c.Param("id")
-
 	var (
 		intID int
 		err   error
 	)
 
+	id := c.Param("id")
 	intID, err = strconv.Atoi(id)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id! Accepted value is INTEGER", "success": false})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
 
 	account, err := o.repo.GetAccount(c.Request.Context(), intID, "")
-
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Account not found"})
-			return
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.Status(http.StatusNotFound)
+		} else {
+			c.Status(http.StatusInternalServerError)
+			_ = c.Error(fmt.Errorf("repo.GetAccount: %w", err))
 		}
-		fmt.Println("Error:", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
-		return
-	} else {
-		c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": account, "success": true})
 		return
 	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": account, "success": true})
 }
 
 func (o *OrdersAPI) handleCreateAccount(c *gin.Context) {
 	var req repo.Account
-	errRequest := c.BindJSON(&req)
-	if errRequest != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"Error": errRequest.Error()})
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	accountId, err := o.repo.CreateAccount(c.Request.Context(), req)
 	if err != nil {
-		if errors.Is(err, common.ErrInvalidBody) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err})
-			return
+		if errors.Is(err, common.ErrInvalidValues) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		} else {
+			c.Status(http.StatusInternalServerError)
+			_ = c.Error(fmt.Errorf("repo.CreateAccount: %w", err))
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
 		return
 	}
 
@@ -78,14 +75,12 @@ func (o *OrdersAPI) handleFetchAccounts(c *gin.Context) {
 		limit = "10"
 	}
 
-	// String conversion to int
 	intSkip, err := strconv.Atoi(skip)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid skip value! Accepted value is INTEGER", "success": false})
 		return
 	}
 
-	// String conversion to int
 	intLimit, err := strconv.Atoi(limit)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit value! Accepted value is INTEGER", "success": false})
@@ -93,25 +88,19 @@ func (o *OrdersAPI) handleFetchAccounts(c *gin.Context) {
 	}
 
 	accounts, err := o.repo.GetAllAccounts(c.Request.Context(), intSkip, intLimit, email)
-
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   err.Error(),
-			"success": false,
-		})
+		c.Status(http.StatusInternalServerError)
+		_ = c.Error(fmt.Errorf("repo.GetAccount: %w", err))
 		return
 	}
+
 	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": accounts, "success": true})
 }
 
 func (o *OrdersAPI) handlePatchAccount(c *gin.Context) {
 	var req repo.Account
-	errRequest := c.BindJSON(&req)
-
-	id := c.Param("id")
-
-	if errRequest != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"Error": errRequest.Error()})
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -120,6 +109,7 @@ func (o *OrdersAPI) handlePatchAccount(c *gin.Context) {
 		err   error
 	)
 
+	id := c.Param("id")
 	intID, err = strconv.Atoi(id)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id! Accepted value is INTEGER", "success": false})
@@ -127,13 +117,16 @@ func (o *OrdersAPI) handlePatchAccount(c *gin.Context) {
 	}
 
 	err = o.repo.PatchAccount(c.Request.Context(), req, intID)
-
 	if err != nil {
 		if errors.Is(err, fmt.Errorf("invalid body")) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err})
-			return
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		} else if errors.Is(err, common.ErrNoRowsAffected) {
+			c.Status(http.StatusNotFound)
+		} else {
+			c.Status(http.StatusInternalServerError)
+			_ = c.Error(fmt.Errorf("repo.PatchAccount: %w", err))
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+
 		return
 	}
 
@@ -141,13 +134,12 @@ func (o *OrdersAPI) handlePatchAccount(c *gin.Context) {
 }
 
 func (o *OrdersAPI) handleDeleteAccount(c *gin.Context) {
-	id := c.Param("id")
-
 	var (
 		intID int
 		err   error
 	)
 
+	id := c.Param("id")
 	intID, err = strconv.Atoi(id)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id! Accepted value is INTEGER", "success": false})
@@ -155,9 +147,9 @@ func (o *OrdersAPI) handleDeleteAccount(c *gin.Context) {
 	}
 
 	err = o.repo.SoftDeleteAccount(c.Request.Context(), intID)
-
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+		c.Status(http.StatusInternalServerError)
+		_ = c.Error(fmt.Errorf("repo.SoftDeleteAccount: %w", err))
 		return
 	}
 
@@ -165,14 +157,12 @@ func (o *OrdersAPI) handleDeleteAccount(c *gin.Context) {
 }
 
 func (o *OrdersAPI) handleHardDeleteAccount(c *gin.Context) {
-	id := c.Param("id")
-
-	// check if id is string or integer
 	var (
 		intID int
 		err   error
 	)
 
+	id := c.Param("id")
 	intID, err = strconv.Atoi(id)
 	if err != nil {
 		// if id is string, then check if it is uuid
@@ -184,9 +174,9 @@ func (o *OrdersAPI) handleHardDeleteAccount(c *gin.Context) {
 	}
 
 	err = o.repo.HardDeleteAllUserDataByAccountID(c.Request.Context(), intID, id)
-
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.Status(http.StatusInternalServerError)
+		_ = c.Error(fmt.Errorf("repo.HardDeleteAllUserDataByAccountID: %w", err))
 		return
 	}
 

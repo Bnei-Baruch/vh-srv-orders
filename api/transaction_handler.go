@@ -4,14 +4,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
-	"log"
+	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/getsentry/sentry-go"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v4"
 	"github.com/volatiletech/null/v9"
@@ -22,59 +23,49 @@ import (
 )
 
 func (o *OrdersAPI) handleTransactionGetByID(c *gin.Context) {
-	id := c.Param("id")
-
-	var (
-		intID int
-		err   error
-	)
-
-	intID, err = strconv.Atoi(id)
+	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id! Accepted value is INTEGER", "success": false})
 		return
 	}
 
-	transaction, err := o.repo.GetTransactionById(c.Request.Context(), intID)
-
+	transaction, err := o.repo.GetTransactionById(c.Request.Context(), id)
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Transaction not found"})
-			return
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.Status(http.StatusNotFound)
+		} else {
+			c.Status(http.StatusInternalServerError)
+			_ = c.Error(fmt.Errorf("repo.GetTransactionById: %w", err))
 		}
-		fmt.Println("Error:", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
-		return
-	} else {
-		c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": transaction, "success": true})
 		return
 	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": transaction, "success": true})
 }
 
 func (o *OrdersAPI) handleTransactionOrderAndPay(c *gin.Context) {
 	var req repo.RequestOrder
-	errRequest := c.BindJSON(&req)
-
-	if errRequest != nil {
-		log.Println("Err:", errRequest)
-		c.JSON(http.StatusBadRequest, gin.H{"Error": errRequest})
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	ord, errOrderCreation := o.repo.CreateOrderViaTransaction(c.Request.Context(), req)
-
-	if errOrderCreation != nil {
-		log.Println("Err:", errOrderCreation)
-		c.JSON(http.StatusBadRequest, gin.H{"Error": errOrderCreation})
+	ord, err := o.repo.CreateOrderViaTransaction(c.Request.Context(), req)
+	if err != nil {
+		if errors.Is(err, common.ErrInvalidValues) {
+			c.Status(http.StatusBadRequest)
+		} else {
+			c.Status(http.StatusInternalServerError)
+			_ = c.Error(fmt.Errorf("repo.CreateOrderViaTransaction: %w", err))
+		}
 		return
 	}
 
 	req.PaymentStatus = null.StringFrom(common.PaymentStatusPending) // don't let anybody fool us
-	p, errPaymentCreation := o.repo.CreatePayment(c.Request.Context(), req, ord.ID)
-
-	if errPaymentCreation != nil {
-		log.Println("Err:", errPaymentCreation)
-		c.JSON(http.StatusBadRequest, gin.H{"Error": errPaymentCreation})
+	p, err := o.repo.CreatePayment(c.Request.Context(), req, ord.ID)
+	if err != nil {
+		c.Status(http.StatusInternalServerError)
+		_ = c.Error(fmt.Errorf("repo.CreatePayment: %w", err))
 		return
 	}
 
@@ -96,26 +87,20 @@ func (o *OrdersAPI) handleTransactionOrderAndPay(c *gin.Context) {
 	}
 
 	tran := repo.Transaction{
-		OrderID:    null.NewInt(ord.ID, true),
+		OrderID:    null.IntFrom(ord.ID),
 		AccountID:  ord.AccountID,
-		PaymentID:  null.NewInt(p.ID, true),
+		PaymentID:  null.IntFrom(p.ID),
 		TerminalID: req.TerminalId,
 	}
 
-	_, err := o.repo.CreateTransactionAndGetId(c.Request.Context(), tran)
-
-	if err != nil {
-		log.Println("Err:", err)
-		c.JSON(http.StatusBadRequest, gin.H{"Error": err})
-		return
-	}
-
+	_, err = o.repo.CreateTransactionAndGetId(c.Request.Context(), tran)
 	if err != nil {
 		if errors.Is(err, fmt.Errorf("invalid body")) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err})
-			return
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		} else {
+			c.Status(http.StatusInternalServerError)
+			_ = c.Error(fmt.Errorf("repo.CreateTransactionAndGetId: %w", err))
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
 		return
 	}
 
@@ -156,119 +141,114 @@ func (o *OrdersAPI) handleTransactionOrderAndPay(c *gin.Context) {
 	}
 
 	if req.TerminalId.String == "ben_dummy_pelecard" {
-		c.JSON(http.StatusOK, gin.H{"url": req.SuccessURL.String + "?success=1&token=1111111111&authNo=2222222&additional_details_param_x=" + paramx + "&card_hebrew_name=xxxxx&confirmation_key=xxxxxxxxx&credit_card_abroad_card=1&credit_card_brand=2&credit_card_company_clearer=1&credit_card_company_issuer=0&credit_card_exp_date=0925&credit_card_number=xxxxxxxxxxxxxxxx&credit_type=1&debit_code=50&debit_currency=2&debit_total=" + strconv.FormatFloat(req.Amount.Float64, 'f', 2, 64) + "&debit_type=1&first_payment_total=0&fixed_payment_total=0&j_param=4&station_number=1&total_payments=1&transaction_id=xxxxx-xxxxx-xxxx-xxxx-xxxxxxxx&transaction_init_time=" + time.Now().Format("2006-01-02 15:04:05") + "&transaction_pelecard_id=11111111&transaction_update_time=" + time.Now().Format("2006-01-02 15:04:05") + "&user_key=" + ordkey + "&voucher_id=00-000-000"})
+		c.JSON(http.StatusOK, gin.H{"url": req.SuccessURL.String + "?success=1&token=1111111111&authNo=2222222&additional_details_param_x=" + paramx +
+			"&card_hebrew_name=xxxxx&confirmation_key=xxxxxxxxx&credit_card_abroad_card=1&credit_card_brand=2&credit_card_company_clearer=1&credit_card_company_issuer=0&credit_card_exp_date=0925&credit_card_number=xxxxxxxxxxxxxxxx&credit_type=1&debit_code=50&debit_currency=2&debit_total=" + strconv.FormatFloat(req.Amount.Float64, 'f', 2, 64) +
+			"&debit_type=1&first_payment_total=0&fixed_payment_total=0&j_param=4&station_number=1&total_payments=1&transaction_id=xxxxx-xxxxx-xxxx-xxxx-xxxxxxxx&transaction_init_time=" + time.Now().Format("2006-01-02 15:04:05") +
+			"&transaction_pelecard_id=11111111&transaction_update_time=" + time.Now().Format("2006-01-02 15:04:05") +
+			"&user_key=" + ordkey + "&voucher_id=00-000-000"})
 		return
 	}
 
-	fmt.Println(extPay)
+	utils.LogFor(c.Request.Context()).Info("payment request", slog.Any("payload", extPay))
 
 	payload, err := json.Marshal(extPay)
-
 	if err != nil {
-		log.Println("Err:", err)
-		c.JSON(http.StatusBadRequest, gin.H{"Error": err})
+		c.Status(http.StatusInternalServerError)
+		_ = c.Error(fmt.Errorf("json.Marshal repo.RequestPayment: %w", err))
 		return
 	}
 
 	ENDPOINT := ""
-
 	if req.Type.String == "recurring" {
 		ENDPOINT = "https://checkout.kbb1.com/token/new"
 	}
-
 	if req.Type.String == "regular" {
 		ENDPOINT = "https://checkout.kbb1.com/emv/new"
 	}
-
 	if req.Reference.String == "testemv" {
-		fmt.Println("EMV")
 		ENDPOINT = "https://checkout.kbb1.com/emv/new"
 	}
-	fmt.Println(ENDPOINT)
+	utils.LogFor(c.Request.Context()).Debug("payment endpoint", slog.String("endpoint", ENDPOINT))
 
 	resp, err := utils.PostJSON("POST", ENDPOINT, payload)
 	if err != nil {
-		fmt.Println("Error wehn posting to ENDPOINT")
-		fmt.Println(err)
+		utils.LogFor(c.Request.Context()).Info("POST external payment failed", slog.Any("err", err))
 		c.JSON(http.StatusOK, gin.H{"url": errorurl})
 		return
 	}
 	defer resp.Body.Close()
-	fmt.Println("response Status:", resp.Status)
-	fmt.Println("response Headers:", resp.Header)
-	body, _ := ioutil.ReadAll(resp.Body)
 
-	parsableBody := string(body)
-	fmt.Println("response URL:", parsableBody)
+	body, _ := io.ReadAll(resp.Body)
 
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"Error": err})
-	} else {
-		// Grisha you should fix that one... seriously
-		if req.Type.String == "regular" {
-			// if req.Type is regular - endpoint return some ass-shit string
-			// gota parse the m*fkr
+	utils.LogFor(c.Request.Context()).Info("payment response", slog.Group("response",
+		slog.String("status", resp.Status),
+		slog.Any("headers", resp.Header),
+		slog.String("body", string(body))))
 
-			var serRes repo.OrderServiceEmvRes
-			if err := json.Unmarshal(body, &serRes); err != nil {
-				log.Println("Err while parsing https://checkout.kbb1.com/emv/new response", err)
-			}
+	// Grisha you should fix that one... seriously
+	if req.Type.String == "regular" {
+		// if req.Type is regular - endpoint return some ass-shit string
+		// gota parse the m*fkr
 
-			if serRes.Status == "success" {
-				// actualURL := strings.Split(serRes.URL, "'")[1]
-				actualURL := serRes.URL
-				c.JSON(http.StatusOK, gin.H{"url": actualURL})
-			} else {
-				fmt.Println("--error-in-https://checkout.kbb1.com/emv/new--")
-				var i interface{}
-				json.Unmarshal(body, &i)
-				c.JSON(http.StatusOK, i)
-			}
+		var serRes repo.OrderServiceEmvRes
+		if err := json.Unmarshal(body, &serRes); err != nil {
+			utils.LogFor(c.Request.Context()).Info("payment response [regular] is not structured", slog.Any("err", err))
+		}
 
+		if serRes.Status == "success" {
+			c.JSON(http.StatusOK, gin.H{"url": serRes.URL})
 		} else {
 			var i interface{}
-			json.Unmarshal(body, &i)
+			if err := json.Unmarshal(body, &i); err != nil {
+				utils.LogFor(c.Request.Context()).Warn("payment response [regular] json.Unmarshal", slog.Any("err", err))
+				utils.SentryFor(c.Request.Context()).CaptureException(err)
+			}
 			c.JSON(http.StatusOK, i)
 		}
+
+	} else {
+		var i interface{}
+		if err := json.Unmarshal(body, &i); err != nil {
+			utils.LogFor(c.Request.Context()).Warn("payment response [generic] json.Unmarshal", slog.Any("err", err))
+			utils.SentryFor(c.Request.Context()).CaptureException(err)
+		}
+		c.JSON(http.StatusOK, i)
 	}
 }
 
 func (o *OrdersAPI) handleTransactionPaid(c *gin.Context) {
 	var rp repo.RequestPaid
-	err := c.BindJSON(&rp)
-
-	if err != nil {
-		log.Println("Err:", err)
-		c.JSON(http.StatusBadRequest, gin.H{"Error": err})
+	if err := c.ShouldBindJSON(&rp); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	if len(rp.UserKey.String) == 0 {
-		log.Println("Err: No Order ID provided")
-		log.Println(">> ParamX: " + rp.ParamX.String)
-		c.JSON(http.StatusBadRequest, gin.H{"Error": "No order id provided in UserKey"})
+		utils.LogFor(c.Request.Context()).Warn("user_key is empty", slog.String("additional_details_param_x", rp.ParamX.String))
+		hub := utils.SentryFor(c.Request.Context())
+		hub.WithScope(func(scope *sentry.Scope) {
+			scope.SetExtra("additional_details_param_x", rp.ParamX.String)
+			hub.CaptureMessage("OrdersAPI.handleTransactionPaid user_key is empty")
+		})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No order id provided in UserKey"})
 		return
 	}
 
 	p, err := o.repo.UpdatePayment(c.Request.Context(), rp)
-
 	if err != nil {
 		// TODO : ask grisha to return more info on error
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"Error": err})
+		utils.LogFor(c.Request.Context()).Warn("repo.UpdatePayment", slog.Any("err", err))
+		utils.SentryFor(c.Request.Context()).CaptureException(err)
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
 		return
 	}
 
-	order, err := o.repo.UpdateOrderAfterPayment(c.Request.Context(), p)
-
-	// TODO (edo): not sure jan2022ticket is relevant anymore. Anyhow, use events instead of webhooks
-	if p.PaymentStatus.String == "success" && order.ProductType.String == "jan2022ticket" {
-		log.Println("Sync with Registration")
-		err := o.repo.SyncServiceRegistration(c.Request.Context(), p, order)
-
-		if err != nil {
-			log.Println("we have an error")
-			log.Println(err)
-		}
+	err = o.repo.UpdateOrderAfterPayment(c.Request.Context(), *p)
+	if err != nil {
+		c.Status(http.StatusInternalServerError)
+		_ = c.Error(fmt.Errorf("repo.UpdateOrderAfterPayment: %w", err))
+		return
 	}
+
 	c.JSON(http.StatusOK, nil)
 }

@@ -10,31 +10,40 @@ import (
 )
 
 func (o *OrdersAPI) handleOrdersCount(c *gin.Context) {
-	var total int64
-	var res repo.PaidDetailC
+	var (
+		total int64
+		res   *repo.PaidDetailC
+		err   error
+	)
+
 	filter := string(c.Params.ByName("filter"))
 	switch filter {
 	case "all":
-		total = o.repo.CountsAllOrders(c.Request.Context())
+		total, err = o.repo.CountsAllOrders(c.Request.Context())
 	case "paid":
-		total = o.repo.CountsFilteredOrders(c.Request.Context(), filter)
+		total, err = o.repo.CountsFilteredOrders(c.Request.Context(), filter)
 	case "failed":
-		total = o.repo.CountsFilteredOrders(c.Request.Context(), filter)
+		total, err = o.repo.CountsFilteredOrders(c.Request.Context(), filter)
 	case "pending":
-		total = o.repo.CountsFilteredOrders(c.Request.Context(), filter)
+		total, err = o.repo.CountsFilteredOrders(c.Request.Context(), filter)
 	case "tickets":
-		total = o.repo.CountsTicketsOrders(c.Request.Context())
+		total, err = o.repo.CountsTicketsOrders(c.Request.Context())
 	case "tickets10":
-		total = o.repo.CountsTickets10Orders(c.Request.Context())
+		total, err = o.repo.CountsTickets10Orders(c.Request.Context())
 	case "tickets30":
-		total = o.repo.CountsTickets30Orders(c.Request.Context())
+		total, err = o.repo.CountsTickets30Orders(c.Request.Context())
 	case "convention":
-		total = o.repo.CountsConventionOrders(c.Request.Context())
+		total, err = o.repo.CountsConventionOrders(c.Request.Context())
 	// for event in may2022
 	case "0522":
-		res = o.repo.PaidDetailCount(c.Request.Context())
+		res, err = o.repo.PaidDetailCount(c.Request.Context())
 	default:
-		total = o.repo.CountsAllOrders(c.Request.Context())
+		total, err = o.repo.CountsAllOrders(c.Request.Context())
+	}
+	if err != nil {
+		c.Status(http.StatusInternalServerError)
+		_ = c.Error(fmt.Errorf("repo count [%s]: %w", filter, err))
+		return
 	}
 
 	if filter == "0522" {
@@ -42,6 +51,5 @@ func (o *OrdersAPI) handleOrdersCount(c *gin.Context) {
 		return
 	}
 
-	fmt.Printf("\n>> Count %s : %d", filter, total)
 	c.JSON(http.StatusOK, gin.H{filter: total})
 }

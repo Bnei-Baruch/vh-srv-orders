@@ -77,10 +77,7 @@ func (a *App) initSentry() {
 }
 
 func (a *App) initGinEngine() {
-	if common.Config.Mode == "PROD" {
-		gin.SetMode(gin.ReleaseMode)
-	}
-
+	gin.SetMode(common.Config.Mode)
 	a.gEngine = gin.New()
 
 	// middleware

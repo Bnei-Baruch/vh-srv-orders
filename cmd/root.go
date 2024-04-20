@@ -12,8 +12,9 @@ import (
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   "orders",
-	Short: "Virtual home orders and payments management",
+	Use:     "orders",
+	Short:   "Virtual home orders and payments management",
+	Version: "x",
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.

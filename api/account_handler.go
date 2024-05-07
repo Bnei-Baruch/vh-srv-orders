@@ -182,3 +182,27 @@ func (o *OrdersAPI) handleHardDeleteAccount(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Deleted!", "success": true})
 }
+
+func (o *OrdersAPI) handleMergeAccounts(c *gin.Context) {
+	var req repo.AccountMergeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.SourceId == "" || req.DestinationId == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "sourceID and destinationID are required"})
+		return
+	}
+	if req.SourceId == req.DestinationId {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "sourceID and destinationID must be different"})
+		return
+	}
+	err := o.repo.MergeAccountsOrders(c.Request.Context(), req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Merged!", "success": true})
+}

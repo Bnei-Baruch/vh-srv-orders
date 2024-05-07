@@ -117,6 +117,7 @@ func (a *App) initGinEngine() {
 		account.PATCH("/:id", a.ordersAPI.handlePatchAccount)
 		account.DELETE("/:id", a.ordersAPI.handleDeleteAccount)
 		account.DELETE("/:id/hard", a.ordersAPI.handleHardDeleteAccount)
+		account.POST("/merge", a.ordersAPI.handleMergeAccounts)
 	}
 	baseV2Path.GET("/accounts", a.ordersAPI.handleFetchAccounts)
 

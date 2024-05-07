@@ -281,6 +281,29 @@ func (o *OrdersDB) GetAccountIDByKeycloakID(ctx context.Context, keycloakId stri
 	return accountID, nil
 }
 
+func (o *OrdersDB) MergeAccountsOrders(ctx context.Context, req AccountMergeRequest) error {
+	var (
+		intSourceAccountID      int
+		intDestinationAccountID int
+		err                     error
+	)
+	intSourceAccountID, err = o.GetAccountIDByKeycloakID(ctx, req.SourceId)
+	intDestinationAccountID, err = o.GetAccountIDByKeycloakID(ctx, req.DestinationId)
+	if err != nil {
+		return errors.New("ID not found in DB")
+	}
+	_, err = o.Exec(ctx, `UPDATE orders SET "AccountID" = $1 WHERE "AccountID" = $2`, intDestinationAccountID, intSourceAccountID)
+	if err != nil {
+		return err
+	}
+	o.emitEvent(ctx, events.TypeUpdateAccount, map[string]interface{}{"account_id": req.DestinationId})
+	err = o.SoftDeleteAccount(ctx, intSourceAccountID)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func prepareAccountCreateQuery(req Account) (string, string, []interface{}) {
 	var createStrings []string
 	var numString []string

@@ -251,6 +251,11 @@ type Account struct {
 	UserKey             null.String `json:"UserKCID,omitempty" gorm:"Column:UserKey;type:varchar(85)"`
 }
 
+type AccountMergeRequest struct {
+	SourceId      string `json:"sourceID"`
+	DestinationId string `json:"destinationID"`
+}
+
 // RequestPayment ..
 type RequestPayment struct {
 	// Part for Pelecard

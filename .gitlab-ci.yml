@@ -50,16 +50,15 @@ deploy_staging:
     PROFILE_SERVICE_URL: ${DYN_STAGING_PROFILE_SERVICE_URL}
     SENDGRID_API_KEY: ${SENDGRID_API_KEY}
     SENTRY_DSN: ${STAGING_ORDERS_SENTRY_DSN}
-  image: gitlab.bbdev.team:5050/vh/buildutils/buildutil:0.7.0
+  image: gitlab.bbdev.team:5050/vh/buildutils/buildutil:0.8.0
   stage: deploy
   tags:
     - staging
   script:
-    - env
     - docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY
-    - IMAGE_NAME=$STAGING_IMAGE docker-compose up -d ordersdb nats
+    - IMAGE_NAME=$STAGING_IMAGE docker compose up -d ordersdb nats
     - sleep 60
-    - IMAGE_NAME=$STAGING_IMAGE docker-compose up -d vh-srv-orders
+    - IMAGE_NAME=$STAGING_IMAGE docker compose up -d vh-srv-orders
   only:
     - master
 
@@ -77,7 +76,7 @@ build_production:
     - tags
 
 deploy_production:
-  image: gitlab.bbdev.team:5050/vh/buildutils/buildutil:0.7.0
+  image: gitlab.bbdev.team:5050/vh/buildutils/buildutil:0.8.0
   stage: deploy
   tags:
     - production
@@ -103,9 +102,9 @@ deploy_production:
     SENTRY_DSN: ${PROD_ORDERS_SENTRY_DSN}
   script:
     - docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY
-    - IMAGE_NAME=$PROD_IMAGE docker-compose up -d nats
+    - IMAGE_NAME=$PROD_IMAGE docker compose up -d nats
     - sleep 10
-    - IMAGE_NAME=$PROD_IMAGE docker-compose up -d vh-srv-orders
+    - IMAGE_NAME=$PROD_IMAGE docker compose up -d vh-srv-orders
   only:
     - tags
   when: manual

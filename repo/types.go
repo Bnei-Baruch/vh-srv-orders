@@ -252,8 +252,8 @@ type Account struct {
 }
 
 type AccountMergeRequest struct {
-	SourceId      string `json:"sourceID"`
-	DestinationId string `json:"destinationID"`
+	SourceKeycloakID      null.String `json:"source_keycloak_id"`
+	DestinationKeycloakID null.String `json:"destination_keycloak_id"`
 }
 
 // RequestPayment ..

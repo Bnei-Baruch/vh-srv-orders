@@ -283,21 +283,69 @@ func (o *OrdersDB) GetAccountIDByKeycloakID(ctx context.Context, keycloakId stri
 
 func (o *OrdersDB) MergeAccountsOrders(ctx context.Context, req AccountMergeRequest) error {
 	var (
-		intSourceAccountID      int
-		intDestinationAccountID int
-		err                     error
+		sourceAccountID      int
+		destinationAccountID int
+		err                  error
 	)
-	intSourceAccountID, err = o.GetAccountIDByKeycloakID(ctx, req.SourceId)
-	intDestinationAccountID, err = o.GetAccountIDByKeycloakID(ctx, req.DestinationId)
+	sourceAccountID, err = o.GetAccountIDByKeycloakID(ctx, req.SourceKeycloakID.String)
 	if err != nil {
-		return errors.New("ID not found in DB")
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("Keycloak ID '%s' is not found.", req.SourceKeycloakID.String)
+		} else {
+			return fmt.Errorf("GetAccountIDByKeycloakID: %w", err)
+		}
+
 	}
-	_, err = o.Exec(ctx, `UPDATE orders SET "AccountID" = $1 WHERE "AccountID" = $2`, intDestinationAccountID, intSourceAccountID)
+	destinationAccountID, err = o.GetAccountIDByKeycloakID(ctx, req.DestinationKeycloakID.String)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("Keycloak ID '%s' is not found.", req.DestinationKeycloakID.String)
+		} else {
+			return fmt.Errorf("GetAccountIDByKeycloakID: %w", err)
+		}
+
+	}
+	tx, err := o.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("o.Begin: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	_, err = tx.Exec(ctx, `UPDATE orders SET "AccountID" = $1 WHERE "AccountID" = $2`, destinationAccountID, sourceAccountID)
 	if err != nil {
 		return err
 	}
-	o.emitEvent(ctx, events.TypeUpdateAccount, map[string]interface{}{"account_id": req.DestinationId})
-	err = o.SoftDeleteAccount(ctx, intSourceAccountID)
+	_, err = tx.Exec(ctx, `UPDATE orders SET "userkey" = $1 WHERE "userkey" = $2`, req.DestinationKeycloakID, req.SourceKeycloakID)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `DELETE FROM transaction WHERE account_id = $1`, sourceAccountID)
+	if err != nil {
+		return fmt.Errorf("delete from transaction: %w", err)
+	}
+
+	_, err = tx.Exec(ctx, `DELETE FROM card_details where account_id = $1`, sourceAccountID)
+	if err != nil {
+		return fmt.Errorf("delete from card_details: %w", err)
+	}
+
+	_, err = tx.Exec(ctx, `DELETE FROM specials where email = (SELECT "Email" FROM accounts WHERE id = $1)`, sourceAccountID)
+	if err != nil {
+		return fmt.Errorf("delete from specials: %w", err)
+	}
+
+	_, err = tx.Exec(ctx, "DELETE FROM accounts WHERE id = $1", sourceAccountID)
+	if err != nil {
+		return fmt.Errorf("delete from accounts: %w", err)
+	}
+
+	err = tx.Commit(ctx)
+	if err != nil {
+		return fmt.Errorf("tx.Commit: %w", err)
+	}
+
+	o.emitEvent(ctx, events.TypeUpdateAccount, map[string]interface{}{"account_id": req.DestinationKeycloakID})
+	err = o.SoftDeleteAccount(ctx, sourceAccountID)
 	if err != nil {
 		return err
 	}

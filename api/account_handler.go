@@ -189,12 +189,16 @@ func (o *OrdersAPI) handleMergeAccounts(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if req.SourceId == "" || req.DestinationId == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sourceID and destinationID are required"})
+	if !req.SourceKeycloakID.IsValid() || !req.DestinationKeycloakID.IsValid() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "source_keycloak_id and destination_keycloak_id are required"})
 		return
 	}
-	if req.SourceId == req.DestinationId {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sourceID and destinationID must be different"})
+	if req.SourceKeycloakID.String == "" || req.DestinationKeycloakID.String == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "source_keycloak_id or destination_keycloak_id cannot be empty"})
+		return
+	}
+	if req.SourceKeycloakID.String == req.DestinationKeycloakID.String {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "source_keycloak_id and destination_keycloak_id must be different"})
 		return
 	}
 	err := o.repo.MergeAccountsOrders(c.Request.Context(), req)

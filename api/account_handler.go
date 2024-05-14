@@ -203,9 +203,12 @@ func (o *OrdersAPI) handleMergeAccounts(c *gin.Context) {
 	}
 	err := o.repo.MergeAccountsOrders(c.Request.Context(), req)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
-
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Merged!", "success": true})

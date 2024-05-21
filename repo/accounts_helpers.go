@@ -281,6 +281,80 @@ func (o *OrdersDB) GetAccountIDByKeycloakID(ctx context.Context, keycloakId stri
 	return accountID, nil
 }
 
+func (o *OrdersDB) MergeAccountsOrders(ctx context.Context, req AccountMergeRequest) error {
+	var (
+		sourceAccountID      int
+		destinationAccountID int
+		err                  error
+	)
+	sourceAccountID, err = o.GetAccountIDByKeycloakID(ctx, req.SourceKeycloakID.String)
+	if err != nil {
+		return fmt.Errorf("o.GetAccountIDByKeycloakID: %w", err)
+	}
+	destinationAccountID, err = o.GetAccountIDByKeycloakID(ctx, req.DestinationKeycloakID.String)
+	if err != nil {
+		return fmt.Errorf("o.GetAccountIDByKeycloakID: %w", err)
+	}
+	var sourceAccountEmail string
+	err = o.QueryRow(ctx, `SELECT  "Email" FROM accounts WHERE id = $1`, sourceAccountID).Scan(&sourceAccountEmail)
+	if err != nil {
+		return fmt.Errorf("Email from source account.id: %w", err)
+	}
+
+	var destinationAccountEmail string
+	err = o.QueryRow(ctx, `SELECT "Email" FROM accounts WHERE id = $1`, destinationAccountID).Scan(&destinationAccountEmail)
+	if err != nil {
+		return fmt.Errorf("Email from destaination account.id: %w", err)
+	}
+
+	tx, err := o.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("o.Begin: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	_, err = tx.Exec(ctx, `UPDATE orders SET "AccountID" = $1 WHERE "AccountID" = $2`, destinationAccountID, sourceAccountID)
+	if err != nil {
+		return fmt.Errorf("UPDATE orders AccountIds update : %w", err)
+	}
+	_, err = tx.Exec(ctx, `UPDATE orders SET "userkey" = $1 WHERE "userkey" = $2`, req.DestinationKeycloakID, req.SourceKeycloakID)
+	if err != nil {
+		return fmt.Errorf("UPDATE orders userKeys update : %w", err)
+	}
+	_, err = tx.Exec(ctx, `UPDATE transaction SET account_id = $1 WHERE account_id = $2`, destinationAccountID, sourceAccountID)
+	if err != nil {
+		return fmt.Errorf("UPDATE transaction : %w", err)
+	}
+
+	_, err = tx.Exec(ctx, `DELETE FROM card_details where account_id = $1`, sourceAccountID)
+	if err != nil {
+		return fmt.Errorf("delete from card_details: %w", err)
+	}
+
+	_, err = tx.Exec(ctx, `DELETE FROM specials where email = (SELECT "Email" FROM accounts WHERE id = $1)`, sourceAccountID)
+	if err != nil {
+		return fmt.Errorf("delete from specials: %w", err)
+	}
+
+	_, err = tx.Exec(ctx, "DELETE FROM accounts WHERE id = $1", sourceAccountID)
+	if err != nil {
+		return fmt.Errorf("delete from accounts: %w", err)
+	}
+
+	err = tx.Commit(ctx)
+	if err != nil {
+		return fmt.Errorf("tx.Commit: %w", err)
+	}
+
+	o.emitEvent(ctx, events.TypeMergeAccount, map[string]interface{}{
+		"source_account_id":         req.SourceKeycloakID,
+		"destination_account_id":    req.DestinationKeycloakID,
+		"source_account_email":      sourceAccountEmail,
+		"destination_account_email": destinationAccountEmail})
+
+	return nil
+}
+
 func prepareAccountCreateQuery(req Account) (string, string, []interface{}) {
 	var createStrings []string
 	var numString []string

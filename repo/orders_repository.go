@@ -19,6 +19,7 @@ type OrdersRepository interface {
 	SoftDeleteAccount(ctx context.Context, accountID int) error
 	HardDeleteAllUserDataByAccountID(ctx context.Context, accountID int, kc_id string) error
 	GetAccount(ctx context.Context, id int, email string) (*Account, error)
+	MergeAccountsOrders(ctx context.Context, request AccountMergeRequest) error
 
 	UpdateOrderStatusByOrderID(ctx context.Context, oid int, status string) error
 	CreateOrderViaTransaction(ctx context.Context, req RequestOrder) (*Order, error)

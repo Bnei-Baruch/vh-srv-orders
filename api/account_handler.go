@@ -182,3 +182,34 @@ func (o *OrdersAPI) handleHardDeleteAccount(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Deleted!", "success": true})
 }
+
+func (o *OrdersAPI) handleMergeAccounts(c *gin.Context) {
+	var req repo.AccountMergeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !req.SourceKeycloakID.IsValid() || !req.DestinationKeycloakID.IsValid() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "source_keycloak_id and destination_keycloak_id are required"})
+		return
+	}
+	if req.SourceKeycloakID.String == "" || req.DestinationKeycloakID.String == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "source_keycloak_id or destination_keycloak_id cannot be empty"})
+		return
+	}
+	if req.SourceKeycloakID.String == req.DestinationKeycloakID.String {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "source_keycloak_id and destination_keycloak_id must be different"})
+		return
+	}
+	err := o.repo.MergeAccountsOrders(c.Request.Context(), req)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Merged!", "success": true})
+}

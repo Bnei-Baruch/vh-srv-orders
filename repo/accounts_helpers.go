@@ -347,10 +347,9 @@ func (o *OrdersDB) MergeAccountsOrders(ctx context.Context, req AccountMergeRequ
 	}
 
 	o.emitEvent(ctx, events.TypeMergeAccount, map[string]interface{}{
-		"source_account_id":         req.SourceKeycloakID,
-		"destination_account_id":    req.DestinationKeycloakID,
-		"source_account_email":      sourceAccountEmail,
-		"destination_account_email": destinationAccountEmail})
+		"source_account_id":      req.SourceKeycloakID,
+		"destination_account_id": req.DestinationKeycloakID,
+	})
 
 	return nil
 }

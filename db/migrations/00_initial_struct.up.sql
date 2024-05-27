@@ -188,11 +188,4 @@ CREATE TABLE IF NOT EXISTS specials
     CONSTRAINT specials_email_key UNIQUE(email)
 );
 
-CREATE TABLE IF NOT EXISTS specials_sep2021
-(
-    email                       TEXT,
-    category                    TEXT,
-    subcategory                 TEXT
-);
-
 COMMIT;

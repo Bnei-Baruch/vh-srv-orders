@@ -14,7 +14,7 @@ func (o *OrdersDB) GetSpecialByEmail(ctx context.Context, email string) (*Specia
 
 	if err := o.QueryRow(ctx, `SELECT s.id, s.keycloak_id, a."Email", s.start_date, s.end_date, s.category, s.subcategory from specials as s LEFT JOIN accounts a on s.keycloak_id = a."UserKey" 
                                           where a."Email" = $1`, email).
-		Scan(&spe.Id, &spe.KeycloakId, &spe.Email, &spe.StartDate, &spe.EndDate, &spe.Category, &spe.SubCategory); err != nil {
+		Scan(&spe.Id, &spe.KeycloakId, &spe.StartDate, &spe.EndDate, &spe.Category, &spe.SubCategory); err != nil {
 		return nil, err
 	}
 
@@ -25,7 +25,7 @@ func (o *OrdersDB) GetSpecialById(ctx context.Context, id string) (*Special, err
 	var spe Special
 	if err := o.QueryRow(ctx, `SELECT s.id, s.keycloak_id, a."Email", s.start_date, s.end_date, s.category, s.subcategory from specials as s LEFT JOIN accounts a on s.keycloak_id = a."UserKey" 
                                           where s."keycloak_id" = $1`, id).
-		Scan(&spe.Id, &spe.KeycloakId, &spe.Email, &spe.StartDate, &spe.EndDate, &spe.Category, &spe.SubCategory); err != nil {
+		Scan(&spe.Id, &spe.KeycloakId, &spe.StartDate, &spe.EndDate, &spe.Category, &spe.SubCategory); err != nil {
 		return nil, err
 	}
 	return &spe, nil

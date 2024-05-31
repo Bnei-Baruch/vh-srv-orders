@@ -18,7 +18,8 @@ const (
 	TypeCreatePayment     = "create_payment"
 	TypeUpdatePayment     = "update_payment"
 	TypeDeletePayment     = "delete_payment"
-	TypeDeleteSpecial     = "delete_special"
+	TypeUpdateSpecial     = "update_special"
+	TypeCreateSpecial     = "Create_special"
 )
 
 type Event struct {

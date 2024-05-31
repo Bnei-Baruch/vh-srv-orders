@@ -9,21 +9,6 @@ import (
 	"time"
 )
 
-func (o *OrdersDB) HardDeleteSpecialByEmail(ctx context.Context, email string) error {
-	res, err := o.Exec(ctx, `Update  specials set end_date = now() WHERE  keycloak_id = (SELECT keycloak_id from accounts where "Email" = $1)`, email)
-	if err != nil {
-		return err
-	}
-
-	if res.RowsAffected() == 0 {
-		return common.ErrNoRowsAffected
-	} else {
-		o.emitEvent(ctx, events.TypeDeleteSpecial, map[string]interface{}{"email": email})
-	}
-
-	return nil
-}
-
 func (o *OrdersDB) GetSpecialByEmail(ctx context.Context, email string) (*Special, error) {
 	var spe Special
 
@@ -66,7 +51,7 @@ func (o *OrdersDB) CreateSpecial(ctx context.Context, s Special) (int, error) {
 		createQueryArgs...).Scan(&ID); err != nil {
 		return 0, err
 	}
-
+	o.emitEvent(ctx, events.TypeCreateSpecial, map[string]interface{}{"keycloak_id": s.KeycloakId, "start_date": s.StartDate, "end_date": s.EndDate})
 	return ID, nil
 }
 
@@ -80,10 +65,17 @@ func (o *OrdersDB) PatchSpecial(ctx context.Context, req Special, specialID int)
 	if err != nil {
 		return fmt.Errorf("o.Exec: %w", err)
 	}
+
 	if updateRes.RowsAffected() == 0 {
 		return common.ErrNoRowsAffected
 	}
 
+	var keycloakID string
+	if err := o.QueryRow(ctx, `SELECT "UserKey" FROM accounts  WHERE id=$1`, specialID).
+		Scan(&keycloakID); err != nil {
+		return fmt.Errorf("o.QueryRow: %w", err)
+	}
+	o.emitEvent(ctx, events.TypeUpdateSpecial, map[string]interface{}{"keycloak_id": keycloakID, "start_date": req.StartDate, "end_date": req.EndDate})
 	return nil
 }
 

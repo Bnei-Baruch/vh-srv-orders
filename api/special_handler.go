@@ -12,23 +12,6 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/common"
 )
 
-func (o *OrdersAPI) handleSpecialHardDeleteByEmail(c *gin.Context) {
-	email := c.Param("email")
-
-	err := o.repo.HardDeleteSpecialByEmail(c.Request.Context(), email)
-	if err != nil {
-		if errors.Is(err, common.ErrNoRowsAffected) {
-			c.Status(http.StatusNotFound)
-		} else {
-			c.Status(http.StatusInternalServerError)
-			_ = c.Error(fmt.Errorf("repo.HardDeleteSpecialByEmail: %w", err))
-		}
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "Deleted!", "success": true})
-}
-
 func (o *OrdersAPI) handleCreateSpecial(c *gin.Context) {
 	var req repo.Special
 	if err := c.ShouldBindJSON(&req); err != nil {

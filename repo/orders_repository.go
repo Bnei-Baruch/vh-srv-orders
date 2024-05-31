@@ -76,7 +76,6 @@ type OrdersRepository interface {
 
 	CreateSpecial(ctx context.Context, s Special) (int, error)
 	PatchSpecial(ctx context.Context, req Special, specialID int) error
-	HardDeleteSpecialByEmail(ctx context.Context, email string) error
 	GetSpecialByEmail(ctx context.Context, email string) (*Special, error)
 	GetSpecialById(ctx context.Context, id string) (*Special, error)
 

@@ -157,10 +157,10 @@ func (a *App) initGinEngine() {
 
 	special := baseV2Path.Group("/special")
 	{
+		special.DELETE("/:email", a.ordersAPI.handleSpecialHardDeleteByEmail)
 		special.POST("/", a.ordersAPI.handleCreateSpecial)
 		special.GET("/email/:email", a.ordersAPI.handleSpecialGetByEmail)
 		special.GET("/id/:id", a.ordersAPI.handleSpecialGetById)
-		special.PATCH("/:id", a.ordersAPI.handlePatchSpecial)
 	}
 
 	operation := baseV2Path.Group("/operation")

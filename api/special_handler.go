@@ -3,15 +3,16 @@ package api
 import (
 	"errors"
 	"fmt"
+	"net/http"
+
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v4"
 	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/repo"
-	"net/http"
 )
 
 func (o *OrdersAPI) handleSpecialDeleteByEmail(c *gin.Context) {
-	//Delete this mean set end_data to now, without removing record from table
+	// Mark the record as deleted by setting the end_date to the current time, without actually removing the record from the table
 	email := c.Param("email")
 	err := o.repo.DeleteSpecialByEmail(c.Request.Context(), email)
 	if err != nil {

@@ -75,9 +75,9 @@ type OrdersRepository interface {
 	CreateTransactionAndGetId(ctx context.Context, p Transaction) (int, error)
 
 	CreateSpecial(ctx context.Context, s Special) (int, error)
-	HardDeleteSpecialByEmail(ctx context.Context, email string) error
+	DeleteSpecialByEmail(ctx context.Context, email string) error
 	GetSpecialByEmail(ctx context.Context, email string) (*Special, error)
-	GetSpecialById(ctx context.Context, id string) (*Special, error)
+	GetSpecialByKeycloakID(ctx context.Context, keycloakID string) (*Special, error)
 
 	HasPaidMembership(ctx context.Context, email string) (bool, error)
 	HasTicket(ctx context.Context, email string) (bool, error)

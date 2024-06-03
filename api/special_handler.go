@@ -10,16 +10,16 @@ import (
 	"net/http"
 )
 
-func (o *OrdersAPI) handleSpecialHardDeleteByEmail(c *gin.Context) {
+func (o *OrdersAPI) handleSpecialDeleteByEmail(c *gin.Context) {
+	//Delete this mean set end_data to now, without removing record from table
 	email := c.Param("email")
-
-	err := o.repo.HardDeleteSpecialByEmail(c.Request.Context(), email)
+	err := o.repo.DeleteSpecialByEmail(c.Request.Context(), email)
 	if err != nil {
 		if errors.Is(err, common.ErrNoRowsAffected) {
 			c.Status(http.StatusNotFound)
 		} else {
 			c.Status(http.StatusInternalServerError)
-			_ = c.Error(fmt.Errorf("repo.HardDeleteSpecialByEmail: %w", err))
+			_ = c.Error(fmt.Errorf("repo.DeleteSpecialByEmail: %w", err))
 		}
 		return
 	}
@@ -71,20 +71,19 @@ func (o *OrdersAPI) handleSpecialGetByEmail(c *gin.Context) {
 }
 
 func (o *OrdersAPI) handleSpecialGetById(c *gin.Context) {
-	id := c.Param("id")
-
-	if id == "" {
+	keycloakID := c.Param("id")
+	if keycloakID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Email is required", "success": false})
 		return
 	}
 
-	special, err := o.repo.GetSpecialById(c.Request.Context(), id)
+	special, err := o.repo.GetSpecialByKeycloakID(c.Request.Context(), keycloakID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			c.Status(http.StatusNotFound)
 		} else {
 			c.Status(http.StatusInternalServerError)
-			_ = c.Error(fmt.Errorf("repo.GetSpecialById: %w", err))
+			_ = c.Error(fmt.Errorf("repo.GetSpecialByKeycloakID: %w", err))
 		}
 		return
 	}

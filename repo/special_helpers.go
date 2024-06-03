@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func (o *OrdersDB) HardDeleteSpecialByEmail(ctx context.Context, email string) error {
+func (o *OrdersDB) DeleteSpecialByEmail(ctx context.Context, email string) error {
 	res, err := o.Exec(ctx, `Update  specials set end_date = now() WHERE  keycloak_id = (SELECT keycloak_id from accounts where "Email" = $1)`, email)
 	if err != nil {
 		return err
@@ -36,10 +36,10 @@ func (o *OrdersDB) GetSpecialByEmail(ctx context.Context, email string) (*Specia
 	return &spe, nil
 }
 
-func (o *OrdersDB) GetSpecialById(ctx context.Context, id string) (*Special, error) {
+func (o *OrdersDB) GetSpecialByKeycloakID(ctx context.Context, keycloakID string) (*Special, error) {
 	var spe Special
 	if err := o.QueryRow(ctx, `SELECT s.id, s.keycloak_id, a."Email", s.start_date, s.end_date, s.category, s.subcategory from specials as s LEFT JOIN accounts a on s.keycloak_id = a."UserKey" 
-                                          where s."keycloak_id" = $1`, id).
+                                          where s."keycloak_id" = $1`, keycloakID).
 		Scan(&spe.Id, &spe.KeycloakId, &spe.StartDate, &spe.EndDate, &spe.Category, &spe.SubCategory); err != nil {
 		return nil, err
 	}

@@ -50,6 +50,8 @@ const (
 
 	OfflinePaymentMethodRobokasa       = "robokasa"
 	OfflinePaymentPropertiesRobokasaID = "robokasa_id"
+	SpreadsheetId                      = "12mAnmN2eTlUNZoTZA9oMilAo5F-hE1Wzn5x5iDHz8Hk"
+	SpreadsheetRange                   = "import specials"
 )
 
 // This gets set at build time via `-ldflags "-X ..."`

@@ -26,8 +26,17 @@ var genericOfflineCmd = &cobra.Command{
 	},
 }
 
+var importSpecialsCmd = &cobra.Command{
+	Use:   "specials",
+	Short: "Import specials for membership",
+	Run: func(cmd *cobra.Command, args []string) {
+		importers.ImportSpecials()
+	},
+}
+
 func init() {
 	importerCmd.AddCommand(robokasaCmd)
 	importerCmd.AddCommand(genericOfflineCmd)
+	importerCmd.AddCommand(importSpecialsCmd)
 	rootCmd.AddCommand(importerCmd)
 }

@@ -10,7 +10,7 @@ import (
 )
 
 func (o *OrdersDB) DeleteSpecialByEmail(ctx context.Context, email string) error {
-	res, err := o.Exec(ctx, `Update  specials set end_date = now() WHERE  keycloak_id = (SELECT keycloak_id from accounts where "Email" = $1)`, email)
+	res, err := o.Exec(ctx, `Update  specials set end_date = now() WHERE  email = $1`, email)
 	if err != nil {
 		return err
 	}
@@ -27,9 +27,8 @@ func (o *OrdersDB) DeleteSpecialByEmail(ctx context.Context, email string) error
 func (o *OrdersDB) GetSpecialByEmail(ctx context.Context, email string) (*Special, error) {
 	var spe Special
 
-	if err := o.QueryRow(ctx, `SELECT s.id, s.keycloak_id, a."Email", s.start_date, s.end_date, s.category, s.subcategory from specials as s LEFT JOIN accounts a on s.keycloak_id = a."UserKey" 
-                                          where a."Email" = $1`, email).
-		Scan(&spe.Id, &spe.KeycloakId, &spe.StartDate, &spe.EndDate, &spe.Category, &spe.SubCategory); err != nil {
+	if err := o.QueryRow(ctx, `SELECT id, keycloak_id, email, start_date, end_date, category, subcategory from specials where email = $1`, email).
+		Scan(&spe.Id, &spe.KeycloakId, &spe.Email, &spe.StartDate, &spe.EndDate, &spe.Category, &spe.SubCategory); err != nil {
 		return nil, err
 	}
 
@@ -38,17 +37,15 @@ func (o *OrdersDB) GetSpecialByEmail(ctx context.Context, email string) (*Specia
 
 func (o *OrdersDB) GetSpecialByKeycloakID(ctx context.Context, keycloakID string) (*Special, error) {
 	var spe Special
-	if err := o.QueryRow(ctx, `SELECT s.id, s.keycloak_id, a."Email", s.start_date, s.end_date, s.category, s.subcategory from specials as s LEFT JOIN accounts a on s.keycloak_id = a."UserKey" 
-                                          where s."keycloak_id" = $1`, keycloakID).
-		Scan(&spe.Id, &spe.KeycloakId, &spe.StartDate, &spe.EndDate, &spe.Category, &spe.SubCategory); err != nil {
+	if err := o.QueryRow(ctx, `SELECT id, keycloak_id, email, start_date, end_date, category, subcategory from specials where keycloak_id = $1`, keycloakID).
+		Scan(&spe.Id, &spe.KeycloakId, &spe.Email, &spe.StartDate, &spe.EndDate, &spe.Category, &spe.SubCategory); err != nil {
 		return nil, err
 	}
 	return &spe, nil
 }
 
 func (o *OrdersDB) HasSpecialMembership(ctx context.Context, email string) (bool, error) {
-	count, err := o.count(ctx, `select count(s.*) as total from specials as s  LEFT JOIN accounts a on s.keycloak_id = a."UserKey" 
-                                          where a."Email" = $1`, email)
+	count, err := o.count(ctx, `select count(*) as total from specials where email = $1`, email)
 	if err != nil {
 		return false, err
 	}
@@ -79,6 +76,11 @@ func prepareSpecialCreateQuery(req Special) (string, string, []interface{}) {
 		createStrings = append(createStrings, `"keycloak_id"`)
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.KeycloakId.String)
+	}
+	if req.Email.Valid {
+		createStrings = append(createStrings, `"email"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.Email.String)
 	}
 	if req.StartDate.Valid {
 		createStrings = append(createStrings, `"start_date"`)
@@ -112,35 +114,4 @@ func prepareSpecialCreateQuery(req Special) (string, string, []interface{}) {
 	concatedNumString := strings.Join(numString, ",")
 
 	return concatedCreateString, concatedNumString, args
-}
-
-func prepareSpecialUpdateQuery(req Special) (string, []interface{}) {
-	var updateStrings []string
-	var args []interface{}
-
-	if req.KeycloakId.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"keycloak_id"=$%d`, len(updateStrings)+1))
-		args = append(args, req.KeycloakId.String)
-	}
-	if req.StartDate.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"start_date"=$%d`, len(updateStrings)+1))
-		args = append(args, req.StartDate.Time)
-	}
-	if req.EndDate.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"end_date"=$%d`, len(updateStrings)+1))
-		args = append(args, req.EndDate.Time)
-	}
-	if req.Category.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"category"=$%d`, len(updateStrings)+1))
-		args = append(args, req.Category.String)
-	}
-
-	if req.SubCategory.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"subcategory"=$%d`, len(updateStrings)+1))
-		args = append(args, req.SubCategory.String)
-	}
-
-	updateArgument := strings.Join(updateStrings, ",")
-
-	return updateArgument, args
 }

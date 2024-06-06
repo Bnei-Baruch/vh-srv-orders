@@ -99,29 +99,28 @@ func (im *SpecialsImporter) getSheetValues() ([]*SpecialRecord, error) {
 		}
 		records = append(records, record)
 	}
-	fmt.Println(records)
 	return records, nil
 }
 
 func (im *SpecialsImporter) createSpecial(rSpecial *SpecialRecord) error {
-	ctx := context.WithValue(context.Background(), common.CtxEventBuilder, im)
-	account, err := im.repo.GetAccount(ctx, 0, rSpecial.Email)
-	if err != nil {
-		return fmt.Errorf("importer.getAccount: %w", err)
-	}
+
 	var special repo.Special
-	special.KeycloakId = account.UserKey
 	special.Email = null.StringFrom(rSpecial.Email)
 	special.StartDate = null.TimeFrom(rSpecial.StartDate)
 	special.EndDate = null.TimeFrom(rSpecial.EndDate)
 	special.Category = null.StringFrom(rSpecial.Category)
 	special.SubCategory = null.StringFrom(rSpecial.SubCategory)
 
+	ctx := context.WithValue(context.Background(), common.CtxEventBuilder, im)
+	account, err := im.repo.GetAccount(ctx, 0, rSpecial.Email)
+	if err == nil {
+		special.KeycloakId = account.UserKey
+	}
+
 	_, err = im.repo.CreateSpecial(ctx, special)
 	if err != nil {
 		return fmt.Errorf("importer.createSpecial: %w", err)
 	}
-
 	return nil
 }
 

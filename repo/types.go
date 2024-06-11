@@ -133,6 +133,30 @@ type RequestOrder struct {
 	RejectionMessage  null.String `json:"RejectionMessage,omitempty"`
 }
 
+type RequestToken struct {
+	//User data
+	FirstName null.String `json:"FirstName"`
+	LastName  null.String `json:"LastName" `
+	Email     null.String `json:"Email" `
+	Phone     null.String `json:"Phone" `
+	Country   null.String `json:"Country"`
+	UserKey   null.String `json:"UserKey"`
+
+	//Product data
+	Currency      null.String `json:"Currency"`
+	Reference     null.String `json:"Reference"`
+	VAT           null.String `json:"VAT"`
+	SKU           null.String `json:"SKU"`
+	Installements null.Int    `json:"Installements"`
+	Organization  null.String `json:"Organization"`
+	OrderLanguage null.String `json:"OrderLanguage"`
+
+	//Transaction data
+	SuccessURL null.String `json:"SuccessURL"`
+	ErrorURL   null.String `json:"ErrorURL"`
+	CancelURL  null.String `json:"CancelURL"`
+}
+
 type PaymentUpdate struct {
 	//Common data
 	PaymentType         null.String `json:"PaymentType"`
@@ -283,6 +307,27 @@ type RequestPayment struct {
 	Reference    string  `json:"Reference"`
 	Organization string  `json:"Organization"`
 	UserKey      string  `json:"UserKey"`
+}
+
+type RequestNewToken struct {
+	// Part for Pelecard
+	GoodURL   string `json:"GoodURL"`
+	ErrorURL  string `json:"ErrorURL"`
+	CancelURL string `json:"CancelURL"`
+
+	// Part for Priority
+	Name         string `json:"Name"`
+	Currency     string `json:"Currency"`
+	Email        string `json:"Email"`
+	Phone        string `json:"Phone"`
+	Country      string `json:"Country"`
+	SKU          string `json:"SKU"`
+	VAT          string `json:"VAT"`
+	Installments int    `json:"Installments"`
+	Language     string `json:"Language"`
+	Reference    string `json:"Reference"`
+	Organization string `json:"Organization"`
+	UserKey      string `json:"UserKey"`
 }
 
 // RequestPaid ...

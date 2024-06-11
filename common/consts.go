@@ -50,6 +50,7 @@ const (
 
 	OfflinePaymentMethodRobokasa       = "robokasa"
 	OfflinePaymentPropertiesRobokasaID = "robokasa_id"
+	GetNewTokenEndpoint                = "https://checkout.kbb1.com/emv/new_token"
 )
 
 // This gets set at build time via `-ldflags "-X ..."`

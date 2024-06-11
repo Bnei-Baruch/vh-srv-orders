@@ -144,6 +144,7 @@ func (a *App) initGinEngine() {
 		transaction.GET("/:id", a.ordersAPI.handleTransactionGetByID)
 		transaction.PATCH("/", a.ordersAPI.handleTransactionPaid)
 		transaction.POST("/", a.ordersAPI.handleTransactionOrderAndPay)
+		transaction.POST("/new_token", a.ordersAPI.handleTransactionNewToken)
 	}
 
 	userCardDetails := baseV2Path.Group("/card_detail")

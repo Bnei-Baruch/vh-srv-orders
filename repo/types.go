@@ -468,7 +468,6 @@ type PaymentWithFullName struct {
 type PaymentByEmail struct {
 	OrderID       null.Int     `json:"order_id"`
 	CreatedAt     time.Time    `json:"created_at"`
-	PaymentDate   null.Time    `json:"payment_date"`
 	Type          null.String  `json:"type"`
 	ProductType   null.String  `json:"product_type"`
 	PaymentID     null.String  `json:"payment_id"`

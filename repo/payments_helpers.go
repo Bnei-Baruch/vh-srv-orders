@@ -146,7 +146,7 @@ func (o *OrdersDB) GetTotalParticipationStatusCount(ctx context.Context, email s
 }
 
 func (o *OrdersDB) GetPaymentByEmail(ctx context.Context, email string) ([]PaymentByEmail, error) {
-	rows, err := o.Query(ctx, `select p."OrderID", p.created_at, o."PaymentDate", o."Type", o."ProductType", p."Amount", 
+	rows, err := o.Query(ctx, `select p."OrderID", p.created_at, o."Type", o."ProductType", p."Amount", 
 	p."Currency", p."CCNumber", p."ParamX", p."PaymentStatus"
 	from payments as p, orders as o, accounts as a
 	where a."Email" = $1
@@ -161,7 +161,7 @@ func (o *OrdersDB) GetPaymentByEmail(ctx context.Context, email string) ([]Payme
 	paymentData := []PaymentByEmail{}
 	for rows.Next() {
 		var p PaymentByEmail
-		err := rows.Scan(&p.OrderID, &p.CreatedAt, &p.PaymentDate, &p.Type, &p.ProductType, &p.Amount, &p.Currency, &p.CCNumber,
+		err := rows.Scan(&p.OrderID, &p.CreatedAt, &p.Type, &p.ProductType, &p.Amount, &p.Currency, &p.CCNumber,
 			&p.PaymentID, &p.PaymentStatus)
 		if err != nil {
 			return nil, fmt.Errorf("rows.Scan: %w", err)

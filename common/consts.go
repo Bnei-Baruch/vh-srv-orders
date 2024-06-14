@@ -50,6 +50,7 @@ const (
 
 	OfflinePaymentMethodRobokasa       = "robokasa"
 	OfflinePaymentPropertiesRobokasaID = "robokasa_id"
+	GetNewTokenEndpoint                = "https://checkout.kbb1.com/emv/new_token"
 	SpreadsheetId                      = "12mAnmN2eTlUNZoTZA9oMilAo5F-hE1Wzn5x5iDHz8Hk"
 	SpreadsheetRange                   = "import specials"
 )

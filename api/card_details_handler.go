@@ -14,12 +14,15 @@ import (
 )
 
 func (o *OrdersAPI) handleCardDetailGetByID(c *gin.Context) {
+
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id! Accepted value is INTEGER", "success": false})
 		return
 	}
-
+	if !o.isUserOrHasAnyRole(c, c.Param("id"), common.RoleRoot, common.RoleAdmin) {
+		return
+	}
 	cardDetail, err := o.repo.GetCardDetailById(c.Request.Context(), id)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -35,6 +38,9 @@ func (o *OrdersAPI) handleCardDetailGetByID(c *gin.Context) {
 }
 
 func (o *OrdersAPI) handleCardDetailSoftDeleteByID(c *gin.Context) {
+	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
+		return
+	}
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id! Accepted value is INTEGER", "success": false})
@@ -52,6 +58,10 @@ func (o *OrdersAPI) handleCardDetailSoftDeleteByID(c *gin.Context) {
 }
 
 func (o *OrdersAPI) handleCardDetailCreate(c *gin.Context) {
+	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
+		return
+	}
+
 	var req repo.CardDetails
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -73,6 +83,9 @@ func (o *OrdersAPI) handleCardDetailCreate(c *gin.Context) {
 }
 
 func (o *OrdersAPI) handleCardDetailUpdateByID(c *gin.Context) {
+	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
+		return
+	}
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id! Accepted value is INTEGER", "success": false})
@@ -103,6 +116,9 @@ func (o *OrdersAPI) handleCardDetailUpdateByID(c *gin.Context) {
 }
 
 func (o *OrdersAPI) handleCardDetailsFetchAll(c *gin.Context) {
+	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
+		return
+	}
 	skip := c.Query("skip")
 	limit := c.Query("limit")
 

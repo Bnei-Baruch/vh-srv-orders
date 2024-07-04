@@ -102,7 +102,6 @@ func (o *OrdersDB) UpdateOrderAfterPayment(ctx context.Context, p Payment) error
 
 	return nil
 }
-
 func (o *OrdersDB) GetOrderByID(ctx context.Context, orderID uint) (*Order, error) {
 	var order Order
 	var amount string
@@ -492,13 +491,13 @@ func (o *OrdersDB) PatchOrderByID(ctx context.Context, order Order, orderId int)
 
 func (o *OrdersDB) GetAllOrders(ctx context.Context, skip int, limit int, fromDate string, toDate *time.Time, productType string,
 	currency string, status string, organisation string, email string, accountID int, evaluateMembership string,
-	orderByPaymentDate string) (*[]Order, error) {
+	orderByPaymentDate string, keycloakID string) (*[]Order, error) {
 
 	orders := []Order{}
 
 	limitOffsetString := fmt.Sprintf(" LIMIT %d OFFSET %d", limit, skip)
 
-	whereQuery, orderByQuery, queryBuildErr := buildAndGetOrdersWhereQuery(fromDate, toDate, productType, currency, status, organisation, email, accountID, evaluateMembership, orderByPaymentDate)
+	whereQuery, orderByQuery, queryBuildErr := buildAndGetOrdersWhereQuery(fromDate, toDate, productType, currency, status, organisation, email, accountID, keycloakID, evaluateMembership, orderByPaymentDate)
 
 	if queryBuildErr != nil {
 		return &orders, queryBuildErr
@@ -717,7 +716,7 @@ func prepareOrderUpdateQuery(req Order) (string, []interface{}) {
 	return updateArgument, args
 }
 
-func buildAndGetOrdersWhereQuery(fromDate string, dateTo *time.Time, productType string, currency string, status string, organisation string, email string, accountID int, evaluateMembership string, orderByPaymentDate string) (string, string, error) {
+func buildAndGetOrdersWhereQuery(fromDate string, dateTo *time.Time, productType string, currency string, status string, organisation string, email string, accountID int, keycloakID string, evaluateMembership string, orderByPaymentDate string) (string, string, error) {
 
 	var whereString strings.Builder
 	var orderBy strings.Builder
@@ -754,9 +753,11 @@ func buildAndGetOrdersWhereQuery(fromDate string, dateTo *time.Time, productType
 	if organisation != "" {
 		whereCondition.WriteString(fmt.Sprintf(" AND LOWER(o.\"Organization\")=LOWER('%s')", organisation))
 	}
-
 	if accountID != 0 {
 		whereCondition.WriteString(fmt.Sprintf(" AND o.\"AccountID\" = %d", accountID))
+	}
+	if keycloakID != "" {
+		whereCondition.WriteString(fmt.Sprintf(" AND o.userkey = %s", keycloakID))
 	}
 
 	if email != "" {

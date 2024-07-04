@@ -2,12 +2,16 @@ package api
 
 import (
 	"fmt"
+	"gitlab.bbdev.team/vh/pay/orders/common"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
 
 func (o *OrdersAPI) handleOrdersFlag(c *gin.Context) {
+	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
+		return
+	}
 	type req struct {
 		Flag  string `json:"flag"`
 		Month int64  `json:"month"`

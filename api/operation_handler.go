@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"gitlab.bbdev.team/vh/pay/orders/common"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -10,7 +11,9 @@ import (
 )
 
 func (o *OrdersAPI) handleOperationCreate(c *gin.Context) {
-
+	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
+		return
+	}
 	var opr repo.OperationReq
 
 	if err := c.Bind(&opr); err != nil {
@@ -40,6 +43,10 @@ func (o *OrdersAPI) handleOperationCreate(c *gin.Context) {
 }
 
 func (o *OrdersAPI) handleOperationRevert(c *gin.Context) {
+
+	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
+		return
+	}
 
 	var opr repo.OperationReq
 

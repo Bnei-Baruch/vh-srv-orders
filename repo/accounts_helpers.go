@@ -14,6 +14,7 @@ import (
 )
 
 func (o *OrdersDB) CreateOrUpdateAccount(ctx context.Context, a Account) (int, error) {
+
 	var id int
 	err := o.QueryRow(ctx, `select id from accounts where "UserKey" = $1 ORDER BY id DESC LIMIT 1`, a.UserKey.String).
 		Scan(&id)
@@ -279,6 +280,14 @@ func (o *OrdersDB) GetAccountIDByKeycloakID(ctx context.Context, keycloakId stri
 		return 0, err
 	}
 	return accountID, nil
+}
+
+func (o *OrdersDB) GetEmailByKeycloakID(ctx context.Context, keycloakId string) (string, error) {
+	var email string
+	if err := o.QueryRow(ctx, `SELECT "Email" FROM accounts WHERE "UserKey"=$1`, keycloakId).Scan(&email); err != nil {
+		return "", err
+	}
+	return email, nil
 }
 
 func (o *OrdersDB) MergeAccountsOrders(ctx context.Context, req AccountMergeRequest) error {
@@ -559,4 +568,17 @@ func buildAndGetAccountsWhereQuery(email string) (string, string) {
 	}
 
 	return whereString.String(), orderBy.String()
+}
+
+func (o *OrdersDB) IsSubjectID(ctx context.Context, keycloakID, accountID string) (bool, error) {
+	row := o.QueryRow(ctx, "SELECT 1 FROM accounts WHERE UserKey = $1 AND id = $2", keycloakID, accountID)
+	var x int
+	if err := row.Scan(&x); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	return true, nil
 }

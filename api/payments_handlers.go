@@ -19,13 +19,18 @@ import (
 )
 
 func (o *OrdersAPI) handlePaymentFetchByID(c *gin.Context) {
+	isAuthUser, isAdmin, keycloakId := o.isAuthUserOrHasAnyRole(c, common.RoleAdmin, common.RoleRoot)
+	if !isAuthUser {
+		return
+	}
+
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id! Accepted value is INTEGER", "success": false})
 		return
 	}
 
-	account, err := o.repo.GetPaymentByID(c.Request.Context(), id)
+	payment, err := o.repo.GetPaymentByID(c.Request.Context(), id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			c.Status(http.StatusNotFound)
@@ -34,12 +39,20 @@ func (o *OrdersAPI) handlePaymentFetchByID(c *gin.Context) {
 			_ = c.Error(fmt.Errorf("repo.GetPaymentByID: %w", err))
 		}
 		return
+	} else {
+		if !isAdmin && payment.Ordkey.String != keycloakId {
+			c.Status(http.StatusForbidden)
+			return
+		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": account, "success": true})
+	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": payment, "success": true})
 }
 
 func (o *OrdersAPI) handlePaymentDelete(c *gin.Context) {
+	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
+		return
+	}
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id! Accepted value is INTEGER", "success": false})
@@ -57,8 +70,11 @@ func (o *OrdersAPI) handlePaymentDelete(c *gin.Context) {
 }
 
 func (o *OrdersAPI) handlePaymentFetchViaParamX(c *gin.Context) {
+	if !o.HasAnyRole(c, common.RoleAdmin, common.RoleRoot) {
+		c.Status(http.StatusForbidden)
+		return
+	}
 	paramx := c.Param("paramx")
-
 	payment, err := o.repo.FetchPaymentByParamX(c.Request.Context(), paramx)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -74,6 +90,9 @@ func (o *OrdersAPI) handlePaymentFetchViaParamX(c *gin.Context) {
 }
 
 func (o *OrdersAPI) handlePaymentUpdate(c *gin.Context) {
+	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
+		return
+	}
 	var req repo.PaymentUpdate
 	var paymentStatus string
 
@@ -203,6 +222,11 @@ func (o *OrdersAPI) handlePaymentUpdate(c *gin.Context) {
 }
 
 func (o *OrdersAPI) handlePaymentFetch(c *gin.Context) {
+	isAuthUser, isAdmin, keycloakId := o.isAuthUserOrHasAnyRole(c, common.RoleAdmin, common.RoleRoot)
+	if !isAuthUser {
+		return
+	}
+
 	skip := c.Query("skip")
 	limit := c.Query("limit")
 	fromDate := c.Query("from-date")
@@ -216,6 +240,20 @@ func (o *OrdersAPI) handlePaymentFetch(c *gin.Context) {
 	orderID := c.Query("order-id")
 	orderByCreatedAt := c.Query("o-created-at")
 
+	var (
+		currentUserAccountId int
+		err                  error
+	)
+	if !isAdmin {
+		currentUserAccountId, err = o.repo.GetAccountIDByKeycloakID(c, keycloakId)
+		if err != nil {
+			c.Status(http.StatusInternalServerError)
+			_ = c.Error(fmt.Errorf("o.repo.GetAccountIDByKeycloakID: %w", err))
+			return
+		}
+
+	}
+
 	if orderByCreatedAt != "" {
 		if orderByCreatedAt != "asc" && orderByCreatedAt != "desc" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid order by created at"})
@@ -225,7 +263,6 @@ func (o *OrdersAPI) handlePaymentFetch(c *gin.Context) {
 
 	var (
 		toDateParsed time.Time
-		err          error
 		intAccountID int
 		intOrderID   int
 	)
@@ -268,8 +305,16 @@ func (o *OrdersAPI) handlePaymentFetch(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit value! Accepted value is INTEGER", "success": false})
 			return
 		}
+
+		if !isAdmin && currentUserAccountId != intAccountID {
+			c.Status(http.StatusForbidden)
+			return
+		}
 	} else {
-		intAccountID = 0
+		if !isAdmin {
+			intAccountID = currentUserAccountId
+		}
+
 	}
 
 	if orderID != "" {
@@ -294,8 +339,12 @@ func (o *OrdersAPI) handlePaymentFetch(c *gin.Context) {
 }
 
 func (o *OrdersAPI) handlePaymentFetchByEmail(c *gin.Context) {
+
 	var email = c.Param("email")
 
+	if !o.isEmailOwnerOrHasAnyRole(c, email, common.RoleRoot, common.RoleAdmin) {
+		return
+	}
 	ord, err := o.repo.GetPaymentByEmail(c.Request.Context(), email)
 	if err != nil {
 		c.Status(http.StatusInternalServerError)
@@ -307,6 +356,23 @@ func (o *OrdersAPI) handlePaymentFetchByEmail(c *gin.Context) {
 }
 
 func (o *OrdersAPI) handleGetActivities(c *gin.Context) {
+	isAuthUser, isAdmin, keycloakId := o.isAuthUserOrHasAnyRole(c, common.RoleAdmin, common.RoleRoot)
+	if !isAuthUser {
+		return
+	}
+	var (
+		currentUserEmail string
+		err              error
+	)
+	if !isAdmin {
+		currentUserEmail, err = o.repo.GetEmailByKeycloakID(c, keycloakId) // getting user email by keycloakId
+		if err != nil {
+			c.Status(http.StatusInternalServerError)
+			_ = c.Error(fmt.Errorf("repo.GetEmailByKeycloakID: %w", err))
+			return
+		}
+	}
+
 	skip := c.Query("skip")
 	limit := c.Query("limit")
 	email := c.Query("email")
@@ -320,7 +386,13 @@ func (o *OrdersAPI) handleGetActivities(c *gin.Context) {
 	if limit == "" {
 		limit = "10"
 	}
-
+	if !isAdmin && email != "" && currentUserEmail != email {
+		c.Status(http.StatusForbidden)
+		return
+	}
+	if !isAdmin {
+		email = currentUserEmail
+	}
 	intSkip, err := strconv.Atoi(skip)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid skip value! Accepted value is INTEGER", "success": false})

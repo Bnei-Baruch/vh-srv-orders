@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"gitlab.bbdev.team/vh/pay/orders/common"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -10,6 +11,9 @@ import (
 )
 
 func (o *OrdersAPI) handleOrdersCount(c *gin.Context) {
+	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
+		return
+	}
 	var (
 		total int64
 		res   *repo.PaidDetailC

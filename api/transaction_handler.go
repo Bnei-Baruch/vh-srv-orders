@@ -23,13 +23,26 @@ import (
 )
 
 func (o *OrdersAPI) handleTransactionGetByID(c *gin.Context) {
+
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id! Accepted value is INTEGER", "success": false})
 		return
 	}
+	isActiveUser, isAdmin, keycloakId := o.isAuthUserOrHasAnyRole(c, common.RoleAdmin, common.RoleRoot)
+	if !isActiveUser {
+		return
+	}
+	var accountId int
+	if !isAdmin {
+		accountId, err = o.repo.GetAccountIDByKeycloakID(c, keycloakId)
+		if err != nil {
+			c.Status(http.StatusForbidden)
+			return
+		}
+	}
 
-	transaction, err := o.repo.GetTransactionById(c.Request.Context(), id)
+	transaction, err := o.repo.GetTransactionById(c.Request.Context(), id, &accountId)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			c.Status(http.StatusNotFound)
@@ -47,6 +60,9 @@ func (o *OrdersAPI) handleTransactionOrderAndPay(c *gin.Context) {
 	var req repo.RequestOrder
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !o.isEmailOwnerOrHasAnyRole(c, req.Email.String, common.RoleRoot, common.RoleAdmin) {
 		return
 	}
 
@@ -300,6 +316,13 @@ func (o *OrdersAPI) handleTransactionNewToken(c *gin.Context) {
 }
 
 func (o *OrdersAPI) handleTransactionPaid(c *gin.Context) {
+
+	isAuthUser, isAdmin, keycloakId := o.isAuthUserOrHasAnyRole(c, common.RoleAdmin, common.RoleRoot)
+
+	if !isAuthUser {
+		return
+	}
+
 	var rp repo.RequestPaid
 	if err := c.ShouldBindJSON(&rp); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -316,7 +339,12 @@ func (o *OrdersAPI) handleTransactionPaid(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "No order id provided in UserKey"})
 		return
 	}
-
+	if !isAdmin { //if user not root or admin
+		if keycloakId != rp.UserKey.String { //compare his  UserKey with keycloakId from auth
+			c.Status(http.StatusForbidden)
+			return
+		}
+	}
 	p, err := o.repo.UpdatePayment(c.Request.Context(), rp)
 	if err != nil {
 		// TODO : ask grisha to return more info on error

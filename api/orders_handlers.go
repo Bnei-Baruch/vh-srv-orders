@@ -26,6 +26,10 @@ func (o *OrdersAPI) handleV2OrderCreate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing AccountID"})
 		return
 	}
+	userIdString := strconv.Itoa(req.AccountID.Int)
+	if !o.isUserOrHasAnyRole(c, userIdString, common.RoleRoot, common.RoleAdmin) {
+		return
+	}
 
 	orderID, err := o.repo.CreateV2Order(c.Request.Context(), req)
 	if err != nil {
@@ -42,6 +46,9 @@ func (o *OrdersAPI) handleV2OrderCreate(c *gin.Context) {
 }
 
 func (o *OrdersAPI) handleOrderDeleteByID(c *gin.Context) {
+	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
+		return
+	}
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id! Accepted value is INTEGER", "success": false})
@@ -59,9 +66,15 @@ func (o *OrdersAPI) handleOrderDeleteByID(c *gin.Context) {
 }
 
 func (o *OrdersAPI) handleOrderUpdateByID(c *gin.Context) {
+
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id! Accepted value is INTEGER", "success": false})
+		return
+	}
+
+	isAuthUser, isAdmin, keycloakId := o.isAuthUserOrHasAnyRole(c, common.RoleAdmin, common.RoleRoot)
+	if !isAuthUser {
 		return
 	}
 
@@ -69,6 +82,18 @@ func (o *OrdersAPI) handleOrderUpdateByID(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+	if !isAdmin {
+		account, err := o.repo.GetAccountForOrderID(c, uint(id))
+		if err != nil {
+			c.Status(http.StatusInternalServerError)
+			_ = c.Error(fmt.Errorf("repo.GetAccountForOrderID: %w", err))
+			return
+		}
+		if account.UserKey.String != keycloakId {
+			c.Status(http.StatusForbidden)
+			return
+		}
 	}
 
 	err = o.repo.PatchOrderByID(c.Request.Context(), req, id)
@@ -88,10 +113,28 @@ func (o *OrdersAPI) handleOrderUpdateByID(c *gin.Context) {
 }
 
 func (o *OrdersAPI) handleOrderGetByID(c *gin.Context) {
+
+	isAuthUser, isAdmin, keycloakId := o.isAuthUserOrHasAnyRole(c, common.RoleAdmin, common.RoleRoot)
+	if !isAuthUser {
+		return
+	}
+
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id! Accepted value is INTEGER", "success": false})
 		return
+	}
+	if !isAdmin {
+		account, err := o.repo.GetAccountForOrderID(c, uint(id))
+		if err != nil {
+			c.Status(http.StatusInternalServerError)
+			_ = c.Error(fmt.Errorf("repo.GetAccountForOrderID: %w", err))
+			return
+		}
+		if account.UserKey.String != keycloakId {
+			c.Status(http.StatusForbidden)
+			return
+		}
 	}
 
 	order, err := o.repo.GetOrderByID(c.Request.Context(), uint(id))
@@ -109,6 +152,9 @@ func (o *OrdersAPI) handleOrderGetByID(c *gin.Context) {
 }
 
 func (o *OrdersAPI) handleOrdersRenew(c *gin.Context) {
+	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
+		return
+	}
 	type req struct {
 		User string `json:"user"`
 		Key  string `json:"key"`
@@ -135,6 +181,11 @@ func (o *OrdersAPI) handleOrdersRenew(c *gin.Context) {
 }
 
 func (o *OrdersAPI) handleOrderFetch(c *gin.Context) {
+	isAuthUser, isAdmin, keycloakId := o.isAuthUserOrHasAnyRole(c, common.RoleAdmin, common.RoleRoot)
+	if !isAuthUser {
+		return
+	}
+
 	skip := c.Query("skip")
 	limit := c.Query("limit")
 	fromDate := c.Query("from-date")
@@ -194,7 +245,6 @@ func (o *OrdersAPI) handleOrderFetch(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit value! Accepted value is INTEGER", "success": false})
 		return
 	}
-
 	if accountID != "" {
 		intAccountID, err = strconv.Atoi(accountID)
 		if err != nil {
@@ -204,9 +254,12 @@ func (o *OrdersAPI) handleOrderFetch(c *gin.Context) {
 	} else {
 		intAccountID = 0
 	}
+	if isAdmin {
+		keycloakId = "" //We should send keycloakId only is user is not admin
+	}
 
 	orders, err := o.repo.GetAllOrders(c.Request.Context(), intSkip, intLimit, fromDate, &toDateParsed, productType,
-		currency, status, organisation, email, intAccountID, evaluateMembership, orderByPaymentDate)
+		currency, status, organisation, email, intAccountID, keycloakId, evaluateMembership, orderByPaymentDate)
 
 	if err != nil {
 		c.Status(http.StatusInternalServerError)
@@ -218,6 +271,9 @@ func (o *OrdersAPI) handleOrderFetch(c *gin.Context) {
 }
 
 func (o *OrdersAPI) handleCreateOffline(c *gin.Context) {
+	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
+		return
+	}
 	var req repo.OfflinePaymentRequest
 	err := c.ShouldBindJSON(&req)
 	if err != nil {

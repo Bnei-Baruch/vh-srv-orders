@@ -19,14 +19,15 @@ func (o *OrdersAPI) handleGetAccount(c *gin.Context) {
 		intID int
 		err   error
 	)
-
 	id := c.Param("id")
 	intID, err = strconv.Atoi(id)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
-
+	if !o.isUserOrHasAnyRole(c, id, common.RoleRoot, common.RoleAdmin) {
+		return
+	}
 	account, err := o.repo.GetAccount(c.Request.Context(), intID, "")
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -42,12 +43,15 @@ func (o *OrdersAPI) handleGetAccount(c *gin.Context) {
 }
 
 func (o *OrdersAPI) handleCreateAccount(c *gin.Context) {
+
 	var req repo.Account
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-
+	if !o.isEmailOwnerOrHasAnyRole(c, req.Email.String, common.RoleRoot, common.RoleAdmin) {
+		return
+	}
 	accountId, err := o.repo.CreateAccount(c.Request.Context(), req)
 	if err != nil {
 		if errors.Is(err, common.ErrInvalidValues) {
@@ -63,6 +67,11 @@ func (o *OrdersAPI) handleCreateAccount(c *gin.Context) {
 }
 
 func (o *OrdersAPI) handleFetchAccounts(c *gin.Context) {
+
+	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
+		return
+	}
+
 	skip := c.Query("skip")
 	limit := c.Query("limit")
 	email := c.Query("email")
@@ -98,6 +107,7 @@ func (o *OrdersAPI) handleFetchAccounts(c *gin.Context) {
 }
 
 func (o *OrdersAPI) handlePatchAccount(c *gin.Context) {
+
 	var req repo.Account
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -115,7 +125,9 @@ func (o *OrdersAPI) handlePatchAccount(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id! Accepted value is INTEGER", "success": false})
 		return
 	}
-
+	if !o.isUserOrHasAnyRole(c, id, common.RoleRoot, common.RoleAdmin) {
+		return
+	}
 	err = o.repo.PatchAccount(c.Request.Context(), req, intID)
 	if err != nil {
 		if errors.Is(err, fmt.Errorf("invalid body")) {
@@ -134,6 +146,10 @@ func (o *OrdersAPI) handlePatchAccount(c *gin.Context) {
 }
 
 func (o *OrdersAPI) handleDeleteAccount(c *gin.Context) {
+	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
+		return
+	}
+
 	var (
 		intID int
 		err   error
@@ -157,6 +173,10 @@ func (o *OrdersAPI) handleDeleteAccount(c *gin.Context) {
 }
 
 func (o *OrdersAPI) handleHardDeleteAccount(c *gin.Context) {
+	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
+		return
+	}
+
 	var (
 		intID int
 		err   error
@@ -184,6 +204,10 @@ func (o *OrdersAPI) handleHardDeleteAccount(c *gin.Context) {
 }
 
 func (o *OrdersAPI) handleMergeAccounts(c *gin.Context) {
+	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
+		return
+	}
+
 	var req repo.AccountMergeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

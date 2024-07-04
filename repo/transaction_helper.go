@@ -9,9 +9,13 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/common"
 )
 
-func (o *OrdersDB) GetTransactionById(ctx context.Context, id int) (*Transaction, error) {
+func (o *OrdersDB) GetTransactionById(ctx context.Context, id int, accountId *int) (*Transaction, error) {
 	var transaction Transaction
 
+	whereCondition := fmt.Sprintf("where id = %d", id)
+	if accountId != nil {
+		whereCondition += fmt.Sprintf(" and account_id = %d", accountId)
+	}
 	if err := o.QueryRow(ctx, `SELECT 
 		id,
 		order_id,
@@ -20,7 +24,7 @@ func (o *OrdersDB) GetTransactionById(ctx context.Context, id int) (*Transaction
 		terminal_id,
 		status,
 		created_at,
-		updated_at from transaction `+fmt.Sprintf("where id = %d", id)).Scan(
+		updated_at from transaction `+whereCondition).Scan(
 		&transaction.ID,
 		&transaction.OrderID,
 		&transaction.PaymentID,

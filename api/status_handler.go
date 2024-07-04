@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"gitlab.bbdev.team/vh/pay/orders/common"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -9,23 +10,26 @@ import (
 
 // Status returns membership and status
 func (o *OrdersAPI) status(c *gin.Context) {
-	filter := string(c.Params.ByName("email"))
-
-	paidmb, err := o.repo.HasPaidMembership(c.Request.Context(), filter)
+	email := c.Param("email")
+	if !o.isEmailOwnerOrHasAnyRole(c, email, common.RoleAdmin, common.RoleRoot) {
+		c.Status(http.StatusForbidden)
+		return
+	}
+	paidmb, err := o.repo.HasPaidMembership(c.Request.Context(), email)
 	if err != nil {
 		c.Status(http.StatusInternalServerError)
 		_ = c.Error(fmt.Errorf("repo.HasPaidMembership: %w", err))
 		return
 	}
 
-	ticket, err := o.repo.HasTicket(c.Request.Context(), filter)
+	ticket, err := o.repo.HasTicket(c.Request.Context(), email)
 	if err != nil {
 		c.Status(http.StatusInternalServerError)
 		_ = c.Error(fmt.Errorf("repo.HasTicket: %w", err))
 		return
 	}
 
-	specialmb, err := o.repo.HasSpecialMembership(c.Request.Context(), filter)
+	specialmb, err := o.repo.HasSpecialMembership(c.Request.Context(), email)
 	if err != nil {
 		c.Status(http.StatusInternalServerError)
 		_ = c.Error(fmt.Errorf("repo.HasSpecialMembership: %w", err))

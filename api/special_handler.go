@@ -3,15 +3,17 @@ package api
 import (
 	"errors"
 	"fmt"
-	"net/http"
-
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v4"
-
 	"gitlab.bbdev.team/vh/pay/orders/common"
+	"net/http"
 )
 
 func (o *OrdersAPI) handleSpecialHardDeleteByEmail(c *gin.Context) {
+
+	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
+		return
+	}
 	email := c.Param("email")
 
 	err := o.repo.HardDeleteSpecialByEmail(c.Request.Context(), email)
@@ -27,8 +29,12 @@ func (o *OrdersAPI) handleSpecialHardDeleteByEmail(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Deleted!", "success": true})
 }
-
 func (o *OrdersAPI) handleSpecialGetByEmail(c *gin.Context) {
+
+	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
+		return
+	}
+
 	email := c.Param("email")
 
 	if email == "" {

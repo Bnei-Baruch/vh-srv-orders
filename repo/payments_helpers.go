@@ -15,14 +15,16 @@ import (
 )
 
 func (o *OrdersDB) GetPaymentByID(ctx context.Context, id int) (*Payment, error) {
-	var pay Payment
-
+	var (
+		pay      Payment
+		addQuery string
+	)
 	if err := o.QueryRow(ctx, `SELECT 
 	id, created_at, updated_at, deleted_at, "Amount", "Currency", "PaymentStatus", "PaymentType", "OrderID", "ParamX", 
 	"Ordkey", "AuthNo", confirmation_key, success, pelecard_token, "TransactionID", "ErrorMsg", "CardHebrewName", 
 	"CCAbroadCard", "CCBrand", "CCCompanyClearer", "CCCompanyIssuer", credit_type, "CCExpDate", "CCNumber", "DebitCode", 
 	"DebitCurrency", "DebitTotal", "DebitType", "FirstPaymentTotal", "FixedPaymentTotal", "TotalPayments", j_param, 
-	"TransactionInitTime", "TransactionUpdateTime", "VoucherID" from payments where id = $1`, id).Scan(
+	"TransactionInitTime", "TransactionUpdateTime", "VoucherID" from payments where id = $1`+addQuery, id).Scan(
 		&pay.ID, &pay.CreatedAt, &pay.UpdatedAt, &pay.DeletedAt, &pay.Amount, &pay.Currency, &pay.PaymentStatus,
 		&pay.PaymentType, &pay.OrderID, &pay.ParamX, &pay.Ordkey, &pay.AuthNo, &pay.ConfirmationKey, &pay.Success,
 		&pay.PelecardToken, &pay.TransactionID, &pay.ErrorMsg, &pay.CardHebrewName, &pay.CCAbroadCard, &pay.CCBrand,

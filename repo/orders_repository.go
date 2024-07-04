@@ -19,6 +19,8 @@ type OrdersRepository interface {
 	SoftDeleteAccount(ctx context.Context, accountID int) error
 	HardDeleteAllUserDataByAccountID(ctx context.Context, accountID int, kc_id string) error
 	GetAccount(ctx context.Context, id int, email string) (*Account, error)
+	GetAccountIDByKeycloakID(ctx context.Context, keycloakId string) (int, error)
+	GetEmailByKeycloakID(ctx context.Context, keycloakId string) (string, error)
 	MergeAccountsOrders(ctx context.Context, request AccountMergeRequest) error
 
 	UpdateOrderStatusByOrderID(ctx context.Context, oid int, status string) error
@@ -27,7 +29,6 @@ type OrdersRepository interface {
 	GetOrderByID(ctx context.Context, orderID uint) (*Order, error)
 	GetPaymentForOrderID(ctx context.Context, orderID uint) (*Payment, error)
 	GetAccountForOrderID(ctx context.Context, orderID uint) (*Account, error)
-	GetAccountIDByKeycloakID(ctx context.Context, keycloakId string) (int, error)
 	ChargeOrdersToRenew(ctx context.Context, pmx string) (int, error)
 	FlagDuplicateOrders(ctx context.Context, ProductType string) (int, error)
 	FlagOrdersToRenew(ctx context.Context, month int64, year int64) (int64, error)
@@ -36,7 +37,7 @@ type OrdersRepository interface {
 	SoftDeleteOrderByID(ctx context.Context, orderID int) error
 	PatchOrderByID(c context.Context, order Order, orderId int) error
 	GetAllOrders(ctx context.Context, skip int, limit int, fromDate string, toDate *time.Time, productType string,
-		currency string, status string, organisation string, email string, accountID int, evaluateMembership string,
+		currency string, status string, organisation string, email string, accountID int, keycloakID string, evaluateMembership string,
 		orderByPaymentDate string) (*[]Order, error)
 
 	GetPaymentByID(ctx context.Context, id int) (*Payment, error)
@@ -71,7 +72,7 @@ type OrdersRepository interface {
 	PatchCardDetailsById(ctx context.Context, req CardDetails, id int) error
 	GetAllCardDetails(ctx context.Context, skip int, limit int) ([]CardDetails, error)
 
-	GetTransactionById(ctx context.Context, id int) (*Transaction, error)
+	GetTransactionById(ctx context.Context, id int, accountId *int) (*Transaction, error)
 	CreateTransactionAndGetId(ctx context.Context, p Transaction) (int, error)
 
 	HardDeleteSpecialByEmail(ctx context.Context, email string) error
@@ -83,6 +84,7 @@ type OrdersRepository interface {
 
 	PerformOperation(ctx context.Context, req OperationReq) (int, error)
 	RevertOperation(ctx context.Context, newEmail string, oldEmail string) error
+	IsSubjectID(ctx context.Context, keycloakID, userID string) (bool, error)
 
 	Close()
 }

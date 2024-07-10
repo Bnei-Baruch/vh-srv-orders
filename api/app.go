@@ -10,6 +10,9 @@ import (
 	sentrygin "github.com/getsentry/sentry-go/gin"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/hellofresh/health-go/v5"
+	healthnats "github.com/hellofresh/health-go/v5/checks/nats"
+	healthpgx "github.com/hellofresh/health-go/v5/checks/pgx4"
 
 	"gitlab.bbdev.team/vh/pay/orders/api/middleware"
 	"gitlab.bbdev.team/vh/pay/orders/common"
@@ -35,6 +38,7 @@ func (a *App) Initialize() {
 	a.initDB()
 	a.ordersAPI = NewOrdersAPI(a.repo)
 	a.initGinEngine()
+	a.initHealth()
 }
 
 func (a *App) initEventEmitter() {
@@ -177,6 +181,30 @@ func (a *App) initGinEngine() {
 	}
 
 	a.gEngine.GET("/status/:email", a.ordersAPI.status)
+}
+
+func (a *App) initHealth() {
+	h, _ := health.New(health.WithComponent(health.Component{
+		Name:    common.ServiceName,
+		Version: common.GitSHA,
+	}), health.WithChecks(
+		health.Config{
+			Name:    "postgres",
+			Timeout: time.Second * 5,
+			Check:   healthpgx.New(healthpgx.Config{DSN: repo.GetDBURL()}),
+		},
+	))
+	if common.Config.NatsUrl != "" {
+		h.Register(health.Config{
+			Name:    "nats",
+			Timeout: time.Second * 5,
+			Check:   healthnats.New(healthnats.Config{DSN: common.Config.NatsUrl}),
+		})
+	}
+
+	a.gEngine.GET("/health", func(c *gin.Context) {
+		h.HandlerFunc(c.Writer, c.Request)
+	})
 }
 
 func (a *App) Run() {

@@ -41,8 +41,8 @@ func (o *OrdersAPI) handlePaymentFetchByID(c *gin.Context) {
 		return
 	} else {
 		if !isAdmin && payment.Ordkey.String != keycloakId {
-			c.Status(http.StatusForbidden)
-			return
+			// c.Status(http.StatusForbidden)
+			// return
 		}
 	}
 

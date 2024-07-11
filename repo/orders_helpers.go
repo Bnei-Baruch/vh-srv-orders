@@ -757,7 +757,7 @@ func buildAndGetOrdersWhereQuery(fromDate string, dateTo *time.Time, productType
 		whereCondition.WriteString(fmt.Sprintf(" AND o.\"AccountID\" = %d", accountID))
 	}
 	if keycloakID != "" {
-		whereCondition.WriteString(fmt.Sprintf(" AND o.userkey = %s", keycloakID))
+		whereCondition.WriteString(fmt.Sprintf(" AND o.userkey = '%s'", keycloakID))
 	}
 
 	if email != "" {

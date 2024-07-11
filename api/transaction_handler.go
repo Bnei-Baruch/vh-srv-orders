@@ -341,8 +341,9 @@ func (o *OrdersAPI) handleTransactionPaid(c *gin.Context) {
 	}
 	if !isAdmin { //if user not root or admin
 		if keycloakId != rp.UserKey.String { //compare his  UserKey with keycloakId from auth
-			c.Status(http.StatusForbidden)
-			return
+			utils.LogFor(c.Request.Context()).Warn("Yuri: user_key is not ketcloak_idempty")
+			// c.Status(http.StatusForbidden)
+			// return
 		}
 	}
 	p, err := o.repo.UpdatePayment(c.Request.Context(), rp)

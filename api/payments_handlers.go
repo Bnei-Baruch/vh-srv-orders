@@ -40,10 +40,19 @@ func (o *OrdersAPI) handlePaymentFetchByID(c *gin.Context) {
 		}
 		return
 	} else {
-		if !isAdmin && payment.Ordkey.String != keycloakId {
-			// c.Status(http.StatusForbidden)
-			// return
+		if !isAdmin {
+			account, err := o.repo.GetAccountForOrderID(c, uint(payment.OrderID.Int))
+			if err != nil {
+				c.Status(http.StatusInternalServerError)
+				_ = c.Error(fmt.Errorf("repo.GetAccountForOrderID: %w", err))
+				return
+			}
+			if keycloakId != account.UserKey.String {
+				c.Status(http.StatusForbidden)
+				return
+			}
 		}
+
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": payment, "success": true})

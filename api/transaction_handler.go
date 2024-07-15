@@ -340,10 +340,22 @@ func (o *OrdersAPI) handleTransactionPaid(c *gin.Context) {
 		return
 	}
 	if !isAdmin { //if user not root or admin
-		if keycloakId != rp.UserKey.String { //compare his  UserKey with keycloakId from auth
-			utils.LogFor(c.Request.Context()).Warn("Yuri: user_key is not ketcloak_idempty")
-			// c.Status(http.StatusForbidden)
-			// return
+		orderid, err := strconv.ParseUint(strings.Split(rp.UserKey.String, "-")[1], 10, 0)
+		if err != nil {
+			errf := fmt.Errorf("strconv.ParseUint [user_key]: %w", err)
+			utils.SentryFor(c.Request.Context()).CaptureException(errf)
+			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": errf.Error()})
+			return
+		}
+		account, err := o.repo.GetAccountForOrderID(c, uint(orderid))
+		if err != nil {
+			c.Status(http.StatusInternalServerError)
+			_ = c.Error(fmt.Errorf("repo.GetAccountForOrderID: %w", err))
+			return
+		}
+		if keycloakId != account.UserKey.String {
+			c.Status(http.StatusForbidden)
+			return
 		}
 	}
 	p, err := o.repo.UpdatePayment(c.Request.Context(), rp)
@@ -354,7 +366,6 @@ func (o *OrdersAPI) handleTransactionPaid(c *gin.Context) {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
 		return
 	}
-
 	err = o.repo.UpdateOrderAfterPayment(c.Request.Context(), *p)
 	if err != nil {
 		c.Status(http.StatusInternalServerError)

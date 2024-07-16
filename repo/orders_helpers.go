@@ -492,34 +492,32 @@ func (o *OrdersDB) PatchOrderByID(ctx context.Context, order Order, orderId int)
 func (o *OrdersDB) GetAllOrders(ctx context.Context, skip int, limit int, fromDate string, toDate *time.Time, productType string,
 	currency string, status string, organisation string, email string, accountID int, evaluateMembership string,
 	orderByPaymentDate string, keycloakID string) (*[]Order, error) {
-
-	orders := []Order{}
-
 	limitOffsetString := fmt.Sprintf(" LIMIT %d OFFSET %d", limit, skip)
-
 	whereQuery, orderByQuery, queryBuildErr := buildAndGetOrdersWhereQuery(fromDate, toDate, productType, currency, status, organisation, email, accountID, keycloakID, evaluateMembership, orderByPaymentDate)
 
 	if queryBuildErr != nil {
-		return &orders, queryBuildErr
+		return nil, fmt.Errorf("buildAndGetOrdersWhereQuery: %w", queryBuildErr)
 	}
 
 	fromQuery := " FROM orders as o"
-
 	if email != "" {
 		fromQuery = fromQuery + ", accounts as a"
 	}
 
-	rows, err := o.Query(ctx, `SELECT 
+	query := `SELECT 
 		o.id, o."Type", o."ProductType", o."RecuringFreq", o."AccountID", o."Organization", o."Amount", 
 		"Currency", o."Status", o."OrderLanguage", o."PaymentDate", o.starting_date, o."SKU", o."Note", o."Flag", o.quantity, o.amount_item,
 		 o.created_at, o.updated_at, o.deleted_at
-	`+fromQuery+whereQuery+orderByQuery+limitOffsetString)
+	` + fromQuery + whereQuery + orderByQuery + limitOffsetString
 
+	utils.LogFor(ctx).Info("GetAllOrders.query", slog.String("sql", query))
+	rows, err := o.Query(ctx, query)
 	if err != nil {
-		fmt.Println("--error-while-executing-query", err)
-		return &orders, err
+		return nil, fmt.Errorf("o.Query: %w", err)
 	}
 	defer rows.Close()
+
+	orders := []Order{}
 	for rows.Next() {
 		var d Order
 		err := rows.Scan(
@@ -527,11 +525,15 @@ func (o *OrdersDB) GetAllOrders(ctx context.Context, skip int, limit int, fromDa
 			&d.Currency, &d.Status, &d.OrderLanguage, &d.PaymentDate, &d.StartingDate, &d.SKU, &d.Note, &d.Flag, &d.Quantity, &d.AmountItem,
 			&d.CreatedAt, &d.UpdatedAt, &d.DeletedAt)
 		if err != nil {
-			return &orders, err
+			return &orders, fmt.Errorf("rows.Scan: %w", err)
 		}
 		orders = append(orders, d)
 	}
-	return &orders, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows.Err: %w", err)
+	}
+
+	return &orders, nil
 
 }
 

@@ -490,10 +490,11 @@ func (o *OrdersDB) PatchOrderByID(ctx context.Context, order Order, orderId int)
 }
 
 func (o *OrdersDB) GetAllOrders(ctx context.Context, skip int, limit int, fromDate string, toDate *time.Time, productType string,
-	currency string, status string, organisation string, email string, accountID int, evaluateMembership string,
-	orderByPaymentDate string, keycloakID string) (*[]Order, error) {
+	currency string, status string, organisation string, email string, accountID int, keycloakID string, evaluateMembership string,
+	orderByPaymentDate string) (*[]Order, error) {
 	limitOffsetString := fmt.Sprintf(" LIMIT %d OFFSET %d", limit, skip)
-	whereQuery, orderByQuery, queryBuildErr := buildAndGetOrdersWhereQuery(fromDate, toDate, productType, currency, status, organisation, email, accountID, keycloakID, evaluateMembership, orderByPaymentDate)
+	whereQuery, orderByQuery, queryBuildErr := buildAndGetOrdersWhereQuery(fromDate, toDate, productType, currency, status,
+		organisation, email, accountID, keycloakID, evaluateMembership, orderByPaymentDate)
 
 	if queryBuildErr != nil {
 		return nil, fmt.Errorf("buildAndGetOrdersWhereQuery: %w", queryBuildErr)
@@ -510,7 +511,7 @@ func (o *OrdersDB) GetAllOrders(ctx context.Context, skip int, limit int, fromDa
 		 o.created_at, o.updated_at, o.deleted_at
 	` + fromQuery + whereQuery + orderByQuery + limitOffsetString
 
-	utils.LogFor(ctx).Info("GetAllOrders.query", slog.String("sql", query))
+	// utils.LogFor(ctx).Info("GetAllOrders.query", slog.String("sql", query))
 	rows, err := o.Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("o.Query: %w", err)
@@ -718,7 +719,8 @@ func prepareOrderUpdateQuery(req Order) (string, []interface{}) {
 	return updateArgument, args
 }
 
-func buildAndGetOrdersWhereQuery(fromDate string, dateTo *time.Time, productType string, currency string, status string, organisation string, email string, accountID int, keycloakID string, evaluateMembership string, orderByPaymentDate string) (string, string, error) {
+func buildAndGetOrdersWhereQuery(fromDate string, dateTo *time.Time, productType string, currency string, status string,
+	organisation string, email string, accountID int, keycloakID string, evaluateMembership string, orderByPaymentDate string) (string, string, error) {
 
 	var whereString strings.Builder
 	var orderBy strings.Builder

@@ -3,18 +3,24 @@ package api
 import (
 	"errors"
 	"fmt"
+	"net/http"
+
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v4"
+
 	"gitlab.bbdev.team/vh/pay/orders/common"
-	"net/http"
 )
 
 func (o *OrdersAPI) handleSpecialHardDeleteByEmail(c *gin.Context) {
-
-	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
+	email := c.Param("email")
+	if email == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Email is required", "success": false})
 		return
 	}
-	email := c.Param("email")
+
+	if !o.isEmailOwnerOrHasAnyRole(c, email, common.RoleRoot, common.RoleAdmin) {
+		return
+	}
 
 	err := o.repo.HardDeleteSpecialByEmail(c.Request.Context(), email)
 	if err != nil {
@@ -29,16 +35,15 @@ func (o *OrdersAPI) handleSpecialHardDeleteByEmail(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Deleted!", "success": true})
 }
-func (o *OrdersAPI) handleSpecialGetByEmail(c *gin.Context) {
 
-	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
+func (o *OrdersAPI) handleSpecialGetByEmail(c *gin.Context) {
+	email := c.Param("email")
+	if email == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Email is required", "success": false})
 		return
 	}
 
-	email := c.Param("email")
-
-	if email == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Email is required", "success": false})
+	if !o.isEmailOwnerOrHasAnyRole(c, email, common.RoleRoot, common.RoleAdmin) {
 		return
 	}
 

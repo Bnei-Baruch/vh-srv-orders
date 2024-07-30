@@ -235,10 +235,12 @@ func (o *OrdersDB) HardDeleteAllUserDataByAccountID(ctx context.Context, account
 
 func (o *OrdersDB) GetAccount(ctx context.Context, id int, email string) (*Account, error) {
 	var whereQuery string
+	var orderQuery string
 	if id != 0 {
 		whereQuery = fmt.Sprintf("where id = %d", id)
 	} else {
 		whereQuery = fmt.Sprintf("where LOWER(\"Email\") = LOWER('%s')", email)
+		orderQuery = " order by created_at desc limit 1"
 	}
 
 	var acc Account
@@ -262,7 +264,7 @@ func (o *OrdersDB) GetAccount(ctx context.Context, id int, email string) (*Accou
 			"AuthNo",
 			created_at,
 			updated_at,
-			deleted_at from accounts `+whereQuery).Scan(
+			deleted_at from accounts `+whereQuery+orderQuery).Scan(
 		&acc.ID, &acc.FirstName, &acc.LastName, &acc.Email, &acc.Phone, &acc.Street,
 		&acc.City, &acc.State, &acc.Postcode, &acc.Country, &acc.AccountType,
 		&acc.PaymentToken, &acc.PaymentCardID, &acc.PaymentCardExpMonth, &acc.PaymentCardExpYear,

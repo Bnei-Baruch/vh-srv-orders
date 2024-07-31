@@ -180,6 +180,32 @@ func (o *OrdersAPI) handleOrdersRenew(c *gin.Context) {
 	}
 }
 
+func (o *OrdersAPI) handleOrdersUpdateToken(c *gin.Context) {
+	var (
+		req repo.RequestUpdateToken
+		err error
+	)
+	if err = c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	account, err := o.repo.GetAccountForOrderID(c, uint(req.OrderId))
+	if err != nil {
+		c.Status(http.StatusInternalServerError)
+		_ = c.Error(fmt.Errorf("repo.GetAccountForOrderID: %w", err))
+		return
+	}
+	if !o.isUserOrHasAnyRole(c, strconv.Itoa(account.ID), common.RoleRoot, common.RoleAdmin) {
+		return
+	}
+	if err = o.repo.UpdateOrdersToken(c, req); err != nil {
+		c.Status(http.StatusInternalServerError)
+		_ = c.Error(fmt.Errorf("repo.handleOrdersUpdateToken: %w", err))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Updated!", "success": true})
+}
+
 func (o *OrdersAPI) handleOrderFetch(c *gin.Context) {
 	isAuthUser, isAdmin, keycloakId := o.isAuthUserOrHasAnyRole(c, common.RoleAdmin, common.RoleRoot)
 	if !isAuthUser {

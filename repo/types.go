@@ -31,8 +31,8 @@ type Order struct {
 	Quantity      null.Int     `json:"Quantity"`
 	AmountItem    null.Int     `json:"AmountItem"`
 	StartingDate  null.Time    `json:"StartingDate"`
-
-	Payments []Payment `json:"Payments" gorm:"foreignkey:OrderID"`
+	CardDetailsId null.Int     `json:"card_details_id" gorm:"Column:card_details_id"`
+	Payments      []Payment    `json:"Payments" gorm:"foreignkey:OrderID"`
 }
 
 // Payment is defined by
@@ -131,6 +131,13 @@ type RequestOrder struct {
 	//Helphaver Payment
 	ValidationMessage null.String `json:"ValidationMessage,omitempty"`
 	RejectionMessage  null.String `json:"RejectionMessage,omitempty"`
+}
+type RequestUpdateToken struct {
+	Token      string `json:"token"`
+	OrderId    int    `json:"order_id"`
+	ParamX     string `json:"param_x"`
+	CardNumber string `json:"card_number"`
+	CardExp    string `json:"card_exp"`
 }
 
 type RequestToken struct {

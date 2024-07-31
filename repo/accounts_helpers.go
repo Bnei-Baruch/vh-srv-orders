@@ -324,10 +324,22 @@ func (o *OrdersDB) MergeAccountsOrders(ctx context.Context, req AccountMergeRequ
 	}
 	defer tx.Rollback(ctx)
 
+	_, err = tx.Exec(ctx, `UPDATE card_details SET account_id = $1 WHERE id IN (SELECT card_details_id FROM orders WHERE account_id = $2) 
+		AND  cc_number NOT IN (SELECT cc_number FROM card_details WHERE account_id = $2 )`, destinationAccountID, sourceAccountID)
+	if err != nil {
+		return fmt.Errorf("UPDATE card_details  AccountIds update : %w", err)
+	}
+
+	_, err = tx.Exec(ctx, `DELETE FROM card_details where account_id = $1`, sourceAccountID)
+	if err != nil {
+		return fmt.Errorf("delete from card_details: %w", err)
+	}
+
 	_, err = tx.Exec(ctx, `UPDATE orders SET "AccountID" = $1 WHERE "AccountID" = $2`, destinationAccountID, sourceAccountID)
 	if err != nil {
 		return fmt.Errorf("UPDATE orders AccountIds update : %w", err)
 	}
+
 	_, err = tx.Exec(ctx, `UPDATE orders SET "userkey" = $1 WHERE "userkey" = $2`, req.DestinationKeycloakID, req.SourceKeycloakID)
 	if err != nil {
 		return fmt.Errorf("UPDATE orders userKeys update : %w", err)
@@ -335,11 +347,6 @@ func (o *OrdersDB) MergeAccountsOrders(ctx context.Context, req AccountMergeRequ
 	_, err = tx.Exec(ctx, `UPDATE transaction SET account_id = $1 WHERE account_id = $2`, destinationAccountID, sourceAccountID)
 	if err != nil {
 		return fmt.Errorf("UPDATE transaction : %w", err)
-	}
-
-	_, err = tx.Exec(ctx, `DELETE FROM card_details where account_id = $1`, sourceAccountID)
-	if err != nil {
-		return fmt.Errorf("delete from card_details: %w", err)
 	}
 
 	_, err = tx.Exec(ctx, `DELETE FROM specials where email = (SELECT "Email" FROM accounts WHERE id = $1)`, sourceAccountID)

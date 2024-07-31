@@ -71,6 +71,28 @@ func (o *OrdersDB) CreateOrderViaTransaction(ctx context.Context, req RequestOrd
 
 	return &order, nil
 }
+func (o *OrdersDB) UpdateOrdersToken(ctx context.Context, req RequestUpdateToken) error {
+	if req.ParamX != fmt.Sprintf("new_token_%s", strconv.Itoa(req.OrderId)) {
+		return fmt.Errorf("o.UpdateOrdersToken: Wrong ParamX")
+	}
+	account, err := o.GetAccountForOrderID(ctx, uint(req.OrderId))
+	if err != nil {
+		return fmt.Errorf("UpdateOrdersToken: o.Exec [nosuccess]: %w", err)
+	}
+	cardDetails := CardDetails{
+		AccountID:       null.IntFrom(account.ID),
+		GatewayProvider: null.StringFrom(""), //because I have no idea about this field, but maybe we will get it in the future
+		CCNumber:        null.StringFrom(req.CardNumber),
+		CCExpDate:       null.StringFrom(req.CardExp),
+		Active:          null.BoolFrom(true),
+		Token:           null.StringFrom(req.Token),
+	}
+	_, err = o.CreateCardDetailsAndGetId(ctx, cardDetails)
+	if err != nil {
+		return fmt.Errorf("UpdateToken: o.CreateCardDetailsAndGetId: %w", err)
+	}
+	return nil
+}
 
 func (o *OrdersDB) UpdateOrderAfterPayment(ctx context.Context, p Payment) error {
 	var order Order
@@ -102,6 +124,7 @@ func (o *OrdersDB) UpdateOrderAfterPayment(ctx context.Context, p Payment) error
 
 	return nil
 }
+
 func (o *OrdersDB) GetOrderByID(ctx context.Context, orderID uint) (*Order, error) {
 	var order Order
 	var amount string
@@ -120,6 +143,7 @@ func (o *OrdersDB) GetOrderByID(ctx context.Context, orderID uint) (*Order, erro
 	"PaymentDate",
 	starting_date,
 	"Flag",
+	card_details_id,
 	quantity,
 	amount_item,
 	created_at,
@@ -127,7 +151,7 @@ func (o *OrdersDB) GetOrderByID(ctx context.Context, orderID uint) (*Order, erro
 	deleted_at 
 	FROM orders WHERE id=$1`, orderID).Scan(
 		&order.ID, &order.Type, &order.ProductType, &order.RecuringFreq, &order.AccountID, &order.Organization, &amount,
-		&order.Currency, &order.Status, &order.OrderLanguage, &order.PaymentDate, &order.StartingDate, &order.Flag, &order.Quantity, &order.AmountItem,
+		&order.Currency, &order.Status, &order.OrderLanguage, &order.PaymentDate, &order.StartingDate, &order.Flag, &order.CardDetailsId, &order.Quantity, &order.AmountItem,
 		&order.CreatedAt, &order.UpdatedAt, &order.DeletedAt,
 	); err != nil {
 		return nil, fmt.Errorf("o.QueryRow.Scan: %w", err)
@@ -242,8 +266,17 @@ func (o *OrdersDB) createRequestPayByToken(c context.Context, a *Account, order 
 	if err != nil {
 		return nil, nil, fmt.Errorf("o.createPendingPayment: %w", err)
 	}
+	token := p.PelecardToken
+	cardDetails, err := o.GetCardDetailById(c, order.CardDetailsId.Int)
+	if err != nil {
+		return nil, nil, fmt.Errorf("o.GetCardDetailById: %w", err)
+	}
 
-	newp.PelecardToken = p.PelecardToken
+	if cardDetails.Token.Valid {
+		token = cardDetails.Token
+	}
+
+	newp.PelecardToken = token
 	newp.AuthNo = p.AuthNo
 
 	extPay := RequestPayment{
@@ -253,7 +286,7 @@ func (o *OrdersDB) createRequestPayByToken(c context.Context, a *Account, order 
 		ErrorURL:   "http://ec41a043fda1.ngrok.io/pelecard/error",
 		CancelURL:  "http://ec41a043fda1.ngrok.io/pelecard/cancel",
 		ApprovalNo: p.AuthNo.String,
-		Token:      p.PelecardToken.String,
+		Token:      token.String,
 
 		Name:         a.FirstName.String + " " + a.LastName.String,
 		Price:        order.Amount.Float64,
@@ -507,7 +540,7 @@ func (o *OrdersDB) GetAllOrders(ctx context.Context, skip int, limit int, fromDa
 
 	query := `SELECT 
 		o.id, o."Type", o."ProductType", o."RecuringFreq", o."AccountID", o."Organization", o."Amount", 
-		"Currency", o."Status", o."OrderLanguage", o."PaymentDate", o.starting_date, o."SKU", o."Note", o."Flag", o.quantity, o.amount_item,
+		"Currency", o."Status", o."OrderLanguage", o."PaymentDate", o.starting_date, o."SKU", o."Note", o."Flag",o.card_details_id, o.quantity, o.amount_item,
 		 o.created_at, o.updated_at, o.deleted_at
 	` + fromQuery + whereQuery + orderByQuery + limitOffsetString
 
@@ -523,7 +556,7 @@ func (o *OrdersDB) GetAllOrders(ctx context.Context, skip int, limit int, fromDa
 		var d Order
 		err := rows.Scan(
 			&d.ID, &d.Type, &d.ProductType, &d.RecuringFreq, &d.AccountID, &d.Organization, &d.Amount,
-			&d.Currency, &d.Status, &d.OrderLanguage, &d.PaymentDate, &d.StartingDate, &d.SKU, &d.Note, &d.Flag, &d.Quantity, &d.AmountItem,
+			&d.Currency, &d.Status, &d.OrderLanguage, &d.PaymentDate, &d.StartingDate, &d.SKU, &d.Note, &d.Flag, &d.CardDetailsId, &d.Quantity, &d.AmountItem,
 			&d.CreatedAt, &d.UpdatedAt, &d.DeletedAt)
 		if err != nil {
 			return &orders, fmt.Errorf("rows.Scan: %w", err)
@@ -623,6 +656,11 @@ func prepareOrderCreateQuery(req Order) (string, string, []interface{}) {
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.StartingDate.Time)
 	}
+	if req.CardDetailsId.Valid {
+		createStrings = append(createStrings, `"card_details_id"`)
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.StartingDate.Time)
+	}
 
 	if len(args) != 0 {
 		createStrings = append(createStrings, "created_at")
@@ -699,6 +737,10 @@ func prepareOrderUpdateQuery(req Order) (string, []interface{}) {
 	if req.Flag.Valid {
 		updateStrings = append(updateStrings, fmt.Sprintf(`"Flag"=$%d`, len(updateStrings)+1))
 		args = append(args, req.Flag.String)
+	}
+	if req.CardDetailsId.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf(`"card_details_id"=$%d`, len(updateStrings)+1))
+		args = append(args, req.CardDetailsId.Int)
 	}
 	if req.Quantity.Valid {
 		updateStrings = append(updateStrings, fmt.Sprintf(`quantity=$%d`, len(updateStrings)+1))

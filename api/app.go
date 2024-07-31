@@ -138,6 +138,7 @@ func (a *App) initGinEngine() {
 		order.GET("/:id", a.ordersAPI.handleOrderGetByID)
 		order.DELETE("/:id", a.ordersAPI.handleOrderDeleteByID)
 		order.POST("/", a.ordersAPI.handleV2OrderCreate)
+		order.POST("/update_token", a.ordersAPI.handleOrdersUpdateToken)
 		order.POST("/offline", a.ordersAPI.handleCreateOffline)
 		order.PATCH("/:id", a.ordersAPI.handleOrderUpdateByID)
 	}

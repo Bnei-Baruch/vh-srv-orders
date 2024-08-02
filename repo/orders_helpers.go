@@ -72,25 +72,27 @@ func (o *OrdersDB) CreateOrderViaTransaction(ctx context.Context, req RequestOrd
 	return &order, nil
 }
 func (o *OrdersDB) UpdateOrdersToken(ctx context.Context, req RequestUpdateToken) error {
-	if req.ParamX != fmt.Sprintf("new_token_%s", strconv.Itoa(req.OrderId)) {
-		return fmt.Errorf("o.UpdateOrdersToken: Wrong ParamX")
-	}
 	account, err := o.GetAccountForOrderID(ctx, uint(req.OrderId))
 	if err != nil {
-		return fmt.Errorf("UpdateOrdersToken: o.Exec [nosuccess]: %w", err)
+		return fmt.Errorf("GetAccountForOrderID: %w", err)
 	}
+
 	cardDetails := CardDetails{
-		AccountID:       null.IntFrom(account.ID),
-		GatewayProvider: null.StringFrom(""), //because I have no idea about this field, but maybe we will get it in the future
-		CCNumber:        null.StringFrom(req.CardNumber),
-		CCExpDate:       null.StringFrom(req.CardExp),
-		Active:          null.BoolFrom(true),
-		Token:           null.StringFrom(req.Token),
+		AccountID: null.IntFrom(account.ID),
+		CCNumber:  null.StringFrom(req.CardNumber),
+		CCExpDate: null.StringFrom(req.CardExp),
+		Active:    null.BoolFrom(true),
+		Token:     null.StringFrom(req.Token),
 	}
-	_, err = o.CreateCardDetailsAndGetId(ctx, cardDetails)
+	cardID, err := o.CreateCardDetailsAndGetId(ctx, cardDetails)
 	if err != nil {
-		return fmt.Errorf("UpdateToken: o.CreateCardDetailsAndGetId: %w", err)
+		return fmt.Errorf("CreateCardDetailsAndGetId: %w", err)
 	}
+
+	if err := o.PatchOrderByID(ctx, Order{CardDetailsId: null.IntFrom(cardID)}, req.OrderId); err != nil {
+		return fmt.Errorf("PatchOrderByID: %w", err)
+	}
+
 	return nil
 }
 

@@ -553,3 +553,20 @@ type PaidDetailC struct {
 	TotalPeoplePaidWithCC int64 `json:"total_people_paid_with_cc"`
 	TotalTicketSold       int64 `json:"total_ticket_sold"`
 }
+
+type MonthlyCharge struct {
+	ID        int
+	StartDate null.Time // start of eligble orders period
+	EndDate   null.Time // end of eligble orders period
+	Status    string    // in progress / completed
+	CreatedAt null.Time // technical
+}
+
+type OrderChargeRecord struct {
+	ChargeID  int
+	OrderID   int
+	Status    string   // to_charge / skipped / charged
+	UserKey   string   // point in time, immutable, keycloak_id
+	Comment   string   // skip reason / ?
+	PaymentID null.Int // maybe put this on payment?
+}

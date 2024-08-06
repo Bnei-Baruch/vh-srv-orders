@@ -580,7 +580,7 @@ func buildAndGetAccountsWhereQuery(email string) (string, string) {
 }
 
 func (o *OrdersDB) IsSubjectID(ctx context.Context, keycloakID, accountID string) (bool, error) {
-	row := o.QueryRow(ctx, `SELECT 1 FROM accounts WHERE "UserKey" = $1 AND id = $`, keycloakID, accountID)
+	row := o.QueryRow(ctx, `SELECT 1 FROM accounts WHERE "UserKey" = $1 AND id = $2`, keycloakID, accountID)
 	var x int
 	if err := row.Scan(&x); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

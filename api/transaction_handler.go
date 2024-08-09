@@ -243,6 +243,7 @@ func (o *OrdersAPI) handleTransactionNewToken(c *gin.Context) {
 	var country string
 	var sku string
 	var reference string
+	var language string
 
 	if req.Phone.Valid && len(req.Phone.String) > 0 {
 		phone = req.Phone.String
@@ -264,6 +265,11 @@ func (o *OrdersAPI) handleTransactionNewToken(c *gin.Context) {
 	} else {
 		reference = "new_token" //TBC
 	}
+	if req.OrderLanguage.Valid {
+		language = req.OrderLanguage.String
+	} else {
+		language = common.OrderLanguageEnglish
+	}
 
 	extPay := repo.RequestNewToken{
 		UserKey:      req.UserKey.String,
@@ -276,9 +282,9 @@ func (o *OrdersAPI) handleTransactionNewToken(c *gin.Context) {
 		Phone:        phone,
 		Country:      country,
 		SKU:          sku,
-		VAT:          req.VAT.String,
+		VAT:          "f",
 		Installments: 1,
-		Language:     req.OrderLanguage.String,
+		Language:     language,
 		Reference:    reference,
 		Organization: req.Organization.String,
 	}

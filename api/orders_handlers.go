@@ -195,7 +195,7 @@ func (o *OrdersAPI) handleOrdersUpdateToken(c *gin.Context) {
 		return
 	}
 
-	account, err := o.repo.GetAccountForOrderID(c, uint(req.OrderId))
+	account, err := o.repo.GetAccountForOrderID(c.Request.Context(), uint(req.OrderId))
 	if err != nil {
 		c.Status(http.StatusInternalServerError)
 		_ = c.Error(fmt.Errorf("repo.GetAccountForOrderID: %w", err))
@@ -206,7 +206,7 @@ func (o *OrdersAPI) handleOrdersUpdateToken(c *gin.Context) {
 		return
 	}
 
-	if err = o.repo.UpdateOrdersToken(c, req); err != nil {
+	if err = o.repo.UpdateOrdersToken(c.Request.Context(), req); err != nil {
 		c.Status(http.StatusInternalServerError)
 		_ = c.Error(fmt.Errorf("repo.UpdateOrdersToken: %w", err))
 		return

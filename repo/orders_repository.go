@@ -87,6 +87,10 @@ type OrdersRepository interface {
 	RevertOperation(ctx context.Context, newEmail string, oldEmail string) error
 	IsSubjectID(ctx context.Context, keycloakID, userID string) (bool, error)
 
+	GetMonthlyCharges(ctx context.Context, skip int, limit int) ([]*MonthlyCharge, error)
+	CreateMonthlyCharge(ctx context.Context, c *MonthlyCharge) (int, error)
+	GetOrdersToCharge(ctx context.Context, year int, month int) ([]*OrderToCharge, error)
+
 	Close()
 }
 

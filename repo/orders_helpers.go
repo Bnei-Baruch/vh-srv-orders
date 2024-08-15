@@ -276,6 +276,7 @@ func (o *OrdersDB) createRequestPayByToken(c context.Context, a *Account, order 
 
 	if cardDetails.Token.Valid {
 		token = cardDetails.Token
+
 	}
 
 	newp.PelecardToken = token
@@ -320,7 +321,7 @@ func (o *OrdersDB) renewPaymentByToken(ctx context.Context, extPay *RequestPayme
 	}
 
 	payload, _ := json.Marshal(extPay)
-	resp, err := utils.PostJSON("POST", url, payload)
+	resp, err := utils.PostJSON(ctx, "POST", url, payload)
 	if err != nil {
 		return nil, fmt.Errorf("utils.PostJSON: %w", err)
 	}

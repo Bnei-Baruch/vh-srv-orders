@@ -57,6 +57,12 @@ const (
 	OfflinePaymentMethodRobokasa       = "robokasa"
 	OfflinePaymentPropertiesRobokasaID = "robokasa_id"
 	GetNewTokenEndpoint                = "https://checkout.kbb1.com/emv/new_token"
+
+	MonthlyChargeStatusStarted    = "started"
+	MonthlyChargeStatusInProgress = "in_progress"
+	MonthlyChargeStatusCompleted  = "completed"
+	MonthlyChargeStatusFailed     = "failed"
+	MonthlyChargeStatusAborted    = "aborted"
 )
 
 var RoleAnyAdmin = []string{RoleRoot, RoleAdmin, RoleHelpHaverAdmin}

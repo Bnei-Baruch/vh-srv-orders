@@ -562,18 +562,31 @@ type PaidDetailC struct {
 }
 
 type MonthlyCharge struct {
-	ID        int
-	StartDate null.Time // start of eligble orders period
-	EndDate   null.Time // end of eligble orders period
-	Status    string    // in progress / completed
-	CreatedAt null.Time // technical
+	ID         int
+	StartDate  null.Time // start of eligble orders period
+	EndDate    null.Time // end of eligble orders period
+	Month      int
+	Year       int
+	Status     string    // in progress / completed
+	Properties null.JSON // bag of crap (steps duration,)
+	CreatedAt  null.Time // technical
+	UpdatedAt  null.Time // technical
+
+	Props map[string]interface{} // trasient properties (saved to Properties)
 }
 
 type OrderChargeRecord struct {
 	ChargeID  int
 	OrderID   int
-	Status    string   // to_charge / skipped / charged
+	Status    string   // to_charge / skipped / charged / muhlafim
 	UserKey   string   // point in time, immutable, keycloak_id
-	Comment   string   // skip reason / ?
+	Email     string   // point in time, immutable, email
+	Comment   string   // skip reason / muhlafim / ?
 	PaymentID null.Int // maybe put this on payment?
+}
+
+type OrderToCharge struct {
+	Order
+	UserKey string
+	Email   string
 }

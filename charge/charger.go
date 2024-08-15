@@ -2,11 +2,13 @@ package charge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/getsentry/sentry-go"
+	"github.com/volatiletech/null/v9"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/events"
@@ -50,12 +52,15 @@ func MonthlyCharge() {
 }
 
 type Charger struct {
-	repo         repo.OrdersRepository
-	eventEmitter events.EventEmitter
+	repo            repo.OrdersRepository
+	eventEmitter    events.EventEmitter
+	muhlafimFetcher MuhlafimFetcher
 }
 
 func NewCharger() *Charger {
-	return new(Charger)
+	c := new(Charger)
+	c.muhlafimFetcher = NewPelecardMuhlafimFetcher()
+	return c
 }
 
 func (c *Charger) Init() error {
@@ -80,7 +85,58 @@ func (c *Charger) Close() {
 	c.eventEmitter.Close(ctx)
 }
 
+func (c *Charger) SetMuhlafimFetcher(f MuhlafimFetcher) {
+	c.muhlafimFetcher = f
+}
+
 func (c *Charger) Charge() error {
+	// locking ?! we need to ensure only one charge process
+
+	ctx := context.Background()
+	charge := new(repo.MonthlyCharge)
+	charge.Props = make(map[string]interface{})
+	charge.Props["timing"] = make(map[string]time.Duration)
+
+	previousCharges, err := c.repo.GetMonthlyCharges(ctx, 0, 1)
+	if err != nil {
+		return fmt.Errorf("repo.GetMonthlyCharges: %w", err)
+	}
+
+	var lastCharge *repo.MonthlyCharge
+	if len(previousCharges) > 0 {
+		lastCharge = previousCharges[0]
+		if lastCharge.Status == common.MonthlyChargeStatusInProgress {
+			return errors.New("Another monthly charge is already in progress. Please abort it first")
+		}
+
+		// TODO (edo): consider different status of multiple previous charges.
+		// at the moment I'm naive to consider the previous to have been completed successfuly.
+		// Basically we need dates but do we continue where unsuccessful previous attempt left of?
+
+		charge.StartDate = lastCharge.EndDate
+		charge.EndDate = null.TimeFrom(time.Now().UTC())
+	}
+	charge.Status = common.MonthlyChargeStatusStarted
+	charge.Month = int(time.Now().Month())
+	charge.Year = time.Now().Year()
+
+	charge.ID, err = c.repo.CreateMonthlyCharge(ctx, charge)
+	if err != nil {
+		return fmt.Errorf("repo.CreateMonthlyCharge: %w", err)
+	}
+	slog.Info("created new charge", slog.Int("id", charge.ID), slog.Int("month", charge.Month), slog.Int("year", charge.Year))
+
+	// get orders to charge
+	tStart := time.Now()
+	ordersToCharge, err := c.repo.GetOrdersToCharge(ctx, charge.Year, charge.Month)
+	if err != nil {
+		return fmt.Errorf("GetOrdersToCharge: %w", err)
+	}
+	timing := time.Now().Sub(tStart)
+	slog.Info("got orders to charge", slog.Int("count", len(ordersToCharge)), slog.Duration("timing", timing))
+	charge.Props["orders_count"] = len(ordersToCharge)
+	charge.Props["timing"].(map[string]time.Duration)["orders_count"] = timing
+
 	// period start and end dates
 	// cleanup userkey
 	// clear flags

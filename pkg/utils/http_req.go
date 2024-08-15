@@ -2,6 +2,7 @@ package utils
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -49,11 +50,12 @@ func HTTPCallAndGetBody(fullUrl string, authHeader string, bodyBuffer *bytes.Buf
 	return body, resp.StatusCode
 }
 
-func PostJSON(method string, url string, payload []byte) (*http.Response, error) {
+func PostJSON(ctx context.Context, method string, url string, payload []byte) (*http.Response, error) {
 	req, err := http.NewRequest(method, url, bytes.NewReader(payload))
 	if err != nil {
 		return nil, fmt.Errorf("http.NewRequest: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(ctx)
 	return new(http.Client).Do((req))
 }

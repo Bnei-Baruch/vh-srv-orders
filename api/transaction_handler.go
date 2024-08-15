@@ -186,7 +186,7 @@ func (o *OrdersAPI) handleTransactionOrderAndPay(c *gin.Context) {
 	}
 	utils.LogFor(c.Request.Context()).Debug("payment endpoint", slog.String("endpoint", ENDPOINT))
 
-	resp, err := utils.PostJSON("POST", ENDPOINT, payload)
+	resp, err := utils.PostJSON(c.Request.Context(), "POST", ENDPOINT, payload)
 	if err != nil {
 		utils.LogFor(c.Request.Context()).Info("POST external payment failed", slog.Any("err", err))
 		c.JSON(http.StatusOK, gin.H{"url": errorurl})
@@ -296,7 +296,7 @@ func (o *OrdersAPI) handleTransactionNewToken(c *gin.Context) {
 		return
 	}
 
-	resp, err := utils.PostJSON("POST", common.GetNewTokenEndpoint, payload)
+	resp, err := utils.PostJSON(c.Request.Context(), "POST", common.GetNewTokenEndpoint, payload)
 	if err != nil {
 		utils.LogFor(c.Request.Context()).Info("POST handleTransactionNewToken failed", slog.Any("err", err))
 		c.JSON(http.StatusOK, gin.H{"url": req.ErrorURL})

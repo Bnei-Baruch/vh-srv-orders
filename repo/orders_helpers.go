@@ -268,19 +268,28 @@ func (o *OrdersDB) createRequestPayByToken(c context.Context, a *Account, order 
 	if err != nil {
 		return nil, nil, fmt.Errorf("o.createPendingPayment: %w", err)
 	}
-	token := p.PelecardToken
-	cardDetails, err := o.GetCardDetailById(c, order.CardDetailsId.Int)
-	if err != nil {
-		return nil, nil, fmt.Errorf("o.GetCardDetailById: %w", err)
-	}
 
-	if cardDetails.Token.Valid {
-		token = cardDetails.Token
-
-	}
-
-	newp.PelecardToken = token
 	newp.AuthNo = p.AuthNo
+	newp.PelecardToken = p.PelecardToken
+
+	if order.CardDetailsId.IsValid() {
+		cardDetails, err := o.GetCardDetailById(c, order.CardDetailsId.Int)
+		if err != nil {
+			return nil, nil, fmt.Errorf("o.GetCardDetailById: %w", err)
+		}
+
+		if cardDetails.Active.Valid && cardDetails.Active.Bool {
+			if cardDetails.Token.Valid {
+				newp.PelecardToken = cardDetails.Token
+				newp.CCNumber = cardDetails.CCNumber
+				newp.CCExpDate = cardDetails.CCExpDate
+			} else {
+				return nil, nil, fmt.Errorf("empty token [%d]", order.CardDetailsId.Int)
+			}
+		} else {
+			return nil, nil, fmt.Errorf("inactive card [%d]", order.CardDetailsId.Int)
+		}
+	}
 
 	extPay := RequestPayment{
 		UserKey: newp.Ordkey.String,
@@ -289,7 +298,7 @@ func (o *OrdersDB) createRequestPayByToken(c context.Context, a *Account, order 
 		ErrorURL:   "http://ec41a043fda1.ngrok.io/pelecard/error",
 		CancelURL:  "http://ec41a043fda1.ngrok.io/pelecard/cancel",
 		ApprovalNo: p.AuthNo.String,
-		Token:      token.String,
+		Token:      newp.PelecardToken.String,
 
 		Name:         a.FirstName.String + " " + a.LastName.String,
 		Price:        order.Amount.Float64,

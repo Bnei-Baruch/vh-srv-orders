@@ -35,6 +35,7 @@ const (
 	OrderStatusPaid      = "paid"
 	OrderStatusPending   = "pending"
 	OrderStatusRefunded  = "refunded"
+	OrderStatusSuccess   = "success"
 
 	OrderLanguageEnglish = "EN"
 	OrderLanguageHebrew  = "HE"

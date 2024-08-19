@@ -77,17 +77,17 @@ func (o *OrdersDB) UpdateOrdersToken(ctx context.Context, req RequestUpdateToken
 		return fmt.Errorf("GetAccountForOrderID: %w", err)
 	}
 
-	cardDetails := CardDetails{
-		AccountID: null.IntFrom(account.ID),
-		CCNumber:  null.StringFrom(req.CardNumber),
-		CCExpDate: null.StringFrom(req.CardExp),
-		Active:    null.BoolFrom(true),
-		Token:     null.StringFrom(req.Token),
-	}
-	cardID, err := o.CreateCardDetailsAndGetId(ctx, cardDetails)
-	if err != nil {
-		return fmt.Errorf("CreateCardDetailsAndGetId: %w", err)
-	}
+  cardDetails := CardDetails{
+    AccountID: null.IntFrom(account.ID),
+    CCNumber:  null.StringFrom(req.CardNumber),
+    CCExpDate: null.StringFrom(req.CardExp),
+    Active:    null.BoolFrom(true),
+    Token:     null.StringFrom(req.Token),
+  }
+  cardID, err := o.CreateCardDetailsAndGetId(ctx, cardDetails)
+  if err != nil {
+    return fmt.Errorf("CreateCardDetailsAndGetId: %w", err)
+  }
 
 	if err := o.PatchOrderByID(ctx, Order{CardDetailsId: null.IntFrom(cardID)}, req.OrderId); err != nil {
 		return fmt.Errorf("PatchOrderByID: %w", err)
@@ -105,7 +105,7 @@ func (o *OrdersDB) UpdateOrderAfterPayment(ctx context.Context, p Payment) error
 	}
 
 	if p.Success.String == "1" {
-		order.Status = null.NewString("paid", true)
+		order.Status = null.NewString(common.OrderStatusPaid, true)
 		order.PaymentDate = null.NewTime(time.Now(), true)
 
 		_, err := o.Exec(ctx, `UPDATE orders SET "Status"=$1, "PaymentDate"=$2, updated_at=$3 WHERE id = $4`,
@@ -114,11 +114,11 @@ func (o *OrdersDB) UpdateOrderAfterPayment(ctx context.Context, p Payment) error
 			return fmt.Errorf("o.Exec [success]: %w", err)
 		}
 	} else {
-		order.Status = null.NewString("nosuccess", true)
+		order.Status = null.NewString(common.OrderStatusNoSuccess, true)
 		_, err := o.Exec(ctx, `UPDATE orders SET "Status"=$1, updated_at=$2 WHERE id = $3`,
 			order.Status.String, time.Now(), p.OrderID.Int)
 		if err != nil {
-			return fmt.Errorf("o.Exec [nosuccess]: %w", err)
+			return fmt.Errorf("o.Exec [%s]: %w", common.OrderStatusNoSuccess, err)
 		}
 	}
 
@@ -129,7 +129,7 @@ func (o *OrdersDB) UpdateOrderAfterPayment(ctx context.Context, p Payment) error
 
 func (o *OrdersDB) GetOrderByID(ctx context.Context, orderID uint) (*Order, error) {
 	var order Order
-	var amount string
+	var amount null.String
 
 	if err := o.QueryRow(ctx, `SELECT 
 	id,
@@ -159,7 +159,11 @@ func (o *OrdersDB) GetOrderByID(ctx context.Context, orderID uint) (*Order, erro
 		return nil, fmt.Errorf("o.QueryRow.Scan: %w", err)
 	}
 
-	value, err := strconv.ParseFloat(amount, 64)
+  if !amount.Valid {
+		fmt.Println("amount is null, expected float")
+		return nil, fmt.Errorf("amount is null, expected float")
+  }
+	value, err := strconv.ParseFloat(amount.String, 64)
 	if err != nil {
 		fmt.Println("error converting amount string to float")
 		return nil, fmt.Errorf("strconv.ParseFloat(amount): %w", err)
@@ -439,7 +443,7 @@ func (o *OrdersDB) flagOrderAsRenewed(ctx context.Context, orderID uint) error {
 func (o *OrdersDB) ChargeOrdersToRenew(ctx context.Context, pmx string) (int, error) {
 	sqlQuery := `
 	Select id from orders 
-	Where ("Status" = 'paid' or "Status" = 'nosuccess')
+	Where ("Status" = '` + common.OrderStatusPaid + `' or "Status" = '` + common.OrderStatusNoSuccess + `')
 	and "Type" = 'recurring'
 	and "Flag" = 'torenew'
 	`
@@ -814,7 +818,11 @@ func buildAndGetOrdersWhereQuery(fromDate string, dateTo *time.Time, productType
 
 	if evaluateMembership != "" {
 		if evaluateMembership == "true" {
-			whereCondition.WriteString(" AND (o.\"Status\" = 'paid' OR o.\"Status\" = 'success' OR o.\"Status\" = 'nosuccess' OR o.\"Status\" = 'cancelled')")
+			whereCondition.WriteString(
+        " AND (o.\"Status\" = '" + common.OrderStatusPaid +
+        "' OR o.\"Status\" = '" + common.OrderStatusSuccess +
+        "' OR o.\"Status\" = '" + common.OrderStatusNoSuccess +
+        "' OR o.\"Status\" = '" + common.OrderStatusCancelled + "')")
 		}
 	}
 
@@ -842,9 +850,11 @@ select count(o.*) as total
 from orders as o, accounts as a
 where a."Email" = $1
 and o."AccountID" = a.id
-and o."ProductType" = 'globalmembership'
-and (o."Status" = 'paid' or o."Status" = 'success' or o."Status" = 'nosuccess')
-`
+and o."ProductType" = '` + common.ProductTypeGlobalMembership +
+`' and (o."Status" = '` + common.OrderStatusPaid +
+`' or o."Status" = '` + common.OrderStatusSuccess +
+`' or o."Status" = '` + common.OrderStatusNoSuccess + `')`
+
 	count, err := o.count(ctx, query, email)
 	if err != nil {
 		return false, err

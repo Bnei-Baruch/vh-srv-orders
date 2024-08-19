@@ -60,7 +60,6 @@ func (o *OrdersAPI) isEmailOwnerOrHasAnyRole(c *gin.Context, email string, roles
 }
 
 func (o *OrdersAPI) isUserOrHasAnyRole(c *gin.Context, userID string, roles ...string) bool {
-
 	authData := c.Request.Context().Value(common.CtxAuthClaims)
 	if authData == nil {
 		c.Status(http.StatusForbidden)

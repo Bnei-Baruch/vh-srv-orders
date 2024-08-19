@@ -104,6 +104,10 @@ func (a *App) initGinEngine() {
 		a.gEngine.Use(cors.Default())
 	}
 
+  a.initRoutes()
+}
+
+func (a *App) initRoutes() {
 	// routes
 	orders := a.gEngine.Group("/orders")
 	{

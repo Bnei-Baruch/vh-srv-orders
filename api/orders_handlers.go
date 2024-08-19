@@ -206,7 +206,7 @@ func (o *OrdersAPI) handleOrdersUpdateToken(c *gin.Context) {
 		return
 	}
 
-	if err = o.repo.UpdateOrdersToken(c, req); err != nil {
+	if err = o.repo.UpdateOrdersToken(c.Request.Context(), req); err != nil {
 		c.Status(http.StatusInternalServerError)
 		_ = c.Error(fmt.Errorf("repo.UpdateOrdersToken: %w", err))
 		return

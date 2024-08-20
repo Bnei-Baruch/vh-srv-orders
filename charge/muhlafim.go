@@ -21,34 +21,6 @@ const (
 	muhlafimActionLoTakin     = "שונה סטאטוס (מתקין ללא תקין)"
 )
 
-type MuhlafimRequest struct {
-	User      string
-	Password  string
-	Terminal  string `json:"terminalNumber"`
-	StartDate string `json:"startDate"`
-	EndDate   string `json:"endDate"`
-}
-
-type TokenRedirect struct {
-	SupplierNumber    string `json:"SupplierNumber"`
-	CreationDate      string `json:"CreationDate"` // "20/06/2024 14:09:12"
-	Source            string `json:"Source"`
-	FileName          string `json:"FileName"`
-	ActionDescription string `json:"ActionDescription"`
-	Token             string `json:"Token"`
-	CardNumber        string `json:"CardNumber"`
-	NewCardNumber     string `json:"NewCardNumber"`
-	NewExpirationDate string `json:"NewExpirationDate"`
-	Amount            string `json:"Amount"`
-	VoucherNo         string `json:"VoucherNo"`
-}
-
-type MuhlafimResponse struct {
-	StatusCode   string           `json:"StatusCode"`
-	ErrorMessage string           `json:"ErrorMessage"`
-	ResultData   []*TokenRedirect `json:"ResultData"`
-}
-
 type MuhlafimFetcher interface {
 	FetchMuhlafim(ctx context.Context, start time.Time, end time.Time) ([]*TokenRedirect, error)
 }
@@ -99,7 +71,7 @@ func (f *PelecardMuhlafimFetcher) FetchMuhlafim(ctx context.Context, start time.
 	}
 	utils.LogFor(ctx).Info("muhlafim response", slog.String("StatusCode", payload.StatusCode),
 		slog.String("ErrorMessage", payload.ErrorMessage),
-		slog.Int("results_size", len(payload.ResultData)))
+		slog.Int("ResultData", len(payload.ResultData)))
 
 	return payload.ResultData, nil
 }

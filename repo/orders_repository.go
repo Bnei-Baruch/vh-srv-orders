@@ -72,6 +72,8 @@ type OrdersRepository interface {
 	SoftDeleteCardDetailById(c context.Context, id int) error
 	PatchCardDetailsById(ctx context.Context, req CardDetails, id int) error
 	GetAllCardDetails(ctx context.Context, skip int, limit int) ([]CardDetails, error)
+	GetActiveCardsByTokens(ctx context.Context, tokens []string) ([]CardDetails, error)
+	DeactivateCard(ctx context.Context, id int) ([]int, error)
 
 	GetTransactionById(ctx context.Context, id int, accountId *int) (*Transaction, error)
 	CreateTransactionAndGetId(ctx context.Context, p Transaction) (int, error)

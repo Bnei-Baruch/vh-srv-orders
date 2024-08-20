@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lib/pq"
+	"github.com/volatiletech/null/v9"
 	"gitlab.bbdev.team/vh/pay/orders/common"
 )
 
@@ -123,6 +125,96 @@ func (o *OrdersDB) GetAllCardDetails(ctx context.Context, skip int, limit int) (
 	}
 
 	return cardDetails, rows.Err()
+}
+
+func (o *OrdersDB) GetActiveCardsByTokens(ctx context.Context, tokens []string) ([]CardDetails, error) {
+	rows, err := o.Query(ctx, `SELECT 
+			id,
+			account_id,
+			gateway_provider,
+			cc_number,
+			cc_expdate,
+			active,
+			token,
+			created_at,
+			updated_at,
+			deleted_at 
+			from card_details 
+			where active is true and token in ($1)`, pq.Array(tokens))
+	if err != nil {
+		return nil, fmt.Errorf("o.Query: %w", err)
+	}
+	defer rows.Close()
+
+	cards := []CardDetails{}
+	for rows.Next() {
+		var d CardDetails
+		err := rows.Scan(
+			&d.ID,
+			&d.AccountID,
+			&d.GatewayProvider,
+			&d.CCNumber,
+			&d.CCExpDate,
+			&d.Active,
+			&d.Token,
+			&d.CreatedAt,
+			&d.UpdatedAt,
+			&d.DeletedAt)
+		if err != nil {
+			return nil, fmt.Errorf("rows.Scan: %w", err)
+		}
+		cards = append(cards, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows.Err: %w", err)
+	}
+
+	return cards, nil
+}
+
+func (o *OrdersDB) DeactivateCard(ctx context.Context, id int) ([]int, error) {
+	orderIDs, err := o.getIds(ctx, `select id from orders 
+	where "ProductType" = 'globalmembership' 
+	and "Type" = 'recurring'
+	and "Status" != 'cancelled'
+	and card_details_id=$1`, id)
+	if err != nil {
+		return nil, fmt.Errorf("o.getIds [orders]: %w", err)
+	}
+
+	for _, orderID := range orderIDs {
+		if err := o.PatchOrderByID(ctx, Order{Status: null.StringFrom(common.OrderStatusCancelled)}, orderID); err != nil {
+			return nil, fmt.Errorf(" o.PatchOrderByID [%d]: %w", orderID, err)
+		}
+	}
+
+	if err := o.PatchCardDetailsById(ctx, CardDetails{Active: null.BoolFrom(false)}, id); err != nil {
+		return nil, fmt.Errorf("o.PatchCardDetailsById: %w", err)
+	}
+
+	return nil, nil
+}
+
+func (o *OrdersDB) getIds(ctx context.Context, query string, args ...interface{}) ([]int, error) {
+	rows, err := o.Query(ctx, query, args)
+	if err != nil {
+		return nil, fmt.Errorf("o.Query: %w", err)
+	}
+	defer rows.Close()
+
+	ids := []int{}
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("rows.Scan: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows.Err: %w", err)
+	}
+
+	return ids, nil
 }
 
 //func addCardDetailsFromAllExistingOrders(ctx *gin.Context, orderType string) {

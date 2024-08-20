@@ -51,12 +51,12 @@ func (o *OrdersDB) GetOrdersToCharge(ctx context.Context, year int, month int) (
 		select distinct on ("AccountID") *
 		from orders
 		where "ProductType" = 'globalmembership'
-			and "Type" = 'recurring'
-			and "Status" in ('paid', 'nosuccess')
+			and "Status" in ('paid', 'success', 'nosuccess', 'cancelled', 'cancelledFailed')
 		order by "AccountID", "PaymentDate" desc)
-	select lo.id, lo."Status", lo."Amount", lo."Currency", lo.card_details_id, a."UserKey", a."Email" from last_order lo
+	select lo.id, lo."Status", lo."Amount", lo."Currency", lo.card_details_id, a."UserKey", a."Email" 
+	from last_order lo
 	inner join accounts a on lo."AccountID" = a.id
-	where lo.created_at < $1;
+	where lo."Type" = 'recurring' and "Status" in ('paid', 'nosuccess') and lo.created_at < $1;
 `
 
 	rows, err := o.Query(ctx, query, time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC))

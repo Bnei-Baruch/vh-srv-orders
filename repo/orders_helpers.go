@@ -272,7 +272,7 @@ func (o *OrdersDB) createRequestPayByToken(c context.Context, a *Account, order 
 	newp.AuthNo = p.AuthNo
 	newp.PelecardToken = p.PelecardToken
 
-	if order.CardDetailsId.IsValid() {
+	if !order.CardDetailsId.IsZero() {
 		cardDetails, err := o.GetCardDetailById(c, order.CardDetailsId.Int)
 		if err != nil {
 			return nil, nil, fmt.Errorf("o.GetCardDetailById: %w", err)

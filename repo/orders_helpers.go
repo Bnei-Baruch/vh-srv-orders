@@ -146,6 +146,7 @@ func (o *OrdersDB) GetOrderByID(ctx context.Context, orderID uint) (*Order, erro
 	starting_date,
 	"Flag",
 	card_details_id,
+	"Note",
 	quantity,
 	amount_item,
 	created_at,
@@ -153,7 +154,7 @@ func (o *OrdersDB) GetOrderByID(ctx context.Context, orderID uint) (*Order, erro
 	deleted_at 
 	FROM orders WHERE id=$1`, orderID).Scan(
 		&order.ID, &order.Type, &order.ProductType, &order.RecuringFreq, &order.AccountID, &order.Organization, &amount,
-		&order.Currency, &order.Status, &order.OrderLanguage, &order.PaymentDate, &order.StartingDate, &order.Flag, &order.CardDetailsId, &order.Quantity, &order.AmountItem,
+		&order.Currency, &order.Status, &order.OrderLanguage, &order.PaymentDate, &order.StartingDate, &order.Flag, &order.CardDetailsId, &order.Quantity, &order.AmountItem, &order.Note,
 		&order.CreatedAt, &order.UpdatedAt, &order.DeletedAt,
 	); err != nil {
 		return nil, fmt.Errorf("o.QueryRow.Scan: %w", err)

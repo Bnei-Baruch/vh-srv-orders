@@ -3,14 +3,14 @@ package api
 import (
 	"context"
 	"fmt"
+	"github.com/getsentry/sentry-go"
+	"github.com/hellofresh/health-go/v5"
 	"log/slog"
 	"time"
 
-	"github.com/getsentry/sentry-go"
 	sentrygin "github.com/getsentry/sentry-go/gin"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	"github.com/hellofresh/health-go/v5"
 	healthnats "github.com/hellofresh/health-go/v5/checks/nats"
 	healthpgx "github.com/hellofresh/health-go/v5/checks/pgx4"
 
@@ -178,8 +178,14 @@ func (a *App) initGinEngine() {
 
 	special := baseV2Path.Group("/special")
 	{
-		special.DELETE("/:email", a.ordersAPI.handleSpecialHardDeleteByEmail)
-		special.GET("/:email", a.ordersAPI.handleSpecialGetByEmail)
+		special.DELETE("/:id", a.ordersAPI.handleSpecialDeleteById)
+		special.DELETE("/delete/:keycloak_id", a.ordersAPI.handleDeleteSpecialsByKeycloakId)
+		special.POST("/", a.ordersAPI.handleCreateSpecial)
+		special.POST("/update", a.ordersAPI.handleSpecialUpdateKeycloakIdByEmail)
+		special.GET("/email/:email", a.ordersAPI.handleSpecialGetByEmail)
+		special.GET("/id/:id", a.ordersAPI.handleSpecialGetById)
+		special.GET("/keycloak_id/:keycloak_id", a.ordersAPI.handleSpecialGetByKeycloakId)
+		special.GET("/", a.ordersAPI.handleSpecialGetAll)
 	}
 
 	operation := baseV2Path.Group("/operation")

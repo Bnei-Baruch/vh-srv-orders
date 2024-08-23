@@ -50,6 +50,7 @@ services:
       GOOGLE_APPLICATION_CREDENTIALS: /vh_google_app_creds.json
       SENDGRID_API_KEY: ${SENDGRID_API_KEY}
       SENTRY_DSN: ${SENTRY_DSN}
+      IMPORT_SPECIALS_SPREADSHEET_ID: ${IMPORT_SPECIALS_SPREADSHEET_ID}
     mem_limit: 250M
     ports:
       - "8185:8185"

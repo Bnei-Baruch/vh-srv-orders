@@ -16,7 +16,7 @@ FROM alpine:latest
 
 RUN apk --no-cache add curl
 
-COPY misc/robokasa.sh ./
+COPY misc/*.sh ./
 COPY db /db
 COPY --from=base /app/orders /
 

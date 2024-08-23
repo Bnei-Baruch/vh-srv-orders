@@ -76,8 +76,16 @@ type OrdersRepository interface {
 	GetTransactionById(ctx context.Context, id int, accountId *int) (*Transaction, error)
 	CreateTransactionAndGetId(ctx context.Context, p Transaction) (int, error)
 
-	HardDeleteSpecialByEmail(ctx context.Context, email string) error
-	GetSpecialByEmail(ctx context.Context, email string) (*Special, error)
+	CreateSpecial(ctx context.Context, s Special) (int, error)
+	CreateSpecialByImportRecord(ctx context.Context, s Special) error
+	DeleteSpecialById(ctx context.Context, id int) error
+	DeleteSpecialsByKeycloakId(ctx context.Context, keycloakID string) error
+	GetAllSpecialsByEmail(ctx context.Context, email string) ([]*Special, error)
+	GetUniqueEmailsFromSpecial(ctx context.Context) ([]string, error)
+	GetSpecialsByKeycloakId(ctx context.Context, keycloakID string) ([]*Special, error)
+	GetSpecialsById(ctx context.Context, id string) ([]*Special, error)
+	GetAllSpecials(ctx context.Context) ([]*Special, error)
+	SetKeycloakIdByEmail(ctx context.Context, email string, keycloakID string) error
 
 	HasPaidMembership(ctx context.Context, email string) (bool, error)
 	HasTicket(ctx context.Context, email string) (bool, error)

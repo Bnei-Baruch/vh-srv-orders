@@ -528,9 +528,18 @@ type Transaction struct {
 }
 
 type Special struct {
+	Id          null.Int    `json:"id" gorm:"primary_key"`
+	KeycloakId  null.String `json:"keycloak_id"`
 	Email       null.String `json:"email"`
+	StartDate   null.Time   `json:"start_date"`
+	EndDate     null.Time   `json:"end_date"`
 	Category    null.String `json:"category"`
 	SubCategory null.String `json:"subcategory"`
+}
+
+type SpecialKeycloakIdUpdate struct {
+	KeycloakId string `json:"keycloak_id"`
+	Email      string `json:"email"`
 }
 
 type OperationReq struct {

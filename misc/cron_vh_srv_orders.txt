@@ -2,4 +2,5 @@
 
 # import robocasa payments
 0 0 * * * root docker exec  vh-srv-orders ./robokasa.sh
-
+# update specials
+15 0 * * * root docker exec  vh-srv-orders ./activate_specials.sh

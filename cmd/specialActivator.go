@@ -28,6 +28,7 @@ func (w *Worker) String() string {
 type Worker struct {
 	repo         repo.OrdersRepository
 	eventEmitter events.EventEmitter
+	eventBuilder events.EventBuilder
 }
 
 func NewWorker() *Worker {
@@ -118,7 +119,8 @@ func (w *Worker) DoTask() error {
 			}
 		}
 		if actualSpecial != nil {
-			w.emitEvent(context.Background(),
+			ctx := context.WithValue(context.Background(), common.CtxEventBuilder, w)
+			w.emitEvent(ctx,
 				events.TypeCreateSpecial,
 				map[string]interface{}{"keycloak_id": actualSpecial.KeycloakId.String,
 					"start_date": actualSpecial.StartDate,
@@ -138,6 +140,12 @@ func isBeginsToday(special *repo.Special) bool {
 		}
 	}
 	return false
+}
+
+func (w *Worker) BuildEvent(eventType string, payload map[string]interface{}) events.Event {
+	event := events.MakeEvent(eventType, payload)
+	event.Component = events.ComponentGenericImporter
+	return event
 }
 
 func (w *Worker) emitEvent(ctx context.Context, eventType string, payload map[string]interface{}) {

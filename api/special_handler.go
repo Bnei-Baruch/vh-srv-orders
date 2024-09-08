@@ -107,12 +107,7 @@ func (o *OrdersAPI) handleCreateSpecial(c *gin.Context) {
 }
 
 func (o *OrdersAPI) handleSpecialGetByEmail(c *gin.Context) {
-	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
-		return
-	}
-
 	email := c.Param("email")
-
 	if email == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Email is required", "success": false})
 		return

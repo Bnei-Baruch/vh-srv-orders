@@ -124,7 +124,7 @@ func (im *SpecialsImporter) createSpecial(rSpecial *SpecialRecord) error {
 		special.KeycloakId = account.UserKey
 	}
 
-	err = im.repo.CreateSpecialByImportRecord(ctx, special)
+	_, err = im.repo.CreateSpecial(ctx, special)
 	if err != nil {
 		return fmt.Errorf("importer.createSpecial: %w", err)
 	}

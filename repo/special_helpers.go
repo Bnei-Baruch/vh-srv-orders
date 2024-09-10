@@ -3,10 +3,11 @@ package repo
 import (
 	"context"
 	"fmt"
-	"gitlab.bbdev.team/vh/pay/orders/common"
-	"gitlab.bbdev.team/vh/pay/orders/events"
 	"strings"
 	"time"
+
+	"gitlab.bbdev.team/vh/pay/orders/common"
+	"gitlab.bbdev.team/vh/pay/orders/events"
 )
 
 func (o *OrdersDB) DeleteSpecialById(ctx context.Context, id int) error {
@@ -133,23 +134,9 @@ func (o *OrdersDB) CreateSpecial(ctx context.Context, s Special) (int, error) {
 		createQueryArgs...).Scan(&ID); err != nil {
 		return 0, err
 	}
-	o.emitEvent(ctx, events.TypeCreateSpecial, map[string]interface{}{"keycloak_id": s.KeycloakId, "start_date": s.StartDate, "end_date": s.EndDate})
+	o.emitEvent(ctx, events.TypeCreateSpecial,
+		map[string]interface{}{"email": s.Email, "keycloak_id": s.KeycloakId, "start_date": s.StartDate, "end_date": s.EndDate})
 	return ID, nil
-}
-
-// added because I'm not sure what we need TypeCreateSpecial event here
-func (o *OrdersDB) CreateSpecialByImportRecord(ctx context.Context, s Special) error {
-	createString, numString, createQueryArgs := prepareSpecialCreateQuery(s)
-	if len(createQueryArgs) == 0 {
-		return common.ErrInvalidValues
-	}
-
-	var ID int
-	if err := o.QueryRow(ctx, fmt.Sprintf(`INSERT INTO specials (%s) VALUES (%s) RETURNING id`, createString, numString),
-		createQueryArgs...).Scan(&ID); err != nil {
-		return err
-	}
-	return nil
 }
 
 func prepareSpecialCreateQuery(req Special) (string, string, []interface{}) {

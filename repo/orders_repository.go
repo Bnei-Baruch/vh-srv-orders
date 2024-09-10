@@ -77,7 +77,6 @@ type OrdersRepository interface {
 	CreateTransactionAndGetId(ctx context.Context, p Transaction) (int, error)
 
 	CreateSpecial(ctx context.Context, s Special) (int, error)
-	CreateSpecialByImportRecord(ctx context.Context, s Special) error
 	DeleteSpecialById(ctx context.Context, id int) error
 	DeleteSpecialsByKeycloakId(ctx context.Context, keycloakID string) error
 	GetAllSpecialsByEmail(ctx context.Context, email string) ([]*Special, error)

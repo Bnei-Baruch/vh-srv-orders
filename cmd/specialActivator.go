@@ -106,15 +106,13 @@ func (w *Worker) DoTask() error {
 		}
 		var actualSpecial *repo.Special
 		for _, special := range specials {
-			if special.KeycloakId.Valid {
-				if isBeginsToday(special) {
-					if actualSpecial == nil {
-						actualSpecial = special
-						continue
-					}
-					if special.EndDate.Time.After(actualSpecial.EndDate.Time) {
-						actualSpecial = special
-					}
+			if isBeginsToday(special) {
+				if actualSpecial == nil {
+					actualSpecial = special
+					continue
+				}
+				if special.EndDate.Time.After(actualSpecial.EndDate.Time) {
+					actualSpecial = special
 				}
 			}
 		}
@@ -122,9 +120,11 @@ func (w *Worker) DoTask() error {
 			ctx := context.WithValue(context.Background(), common.CtxEventBuilder, w)
 			w.emitEvent(ctx,
 				events.TypeCreateSpecial,
-				map[string]interface{}{"keycloak_id": actualSpecial.KeycloakId.String,
-					"start_date": actualSpecial.StartDate,
-					"end_date":   actualSpecial.EndDate})
+				map[string]interface{}{
+					"email":       actualSpecial.Email,
+					"keycloak_id": actualSpecial.KeycloakId,
+					"start_date":  actualSpecial.StartDate,
+					"end_date":    actualSpecial.EndDate})
 		}
 
 	}

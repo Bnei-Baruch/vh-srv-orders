@@ -19,10 +19,10 @@ type EventEmitter interface {
 	Close(ctx context.Context)
 }
 
-func CreateEmitter() (EventEmitter, error) {
+func CreateEmitter(testMode bool) (EventEmitter, error) {
 	handlers := []EventHandler{new(LoggerEventHandler)}
 
-	if common.Config.NatsUrl != "" {
+	if common.Config.NatsUrl != "" && !testMode {
 		natsHandler, err := NewNatsEventHandler()
 		if err != nil {
 			return nil, fmt.Errorf("initialize nats handler: %w", err)

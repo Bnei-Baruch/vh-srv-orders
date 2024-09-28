@@ -34,18 +34,18 @@ func NewApp() *App {
 
 func (a *App) Initialize() {
 	a.initSentry()
-	a.initEventEmitter()
+	a.initEventEmitter(false)
 	a.initDB()
 	a.ordersAPI = NewOrdersAPI(a.repo)
 	a.initGinEngine()
 	a.initHealth()
 }
 
-func (a *App) initEventEmitter() {
+func (a *App) initEventEmitter(testMode bool) {
 	if common.Config.NatsUrl != "" {
 		slog.Info("initializing events emitter")
 		var err error
-		a.eventEmitter, err = events.CreateEmitter()
+		a.eventEmitter, err = events.CreateEmitter(testMode)
 		if err != nil {
 			utils.LogFatal("events.CreateEmitter", slog.Any("err", err))
 		}

@@ -74,7 +74,7 @@ func NewBaseImporter() *BaseImporter {
 func (im *BaseImporter) Init() error {
 	var err error
 
-	im.eventEmitter, err = events.CreateEmitter()
+	im.eventEmitter, err = events.CreateEmitter(false)
 	if err != nil {
 		return fmt.Errorf("events.CreateEmitter: %w", err)
 	}

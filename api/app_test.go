@@ -22,7 +22,7 @@ const USER_KEY = "keycloak123"
 func NewTestApp(t *testing.T) *App {
 	gin.SetMode(gin.TestMode)
 	a := NewApp()
-	a.initEventEmitter()
+	a.initEventEmitter(true)
 
 	var err error
 	a.repo, err = testutil.NewTestOrdersDB(t, context.Background(), a.eventEmitter)
@@ -51,6 +51,17 @@ func NewRequestAsUser(method, target string, body io.Reader) *http.Request {
 	}
 	ctx = context.WithValue(ctx, common.CtxAuthClaims, claims)
 	return r.WithContext(ctx)
+}
+
+func GET(t *testing.T, a *App, path string, expectedCode int) gin.H {
+	w := httptest.NewRecorder()
+	a.gEngine.ServeHTTP(w, NewRequestAsUser("GET", path, nil))
+	require.Equal(t, expectedCode, w.Code)
+
+	var payload gin.H
+  err := json.Unmarshal(w.Body.Bytes(), &payload)
+	require.NoError(t, err, "GET json.Unmarshal")
+	return payload
 }
 
 func POST(t *testing.T, a *App, path string, request interface{}, expectedCode int) gin.H {

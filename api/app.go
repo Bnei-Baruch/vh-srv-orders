@@ -111,6 +111,10 @@ func (a *App) initGinEngine() {
 		}))
 	}
 
+  a.initRoutes()
+}
+
+func (a *App) initRoutes() {
 	// routes
 	orders := a.gEngine.Group("/orders")
 	{

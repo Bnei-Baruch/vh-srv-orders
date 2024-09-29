@@ -102,8 +102,12 @@ type OrdersDB struct {
 	eventEmitter events.EventEmitter
 }
 
-func NewOrdersDB(ctx context.Context, eventEmitter events.EventEmitter) (OrdersRepository, error) {
-	pool, err := pgxpool.Connect(ctx, GetDBURL())
+func NewOrdersDB(ctx context.Context, eventEmitter events.EventEmitter) (*OrdersDB, error) {
+	return NewOrdersDBUrl(ctx, GetDBURL(), eventEmitter)
+}
+
+func NewOrdersDBUrl(ctx context.Context, db_url string, eventEmitter events.EventEmitter) (*OrdersDB, error) {
+	pool, err := pgxpool.Connect(ctx, db_url)
 	if err != nil {
 		return nil, fmt.Errorf("pgxpool.Connect: %w", err)
 	}

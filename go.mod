@@ -12,7 +12,7 @@ require (
 	github.com/go-resty/resty/v2 v2.7.0
 	github.com/goji/param v0.0.0-20160927210335-d7f49fd7d1ed
 	github.com/golang-jwt/jwt/v4 v4.5.0
-	github.com/golang-migrate/migrate/v4 v4.15.2
+	github.com/golang-migrate/migrate/v4 v4.16.0
 	github.com/hellofresh/health-go/v5 v5.5.3
 	github.com/jackc/pgx/v4 v4.18.3
 	github.com/joho/godotenv v1.3.0
@@ -23,6 +23,7 @@ require (
 	github.com/oklog/ulid/v2 v2.1.0
 	github.com/satori/go.uuid v1.2.0
 	github.com/spf13/cobra v1.8.0
+	github.com/stretchr/testify v1.9.0
 	github.com/volatiletech/null/v9 v9.0.0
 	google.golang.org/api v0.152.0
 )
@@ -33,6 +34,7 @@ require (
 	github.com/bytedance/sonic v1.10.1 // indirect
 	github.com/chenzhuoyu/base64x v0.0.0-20230717121745-296ad89f973d // indirect
 	github.com/chenzhuoyu/iasm v0.9.0 // indirect
+	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.2 // indirect
 	github.com/gin-contrib/sse v0.1.0 // indirect
 	github.com/go-jose/go-jose/v4 v4.0.1 // indirect
@@ -68,9 +70,13 @@ require (
 	github.com/nats-io/nkeys v0.4.7 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.1.0 // indirect
+	github.com/peterldowns/pgtestdb v0.0.14 // indirect
+	github.com/peterldowns/pgtestdb/migrators/golangmigrator v0.0.14 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/segmentio/ksuid v1.0.4 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
+	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.2.11 // indirect
 	go.opencensus.io v0.24.0 // indirect

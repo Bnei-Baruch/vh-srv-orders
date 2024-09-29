@@ -22,10 +22,14 @@ func GetDBURL() string {
 		url.QueryEscape(common.Config.PgDbName))
 }
 
+// Migration files path, also used in tests.
+func MigrationFiles() string {
+  return "file://./db/migrations"
+}
+
 func SyncDBStructInsertionAndMigrations() error {
 	slog.Info("running db migrations")
-	m, err := migrate.New(
-		"file://./db/migrations", GetDBURL()+"?sslmode=disable")
+	m, err := migrate.New(MigrationFiles(), GetDBURL()+"?sslmode=disable")
 	if err != nil {
 		return fmt.Errorf("migrate.New: %w", err)
 	}

@@ -22,6 +22,7 @@ type OrdersRepository interface {
 	GetAccountIDByKeycloakID(ctx context.Context, keycloakId string) (int, error)
 	GetEmailByKeycloakID(ctx context.Context, keycloakId string) (string, error)
 	MergeAccountsOrders(ctx context.Context, request AccountMergeRequest) error
+	GetOrCreateAccount(ctx context.Context, email string) (int, error)
 
 	UpdateOrderStatusByOrderID(ctx context.Context, oid int, status string) error
 	CreateOrderViaTransaction(ctx context.Context, req RequestOrder) (*Order, error)

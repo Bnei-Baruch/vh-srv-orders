@@ -4,6 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/volatiletech/null/v9"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/keycloak"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -590,4 +594,48 @@ func (o *OrdersDB) IsSubjectID(ctx context.Context, keycloakID, accountID string
 	}
 
 	return true, nil
+}
+
+func (o *OrdersDB) GetOrCreateAccount(ctx context.Context, keycloakId string) (int, error) {
+	var account *Account
+	accountId, err := o.GetAccountIDByKeycloakID(ctx, keycloakId)
+	if err == nil {
+		return accountId, nil
+	}
+
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return 0, fmt.Errorf("repo.GetAccount: %w", err)
+	}
+
+	slog.Info("account not found", slog.String("keycloakId", keycloakId))
+	profileService := profiles.NewProfileServiceAPI(keycloak.NewClient())
+	profile, err := profileService.LookupProfileByKeycloakId(ctx, keycloakId)
+	if err != nil {
+		return 0, fmt.Errorf("profileService.LookupProfile: %w", err)
+	}
+
+	if profile == nil {
+		return 0, errors.New("email not found in profile service")
+	}
+
+	slog.Info("creating new account", slog.String("keycloakId", keycloakId))
+	account = &Account{
+		FirstName:   null.StringFromPtr(profile.FirstNameVernacular),
+		LastName:    null.StringFromPtr(profile.LastNameVernacular),
+		Email:       null.StringFromPtr(profile.PrimaryEmail),
+		Phone:       null.StringFromPtr(profile.MobileNumber),
+		Street:      null.StringFromPtr(profile.StreetAddress),
+		City:        null.StringFromPtr(profile.City),
+		State:       null.StringFromPtr(profile.StateOrRegion),
+		Postcode:    null.StringFromPtr(profile.PostalCode),
+		Country:     null.StringFromPtr(profile.Country),
+		AccountType: null.StringFrom(common.AccountTypePersonal),
+		UserKey:     null.StringFrom(profile.KeycloakID.String()),
+	}
+
+	account.ID, err = o.CreateAccount(ctx, *account)
+	if err != nil {
+		return 0, fmt.Errorf("repo.CreateAccount: %w", err)
+	}
+	return account.ID, nil
 }

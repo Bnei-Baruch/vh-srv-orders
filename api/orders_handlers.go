@@ -340,7 +340,7 @@ func (o *OrdersAPI) handleCreateOffline(c *gin.Context) {
 		return
 	}
 
-	accountID, err := o.repo.GetAccountIDByKeycloakID(c, req.KeycloakID.String)
+	accountID, err := o.repo.GetOrCreateAccount(c, req.KeycloakID.String)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "The given KeycloakID is not found.", "success": false})

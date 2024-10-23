@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/volatiletech/null/v9"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/keycloak"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
 	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/volatiletech/null/v9"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/keycloak"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
 
 	"github.com/jackc/pgx/v4"
 
@@ -607,7 +608,7 @@ func (o *OrdersDB) GetOrCreateAccount(ctx context.Context, keycloakId string) (i
 		return 0, fmt.Errorf("repo.GetAccount: %w", err)
 	}
 
-	slog.Info("account not found", slog.String("keycloakId", keycloakId))
+	slog.Info("Account not found", slog.String("keycloakId", keycloakId))
 	profileService := profiles.NewProfileServiceAPI(keycloak.NewClient())
 	profile, err := profileService.LookupProfileByKeycloakId(ctx, keycloakId)
 	if err != nil {
@@ -615,10 +616,10 @@ func (o *OrdersDB) GetOrCreateAccount(ctx context.Context, keycloakId string) (i
 	}
 
 	if profile == nil {
-		return 0, errors.New("email not found in profile service")
+		return 0, errors.New("Account not found by keycloakId in profile service")
 	}
 
-	slog.Info("creating new account", slog.String("keycloakId", keycloakId))
+	slog.Info("Creating new account", slog.String("keycloakId", keycloakId))
 	account = &Account{
 		FirstName:   null.StringFromPtr(profile.FirstNameVernacular),
 		LastName:    null.StringFromPtr(profile.LastNameVernacular),

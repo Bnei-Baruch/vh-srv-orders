@@ -93,12 +93,14 @@ func (im *SpecialsImporter) getSheetValues() ([]*SpecialRecord, error) {
 		}
 
 		record := &SpecialRecord{
-			Email:       null.StringFrom(row[0].(string)),
-			KeycloakID:  null.StringFrom(row[1].(string)),
-			StartDate:   startDate,
-			EndDate:     endDate,
-			Category:    row[4].(string),
-			SubCategory: null.StringFrom(row[5].(string)),
+			Email:      null.StringFrom(row[0].(string)),
+			KeycloakID: null.StringFrom(row[1].(string)),
+			StartDate:  startDate,
+			EndDate:    endDate,
+			Category:   row[4].(string),
+		}
+		if len(row) > 5 {
+			record.SubCategory = null.StringFrom(row[5].(string))
 		}
 		records = append(records, record)
 	}

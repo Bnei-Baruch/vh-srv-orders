@@ -67,6 +67,37 @@ func (p *ProfileServiceAPI) LookupProfile(ctx context.Context, email string) (*P
 	return &(*results)[0], nil
 }
 
+func (p *ProfileServiceAPI) LookupProfileByKeycloakId(ctx context.Context, keycloakId string) (*Profile, error) {
+	req, err := p.baseRequest(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("p.baseRequest: %w", err)
+	}
+
+	path := fmt.Sprintf("/v1/profile/%s/short", keycloakId)
+
+	resp, err := req.
+		SetResult(&Profile{}).
+		Get(path)
+	if err != nil {
+		return nil, fmt.Errorf("req.Get: %w", err)
+	}
+
+	if resp.IsError() {
+		if resp.StatusCode() == http.StatusNotFound {
+			return nil, nil
+		}
+		apiErr := resp.Error().(*APIError)
+		return nil, errors.New(apiErr.Error)
+	}
+
+	result := resp.Result().(*Profile)
+	if result == nil {
+		return nil, nil
+	}
+
+	return result, nil
+}
+
 func (p *ProfileServiceAPI) baseRequest(ctx context.Context) (*resty.Request, error) {
 	r := p.client.NewRequest()
 	r.SetContext(ctx)

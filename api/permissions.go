@@ -2,10 +2,11 @@ package api
 
 import (
 	"fmt"
+	"net/http"
+
 	"github.com/gin-gonic/gin"
 	"gitlab.bbdev.team/vh/pay/orders/api/middleware"
 	"gitlab.bbdev.team/vh/pay/orders/common"
-	"net/http"
 )
 
 func (o *OrdersAPI) HasAnyRole(c *gin.Context, roles ...string) bool {
@@ -52,6 +53,24 @@ func (o *OrdersAPI) isEmailOwnerOrHasAnyRole(c *gin.Context, email string, roles
 	claims := authData.(*middleware.IDTokenClaims)
 
 	if claims.Email != email && !claims.HasAnyRole(roles...) {
+		c.Status(http.StatusForbidden)
+		return false
+	}
+
+	return true
+}
+
+func (o *OrdersAPI) isEmailOwnerAndSubjectOrHasAnyRole(c *gin.Context, keycloakID string, email string, roles ...string) bool {
+
+	authData := c.Request.Context().Value(common.CtxAuthClaims)
+	if authData == nil {
+		c.Status(http.StatusForbidden)
+		return false
+	}
+	claims := authData.(*middleware.IDTokenClaims)
+
+	isEmailOwnerAndSubject := claims.Sub == keycloakID && claims.Email == email
+	if !isEmailOwnerAndSubject && !claims.HasAnyRole(roles...) {
 		c.Status(http.StatusForbidden)
 		return false
 	}

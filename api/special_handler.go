@@ -57,16 +57,15 @@ func (o *OrdersAPI) handleDeleteSpecialsByKeycloakId(c *gin.Context) {
 }
 
 func (o *OrdersAPI) handleSpecialUpdateKeycloakIdByEmail(c *gin.Context) {
-	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
-		return
-	}
-
 	var (
 		req repo.SpecialKeycloakIdUpdate
 		err error
 	)
 	if err = c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !o.isEmailOwnerAndSubjectOrHasAnyRole(c, req.KeycloakId, req.Email, common.RoleRoot, common.RoleAdmin) {
 		return
 	}
 	err = o.repo.SetKeycloakIdByEmail(c.Request.Context(), req.Email, req.KeycloakId)
@@ -78,7 +77,7 @@ func (o *OrdersAPI) handleSpecialUpdateKeycloakIdByEmail(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Deleted!", "success": true})
+	c.JSON(http.StatusOK, gin.H{"message": "KeycloakId Updated!", "success": true})
 }
 
 func (o *OrdersAPI) handleCreateSpecial(c *gin.Context) {

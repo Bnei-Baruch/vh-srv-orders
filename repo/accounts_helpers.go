@@ -631,7 +631,7 @@ func (o *OrdersDB) GetOrCreateAccount(ctx context.Context, keycloakId string) (i
 		Postcode:    null.StringFromPtr(profile.PostalCode),
 		Country:     null.StringFromPtr(profile.Country),
 		AccountType: null.StringFrom(common.AccountTypePersonal),
-		UserKey:     null.StringFrom(profile.KeycloakID.String()),
+		UserKey:     null.StringFrom(keycloakId),
 	}
 
 	account.ID, err = o.CreateAccount(ctx, *account)

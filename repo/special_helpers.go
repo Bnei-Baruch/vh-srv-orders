@@ -190,7 +190,7 @@ func prepareSpecialCreateQuery(req Special) (string, string, []interface{}) {
 
 func (o *OrdersDB) GetAllSpecialsByEmail(ctx context.Context, email string) ([]*Special, error) {
 	var specials []*Special
-	rows, err := o.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory from specials where email = $1`, email)
+	rows, err := o.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory from specials where email ilike $1`, email)
 
 	if err != nil {
 		return nil, err

@@ -3,10 +3,11 @@ package api
 import (
 	"context"
 	"fmt"
-	"github.com/getsentry/sentry-go"
-	"github.com/hellofresh/health-go/v5"
 	"log/slog"
 	"time"
+
+	"github.com/getsentry/sentry-go"
+	"github.com/hellofresh/health-go/v5"
 
 	sentrygin "github.com/getsentry/sentry-go/gin"
 	"github.com/gin-contrib/cors"
@@ -111,7 +112,7 @@ func (a *App) initGinEngine() {
 		}))
 	}
 
-  a.initRoutes()
+	a.initRoutes()
 }
 
 func (a *App) initRoutes() {
@@ -169,6 +170,7 @@ func (a *App) initRoutes() {
 		transaction.PATCH("/", a.ordersAPI.handleTransactionPaid)
 		transaction.POST("/", a.ordersAPI.handleTransactionOrderAndPay)
 		transaction.POST("/new_token", a.ordersAPI.handleTransactionNewToken)
+		transaction.POST("/new_token_no_cvv", a.ordersAPI.handleTransactionNewTokenNoCVV)
 	}
 
 	userCardDetails := baseV2Path.Group("/card_detail")

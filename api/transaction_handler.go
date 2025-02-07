@@ -358,7 +358,7 @@ func (o *OrdersAPI) handleTransactionNewTokenNoCVV(c *gin.Context) {
 	if req.Reference.Valid && len(req.Reference.String) > 0 {
 		reference = req.Reference.String
 	} else {
-		reference = "new_token_by_admin_no_cvv" //TBC
+		reference = "new_token_by_admin_no_cvv"
 	}
 	if req.OrderLanguage.Valid {
 		language = req.OrderLanguage.String
@@ -393,7 +393,7 @@ func (o *OrdersAPI) handleTransactionNewTokenNoCVV(c *gin.Context) {
 
 	resp, err := utils.PostJSON("POST", common.GetNewTokenNoCVVEndpoint, payload)
 	if err != nil {
-		utils.LogFor(c.Request.Context()).Info("POST handleTransactionNewTokenNoCVV failed", slog.Any("err", err))
+		utils.LogFor(c.Request.Context()).Info("POST GetNewTokenNoCVVEndpoint failed", slog.Any("err", err))
 		c.JSON(http.StatusOK, gin.H{"url": req.ErrorURL})
 		return
 	}

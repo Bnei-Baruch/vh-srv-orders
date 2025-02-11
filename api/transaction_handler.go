@@ -321,6 +321,101 @@ func (o *OrdersAPI) handleTransactionNewToken(c *gin.Context) {
 	}
 }
 
+func (o *OrdersAPI) handleTransactionNewTokenNoCVV(c *gin.Context) {
+
+	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
+		c.Status(http.StatusForbidden)
+		return
+	}
+
+	var req repo.RequestToken
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var phone string
+	var country string
+	var sku string
+	var reference string
+	var language string
+
+	if req.Phone.Valid && len(req.Phone.String) > 0 {
+		phone = req.Phone.String
+	} else {
+		phone = "+NA"
+	}
+	if req.Country.Valid && len(req.Country.String) > 0 {
+		country = req.Country.String
+	} else {
+		country = "Undef"
+	}
+	if req.SKU.Valid && len(req.SKU.String) > 0 {
+		sku = req.SKU.String
+	} else {
+		sku = common.ProductSKU40037
+	}
+	if req.Reference.Valid && len(req.Reference.String) > 0 {
+		reference = req.Reference.String
+	} else {
+		reference = "new_token_by_admin_no_cvv"
+	}
+	if req.OrderLanguage.Valid {
+		language = req.OrderLanguage.String
+	} else {
+		language = common.OrderLanguageEnglish
+	}
+
+	extPay := repo.RequestNewToken{
+		UserKey:      req.UserKey.String,
+		GoodURL:      req.SuccessURL.String,
+		ErrorURL:     req.ErrorURL.String,
+		CancelURL:    req.CancelURL.String,
+		Name:         fmt.Sprintf("%s %s", req.FirstName.String, req.LastName.String),
+		Currency:     req.Currency.String,
+		Email:        req.Email.String,
+		Phone:        phone,
+		Country:      country,
+		SKU:          sku,
+		VAT:          "f",
+		Installments: 1,
+		Language:     language,
+		Reference:    reference,
+		Organization: req.Organization.String,
+	}
+
+	payload, err := json.Marshal(extPay)
+	if err != nil {
+		c.Status(http.StatusInternalServerError)
+		_ = c.Error(fmt.Errorf("json.Marshal repo.handleTransactionNewTokenNoCVV: %w", err))
+		return
+	}
+
+	resp, err := utils.PostJSON("POST", common.GetNewTokenNoCVVEndpoint, payload)
+	if err != nil {
+		utils.LogFor(c.Request.Context()).Info("POST GetNewTokenNoCVVEndpoint failed", slog.Any("err", err))
+		c.JSON(http.StatusOK, gin.H{"url": req.ErrorURL})
+		return
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	utils.LogFor(c.Request.Context()).Info("getToken response", slog.Group("response",
+		slog.String("status", resp.Status),
+		slog.Any("headers", resp.Header),
+		slog.String("body", string(body))))
+	{
+		var i interface{}
+		if err := json.Unmarshal(body, &i); err != nil {
+			utils.LogFor(c.Request.Context()).Warn("getToken response json.Unmarshal", slog.Any("err", err))
+			c.Status(http.StatusInternalServerError)
+		}
+
+		c.JSON(http.StatusOK, i)
+	}
+}
+
 func (o *OrdersAPI) handleTransactionPaid(c *gin.Context) {
 
 	isAuthUser, isAdmin, keycloakId := o.isAuthUserOrHasAnyRole(c, common.RoleAdmin, common.RoleRoot)

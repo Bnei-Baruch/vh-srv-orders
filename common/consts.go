@@ -58,6 +58,7 @@ const (
 	OfflinePaymentMethodRobokasa       = "robokasa"
 	OfflinePaymentPropertiesRobokasaID = "robokasa_id"
 	GetNewTokenEndpoint                = "https://checkout.kbb1.com/emv/new_token"
+	GetNewTokenNoCVVEndpoint           = "https://checkout.kbb1.com/renew/renew-card"
 )
 
 var RoleAnyAdmin = []string{RoleRoot, RoleAdmin, RoleHelpHaverAdmin}

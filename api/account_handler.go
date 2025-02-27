@@ -42,6 +42,25 @@ func (o *OrdersAPI) handleGetAccount(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": account, "success": true})
 }
 
+func (o *OrdersAPI) handleGetAccountByEmail(c *gin.Context) {
+	email := c.Param("email")
+	if !o.isEmailOwnerOrHasAnyRole(c, email, common.RoleRoot, common.RoleAdmin) {
+		return
+	}
+	account, err := o.repo.GetAccount(c.Request.Context(), 0, email)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.Status(http.StatusNotFound)
+		} else {
+			c.Status(http.StatusInternalServerError)
+			_ = c.Error(fmt.Errorf("repo.GetAccount: %w", err))
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": account, "success": true})
+}
+
 func (o *OrdersAPI) handleCreateAccount(c *gin.Context) {
 
 	var req repo.Account

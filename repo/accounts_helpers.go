@@ -570,7 +570,7 @@ func buildAndGetAccountsWhereQuery(email string) (string, string) {
 		if whereCondition.String() != "" {
 			whereCondition.WriteString(" AND")
 		}
-		whereCondition.WriteString(fmt.Sprintf(` "Email" = '%s'`, email))
+		whereCondition.WriteString(fmt.Sprintf(` LOWER("Email") = LOWER('%s')`, email))
 	}
 
 	orderBy.WriteString(fmt.Sprintf(" ORDER BY updated_at %s", "desc"))

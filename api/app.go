@@ -138,6 +138,7 @@ func (a *App) initRoutes() {
 	{
 		account.POST("/", a.ordersAPI.handleCreateAccount)
 		account.GET("/:id", a.ordersAPI.handleGetAccount)
+		account.GET("/email/:email", a.ordersAPI.handleGetAccountByEmail)
 		account.PATCH("/:id", a.ordersAPI.handlePatchAccount)
 		account.DELETE("/:id", a.ordersAPI.handleDeleteAccount)
 		account.DELETE("/:id/hard", a.ordersAPI.handleHardDeleteAccount)

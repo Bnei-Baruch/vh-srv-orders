@@ -101,7 +101,7 @@ func (o *OrdersDB) PaidDetailCount(ctx context.Context) (*PaidDetailC, error) {
 
 func (o *OrdersDB) count(ctx context.Context, query string, args ...interface{}) (int64, error) {
 	var result int64
-	if err := o.QueryRow(ctx, query, args).Scan(&result); err != nil {
+	if err := o.QueryRow(ctx, query, args...).Scan(&result); err != nil {
 		return 0, err
 	}
 	return result, nil

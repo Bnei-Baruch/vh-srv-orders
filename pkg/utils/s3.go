@@ -13,10 +13,16 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/common"
 )
 
+// This type and var allows mocking this function for tests where we don't
+// want to uploading anything anywhere.
+type UploadFileToS3Func func(buffer []byte, fileName string) (string, error)
+
+var UploadFileToS3 = uploadFileToS3
+
 // UploadFileToS3 will upload a single file to S3, it will require a file buffer and filename
 // It'll will set file info like content type and encryption on the uploaded file.
 // TODO (edo): use io.Reader instead of []byte
-func UploadFileToS3(buffer []byte, fileName string) (string, error) {
+func uploadFileToS3(buffer []byte, fileName string) (string, error) {
 	// Creating a new session with the given configuration.
 	s3Config := &aws.Config{
 		Credentials:      credentials.NewStaticCredentials(common.Config.S3AccesstKey, common.Config.S3SecretKey, ""),

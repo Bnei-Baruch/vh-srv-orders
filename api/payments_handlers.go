@@ -203,7 +203,7 @@ func (o *OrdersAPI) handlePaymentUpdate(c *gin.Context) {
 			return
 		}
 	} else {
-		c.JSON(http.StatusBadRequest, gin.H{"קrror": "Invalid payment type"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid payment type"})
 		return
 	}
 
@@ -228,6 +228,7 @@ func (o *OrdersAPI) handlePaymentUpdate(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "Updated!", "success": true})
 		return
 	}
+	c.JSON(http.StatusOK, gin.H{"message": "Not updated, status empty", "success": false})
 }
 
 func (o *OrdersAPI) handlePaymentFetch(c *gin.Context) {

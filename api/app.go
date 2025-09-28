@@ -240,3 +240,7 @@ func (a *App) Shutdown() {
 	a.eventEmitter.Close(ctx)
 	sentry.Flush(2 * time.Second)
 }
+
+func (a *App) SetEmitter(emitter events.EventEmitter) {
+	a.eventEmitter = emitter
+}

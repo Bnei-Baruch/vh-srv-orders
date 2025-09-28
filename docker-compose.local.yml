@@ -1,0 +1,15 @@
+services:
+  ordersdb:
+    image: postgres:12
+    environment:
+      POSTGRES_USER: ${PGUSER}
+      POSTGRES_PASSWORD: ${PGPASSWORD}
+      POSTGRES_DB: ${PGDATABASE}
+    ports:
+      - ${PGPORT}:5432
+  nats:
+    image: nats:2.10
+    restart: unless-stopped
+    ports:
+      - "4222:4222"
+    command: ["--jetstream", "--user", "${NATS_USER}", "--pass", "{NATS_PASSWORD}"]

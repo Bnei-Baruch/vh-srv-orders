@@ -38,7 +38,7 @@ func NewTestOrdersDB(t *testing.T, ctx context.Context, em events.EventEmitter) 
 		if err == migrate.ErrNoChange {
 			fmt.Printf("Migrations ok, no change.\n")
 		} else {
-			return nil, err
+			return nil, fmt.Errorf("gm.Migrate: %w", err)
 		}
 	}
 	testDb := pgtestdb.Custom(t, config, gm)

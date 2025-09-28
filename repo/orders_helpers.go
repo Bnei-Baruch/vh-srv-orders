@@ -77,17 +77,17 @@ func (o *OrdersDB) UpdateOrdersToken(ctx context.Context, req RequestUpdateToken
 		return fmt.Errorf("GetAccountForOrderID: %w", err)
 	}
 
-  cardDetails := CardDetails{
-    AccountID: null.IntFrom(account.ID),
-    CCNumber:  null.StringFrom(req.CardNumber),
-    CCExpDate: null.StringFrom(req.CardExp),
-    Active:    null.BoolFrom(true),
-    Token:     null.StringFrom(req.Token),
-  }
-  cardID, err := o.CreateCardDetailsAndGetId(ctx, cardDetails)
-  if err != nil {
-    return fmt.Errorf("CreateCardDetailsAndGetId: %w", err)
-  }
+	cardDetails := CardDetails{
+		AccountID: null.IntFrom(account.ID),
+		CCNumber:  null.StringFrom(req.CardNumber),
+		CCExpDate: null.StringFrom(req.CardExp),
+		Active:    null.BoolFrom(true),
+		Token:     null.StringFrom(req.Token),
+	}
+	cardID, err := o.CreateCardDetailsAndGetId(ctx, cardDetails)
+	if err != nil {
+		return fmt.Errorf("CreateCardDetailsAndGetId: %w", err)
+	}
 
 	if err := o.PatchOrderByID(ctx, Order{CardDetailsId: null.IntFrom(cardID)}, req.OrderId); err != nil {
 		return fmt.Errorf("PatchOrderByID: %w", err)
@@ -159,10 +159,10 @@ func (o *OrdersDB) GetOrderByID(ctx context.Context, orderID uint) (*Order, erro
 		return nil, fmt.Errorf("o.QueryRow.Scan: %w", err)
 	}
 
-  if !amount.Valid {
+	if !amount.Valid {
 		fmt.Println("amount is null, expected float")
 		return nil, fmt.Errorf("amount is null, expected float")
-  }
+	}
 	value, err := strconv.ParseFloat(amount.String, 64)
 	if err != nil {
 		fmt.Println("error converting amount string to float")
@@ -396,7 +396,7 @@ func (o *OrdersDB) renewOrder(ctx context.Context, orderID uint, pmx string) (st
 		newp.PaymentStatus = null.StringFrom("failed")
 		newp.Success = null.StringFrom("0")
 
-		utils.LogFor(ctx).Error("external payment error [renew]: %w", payErr)
+		utils.LogFor(ctx).Error("external payment error [renew]: %w", slog.Any("payErr", payErr))
 		hub := utils.SentryFor(ctx)
 		hub.WithScope(func(scope *sentry.Scope) {
 			scope.SetExtra("order_id", order.ID)
@@ -829,10 +829,10 @@ func buildAndGetOrdersWhereQuery(fromDate string, dateTo *time.Time, productType
 	if evaluateMembership != "" {
 		if evaluateMembership == "true" {
 			whereCondition.WriteString(
-        " AND (o.\"Status\" = '" + common.OrderStatusPaid +
-        "' OR o.\"Status\" = '" + common.OrderStatusSuccess +
-        "' OR o.\"Status\" = '" + common.OrderStatusNoSuccess +
-        "' OR o.\"Status\" = '" + common.OrderStatusCancelled + "')")
+				" AND (o.\"Status\" = '" + common.OrderStatusPaid +
+					"' OR o.\"Status\" = '" + common.OrderStatusSuccess +
+					"' OR o.\"Status\" = '" + common.OrderStatusNoSuccess +
+					"' OR o.\"Status\" = '" + common.OrderStatusCancelled + "')")
 		}
 	}
 
@@ -861,9 +861,9 @@ from orders as o, accounts as a
 where a."Email" = $1
 and o."AccountID" = a.id
 and o."ProductType" = '` + common.ProductTypeGlobalMembership +
-`' and (o."Status" = '` + common.OrderStatusPaid +
-`' or o."Status" = '` + common.OrderStatusSuccess +
-`' or o."Status" = '` + common.OrderStatusNoSuccess + `')`
+		`' and (o."Status" = '` + common.OrderStatusPaid +
+		`' or o."Status" = '` + common.OrderStatusSuccess +
+		`' or o."Status" = '` + common.OrderStatusNoSuccess + `')`
 
 	count, err := o.count(ctx, query, email)
 	if err != nil {

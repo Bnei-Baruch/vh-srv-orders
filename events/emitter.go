@@ -35,8 +35,8 @@ func CreateEmitter() (EventEmitter, error) {
 
 type NoopEmitter struct{}
 
-func (e *NoopEmitter) Emit(_ ...Event)         {}
-func (e *NoopEmitter) Close(_ context.Context) {}
+func (e *NoopEmitter) Emit(_ context.Context, _ ...Event) {}
+func (e *NoopEmitter) Close(_ context.Context)            {}
 
 type SimpleEmitter struct {
 	entropy  io.Reader

@@ -39,9 +39,9 @@ func (o *OrdersDB) CreateOrderViaTransaction(ctx context.Context, req RequestOrd
 		UserKey:     req.UserKey,
 	}
 
-	accountID, err := o.CreateOrUpdateAccount(ctx, a)
+	accountID, err := o.GetOrCreateAccount(ctx, a)
 	if err != nil {
-		return nil, fmt.Errorf("o.CreateOrUpdateAccount: %w", err)
+		return nil, fmt.Errorf("o.GetOrCreateAccount: %w", err)
 	}
 
 	order := Order{

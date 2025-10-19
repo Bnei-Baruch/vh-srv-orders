@@ -3,12 +3,7 @@ package events
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
-	"math/rand"
-	"time"
-
-	"github.com/oklog/ulid/v2"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
@@ -39,20 +34,15 @@ func (e *NoopEmitter) Emit(_ context.Context, _ ...Event) {}
 func (e *NoopEmitter) Close(_ context.Context)            {}
 
 type SimpleEmitter struct {
-	entropy  io.Reader
 	handlers []EventHandler
 }
 
 func NewSimpleEmitter(handlers ...EventHandler) *SimpleEmitter {
-	e := new(SimpleEmitter)
-	e.entropy = rand.New(rand.NewSource(time.Now().UTC().UnixNano()))
-	e.handlers = handlers
-	return e
+	return &SimpleEmitter{handlers: handlers}
 }
 
 func (e *SimpleEmitter) Emit(ctx context.Context, events ...Event) {
 	for _, event := range events {
-		event.ID = ulid.MustNew(ulid.Now(), e.entropy).String()
 		for _, handler := range e.handlers {
 			handler.Handle(ctx, event)
 		}

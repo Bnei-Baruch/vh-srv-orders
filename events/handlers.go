@@ -26,6 +26,8 @@ func (eh *LoggerEventHandler) Handle(ctx context.Context, event Event) {
 	utils.LogFor(ctx).Debug("Handle event", slog.Group("event",
 		slog.String("id", event.ID),
 		slog.String("type", event.Type),
+		slog.String("actor", utils.StrTruncate(event.Actor, 32)),
+		slog.String("component", event.Component),
 		slog.String("request_id", event.RequestID),
 		slog.Any("payload", event.Payload),
 	))

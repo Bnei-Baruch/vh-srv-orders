@@ -59,8 +59,7 @@ func (p *ProfileServiceAPI) LookupProfile(ctx context.Context, email string) (*P
 		if resp.StatusCode() == http.StatusNotFound {
 			return nil, nil
 		}
-		apiErr := resp.Error().(*APIError)
-		return nil, errors.New(apiErr.Error)
+		return nil, respError(resp)
 	}
 
 	results := resp.Result().(*[]Profile)
@@ -90,8 +89,7 @@ func (p *ProfileServiceAPI) LookupProfileByKeycloakId(ctx context.Context, keycl
 		if resp.StatusCode() == http.StatusNotFound {
 			return nil, nil
 		}
-		apiErr := resp.Error().(*APIError)
-		return nil, errors.New(apiErr.Error)
+		return nil, respError(resp)
 	}
 
 	result := resp.Result().(*Profile)
@@ -121,8 +119,7 @@ func (p *ProfileServiceAPI) GetProfileByKeycloakID(ctx context.Context, keycloak
 		if resp.StatusCode() == http.StatusNotFound {
 			return nil, ErrNotFound
 		}
-		apiErr := resp.Error().(*APIError)
-		return nil, errors.New(apiErr.Error)
+		return nil, respError(resp)
 	}
 
 	return resp.Result().(*Profile), nil
@@ -139,4 +136,15 @@ func (p *ProfileServiceAPI) baseRequest(ctx context.Context) (*resty.Request, er
 	r.SetAuthToken(token)
 
 	return r, nil
+}
+
+func respError(resp *resty.Response) error {
+	if resp.IsError() {
+		if apiErr, ok := resp.Error().(*APIError); ok {
+			return errors.New(apiErr.Error)
+		} else {
+			return fmt.Errorf("unexpected response: [%s] %s", resp.Status(), resp.String())
+		}
+	}
+	return nil
 }

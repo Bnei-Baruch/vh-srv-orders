@@ -1,11 +1,23 @@
 package events
 
-import "time"
+import (
+	"io"
+	"math/rand"
+	"time"
+
+	"github.com/oklog/ulid/v2"
+	"gitlab.bbdev.team/vh/pay/orders/common"
+)
 
 const (
-	ComponentAPI              = "api"
-	ComponentRobokasaImporter = "robokasa_importer"
-	ComponentGenericImporter  = "generic_importer"
+	ActorSystem = common.ServiceName
+
+	ComponentAPI                     = "api"
+	ComponentOfflinePaymentsImporter = "offline_payments_importer"
+	ComponentRobokasaImporter        = "robokasa_importer"
+	ComponentSpecialImporter         = "special_importer"
+	ComponentSpecialActivator        = "special_activator"
+	ComponentProfileEventHandler     = "profile_event_handler"
 
 	TypeCreateAccount     = "create_account"
 	TypeUpdateAccount     = "update_account"
@@ -22,6 +34,12 @@ const (
 	TypeCreateSpecial     = "create_special"
 )
 
+var entropy io.Reader
+
+func init() {
+	entropy = rand.New(rand.NewSource(time.Now().UTC().UnixNano()))
+}
+
 type Event struct {
 	ID        string                 `json:"id"`
 	Type      string                 `json:"type"`
@@ -37,5 +55,10 @@ type EventBuilder interface {
 }
 
 func MakeEvent(eventType string, payload map[string]interface{}) Event {
-	return Event{Type: eventType, Payload: payload, Timestamp: time.Now().UTC()}
+	return Event{
+		ID:        ulid.MustNew(ulid.Now(), entropy).String(),
+		Type:      eventType,
+		Payload:   payload,
+		Timestamp: time.Now().UTC(),
+	}
 }

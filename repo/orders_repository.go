@@ -9,20 +9,23 @@ import (
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/events"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/keycloak"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
 )
 
 type OrdersRepository interface {
-	CreateOrUpdateAccount(ctx context.Context, a Account) (int, error)
-	CreateAccount(ctx context.Context, a Account) (int, error)
-	GetAllAccounts(ctx context.Context, skip int, limit int, email string) ([]Account, error)
-	PatchAccount(ctx context.Context, req Account, accountID int) error
-	SoftDeleteAccount(ctx context.Context, accountID int) error
-	HardDeleteAllUserDataByAccountID(ctx context.Context, accountID int, kc_id string) error
 	GetAccount(ctx context.Context, id int, email string) (*Account, error)
+	GetAllAccounts(ctx context.Context, skip int, limit int, email string) ([]Account, error)
 	GetAccountIDByKeycloakID(ctx context.Context, keycloakId string) (int, error)
 	GetEmailByKeycloakID(ctx context.Context, keycloakId string) (string, error)
+	CreateAccount(ctx context.Context, a Account) (int, error)
+	GetOrCreateAccount(ctx context.Context, a Account) (int, error)
+	GetOrCreateAccountFromProfile(ctx context.Context, keycloakID string) (int, error)
+	PatchAccount(ctx context.Context, req Account, accountID int) error
+	PatchOrCreateAccount(ctx context.Context, a Account) (int, error)
+	SoftDeleteAccount(ctx context.Context, accountID int) error
+	HardDeleteAllUserDataByAccountID(ctx context.Context, accountID int, kc_id string) error
 	MergeAccountsOrders(ctx context.Context, request AccountMergeRequest) error
-	GetOrCreateAccount(ctx context.Context, email string) (int, error)
 
 	UpdateOrderStatusByOrderID(ctx context.Context, oid int, status string) error
 	CreateOrderViaTransaction(ctx context.Context, req RequestOrder) (*Order, error)
@@ -100,7 +103,8 @@ type OrdersRepository interface {
 
 type OrdersDB struct {
 	*pgxpool.Pool
-	eventEmitter events.EventEmitter
+	eventEmitter   events.EventEmitter
+	profileService profiles.ProfileService
 }
 
 func NewOrdersDB(ctx context.Context, eventEmitter events.EventEmitter) (*OrdersDB, error) {
@@ -113,9 +117,14 @@ func NewOrdersDBUrl(ctx context.Context, db_url string, eventEmitter events.Even
 		return nil, fmt.Errorf("pgxpool.Connect: %w", err)
 	}
 	return &OrdersDB{
-		Pool:         pool,
-		eventEmitter: eventEmitter,
+		Pool:           pool,
+		eventEmitter:   eventEmitter,
+		profileService: profiles.NewProfileServiceAPI(keycloak.NewClient()),
 	}, nil
+}
+
+func (o *OrdersDB) SetProfileService(ps profiles.ProfileService) {
+	o.profileService = ps
 }
 
 func (o *OrdersDB) emitEvent(ctx context.Context, eventType string, payload map[string]interface{}) {

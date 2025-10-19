@@ -17,6 +17,7 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/events"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/testutil"
+	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
 const USER_KEY = "keycloak123"
@@ -26,8 +27,9 @@ func NewTestApp(t *testing.T) *App {
 	a := NewApp()
 	a.SetEmitter(new(events.NoopEmitter))
 
-	var err error
-	a.repo, err = testutil.NewTestOrdersDB(t, context.Background(), a.eventEmitter)
+	dbURL, err := testutil.NewTestOrdersDB(t, context.Background())
+	require.Nil(t, err)
+	a.repo, err = repo.NewOrdersDBUrl(context.Background(), dbURL, a.eventEmitter)
 	require.Nil(t, err)
 
 	a.ordersAPI = NewOrdersAPI(a.repo)

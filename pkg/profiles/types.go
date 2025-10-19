@@ -1,6 +1,7 @@
 package profiles
 
 import (
+	"errors"
 	"time"
 
 	uuid "github.com/satori/go.uuid"
@@ -9,6 +10,8 @@ import (
 type APIError struct {
 	Error string `json:"error"`
 }
+
+var ErrNotFound = errors.New("Not Found")
 
 type Profile struct {
 	UserID              *uuid.UUID `json:"user_id"`

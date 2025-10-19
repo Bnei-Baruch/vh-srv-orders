@@ -234,5 +234,6 @@ func (im *RobokasaImporter) createPayment(ctx context.Context, rOrder *RobokasaO
 func (im *RobokasaImporter) BuildEvent(eventType string, payload map[string]interface{}) events.Event {
 	event := events.MakeEvent(eventType, payload)
 	event.Component = events.ComponentRobokasaImporter
+	event.Actor = events.ActorSystem
 	return event
 }

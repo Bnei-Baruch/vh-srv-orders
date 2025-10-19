@@ -14,6 +14,8 @@ import (
 
 type ProfileService interface {
 	LookupProfile(ctx context.Context, email string) (*Profile, error)
+	LookupProfileByKeycloakId(ctx context.Context, keycloakId string) (*Profile, error)
+	GetProfileByKeycloakID(ctx context.Context, keycloakId string) (*Profile, error)
 }
 
 type ProfileServiceAPI struct {
@@ -28,6 +30,8 @@ func NewProfileServiceAPI(tokenSource keycloak.TokenSource) *ProfileServiceAPI {
 		"Content-Type": "application/json",
 		"User-Agent":   common.ServiceName,
 	})
+	// TODO (edo): under API context we should propagate request ID (tracing) and actor (user-agent)
+
 	client.SetError(APIError{})
 	//client.EnableTrace()
 
@@ -96,6 +100,32 @@ func (p *ProfileServiceAPI) LookupProfileByKeycloakId(ctx context.Context, keycl
 	}
 
 	return result, nil
+}
+
+func (p *ProfileServiceAPI) GetProfileByKeycloakID(ctx context.Context, keycloakId string) (*Profile, error) {
+	req, err := p.baseRequest(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("p.baseRequest: %w", err)
+	}
+
+	path := fmt.Sprintf("/v1/profile/%s", keycloakId)
+
+	resp, err := req.
+		SetResult(&Profile{}).
+		Get(path)
+	if err != nil {
+		return nil, fmt.Errorf("req.Get: %w", err)
+	}
+
+	if resp.IsError() {
+		if resp.StatusCode() == http.StatusNotFound {
+			return nil, ErrNotFound
+		}
+		apiErr := resp.Error().(*APIError)
+		return nil, errors.New(apiErr.Error)
+	}
+
+	return resp.Result().(*Profile), nil
 }
 
 func (p *ProfileServiceAPI) baseRequest(ctx context.Context) (*resty.Request, error) {

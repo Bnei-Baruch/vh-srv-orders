@@ -144,7 +144,8 @@ func isBeginsToday(special *repo.Special) bool {
 
 func (w *Worker) BuildEvent(eventType string, payload map[string]interface{}) events.Event {
 	event := events.MakeEvent(eventType, payload)
-	event.Component = events.ComponentGenericImporter
+	event.Component = events.ComponentSpecialActivator
+	event.Actor = events.ActorSystem
 	return event
 }
 

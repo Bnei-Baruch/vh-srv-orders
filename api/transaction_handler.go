@@ -35,7 +35,7 @@ func (o *OrdersAPI) handleTransactionGetByID(c *gin.Context) {
 	}
 	var accountId int
 	if !isAdmin {
-		accountId, err = o.repo.GetAccountIDByKeycloakID(c, keycloakId)
+		accountId, err = o.repo.GetAccountIDByKeycloakID(c.Request.Context(), keycloakId)
 		if err != nil {
 			c.Status(http.StatusForbidden)
 			return
@@ -448,7 +448,7 @@ func (o *OrdersAPI) handleTransactionPaid(c *gin.Context) {
 			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": errf.Error()})
 			return
 		}
-		account, err := o.repo.GetAccountForOrderID(c, uint(orderid))
+		account, err := o.repo.GetAccountForOrderID(c.Request.Context(), uint(orderid))
 		if err != nil {
 			c.Status(http.StatusInternalServerError)
 			_ = c.Error(fmt.Errorf("repo.GetAccountForOrderID: %w", err))

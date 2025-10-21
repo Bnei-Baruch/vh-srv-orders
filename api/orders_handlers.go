@@ -84,7 +84,7 @@ func (o *OrdersAPI) handleOrderUpdateByID(c *gin.Context) {
 		return
 	}
 	if !isAdmin {
-		account, err := o.repo.GetAccountForOrderID(c, uint(id))
+		account, err := o.repo.GetAccountForOrderID(c.Request.Context(), uint(id))
 		if err != nil {
 			c.Status(http.StatusInternalServerError)
 			_ = c.Error(fmt.Errorf("repo.GetAccountForOrderID: %w", err))
@@ -125,7 +125,7 @@ func (o *OrdersAPI) handleOrderGetByID(c *gin.Context) {
 		return
 	}
 	if !isAdmin {
-		account, err := o.repo.GetAccountForOrderID(c, uint(id))
+		account, err := o.repo.GetAccountForOrderID(c.Request.Context(), uint(id))
 		if err != nil {
 			c.Status(http.StatusInternalServerError)
 			_ = c.Error(fmt.Errorf("repo.GetAccountForOrderID: %w", err))
@@ -340,7 +340,7 @@ func (o *OrdersAPI) handleCreateOffline(c *gin.Context) {
 		return
 	}
 
-	accountID, err := o.repo.GetOrCreateAccountFromProfile(c, req.KeycloakID.String)
+	accountID, err := o.repo.GetOrCreateAccountFromProfile(c.Request.Context(), req.KeycloakID.String)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "The given KeycloakID is not found.", "success": false})

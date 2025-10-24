@@ -225,6 +225,11 @@ func (a *App) initRoutes() {
 		operation.POST("/revert", a.ordersAPI.handleOperationRevert)
 	}
 
+	pricing := baseV2Path.Group("/pricing")
+	{
+		pricing.GET("/monthly/:keycloak_id", a.ordersAPI.handleMonthlyPriceByKCID)
+	}
+
 	a.gEngine.GET("/status/:email", a.ordersAPI.status)
 }
 

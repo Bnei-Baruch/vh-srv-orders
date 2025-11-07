@@ -121,9 +121,6 @@ func (a *App) initGinEngine() {
 		middleware.Recovery(),
 		sentrygin.New(sentrygin.Options{Repanic: true}),
 		middleware.Sentry(),
-		middleware.EventsBuilder(),
-		middleware.TokenSource(),
-		middleware.Authentication(tokenVerifier),
 	)
 	if gin.IsDebugging() {
 		a.gEngine.Use(cors.New(cors.Config{
@@ -135,6 +132,11 @@ func (a *App) initGinEngine() {
 			MaxAge:           12 * time.Hour,
 		}))
 	}
+	a.gEngine.Use(
+		middleware.EventsBuilder(),
+		middleware.TokenSource(),
+		middleware.Authentication(tokenVerifier),
+	)
 
 	a.initRoutes()
 }

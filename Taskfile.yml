@@ -1,0 +1,167 @@
+# https://taskfile.dev
+
+version: '3'
+
+vars:
+  POSTGRES_USER: '{{default "user" .POSTGRES_USER}}'
+  POSTGRES_PASSWORD: '{{default "password" .POSTGRES_PASSWORD}}'
+  POSTGRES_HOST: '{{default "localhost" .POSTGRES_HOST}}'
+  POSTGRES_PORT: '{{default "5433" .POSTGRES_PORT}}'
+  POSTGRES_DB: '{{default "orders" .POSTGRES_DB}}'
+  NATS_PORT: '{{default "4222" .NATS_PORT}}'
+  NATS_MONITOR_PORT: '{{default "8222" .NATS_MONITOR_PORT}}'
+
+dotenv: ['.env']
+
+silent: true
+
+tasks:
+
+  dev:
+    desc: Start development in shared mode (workspace)
+    cmds:
+      - task: env:init
+      - task: db:ensure
+      - task: run
+
+  dev:standalone:
+    desc: Start development in standalone mode
+    aliases: [dev:s]
+    cmds:
+      - task: env:init
+      - task: dev:standalone:up
+      - task: run
+
+  test:
+    desc: Run all Go tests for vh-srv-orders (go test)
+    cmds:
+      - go test ./...
+
+  build:
+    desc: Build vh-srv-orders (go build)
+    cmds:
+      - go build .
+
+  run:
+    desc: Run vh-srv-orders (go run)
+    cmds:
+      - go run ./... server
+
+  docker:build:
+    desc: Build vh-srv-orders Docker image (docker build)
+    cmds:
+      - docker build -t vh-srv-orders .
+
+  env:init:
+    desc: Ensure .env file exists (copy from env.dev if needed)
+    cmds:
+      - |
+        if [ -f .env ]; then
+          echo ".env file already exists. Skipping initialization."
+        else
+          cp env.dev .env
+          echo "Created .env from env.dev."
+        fi
+
+  # =============================================================================
+  #  SHARED POSTGRESQL BOOTSTRAP (IDEMPOTENT)
+  # =============================================================================
+  
+  db:wait:
+    desc: Wait for PostgreSQL to accept connections
+    cmds:
+      - |
+        until docker exec vh-dev-db psql -U {{.POSTGRES_USER}} -d postgres -c "select 1" >/dev/null; do
+          echo "Waiting for Shared PostgreSQL (vh-dev-db) ..."
+          sleep 1
+        done
+        echo "Shared PostgreSQL (vh-dev-db) is ready."
+
+  db:ensure:
+    desc: Ensure DB '{{.POSTGRES_DB}}' exists (idempotent)
+    cmds:
+      - task: db:wait
+      - |
+        if docker exec vh-dev-db \
+          psql -U {{.POSTGRES_USER}} -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='{{.POSTGRES_DB}}'" | grep -q 1; then
+          echo "DB '{{.POSTGRES_DB}}' already exists"
+        else
+          echo "Creating DB '{{.POSTGRES_DB}}' ..."
+          docker exec vh-dev-db \
+            psql -U {{.POSTGRES_USER}} -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"{{.POSTGRES_DB}}\""
+        fi
+
+  db:drop:
+    desc: Drop the service DB (careful!)
+    cmds:
+      - task: db:wait
+      - |
+        docker exec -i vh-dev-db bash -lc 'psql -U {{.POSTGRES_USER}} -d postgres -v ON_ERROR_STOP=1 << "SQL"
+        \set QUIET 1
+        SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='\''{{.POSTGRES_DB}}'\'';
+        DROP DATABASE IF EXISTS "{{.POSTGRES_DB}}";
+        SQL'
+        echo "DB '{{.POSTGRES_DB}}' dropped."
+  
+  db:shell:
+    desc: Open PostgreSQL shell
+    cmds:
+      - docker exec -it vh-dev-db psql -U {{.POSTGRES_USER}} -d {{.POSTGRES_DB}}
+
+  dev:migrate:
+    desc: Run migrations for shared development environment
+    cmds:
+      - task: db:ensure
+      - go run ./... dev-migrate
+
+  # =============================================================================
+  # STANDALONE DEVELOPMENT INFRASTRUCTURE
+  # =============================================================================
+  
+  dev:standalone:up:
+    desc: Start standalone infra
+    aliases: [dev:s:up]
+    cmds:
+      - docker compose -f docker-compose.dev.yml up -d
+      - echo "Development infrastructure started!"
+      - 'echo "PostgreSQL: localhost:{{.POSTGRES_PORT}}"'
+      - 'echo "NATS: localhost:{{.NATS_PORT}} (monitoring: localhost:{{.NATS_MONITOR_PORT}})"'
+
+  dev:standalone:stop:
+    desc: Stop standalone infra (keep data)
+    aliases: [dev:s:stop]
+    cmds:
+      - docker compose -f docker-compose.dev.yml stop
+      - echo "Development infrastructure stopped (data preserved)"
+
+  dev:standalone:down:
+    desc: Stop and remove standalone infra
+    aliases: [dev:s:down]
+    cmds:
+      - docker compose -f docker-compose.dev.yml down
+      - echo "All development infrastructure removed"
+
+  dev:standalone:clean:
+    desc: Stop and remove all standalone infra containers and volumes
+    aliases: [dev:s:clean]
+    cmds:
+      - docker compose -f docker-compose.dev.yml down -v --remove-orphans
+      - echo "Development environment cleaned!"
+
+  dev:standalone:status:
+    desc: Show status of standalone infra
+    aliases: [dev:s:status]
+    cmds:
+      - docker compose -f docker-compose.dev.yml ps
+
+  db:standalone:shell:
+    desc: Open standalone PostgreSQL shell
+    aliases: [db:s:shell]
+    cmds:
+      - docker compose -f docker-compose.dev.yml exec -it db psql -U {{.POSTGRES_USER}} -d {{.POSTGRES_DB}}
+
+  dev:standalone:logs:
+    desc: Show and follow logs from standalone infra
+    aliases: [dev:s:logs]
+    cmds:
+      - docker compose -f docker-compose.dev.yml logs --tail=50 -f

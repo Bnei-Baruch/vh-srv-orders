@@ -2196,6 +2196,74 @@ func (_c *MockOrdersRepository_GetEmailByKeycloakID_Call) RunAndReturn(run func(
 	return _c
 }
 
+// GetMonthlyPriceByKCID provides a mock function for the type MockOrdersRepository
+func (_mock *MockOrdersRepository) GetMonthlyPriceByKCID(ctx context.Context, keycloakID string) (*repo.UserMonthlyPriceRes, error) {
+	ret := _mock.Called(ctx, keycloakID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetMonthlyPriceByKCID")
+	}
+
+	var r0 *repo.UserMonthlyPriceRes
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (*repo.UserMonthlyPriceRes, error)); ok {
+		return returnFunc(ctx, keycloakID)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) *repo.UserMonthlyPriceRes); ok {
+		r0 = returnFunc(ctx, keycloakID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*repo.UserMonthlyPriceRes)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, keycloakID)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockOrdersRepository_GetMonthlyPriceByKCID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetMonthlyPriceByKCID'
+type MockOrdersRepository_GetMonthlyPriceByKCID_Call struct {
+	*mock.Call
+}
+
+// GetMonthlyPriceByKCID is a helper method to define mock.On call
+//   - ctx context.Context
+//   - keycloakID string
+func (_e *MockOrdersRepository_Expecter) GetMonthlyPriceByKCID(ctx interface{}, keycloakID interface{}) *MockOrdersRepository_GetMonthlyPriceByKCID_Call {
+	return &MockOrdersRepository_GetMonthlyPriceByKCID_Call{Call: _e.mock.On("GetMonthlyPriceByKCID", ctx, keycloakID)}
+}
+
+func (_c *MockOrdersRepository_GetMonthlyPriceByKCID_Call) Run(run func(ctx context.Context, keycloakID string)) *MockOrdersRepository_GetMonthlyPriceByKCID_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockOrdersRepository_GetMonthlyPriceByKCID_Call) Return(res *repo.UserMonthlyPriceRes, err error) *MockOrdersRepository_GetMonthlyPriceByKCID_Call {
+	_c.Call.Return(res, err)
+	return _c
+}
+
+func (_c *MockOrdersRepository_GetMonthlyPriceByKCID_Call) RunAndReturn(run func(ctx context.Context, keycloakID string) (*repo.UserMonthlyPriceRes, error)) *MockOrdersRepository_GetMonthlyPriceByKCID_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetOfflinePayments provides a mock function for the type MockOrdersRepository
 func (_mock *MockOrdersRepository) GetOfflinePayments(ctx context.Context, skip int, limit int, method string, orderByCreatedAt string) ([]*repo.OfflinePayment, error) {
 	ret := _mock.Called(ctx, skip, limit, method, orderByCreatedAt)

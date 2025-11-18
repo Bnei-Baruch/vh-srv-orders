@@ -14,6 +14,7 @@ import (
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/events"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 )
 
 func (o *OrdersDB) GetOrCreateAccount(ctx context.Context, a Account) (int, error) {
@@ -628,7 +629,7 @@ func (o *OrdersDB) GetOrCreateAccountFromProfile(ctx context.Context, keycloakId
 		return 0, fmt.Errorf("repo.GetAccount: %w", err)
 	}
 
-	slog.Info("Account not found", slog.String("keycloakId", keycloakId))
+	utils.LogFor(ctx).Info("Account not found", slog.String("keycloakId", keycloakId))
 	profile, err := o.profileService.LookupProfileByKeycloakId(ctx, keycloakId)
 	if err != nil {
 		return 0, fmt.Errorf("profileService.LookupProfile: %w", err)
@@ -638,7 +639,7 @@ func (o *OrdersDB) GetOrCreateAccountFromProfile(ctx context.Context, keycloakId
 		return 0, errors.New("Account not found by keycloakId in profile service")
 	}
 
-	slog.Info("Creating new account", slog.String("keycloakId", keycloakId))
+	utils.LogFor(ctx).Info("Creating new account", slog.String("keycloakId", keycloakId))
 	account = &Account{
 		FirstName:   null.StringFromPtr(profile.FirstNameVernacular),
 		LastName:    null.StringFromPtr(profile.LastNameVernacular),

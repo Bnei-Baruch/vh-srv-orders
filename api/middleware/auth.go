@@ -115,22 +115,21 @@ func Authentication(tokenVerifier OIDCTokenVerifier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		auth := parseToken(c.Request)
 		if auth == "" {
-			c.Status(http.StatusUnauthorized)
 			c.Header("WWW-Authenticate", "Bearer realm=\"main\"")
+			c.AbortWithStatus(http.StatusUnauthorized)
 			return
 		}
 
 		token, err := tokenVerifier.Verify(c.Request.Context(), auth)
 		if err != nil {
-			c.Status(http.StatusUnauthorized)
 			c.Header("WWW-Authenticate", fmt.Sprintf("Bearer realm=\"main\", error=\"invalid_token\" error_description=\"%s\"", err.Error()))
+			c.AbortWithStatus(http.StatusUnauthorized)
 			return
 		}
 
 		var claims IDTokenClaims
 		if err := token.Claims(&claims); err != nil {
-			c.Status(http.StatusInternalServerError)
-			_ = c.Error(fmt.Errorf("malformed JWT claims: %w", err))
+			c.AbortWithError(http.StatusInternalServerError, fmt.Errorf("malformed JWT claims: %w", err))
 			return
 		}
 

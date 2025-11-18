@@ -76,7 +76,7 @@ func (p *ProfileServiceAPI) LookupProfileByKeycloakId(ctx context.Context, keycl
 		return nil, fmt.Errorf("p.baseRequest: %w", err)
 	}
 
-	path := fmt.Sprintf("/v1/profile/%s/short", keycloakId)
+	path := fmt.Sprintf("/v1/profile/%s", keycloakId)
 
 	resp, err := req.
 		SetResult(&Profile{}).

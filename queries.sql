@@ -687,3 +687,23 @@ from
   inner join last_chargeable_order lco on a.id = lco."AccountID"
   inner join orders o on lco.id = o.id
   ;
+
+
+// all IL users with order not in NIS to be updated to NIS 80
+  with updates as (
+    with last_chargeable_order as (
+      select distinct on (userkey) *
+      from orders
+      where "ProductType" = 'globalmembership' and "Type" = 'recurring' and "Status" in ('paid', 'nosuccess')
+      order by userkey, "PaymentDate" desc
+    )
+    select 
+        lco.id as order_id 
+    from last_chargeable_order lco
+    inner join accounts a on a.id = lco."AccountID"
+    where a."Country" in ('Israel', 'IL') and lco."Currency" != 'NIS'
+)
+update orders 
+set "Currency" = 'NIS', "Amount" = '80'
+from updates 
+where updates.order_id = orders.id;

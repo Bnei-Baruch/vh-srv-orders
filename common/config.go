@@ -19,8 +19,10 @@ type envConfig struct {
 	S3BucketName string `envconfig:"S3_BUCKET_NAME"`
 	S3Endpoint   string `envconfig:"S3_ENDPOINT"`
 
-	PelecardUser     string `envconfig:"PELECARD_USER"`
-	PelecardPassword string `envconfig:"PELECARD_PASSWORD"`
+	PelecardUser              string `envconfig:"PELECARD_USER"`
+	PelecardPassword          string `envconfig:"PELECARD_PASSWORD"`
+	PelecardNewTerminalNumber string `envconfig:"PELECARD_NEW_TERMINAL_NUMBER"`
+	PelecardOldTerminalNumber string `envconfig:"PELECARD_OLD_TERMINAL_NUMBER"`
 
 	KeycloakServerUrl    string `envconfig:"KEYCLOAK_SERVER_URL"`
 	KeycloakRealm        string `envconfig:"KEYCLOAK_REALM"`

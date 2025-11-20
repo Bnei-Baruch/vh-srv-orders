@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 )
 
@@ -76,9 +77,9 @@ func (o *OrdersDB) FlagOrdersToRenew(ctx context.Context, month int64, year int6
 
 			// if not this month and not regular, go ahead
 			utils.LogFor(ctx).Info("marking order for renewal", slog.Int("order_id", aOSelect.ID))
-			err = o.flagOrder(ctx, aOSelect.ID, "torenew")
+			err = o.FlagOrder(ctx, aOSelect.ID, common.OrderFlagToRenew)
 			if err != nil {
-				return counter, fmt.Errorf("o.flagOrder: %w", err)
+				return counter, fmt.Errorf("o.FlagOrder: %w", err)
 			}
 
 			counter++
@@ -118,7 +119,7 @@ order by duplicate desc`
 			return 0, fmt.Errorf("rows.Scan: %w", err)
 		}
 
-		if _, err := o.flagOrdersByAccountID(ctx, id, "duplicate"); err != nil {
+		if _, err := o.flagOrdersByAccountID(ctx, id, common.OrderFlagDuplicate); err != nil {
 			return 0, fmt.Errorf("o.flagOrdersByAccountID: %w", err)
 		}
 
@@ -144,8 +145,8 @@ func (o *OrdersDB) flagOrdersByAccountID(ctx context.Context, aid int, flag stri
 			return 0, fmt.Errorf("rows.Scan: %w", err)
 		}
 
-		if err := o.flagOrder(ctx, id, flag); err != nil {
-			return 0, fmt.Errorf("o.flagOrder: %w", err)
+		if err := o.FlagOrder(ctx, id, flag); err != nil {
+			return 0, fmt.Errorf("o.FlagOrder: %w", err)
 		}
 
 		count++
@@ -153,7 +154,38 @@ func (o *OrdersDB) flagOrdersByAccountID(ctx context.Context, aid int, flag stri
 	return count, nil
 }
 
-func (o *OrdersDB) flagOrder(ctx context.Context, id int, flag string) error {
+func (o *OrdersDB) FlagOrder(ctx context.Context, id int, flag string) error {
 	_, err := o.Exec(ctx, `UPDATE orders SET "Flag" = $2 where id = $1`, id, flag)
 	return err
+}
+
+// GetFlaggedOrders returns all orders with Flag='torenew'
+// Returns a slice of orders with id, Flag, and AccountID
+func (o *OrdersDB) GetFlaggedOrders(ctx context.Context) ([]Order, error) {
+	query := `
+		SELECT id, "Flag", "AccountID"
+		FROM orders
+		WHERE "Flag" = $1
+	`
+
+	rows, err := o.Query(ctx, query, common.OrderFlagToRenew)
+	if err != nil {
+		return nil, fmt.Errorf("o.Query: %w", err)
+	}
+	defer rows.Close()
+
+	var orders []Order
+	for rows.Next() {
+		var order Order
+		if err := rows.Scan(&order.ID, &order.Flag, &order.AccountID); err != nil {
+			return nil, fmt.Errorf("rows.Scan: %w", err)
+		}
+		orders = append(orders, order)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows.Err: %w", err)
+	}
+
+	return orders, nil
 }

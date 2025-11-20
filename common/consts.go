@@ -59,6 +59,17 @@ const (
 	OfflinePaymentPropertiesRobokasaID = "robokasa_id"
 	GetNewTokenEndpoint                = "https://checkout.kbb1.com/emv/new_token"
 	GetNewTokenNoCVVEndpoint           = "https://checkout.kbb1.com/renew/renew-card"
+
+	OrderFlagToRenew        = "torenew"
+	OrderFlagDuplicate      = "duplicate"
+	OrderFlagDuplicates     = "duplicates"
+	OrderFlagRenewed        = "renewed"
+	OrderFlagMuhHiyuvNiklat = "muh_hiyuv_niklat"
+	OrderFlagMuhNidha       = "muh_nidha"
+	OrderFlagMuhBitul       = "muh_bitul"
+	OrderFlagMuhLotakin     = "muh_lotakin"
+	OrderFlagMuhAher        = "muh_aher"
+	OrderFlagPaused         = "paused"
 )
 
 var RoleAnyAdmin = []string{RoleRoot, RoleAdmin, RoleHelpHaverAdmin}

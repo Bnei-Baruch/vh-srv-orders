@@ -36,6 +36,8 @@ type OrdersRepository interface {
 	ChargeOrdersToRenew(ctx context.Context, pmx string) (int, error)
 	FlagDuplicateOrders(ctx context.Context, ProductType string) (int, error)
 	FlagOrdersToRenew(ctx context.Context, month int64, year int64) (int64, error)
+	FlagOrder(ctx context.Context, id int, flag string) error
+	GetFlaggedOrders(ctx context.Context) ([]Order, error)
 	UpdateOrdersToken(ctx context.Context, req RequestUpdateToken) error
 
 	CreateV2Order(ctx context.Context, order Order) (int, error)

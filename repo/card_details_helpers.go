@@ -125,63 +125,6 @@ func (o *OrdersDB) GetAllCardDetails(ctx context.Context, skip int, limit int) (
 	return cardDetails, rows.Err()
 }
 
-//func addCardDetailsFromAllExistingOrders(ctx *gin.Context, orderType string) {
-//
-//	var payments *[]Payment
-//	var err error
-//	var timeNow = time.Now()
-//
-//	var terminalNumber string
-//
-//	payments, err = main.GetAllPayments(ctx, int(0), int(100), "", &timeNow, "", "", orderType, "", int(0), "true", int(0), "")
-//	if err != nil {
-//		fmt.Println("error getting payments :: ", err.Error())
-//		return
-//	}
-//
-//	if orderType == "recurring" {
-//		terminalNumber = "2814722016"
-//	} else {
-//		terminalNumber = "5776492014"
-//	}
-//
-//	// loop over allPayments
-//	for _, payment := range *payments {
-//		var pelecardCardDetail utils.PelecardCardDetail
-//		var peleErr error
-//		pelecardCardDetail, peleErr = utils.FetchPelecardCardDetailFromToken(payment.PelecardToken.String, terminalNumber)
-//
-//		if peleErr != nil {
-//			fmt.Println("error fetching pelecard card detail")
-//			return
-//		}
-//
-//		if pelecardCardDetail.ResultData.CreditCardNumber != "" && pelecardCardDetail.ResultData.ExpirationDate != "" {
-//			order := main.getOrderByID(ctx, uint(payment.OrderID.Int64))
-//
-//			var cardDetails CardDetails
-//			cardDetails.AccountID = order.AccountID
-//			cardDetails.GatewayProvider = null.NewString("pelecard", true)
-//			cardDetails.Token = null.NewString(payment.PelecardToken.String, true)
-//			first4Num := pelecardCardDetail.ResultData.CreditCardNumber[0:4]
-//			last4 := pelecardCardDetail.ResultData.CreditCardNumber[len(pelecardCardDetail.ResultData.CreditCardNumber)-4:]
-//			censoredCreditCardNum := first4Num + "****" + last4
-//
-//			cardDetails.CCNumber = null.NewString(censoredCreditCardNum, true)
-//			cardDetails.CCExpDate = null.NewString(pelecardCardDetail.ResultData.ExpirationDate, true)
-//			cardDetails.Active = null.NewBool(true, true)
-//
-//			_, err = createCardDetailsAndGetId(ctx, cardDetails)
-//			// Error can originate from duplicate entry in DB for same payment details for same account id
-//			if err != nil {
-//				fmt.Println("error creating payment details")
-//				fmt.Println(err.Error())
-//				fmt.Println("--------------------------------")
-//			}
-//		}
-//	}
-//}
-
 func prepareCardDetailsUpdateQuery(req CardDetails) (string, []interface{}) {
 	var updateStrings []string
 	var args []interface{}

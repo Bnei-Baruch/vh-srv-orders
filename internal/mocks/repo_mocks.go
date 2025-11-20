@@ -1296,6 +1296,131 @@ func (_c *MockOrdersRepository_FlagOrdersToRenew_Call) RunAndReturn(run func(ctx
 	return _c
 }
 
+// FlagOrder provides a mock function for the type MockOrdersRepository
+func (_mock *MockOrdersRepository) FlagOrder(ctx context.Context, id int, flag string) error {
+	ret := _mock.Called(ctx, id, flag)
+
+	if len(ret) == 0 {
+		panic("no return value specified for FlagOrder")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int, string) error); ok {
+		r0 = returnFunc(ctx, id, flag)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockOrdersRepository_FlagOrder_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FlagOrder'
+type MockOrdersRepository_FlagOrder_Call struct {
+	*mock.Call
+}
+
+// FlagOrder is a helper method to define mock.On call
+//   - ctx context.Context
+//   - id int
+//   - flag string
+func (_e *MockOrdersRepository_Expecter) FlagOrder(ctx interface{}, id interface{}, flag interface{}) *MockOrdersRepository_FlagOrder_Call {
+	return &MockOrdersRepository_FlagOrder_Call{Call: _e.mock.On("FlagOrder", ctx, id, flag)}
+}
+
+func (_c *MockOrdersRepository_FlagOrder_Call) Run(run func(ctx context.Context, id int, flag string)) *MockOrdersRepository_FlagOrder_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 int
+		if args[1] != nil {
+			arg1 = args[1].(int)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockOrdersRepository_FlagOrder_Call) Return(err error) *MockOrdersRepository_FlagOrder_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockOrdersRepository_FlagOrder_Call) RunAndReturn(run func(ctx context.Context, id int, flag string) error) *MockOrdersRepository_FlagOrder_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetFlaggedOrders provides a mock function for the type MockOrdersRepository
+func (_mock *MockOrdersRepository) GetFlaggedOrders(ctx context.Context) ([]repo.Order, error) {
+	ret := _mock.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetFlaggedOrders")
+	}
+
+	var r0 []repo.Order
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context) ([]repo.Order, error)); ok {
+		return returnFunc(ctx)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context) []repo.Order); ok {
+		r0 = returnFunc(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]repo.Order)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = returnFunc(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockOrdersRepository_GetFlaggedOrders_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetFlaggedOrders'
+type MockOrdersRepository_GetFlaggedOrders_Call struct {
+	*mock.Call
+}
+
+// GetFlaggedOrders is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockOrdersRepository_Expecter) GetFlaggedOrders(ctx interface{}) *MockOrdersRepository_GetFlaggedOrders_Call {
+	return &MockOrdersRepository_GetFlaggedOrders_Call{Call: _e.mock.On("GetFlaggedOrders", ctx)}
+}
+
+func (_c *MockOrdersRepository_GetFlaggedOrders_Call) Run(run func(ctx context.Context)) *MockOrdersRepository_GetFlaggedOrders_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockOrdersRepository_GetFlaggedOrders_Call) Return(_a0 []repo.Order, err error) *MockOrdersRepository_GetFlaggedOrders_Call {
+	_c.Call.Return(_a0, err)
+	return _c
+}
+
+func (_c *MockOrdersRepository_GetFlaggedOrders_Call) RunAndReturn(run func(ctx context.Context) ([]repo.Order, error)) *MockOrdersRepository_GetFlaggedOrders_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetAccount provides a mock function for the type MockOrdersRepository
 func (_mock *MockOrdersRepository) GetAccount(ctx context.Context, id int, email string) (*repo.Account, error) {
 	ret := _mock.Called(ctx, id, email)

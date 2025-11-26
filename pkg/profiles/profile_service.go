@@ -42,17 +42,14 @@ func NewProfileServiceAPI(tokenSource keycloak.TokenSource) *ProfileServiceAPI {
 }
 
 func (p *ProfileServiceAPI) LookupProfile(ctx context.Context, email string) (*Profile, error) {
-	req, err := p.baseRequest(ctx)
+	resp, err := p.executeWithRetry(ctx, func(req *resty.Request) (*resty.Response, error) {
+		return req.
+			SetQueryParam("email", email).
+			SetResult([]Profile{}).
+			Get("/v1/profiles")
+	})
 	if err != nil {
-		return nil, fmt.Errorf("p.baseRequest: %w", err)
-	}
-
-	resp, err := req.
-		SetQueryParam("email", email).
-		SetResult([]Profile{}).
-		Get("/v1/profiles")
-	if err != nil {
-		return nil, fmt.Errorf("req.Get: %w", err)
+		return nil, err
 	}
 
 	if resp.IsError() {
@@ -71,18 +68,15 @@ func (p *ProfileServiceAPI) LookupProfile(ctx context.Context, email string) (*P
 }
 
 func (p *ProfileServiceAPI) LookupProfileByKeycloakId(ctx context.Context, keycloakId string) (*Profile, error) {
-	req, err := p.baseRequest(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("p.baseRequest: %w", err)
-	}
-
 	path := fmt.Sprintf("/v1/profile/%s", keycloakId)
 
-	resp, err := req.
-		SetResult(&Profile{}).
-		Get(path)
+	resp, err := p.executeWithRetry(ctx, func(req *resty.Request) (*resty.Response, error) {
+		return req.
+			SetResult(&Profile{}).
+			Get(path)
+	})
 	if err != nil {
-		return nil, fmt.Errorf("req.Get: %w", err)
+		return nil, err
 	}
 
 	if resp.IsError() {
@@ -101,18 +95,15 @@ func (p *ProfileServiceAPI) LookupProfileByKeycloakId(ctx context.Context, keycl
 }
 
 func (p *ProfileServiceAPI) GetProfileByKeycloakID(ctx context.Context, keycloakId string) (*Profile, error) {
-	req, err := p.baseRequest(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("p.baseRequest: %w", err)
-	}
-
 	path := fmt.Sprintf("/v1/profile/%s", keycloakId)
 
-	resp, err := req.
-		SetResult(&Profile{}).
-		Get(path)
+	resp, err := p.executeWithRetry(ctx, func(req *resty.Request) (*resty.Response, error) {
+		return req.
+			SetResult(&Profile{}).
+			Get(path)
+	})
 	if err != nil {
-		return nil, fmt.Errorf("req.Get: %w", err)
+		return nil, err
 	}
 
 	if resp.IsError() {
@@ -136,6 +127,50 @@ func (p *ProfileServiceAPI) baseRequest(ctx context.Context) (*resty.Request, er
 	r.SetAuthToken(token)
 
 	return r, nil
+}
+
+// invalidateTokenSource clears token cache if TokenSource supports it (e.g., Client)
+func (p *ProfileServiceAPI) invalidateTokenSource() {
+	p.tokenSource.Invalidate()
+}
+
+// executeWithRetry executes a request and retries once on 401 after invalidating the token source
+func (p *ProfileServiceAPI) executeWithRetry(ctx context.Context,
+	execute func(*resty.Request) (*resty.Response, error)) (*resty.Response, error) {
+
+	// First attempt
+	req, err := p.baseRequest(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("baseRequest: %w", err)
+	}
+
+	resp, err := execute(req)
+	if err != nil {
+		return nil, err
+	}
+
+	// If 401, invalidate token cache and retry once
+	if resp != nil && resp.StatusCode() == http.StatusUnauthorized {
+		p.invalidateTokenSource()
+
+		// Get fresh token and retry
+		req, err := p.baseRequest(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("baseRequest (retry): %w", err)
+		}
+
+		resp, err = execute(req)
+		if err != nil {
+			return nil, err
+		}
+
+		// If still 401 after retry with fresh token, return the error
+		if resp != nil && resp.StatusCode() == http.StatusUnauthorized {
+			return nil, respError(resp)
+		}
+	}
+
+	return resp, nil
 }
 
 func respError(resp *resty.Response) error {

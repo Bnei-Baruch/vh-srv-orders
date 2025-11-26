@@ -79,6 +79,12 @@ func (c *Client) AccessToken(ctx context.Context) string {
 	return c.token.AccessToken
 }
 
+// Invalidate clears the cached token, forcing a fresh login on next Token() call
+func (c *Client) Invalidate() {
+	c.token = nil
+	c.claims = nil
+}
+
 func (c *Client) login(ctx context.Context) error {
 	token, err := c.kc.LoginClient(ctx,
 		common.Config.KeycloakClientID,

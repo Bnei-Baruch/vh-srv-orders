@@ -25,12 +25,12 @@ var countryToGroup = map[string]string{
 	"AN": "High",   // Netherlands Antilles
 	"AS": "High",   // American Samoa
 	"AW": "High",   // Aruba
-	"AM": "Medium", // Armenia
+	"AM": "Low",    // Armenia
 	"AO": "Low",    // Angola
-	"AR": "Medium", // Argentina
+	"AR": "Low",    // Argentina
 	"AT": "High",   // Austria
 	"AU": "High",   // Australia
-	"AZ": "Medium", // Azerbaijan
+	"AZ": "Low",    // Azerbaijan
 	"BA": "Medium", // Bosnia and Herzegovina
 	"BB": "High",   // Barbados
 	"BD": "Low",    // Bangladesh
@@ -42,11 +42,11 @@ var countryToGroup = map[string]string{
 	"BJ": "Low",    // Benin
 	"BN": "High",   // Brunei
 	"BO": "Low",    // Bolivia
-	"BR": "Medium", // Brazil
+	"BR": "Low",    // Brazil
 	"BS": "High",   // Bahamas
 	"BT": "Low",    // Bhutan
 	"BW": "Medium", // Botswana
-	"BY": "Medium", // Belarus
+	"BY": "Low",    // Belarus
 	"BZ": "Medium", // Belize
 	"CA": "High",   // Canada
 	"CD": "Low",    // Democratic Republic of the Congo
@@ -57,20 +57,20 @@ var countryToGroup = map[string]string{
 	"CL": "Medium", // Chile
 	"CM": "Low",    // Cameroon
 	"CN": "Medium", // China
-	"CO": "Medium", // Colombia
+	"CO": "Low",    // Colombia
 	"CR": "Medium", // Costa Rica
-	"CU": "Medium", // Cuba
+	"CU": "Low",    // Cuba
 	"CV": "Low",    // Cabo Verde
 	"CY": "High",   // Cyprus
-	"CZ": "High",   // Czech Republic
+	"CZ": "Medium", // Czech Republic
 	"DE": "High",   // Germany
 	"DJ": "Low",    // Djibouti
 	"DK": "High",   // Denmark
 	"DM": "Medium", // Dominica
 	"DO": "Medium", // Dominican Republic
 	"DZ": "Medium", // Algeria
-	"EC": "Medium", // Ecuador
-	"EE": "High",   // Estonia
+	"EC": "Low",    // Ecuador
+	"EE": "Medium", // Estonia
 	"EG": "Medium", // Egypt
 	"ER": "Low",    // Eritrea
 	"ES": "High",   // Spain
@@ -82,7 +82,7 @@ var countryToGroup = map[string]string{
 	"GA": "Medium", // Gabon
 	"GB": "High",   // United Kingdom
 	"GD": "Medium", // Grenada
-	"GE": "Medium", // Georgia
+	"GE": "Low",    // Georgia
 	"GH": "Low",    // Ghana
 	"GM": "Low",    // Gambia
 	"GN": "Low",    // Guinea
@@ -95,7 +95,7 @@ var countryToGroup = map[string]string{
 	"HN": "Low",    // Honduras
 	"HR": "Medium", // Croatia
 	"HT": "Low",    // Haiti
-	"HU": "High",   // Hungary
+	"HU": "Medium", // Hungary
 	"ID": "Low",    // Indonesia
 	"IE": "High",   // Ireland
 	"IL": "High",   // Israel
@@ -125,9 +125,9 @@ var countryToGroup = map[string]string{
 	"LI": "High",   // Liechtenstein
 	"LR": "Low",    // Liberia
 	"LS": "Low",    // Lesotho
-	"LT": "High",   // Lithuania
+	"LT": "Medium", // Lithuania
 	"LU": "High",   // Luxembourg
-	"LV": "High",   // Latvia
+	"LV": "Medium", // Latvia
 	"LY": "Medium", // Libya
 	"MA": "Low",    // Morocco
 	"MC": "High",   // Monaco
@@ -145,7 +145,7 @@ var countryToGroup = map[string]string{
 	"MU": "Medium", // Mauritius
 	"MV": "Medium", // Maldives
 	"MW": "Low",    // Malawi
-	"MX": "Medium", // Mexico
+	"MX": "Low",    // Mexico
 	"MY": "High",   // Malaysia
 	"MZ": "Low",    // Mozambique
 	"NA": "Medium", // Namibia
@@ -158,20 +158,20 @@ var countryToGroup = map[string]string{
 	"NR": "Medium", // Nauru
 	"NZ": "High",   // New Zealand
 	"OM": "High",   // Oman
-	"PA": "High",   // Panama
-	"PE": "Medium", // Peru
+	"PA": "Medium", // Panama
+	"PE": "Low",    // Peru
 	"PG": "Low",    // Papua New Guinea
 	"PH": "Low",    // Philippines
 	"PK": "Low",    // Pakistan
-	"PL": "High",   // Poland
+	"PL": "Medium", // Poland
 	"PS": "Low",    // Palestine
-	"PT": "High",   // Portugal
+	"PT": "Medium", // Portugal
 	"PW": "Medium", // Palau
-	"PY": "Medium", // Paraguay
+	"PY": "Low",    // Paraguay
 	"QA": "High",   // Qatar
 	"RO": "Medium", // Romania
 	"RS": "Medium", // Serbia
-	"RU": "High",   // Russia
+	"RU": "Medium", // Russia
 	"RW": "Low",    // Rwanda
 	"SA": "High",   // Saudi Arabia
 	"SB": "Low",    // Solomon Islands
@@ -179,15 +179,15 @@ var countryToGroup = map[string]string{
 	"SD": "Low",    // Sudan
 	"SE": "High",   // Sweden
 	"SG": "High",   // Singapore
-	"SI": "High",   // Slovenia
-	"SK": "High",   // Slovakia
+	"SI": "Medium", // Slovenia
+	"SK": "Medium", // Slovakia
 	"SL": "Low",    // Sierra Leone
 	"SM": "High",   // San Marino
 	"SN": "Low",    // Senegal
 	"SO": "Low",    // Somalia
 	"SR": "Medium", // Suriname
 	"ST": "Low",    // Sao Tome and Principe
-	"SV": "Medium", // El Salvador
+	"SV": "Low",    // El Salvador
 	"SY": "Low",    // Syria
 	"SZ": "Low",    // Eswatini
 	"TD": "Low",    // Chad
@@ -195,10 +195,10 @@ var countryToGroup = map[string]string{
 	"TH": "Medium", // Thailand
 	"TJ": "Low",    // Tajikistan
 	"TL": "Low",    // Timor-Leste
-	"TM": "Medium", // Turkmenistan
+	"TM": "Low",    // Turkmenistan
 	"TN": "Low",    // Tunisia
 	"TO": "Low",    // Tonga
-	"TR": "High",   // Turkey
+	"TR": "Medium", // Turkey
 	"TT": "High",   // Trinidad and Tobago
 	"TV": "Low",    // Tuvalu
 	"TW": "High",   // Taiwan
@@ -206,11 +206,11 @@ var countryToGroup = map[string]string{
 	"UA": "Low",    // Ukraine
 	"UG": "Low",    // Uganda
 	"US": "High",   // United States
-	"UY": "High",   // Uruguay
+	"UY": "Medium", // Uruguay
 	"UZ": "Low",    // Uzbekistan
 	"VA": "Medium", // Vatican City
 	"VC": "Medium", // Saint Vincent and the Grenadines
-	"VE": "Medium", // Venezuela
+	"VE": "Low",    // Venezuela
 	"VN": "Low",    // Vietnam
 	"VU": "Low",    // Vanuatu
 	"WS": "Low",    // Samoa

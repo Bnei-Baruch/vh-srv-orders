@@ -100,6 +100,8 @@ type OrdersRepository interface {
 	RevertOperation(ctx context.Context, newEmail string, oldEmail string) error
 	IsSubjectID(ctx context.Context, keycloakID, userID string) (bool, error)
 
+	GetMonthlyPriceByKCID(ctx context.Context, keycloakID string) (*UserMonthlyPriceRes, error)
+
 	Close()
 }
 

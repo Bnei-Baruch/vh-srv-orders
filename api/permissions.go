@@ -35,7 +35,13 @@ func (o *OrdersAPI) isSubjectOrHasAnyRole(c *gin.Context, keycloakID string, rol
 	}
 	claims := authData.(*middleware.IDTokenClaims)
 
-	if claims.Sub != keycloakID && !claims.HasAnyRole(roles...) {
+	// Debug mode: Ignore admin roles to test security with non-admin users
+	hasAdminRole := false
+	if !common.Config.DebugIgnoreAdminRoles {
+		hasAdminRole = claims.HasAnyRole(roles...)
+	}
+
+	if claims.Sub != keycloakID && !hasAdminRole {
 		c.Status(http.StatusForbidden)
 		return false
 	}

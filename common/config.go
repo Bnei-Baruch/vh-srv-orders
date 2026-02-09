@@ -34,6 +34,9 @@ type envConfig struct {
 
 	NatsUrl                     string `envconfig:"NATS_URL"`
 	ImportSpecialsSpreadsheetId string `envconfig:"IMPORT_SPECIALS_SPREADSHEET_ID"`
+
+	// Debug flag: Ignore admin roles in permission checks (for testing security)
+	DebugIgnoreAdminRoles bool `envconfig:"DEBUG_IGNORE_ADMIN_ROLES" default:"false"`
 }
 
 var Config = new(envConfig)

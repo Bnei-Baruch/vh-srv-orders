@@ -16,7 +16,11 @@ func (o *OrdersAPI) handleMonthlyPriceByKCID(c *gin.Context) {
 		return
 	}
 
-	price, err := o.repo.GetMonthlyPriceByKCID(c.Request.Context(), keycloakId)
+	// Get user's preferred currency from query parameter (optional)
+	// Example: /pay/v2/pricing/monthly/{keycloak_id}?currency=nis
+	preferredCurrency := c.Query("currency")
+
+	price, err := o.repo.GetMonthlyPriceByKCID(c.Request.Context(), keycloakId, preferredCurrency)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "The given KeycloakID is not found.", "success": false})

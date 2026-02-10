@@ -571,6 +571,7 @@ type PaidDetailC struct {
 }
 
 type UserMonthlyPriceRes struct {
-	Amount   null.Float64 `json:"amount"`
-	Currency null.String  `json:"currency"`
+	Amount         null.Float64 `json:"amount"`
+	Currency       null.String  `json:"currency"`
+	PricingVersion null.String  `json:"pricingVersion"`
 }

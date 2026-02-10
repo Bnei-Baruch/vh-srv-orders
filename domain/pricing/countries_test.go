@@ -179,21 +179,21 @@ func TestGetCountryBasePrice_USDCountries(t *testing.T) {
 			},
 		},
 		{
-			name: "Brazil Medium group",
+			name: "Brazil Low group",
 			code: "BR",
 			expected: CountryBasePrice{
-				Amount:   35.0,
+				Amount:   20.0,
 				Currency: common.CurrencyUSD,
-				Group:    "Medium",
+				Group:    "Low",
 			},
 		},
 		{
-			name: "Mexico Medium group",
+			name: "Mexico Low group",
 			code: "MX",
 			expected: CountryBasePrice{
-				Amount:   35.0,
+				Amount:   20.0,
 				Currency: common.CurrencyUSD,
-				Group:    "Medium",
+				Group:    "Low",
 			},
 		},
 		{
@@ -291,7 +291,7 @@ func TestGetCountryBasePrice_AllGroupsForUSD(t *testing.T) {
 		group    string
 	}{
 		{"USD Low", "IN", 20.0, "Low"},
-		{"USD Medium", "BR", 35.0, "Medium"},
+		{"USD Medium", "CN", 35.0, "Medium"},
 		{"USD High", "US", 55.0, "High"},
 	}
 
@@ -472,7 +472,7 @@ func TestGetCountryBasePrice_PriceMapping(t *testing.T) {
 		"EUR-Medium": "RO",
 		"EUR-High":   "DE",
 		"USD-Low":    "IN",
-		"USD-Medium": "BR",
+		"USD-Medium": "CN",
 		"USD-High":   "US",
 	}
 

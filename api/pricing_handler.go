@@ -20,7 +20,15 @@ func (o *OrdersAPI) handleMonthlyPriceByKCID(c *gin.Context) {
 	// Example: /pay/v2/pricing/monthly/{keycloak_id}?currency=nis
 	preferredCurrency := c.Query("currency")
 
-	price, err := o.repo.GetMonthlyPriceByKCID(c.Request.Context(), keycloakId, preferredCurrency)
+	// Get pricing version from query parameter (optional, defaults to v1)
+	// Supported versions:
+	//   v1: Static pricing (legacy frontend pricing)
+	//   v2: Country-based tiered pricing
+	//   t1: Tier 1 rollout (IL/NIS scope uses v2, others use v1)
+	// Example: /pay/v2/pricing/monthly/{keycloak_id}?pricingVersion=t1
+	pricingVersion := c.Query("pricingVersion")
+
+	price, err := o.repo.GetMonthlyPriceByKCID(c.Request.Context(), keycloakId, preferredCurrency, pricingVersion)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "The given KeycloakID is not found.", "success": false})

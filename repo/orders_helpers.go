@@ -39,9 +39,9 @@ func (o *OrdersDB) CreateOrderViaTransaction(ctx context.Context, req RequestOrd
 		UserKey:     req.UserKey,
 	}
 
-	accountID, err := o.CreateOrUpdateAccount(ctx, a)
+	accountID, err := o.GetOrCreateAccount(ctx, a)
 	if err != nil {
-		return nil, fmt.Errorf("o.CreateOrUpdateAccount: %w", err)
+		return nil, fmt.Errorf("o.GetOrCreateAccount: %w", err)
 	}
 
 	order := Order{
@@ -446,7 +446,7 @@ func (o *OrdersDB) renewOrder(ctx context.Context, orderID uint, pmx string) (st
 }
 
 func (o *OrdersDB) flagOrderAsRenewed(ctx context.Context, orderID uint) error {
-	_, err := o.Exec(ctx, `UPDATE orders SET "Flag"=$1, updated_at=$2 WHERE id = $3`, "renewed", time.Now(), orderID)
+	_, err := o.Exec(ctx, `UPDATE orders SET "Flag"=$1, updated_at=$2 WHERE id = $3`, common.OrderFlagRenewed, time.Now(), orderID)
 	return err
 }
 
@@ -455,7 +455,7 @@ func (o *OrdersDB) ChargeOrdersToRenew(ctx context.Context, pmx string) (int, er
 	Select id from orders 
 	Where ("Status" = '` + common.OrderStatusPaid + `' or "Status" = '` + common.OrderStatusNoSuccess + `')
 	and "Type" = 'recurring'
-	and "Flag" = 'torenew'
+	and "Flag" = '` + common.OrderFlagToRenew + `'
 	`
 
 	rows, err := o.Query(ctx, sqlQuery)
@@ -891,4 +891,162 @@ and (o."Status" = 'paid' or o."Status" = 'success')
 	}
 
 	return count > 0, nil
+}
+
+// GetTokensForOrders batch fetches the latest pelecard_token for multiple orders.
+// Uses the same fallback logic as createRequestPayByToken:
+// 1. First tries to get token from CardDetails (if order has CardDetailsId and card is active)
+// 2. Falls back to the first Payment made on order creation
+// Returns a map of orderID -> token (empty string if no token found)
+func (o *OrdersDB) GetTokensForOrders(ctx context.Context, orderIDs []int) (map[int]string, error) {
+	if len(orderIDs) == 0 {
+		return make(map[int]string), nil
+	}
+
+	result := make(map[int]string)
+	// Initialize all orderIDs with empty string
+	for _, id := range orderIDs {
+		result[id] = ""
+	}
+
+	// Build the IN clause with placeholders
+	placeholders := make([]string, len(orderIDs))
+	args := make([]interface{}, len(orderIDs))
+	for i, id := range orderIDs {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		args[i] = id
+	}
+
+	// Step 1: Get orders with their CardDetailsId
+	ordersQuery := fmt.Sprintf(`
+		SELECT id, card_details_id
+		FROM orders
+		WHERE id IN (%s)
+	`, strings.Join(placeholders, ", "))
+
+	orderRows, err := o.Query(ctx, ordersQuery, args...)
+	if err != nil {
+		return nil, fmt.Errorf("o.Query [orders]: %w", err)
+	}
+	defer orderRows.Close()
+
+	type orderCardInfo struct {
+		orderID       int
+		cardDetailsID null.Int
+	}
+	var ordersWithCards []orderCardInfo
+	var ordersWithoutCards []int
+
+	for orderRows.Next() {
+		var orderID int
+		var cardDetailsID null.Int
+		if err := orderRows.Scan(&orderID, &cardDetailsID); err != nil {
+			return nil, fmt.Errorf("rows.Scan [orders]: %w", err)
+		}
+		if cardDetailsID.Valid && cardDetailsID.Int > 0 {
+			ordersWithCards = append(ordersWithCards, orderCardInfo{orderID: orderID, cardDetailsID: cardDetailsID})
+		} else {
+			ordersWithoutCards = append(ordersWithoutCards, orderID)
+		}
+	}
+
+	if err := orderRows.Err(); err != nil {
+		return nil, fmt.Errorf("rows.Err [orders]: %w", err)
+	}
+
+	// Step 2: Get tokens from CardDetails for orders that have CardDetailsId
+	if len(ordersWithCards) > 0 {
+		cardPlaceholders := make([]string, len(ordersWithCards))
+		cardArgs := make([]interface{}, len(ordersWithCards))
+		for i, oc := range ordersWithCards {
+			cardPlaceholders[i] = fmt.Sprintf("$%d", i+1)
+			cardArgs[i] = oc.cardDetailsID.Int
+		}
+
+		cardDetailsQuery := fmt.Sprintf(`
+			SELECT cd.id, cd.token, o.id as order_id
+			FROM card_details cd
+			INNER JOIN orders o ON o.card_details_id = cd.id
+			WHERE cd.id IN (%s)
+				AND cd.active = true
+				AND cd.token IS NOT NULL
+				AND cd.token != ''
+				AND cd.deleted_at IS NULL
+		`, strings.Join(cardPlaceholders, ", "))
+
+		cardRows, err := o.Query(ctx, cardDetailsQuery, cardArgs...)
+		if err != nil {
+			return nil, fmt.Errorf("o.Query [card_details]: %w", err)
+		}
+		defer cardRows.Close()
+
+		ordersWithCardTokens := make(map[int]bool)
+		for cardRows.Next() {
+			var cardID int
+			var token null.String
+			var orderID int
+			if err := cardRows.Scan(&cardID, &token, &orderID); err != nil {
+				return nil, fmt.Errorf("rows.Scan [card_details]: %w", err)
+			}
+			if token.Valid && token.String != "" {
+				result[orderID] = token.String
+				ordersWithCardTokens[orderID] = true
+			}
+		}
+
+		if err := cardRows.Err(); err != nil {
+			return nil, fmt.Errorf("rows.Err [card_details]: %w", err)
+		}
+
+		// Collect orders that need fallback (have CardDetailsId but no valid token)
+		for _, oc := range ordersWithCards {
+			if !ordersWithCardTokens[oc.orderID] {
+				ordersWithoutCards = append(ordersWithoutCards, oc.orderID)
+			}
+		}
+	}
+
+	// Step 3: Fallback to payments table for orders without CardDetails or without valid card tokens
+	if len(ordersWithoutCards) > 0 {
+		paymentPlaceholders := make([]string, len(ordersWithoutCards))
+		paymentArgs := make([]interface{}, len(ordersWithoutCards))
+		for i, id := range ordersWithoutCards {
+			paymentPlaceholders[i] = fmt.Sprintf("$%d", i+1)
+			paymentArgs[i] = id
+		}
+
+		// Use DISTINCT ON to get the first payment for each order (matching GetPaymentForOrderID logic)
+		// GetPaymentForOrderID filters by "PaymentStatus"='success' and uses natural order (by id)
+		paymentsQuery := fmt.Sprintf(`
+			SELECT DISTINCT ON ("OrderID") "OrderID", pelecard_token
+			FROM payments
+			WHERE "OrderID" IN (%s)
+				AND "PaymentStatus" = 'success'
+			ORDER BY "OrderID", id ASC
+		`, strings.Join(paymentPlaceholders, ", "))
+
+		paymentRows, err := o.Query(ctx, paymentsQuery, paymentArgs...)
+		if err != nil {
+			return nil, fmt.Errorf("o.Query [payments]: %w", err)
+		}
+		defer paymentRows.Close()
+
+		for paymentRows.Next() {
+			var orderID int
+			var token null.String
+			if err := paymentRows.Scan(&orderID, &token); err != nil {
+				return nil, fmt.Errorf("rows.Scan [payments]: %w", err)
+			}
+			// Only set if we don't already have a token from CardDetails
+			if token.Valid && result[orderID] == "" {
+				result[orderID] = token.String
+			}
+		}
+
+		if err := paymentRows.Err(); err != nil {
+			return nil, fmt.Errorf("rows.Err [payments]: %w", err)
+		}
+	}
+
+	return result, nil
 }

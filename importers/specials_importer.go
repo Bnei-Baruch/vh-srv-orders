@@ -135,6 +135,7 @@ func (im *SpecialsImporter) createSpecial(rSpecial *SpecialRecord) error {
 
 func (im *SpecialsImporter) BuildEvent(eventType string, payload map[string]interface{}) events.Event {
 	event := events.MakeEvent(eventType, payload)
-	event.Component = events.ComponentGenericImporter
+	event.Component = events.ComponentSpecialImporter
+	event.Actor = events.ActorSystem
 	return event
 }

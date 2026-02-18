@@ -9,16 +9,15 @@ import (
 	"time"
 
 	"github.com/volatiletech/null/v9"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/keycloak"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
 
 	"github.com/jackc/pgx/v4"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/events"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 )
 
-func (o *OrdersDB) CreateOrUpdateAccount(ctx context.Context, a Account) (int, error) {
+func (o *OrdersDB) GetOrCreateAccount(ctx context.Context, a Account) (int, error) {
 
 	var id int
 	err := o.QueryRow(ctx, `select id from accounts where "UserKey" = $1 ORDER BY id DESC LIMIT 1`, a.UserKey.String).
@@ -141,6 +140,28 @@ func (o *OrdersDB) PatchAccount(ctx context.Context, req Account, accountID int)
 	o.emitEvent(ctx, events.TypeUpdateAccount, map[string]interface{}{"account_id": accountID})
 
 	return nil
+}
+
+func (o *OrdersDB) PatchOrCreateAccount(ctx context.Context, a Account) (int, error) {
+	accountID, err := o.GetAccountIDByKeycloakID(ctx, a.UserKey.String)
+	if err == nil {
+		err = o.PatchAccount(ctx, a, accountID)
+		if err != nil {
+			return 0, fmt.Errorf("o.PatchAccount: %w", err)
+		}
+		return accountID, nil
+	}
+
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return 0, fmt.Errorf("o.GetAccountIDByKeycloakID: %w", err)
+	}
+
+	accountID, err = o.CreateAccount(ctx, a)
+	if err != nil {
+		return 0, fmt.Errorf("o.CreateAccount: %w", err)
+	}
+
+	return accountID, nil
 }
 
 func (o *OrdersDB) SoftDeleteAccount(ctx context.Context, accountID int) error {
@@ -330,7 +351,7 @@ func (o *OrdersDB) MergeAccountsOrders(ctx context.Context, req AccountMergeRequ
 	defer tx.Rollback(ctx)
 
 	_, err = tx.Exec(ctx, `UPDATE card_details SET account_id = $1 WHERE id IN (SELECT card_details_id FROM orders WHERE account_id = $2) 
-		AND  cc_number NOT IN (SELECT cc_number FROM card_details WHERE account_id = $2 )`, destinationAccountID, sourceAccountID)
+		AND  cc_number NOT IN (SELECT cc_number FROM card_details WHERE account_id = $1 )`, destinationAccountID, sourceAccountID)
 	if err != nil {
 		return fmt.Errorf("UPDATE card_details  AccountIds update : %w", err)
 	}
@@ -521,31 +542,31 @@ func prepareAccountUpdateQuery(req Account) (string, []interface{}) {
 		args = append(args, req.Country.String)
 	}
 	if req.AccountType.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`""AccountType""=$%d`, len(updateStrings)+1))
+		updateStrings = append(updateStrings, fmt.Sprintf(`"AccountType"=$%d`, len(updateStrings)+1))
 		args = append(args, req.AccountType.String)
 	}
 	if req.PaymentToken.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`""PaymentToken""=$%d`, len(updateStrings)+1))
+		updateStrings = append(updateStrings, fmt.Sprintf(`"PaymentToken"=$%d`, len(updateStrings)+1))
 		args = append(args, req.PaymentToken.String)
 	}
 	if req.PaymentCardID.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`""PaymentCardID""=$%d`, len(updateStrings)+1))
+		updateStrings = append(updateStrings, fmt.Sprintf(`"PaymentCardID"=$%d`, len(updateStrings)+1))
 		args = append(args, req.PaymentCardID.String)
 	}
 	if req.PaymentCardExpMonth.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`""PaymentCardExpMonth""=$%d`, len(updateStrings)+1))
+		updateStrings = append(updateStrings, fmt.Sprintf(`"PaymentCardExpMonth"=$%d`, len(updateStrings)+1))
 		args = append(args, req.PaymentCardExpMonth.Int)
 	}
 	if req.PaymentCardExpYear.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`""PaymentCardExpYear""=$%d`, len(updateStrings)+1))
+		updateStrings = append(updateStrings, fmt.Sprintf(`"PaymentCardExpYear"=$%d`, len(updateStrings)+1))
 		args = append(args, req.PaymentCardExpYear.Int)
 	}
 	if req.AuthNo.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`""UserKey""=$%d`, len(updateStrings)+1))
+		updateStrings = append(updateStrings, fmt.Sprintf(`"AuthNo"=$%d`, len(updateStrings)+1))
 		args = append(args, req.AuthNo.String)
 	}
 	if req.UserKey.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`""AuthNo""=$%d`, len(updateStrings)+1))
+		updateStrings = append(updateStrings, fmt.Sprintf(`"UserKey"=$%d`, len(updateStrings)+1))
 		args = append(args, req.UserKey.String)
 	}
 
@@ -597,7 +618,7 @@ func (o *OrdersDB) IsSubjectID(ctx context.Context, keycloakID, accountID string
 	return true, nil
 }
 
-func (o *OrdersDB) GetOrCreateAccount(ctx context.Context, keycloakId string) (int, error) {
+func (o *OrdersDB) GetOrCreateAccountFromProfile(ctx context.Context, keycloakId string) (int, error) {
 	var account *Account
 	accountId, err := o.GetAccountIDByKeycloakID(ctx, keycloakId)
 	if err == nil {
@@ -608,9 +629,8 @@ func (o *OrdersDB) GetOrCreateAccount(ctx context.Context, keycloakId string) (i
 		return 0, fmt.Errorf("repo.GetAccount: %w", err)
 	}
 
-	slog.Info("Account not found", slog.String("keycloakId", keycloakId))
-	profileService := profiles.NewProfileServiceAPI(keycloak.NewClient())
-	profile, err := profileService.LookupProfileByKeycloakId(ctx, keycloakId)
+	utils.LogFor(ctx).Info("Account not found", slog.String("keycloakId", keycloakId))
+	profile, err := o.profileService.LookupProfileByKeycloakId(ctx, keycloakId)
 	if err != nil {
 		return 0, fmt.Errorf("profileService.LookupProfile: %w", err)
 	}
@@ -619,7 +639,7 @@ func (o *OrdersDB) GetOrCreateAccount(ctx context.Context, keycloakId string) (i
 		return 0, errors.New("Account not found by keycloakId in profile service")
 	}
 
-	slog.Info("Creating new account", slog.String("keycloakId", keycloakId))
+	utils.LogFor(ctx).Info("Creating new account", slog.String("keycloakId", keycloakId))
 	account = &Account{
 		FirstName:   null.StringFromPtr(profile.FirstNameVernacular),
 		LastName:    null.StringFromPtr(profile.LastNameVernacular),

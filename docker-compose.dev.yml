@@ -1,0 +1,59 @@
+name: vh-srv-orders
+
+services:
+  
+  db:
+    image: postgres:12
+    container_name: vh-srv-orders-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-orders}
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    networks:
+      - vh-srv-orders-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-user} -d ${POSTGRES_DB:-orders}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  nats:
+    image: nats:2.10-alpine
+    container_name: vh-srv-orders-nats
+    restart: unless-stopped
+    command: [
+      "--jetstream",
+      "--store_dir", "/data",
+      "--user", "${NATS_USER:-user}",
+      "--pass", "${NATS_PASSWORD:-password}",
+      "--http_port", "8222",
+      "--port", "4222"
+    ]
+    ports:
+      - "${NATS_PORT:-4222}:4222"  # NATS client port
+      - "${NATS_MONITOR_PORT:-8222}:8222"  # NATS monitoring port
+    volumes:
+      - nats_data:/data
+    networks:
+      - vh-srv-orders-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:${NATS_MONITOR_PORT:-8222}/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  db_data:
+    driver: local
+  nats_data:
+    driver: local
+
+networks:
+  vh-srv-orders-network:
+    name: vh-srv-orders-network
+    driver: bridge

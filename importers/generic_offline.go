@@ -33,7 +33,7 @@ func (im *GenericOfflineImporter) String() string {
 }
 
 // Import fetches all orders and import them.
-// No idempotency is guaranteed, user carefully.
+// No idempotency is guaranteed, use carefully.
 func (im *GenericOfflineImporter) Import() error {
 	var err error
 
@@ -195,6 +195,7 @@ func (im *GenericOfflineImporter) createPayment(ctx context.Context, rOrder *Gen
 
 func (im *GenericOfflineImporter) BuildEvent(eventType string, payload map[string]interface{}) events.Event {
 	event := events.MakeEvent(eventType, payload)
-	event.Component = events.ComponentGenericImporter
+	event.Component = events.ComponentOfflinePaymentsImporter
+	event.Actor = events.ActorSystem
 	return event
 }

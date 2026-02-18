@@ -2,8 +2,9 @@ package api
 
 import (
 	"fmt"
-	"gitlab.bbdev.team/vh/pay/orders/common"
 	"net/http"
+
+	"gitlab.bbdev.team/vh/pay/orders/common"
 
 	"github.com/gin-gonic/gin"
 )
@@ -25,7 +26,7 @@ func (o *OrdersAPI) handleOrdersFlag(c *gin.Context) {
 	}
 
 	switch body.Flag {
-	case "torenew":
+	case common.OrderFlagToRenew:
 		count, err := o.repo.FlagOrdersToRenew(c.Request.Context(), body.Month, body.Year)
 		if err != nil {
 			c.Status(http.StatusInternalServerError)
@@ -34,7 +35,7 @@ func (o *OrdersAPI) handleOrdersFlag(c *gin.Context) {
 		}
 		c.JSON(http.StatusOK, gin.H{"count": count})
 		return
-	case "duplicates":
+	case common.OrderFlagDuplicates:
 		count, err := o.repo.FlagDuplicateOrders(c.Request.Context(), body.Flag)
 		if err != nil {
 			c.Status(http.StatusInternalServerError)

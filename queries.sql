@@ -614,3 +614,96 @@ set "Currency" = updates.currency
 from updates
 where updates.id = payments.id;
 
+
+
+-- IL cards paying not in NIS
+select * from payments_pelecard 
+where debit_total='1'
+order by created_at desc limit 50;
+
+select payment_id, cardhebrew_name, cc_abroad_card, debit_currency, debit_total 
+from payments_pelecard where payment_status='success' order by created_at desc limit 50;
+
+select j_param, count(*) from payments_pelecard where payment_status='success' group by j_param;
+select success, count(*) from payments_pelecard group by success;
+select payment_status, count(*) from payments_pelecard where success ='1' group by payment_status;
+select count(*) from payments_pelecard where payment_status='success' and success !='1';
+
+select payment_id, cardhebrew_name, cc_abroad_card, debit_currency, debit_total 
+from payments_pelecard pp where pp.success = '1' ;
+
+
+select "PaymentType", count(*) from payments group by "PaymentType";
+
+
+with last_chargeable_order as (
+  select distinct on (userkey) *
+  from orders
+  where "ProductType" = 'globalmembership' and "Type" = 'recurring' and "Status" in ('paid', 'nosuccess')
+  order by userkey, "PaymentDate" desc
+),
+last_payment as (
+  select distinct on ("OrderID") * from payments order by "OrderID", updated_at desc, created_at desc
+)
+select
+  a.id,
+  a."Email" as email,
+  a."UserKey" as keycloak_id,
+  a."Country" as country,
+  o.id as order_id,
+  o.created_at as o_created_at,
+  lp.id as payment_id,
+  lp.created_at as p_created_at,
+  lp."CardHebrewName" as p_cc_heb_name, 
+  lp."CCAbroadCard" as p_cc_abroad_card, 
+  lp."Currency" as p_cc_currency, 
+  lp."Amount" as p_cc_amount
+from
+  accounts a
+  inner join last_chargeable_order lco on a.id = lco."AccountID"
+  inner join orders o on lco.id = o.id
+  inner join last_payment lp on lp."OrderID" = o.id and lp."PaymentType"='pelecard' and lp.success ='1' and lp."Currency" != 'NIS'
+  where a."Country" in ('Israel', 'IL')
+  ;
+  
+  
+  
+with last_chargeable_order as (
+  select distinct on (userkey) *
+  from orders
+  where
+    "ProductType" = 'globalmembership' and "Type" = 'recurring' and "Status" in ('paid', 'nosuccess')
+  order by userkey, "PaymentDate" desc
+)
+select
+  a.id,
+  a."Email" as email,
+  a."UserKey" as keycloak_id,
+  a."Country" as country,
+  o.id as order_id,
+  o.created_at as o_created_at
+from
+  accounts a
+  inner join last_chargeable_order lco on a.id = lco."AccountID"
+  inner join orders o on lco.id = o.id
+  ;
+
+
+// all IL users with order not in NIS to be updated to NIS 80
+  with updates as (
+    with last_chargeable_order as (
+      select distinct on (userkey) *
+      from orders
+      where "ProductType" = 'globalmembership' and "Type" = 'recurring' and "Status" in ('paid', 'nosuccess')
+      order by userkey, "PaymentDate" desc
+    )
+    select 
+        lco.id as order_id 
+    from last_chargeable_order lco
+    inner join accounts a on a.id = lco."AccountID"
+    where a."Country" in ('Israel', 'IL') and lco."Currency" != 'NIS'
+)
+update orders 
+set "Currency" = 'NIS', "Amount" = '80'
+from updates 
+where updates.order_id = orders.id;

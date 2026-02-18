@@ -570,3 +570,9 @@ type PaidDetailC struct {
 	TotalPeoplePaidWithCC int64 `json:"total_people_paid_with_cc"`
 	TotalTicketSold       int64 `json:"total_ticket_sold"`
 }
+
+type UserMonthlyPriceRes struct {
+	Amount         null.Float64 `json:"amount"`
+	Currency       null.String  `json:"currency"`
+	PricingVersion null.String  `json:"pricingVersion"`
+}

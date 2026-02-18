@@ -17,16 +17,20 @@ import (
 
 	"gitlab.bbdev.team/vh/pay/orders/api/middleware"
 	"gitlab.bbdev.team/vh/pay/orders/common"
+	"gitlab.bbdev.team/vh/pay/orders/domain"
 	"gitlab.bbdev.team/vh/pay/orders/events"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
 type App struct {
-	repo         repo.OrdersRepository
-	eventEmitter events.EventEmitter
-	ordersAPI    *OrdersAPI
-	gEngine      *gin.Engine
+	repo                repo.OrdersRepository
+	eventEmitter        events.EventEmitter
+	eventListener       *profiles.EventListener
+	domainEventsHandler *domain.EventsHandler
+	ordersAPI           *OrdersAPI
+	gEngine             *gin.Engine
 }
 
 func NewApp() *App {
@@ -37,6 +41,7 @@ func (a *App) Initialize() {
 	a.initSentry()
 	a.initEventEmitter()
 	a.initDB()
+	a.initEventListener()
 	a.ordersAPI = NewOrdersAPI(a.repo)
 	a.initGinEngine()
 	a.initHealth()
@@ -71,6 +76,25 @@ func (a *App) initDB() {
 	slog.Info("db connected and migrated")
 }
 
+func (a *App) initEventListener() {
+	if common.Config.NatsUrl != "" {
+		slog.Info("initializing events listener")
+
+		var err error
+		a.eventListener, err = profiles.NewEventListener()
+		if err != nil {
+			utils.LogFatal("profiles.NewEventListener", slog.Any("err", err))
+		}
+
+		a.domainEventsHandler = domain.NewEventsHandler(a.repo)
+		a.eventListener.RegisterHandler(a.domainEventsHandler.HandleProfilesEvent)
+
+		if err = a.eventListener.Run(); err != nil {
+			utils.LogFatal("eventListener.Run", slog.Any("err", err))
+		}
+	}
+}
+
 func (a *App) initSentry() {
 	err := sentry.Init(sentry.ClientOptions{
 		Release:          common.GitSHA,
@@ -97,9 +121,6 @@ func (a *App) initGinEngine() {
 		middleware.Recovery(),
 		sentrygin.New(sentrygin.Options{Repanic: true}),
 		middleware.Sentry(),
-		middleware.EventsBuilder(),
-		middleware.TokenSource(),
-		middleware.Authentication(tokenVerifier),
 	)
 	if gin.IsDebugging() {
 		a.gEngine.Use(cors.New(cors.Config{
@@ -111,6 +132,11 @@ func (a *App) initGinEngine() {
 			MaxAge:           12 * time.Hour,
 		}))
 	}
+	a.gEngine.Use(
+		middleware.EventsBuilder(),
+		middleware.TokenSource(),
+		middleware.Authentication(tokenVerifier),
+	)
 
 	a.initRoutes()
 }
@@ -199,6 +225,11 @@ func (a *App) initRoutes() {
 	{
 		operation.POST("/", a.ordersAPI.handleOperationCreate)
 		operation.POST("/revert", a.ordersAPI.handleOperationRevert)
+	}
+
+	pricing := baseV2Path.Group("/pricing")
+	{
+		pricing.GET("/monthly/:keycloak_id", a.ordersAPI.handleMonthlyPriceByKCID)
 	}
 
 	a.gEngine.GET("/status/:email", a.ordersAPI.status)

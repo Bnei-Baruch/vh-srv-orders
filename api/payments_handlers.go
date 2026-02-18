@@ -41,7 +41,7 @@ func (o *OrdersAPI) handlePaymentFetchByID(c *gin.Context) {
 		return
 	} else {
 		if !isAdmin {
-			account, err := o.repo.GetAccountForOrderID(c, uint(payment.OrderID.Int))
+			account, err := o.repo.GetAccountForOrderID(c.Request.Context(), uint(payment.OrderID.Int))
 			if err != nil {
 				c.Status(http.StatusInternalServerError)
 				_ = c.Error(fmt.Errorf("repo.GetAccountForOrderID: %w", err))
@@ -209,7 +209,7 @@ func (o *OrdersAPI) handlePaymentUpdate(c *gin.Context) {
 
 	// Updating the status of the parent payment table.
 	if paymentStatus != "" {
-		orderId, err := o.repo.UpdateParentPaymentTableStatusAndReturnOrderId(c, paymentStatus, req.PaymentID.Int)
+		orderId, err := o.repo.UpdateParentPaymentTableStatusAndReturnOrderId(c.Request.Context(), paymentStatus, req.PaymentID.Int)
 		if err != nil {
 			c.Status(http.StatusInternalServerError)
 			_ = c.Error(fmt.Errorf("repo.UpdateParentPaymentTableStatusAndReturnOrderId: %w", err))
@@ -255,10 +255,10 @@ func (o *OrdersAPI) handlePaymentFetch(c *gin.Context) {
 		err                  error
 	)
 	if !isAdmin {
-		currentUserAccountId, err = o.repo.GetAccountIDByKeycloakID(c, keycloakId)
+		currentUserAccountId, err = o.repo.GetAccountIDByKeycloakID(c.Request.Context(), keycloakId)
 		if err != nil {
 			c.Status(http.StatusInternalServerError)
-			_ = c.Error(fmt.Errorf("o.repo.GetAccountIDByKeycloakID: %w", err))
+			_ = c.Error(fmt.Errorf("repo.GetAccountIDByKeycloakID: %w", err))
 			return
 		}
 
@@ -375,7 +375,7 @@ func (o *OrdersAPI) handleGetActivities(c *gin.Context) {
 		err              error
 	)
 	if !isAdmin {
-		currentUserEmail, err = o.repo.GetEmailByKeycloakID(c, keycloakId) // getting user email by keycloakId
+		currentUserEmail, err = o.repo.GetEmailByKeycloakID(c.Request.Context(), keycloakId) // getting user email by keycloakId
 		if err != nil {
 			c.Status(http.StatusInternalServerError)
 			_ = c.Error(fmt.Errorf("repo.GetEmailByKeycloakID: %w", err))

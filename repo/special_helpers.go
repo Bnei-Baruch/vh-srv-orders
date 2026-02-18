@@ -190,7 +190,7 @@ func prepareSpecialCreateQuery(req Special) (string, string, []interface{}) {
 
 func (o *OrdersDB) GetAllSpecialsByEmail(ctx context.Context, email string) ([]*Special, error) {
 	var specials []*Special
-	rows, err := o.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory from specials where email ilike $1`, email)
+	rows, err := o.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory,created_at from specials where email ilike $1`, email)
 
 	if err != nil {
 		return nil, err
@@ -199,7 +199,7 @@ func (o *OrdersDB) GetAllSpecialsByEmail(ctx context.Context, email string) ([]*
 
 	for rows.Next() {
 		var spe Special
-		if err := rows.Scan(&spe.Id, &spe.KeycloakId, &spe.Email, &spe.StartDate, &spe.EndDate, &spe.Category, &spe.SubCategory); err != nil {
+		if err := rows.Scan(&spe.Id, &spe.KeycloakId, &spe.Email, &spe.StartDate, &spe.EndDate, &spe.Category, &spe.SubCategory, &spe.CreatedAt); err != nil {
 			return nil, err
 		}
 		specials = append(specials, &spe)

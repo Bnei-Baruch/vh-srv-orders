@@ -351,7 +351,7 @@ func (o *OrdersDB) MergeAccountsOrders(ctx context.Context, req AccountMergeRequ
 	defer tx.Rollback(ctx)
 
 	_, err = tx.Exec(ctx, `UPDATE card_details SET account_id = $1 WHERE id IN (SELECT card_details_id FROM orders WHERE account_id = $2) 
-		AND  cc_number NOT IN (SELECT cc_number FROM card_details WHERE account_id = $2 )`, destinationAccountID, sourceAccountID)
+		AND  cc_number NOT IN (SELECT cc_number FROM card_details WHERE account_id = $1 )`, destinationAccountID, sourceAccountID)
 	if err != nil {
 		return fmt.Errorf("UPDATE card_details  AccountIds update : %w", err)
 	}

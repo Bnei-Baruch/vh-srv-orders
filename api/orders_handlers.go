@@ -167,7 +167,10 @@ func (o *OrdersAPI) handleOrdersRenew(c *gin.Context) {
 	}
 
 	if body.User == "admin" && (body.Key == "t" || body.Key == "e") {
-		count, err := o.repo.ChargeOrdersToRenew(c.Request.Context(), body.Key)
+		var count int
+		var err error
+
+		count, err = o.repo.ChargeOrdersToRenew(c.Request.Context(), body.Key)
 		if err != nil {
 			c.Status(http.StatusInternalServerError)
 			_ = c.Error(fmt.Errorf("repo.ChargeOrdersToRenew: %w", err))

@@ -47,3 +47,11 @@ type MuhlafimEntry struct {
 	NewCardNumber     string `json:"NewCardNumber"`
 	NewExpirationDate string `json:"NewExpirationDate"`
 }
+
+type Terminal struct {
+	Name string `json:"name"`
+	PMX  string `json:"pmx"`
+}
+
+var TokenTerminal = Terminal{Name: "token", PMX: "t"}
+var EMVTerminal = Terminal{Name: "emv", PMX: "e"}

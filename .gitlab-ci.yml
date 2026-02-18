@@ -1,4 +1,5 @@
 stages:
+  - test
   - build
   - deploy
 
@@ -7,6 +8,60 @@ variables:
   STAGING_LATEST_IMAGE: $CI_REGISTRY_IMAGE:staging
   PROD_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG
   PROD_LATEST_IMAGE: $CI_REGISTRY_IMAGE:latest
+
+test:
+  image: golang:1.21
+  stage: test
+  services:
+    - name: postgres:12
+      alias: postgres
+    - name: nats:2.10-alpine
+      alias: nats
+      command: ["-js", "-user", "testuser", "-pass", "testpass"]
+  variables:
+    # PostgreSQL service configuration
+    POSTGRES_DB: orders_test
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: postgres
+    POSTGRES_HOST_AUTH_METHOD: trust
+    # Application test configuration
+    PGHOST: postgres
+    PGPORT: "5432"
+    PGUSER: postgres
+    PGPASSWORD: postgres
+    PGDATABASE: orders_test
+    PGSSLMODE: disable
+    NATS_URL: "nats://testuser:testpass@nats:4222"
+    APP_ENV: test
+    APP_MODE: debug
+  before_script:
+    # Wait for PostgreSQL to be ready
+    - apt-get update && apt-get install -y postgresql-client netcat-openbsd
+    - until PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U $POSTGRES_USER -d $POSTGRES_DB -c '\q'; do
+        echo "PostgreSQL is unavailable - sleeping";
+        sleep 2;
+      done
+    - echo "PostgreSQL is up"
+    # Wait for NATS to be ready
+    - until nc -z nats 4222; do
+        echo "NATS is unavailable - sleeping";
+        sleep 2;
+      done
+    - echo "NATS is up"
+  script:
+    - go mod download
+    - go test -v -race -coverprofile=coverage.out ./...
+    - go tool cover -func=coverage.out
+  coverage: '/total:\s+\(statements\)\s+(\d+\.\d+)%/'
+  artifacts:
+    paths:
+      - coverage.out
+    expire_in: 1 week
+  only:
+    - master
+    - tags
+    - merge_requests
+
 build_staging:
   image: docker:latest
   stage: build
@@ -101,6 +156,7 @@ deploy_production:
     SENDGRID_API_KEY: ${SENDGRID_API_KEY}
     SENTRY_DSN: ${PROD_ORDERS_SENTRY_DSN}
     IMPORT_SPECIALS_SPREADSHEET_ID: ${PROD_IMPORT_SPECIALS_SPREADSHEET_ID}
+    RENEWAL_MAX_WORKERS: "5"
     PELECARD_USER: ${PELECARD_USER}
     PELECARD_PASSWORD: ${PELECARD_PASSWORD}
     PELECARD_OLD_TERMINAL_NUMBER: ${PELECARD_OLD_TERMINAL_NUMBER}

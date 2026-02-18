@@ -15,6 +15,7 @@ import (
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/events"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/pelecard"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 )
 
@@ -71,6 +72,7 @@ func (o *OrdersDB) CreateOrderViaTransaction(ctx context.Context, req RequestOrd
 
 	return &order, nil
 }
+
 func (o *OrdersDB) UpdateOrdersToken(ctx context.Context, req RequestUpdateToken) error {
 	account, err := o.GetAccountForOrderID(ctx, uint(req.OrderId))
 	if err != nil {
@@ -268,7 +270,9 @@ func (o *OrdersDB) GetAccountForOrderID(ctx context.Context, orderID uint) (*Acc
 }
 
 func (o *OrdersDB) createRequestPayByToken(c context.Context, a *Account, order *Order, p *Payment, pmx null.String) (*RequestPayment, *Payment, error) {
-	newp, err := o.createPendingPayment(c, order, pmx)
+	// Suppress TypeCreatePayment event during renewal to prevent double membership evaluation.
+	// TypeUpdateOrder will be emitted by UpdateOrderAfterPayment, which triggers membership evaluation.
+	newp, err := o.createPendingPayment(c, order, pmx, true)
 	if err != nil {
 		return nil, nil, fmt.Errorf("o.createPendingPayment: %w", err)
 	}
@@ -390,7 +394,14 @@ func (o *OrdersDB) renewOrder(ctx context.Context, orderID uint, pmx string) (st
 		return "", fmt.Errorf("o.createRequestPayByToken: %w", err)
 	}
 
-	resp, payErr := o.renewPaymentByToken(ctx, pr, pmx)
+	var resp interface{}
+	var payErr error
+	if o.dryRunChargeExecutor != nil {
+		m, err := o.dryRunChargeExecutor.Execute(ctx, pr, pmx, orderID)
+		resp, payErr = m, err
+	} else {
+		resp, payErr = o.renewPaymentByToken(ctx, pr, pmx)
+	}
 	if payErr != nil {
 		// Note: we don't return here with the payErr as we have to update the failure in DB later on
 		newp.PaymentStatus = null.StringFrom("failed")
@@ -404,12 +415,16 @@ func (o *OrdersDB) renewOrder(ctx context.Context, orderID uint, pmx string) (st
 			hub.CaptureException(payErr)
 		})
 	} else {
-		answers := resp.(map[string]interface{})
-		if answers["status"].(string) == "success" {
+		answers, ok := resp.(map[string]interface{})
+		if !ok {
+			return newp.Success.String, fmt.Errorf("unexpected gateway response type: %T", resp)
+		}
+		status, _ := answers["status"].(string)
+		if status == "success" {
 			newp.PaymentStatus = null.StringFrom("success")
 			newp.Success = null.StringFrom("1")
-			if err := o.flagOrderAsRenewed(ctx, orderID); err != nil {
-				return newp.Success.String, fmt.Errorf("o.flagOrderAsRenewed: %w", err)
+			if err := o.FlagOrderAsRenewed(ctx, orderID); err != nil {
+				return newp.Success.String, fmt.Errorf("o.FlagOrderAsRenewed: %w", err)
 			}
 		} else {
 			newp.PaymentStatus = null.StringFrom("failed")
@@ -445,9 +460,124 @@ func (o *OrdersDB) renewOrder(ctx context.Context, orderID uint, pmx string) (st
 	return newp.Success.String, nil
 }
 
-func (o *OrdersDB) flagOrderAsRenewed(ctx context.Context, orderID uint) error {
-	_, err := o.Exec(ctx, `UPDATE orders SET "Flag"=$1, updated_at=$2 WHERE id = $3`, common.OrderFlagRenewed, time.Now(), orderID)
-	return err
+// tryRenewalWithTerminal attempts a single renewal with specific terminal.
+// It returns the new, updated payment record.
+//
+// Error types:
+//   - Wrapped with common.ErrPrePayment: DB lookups or card details missing (no payment attempted)
+//   - Wrapped with common.ErrPostPayment: DB updates failed after payment attempt (money may have moved)
+//   - Other errors: payment gateway/network errors (safe to retry on different terminal)
+func (o *OrdersDB) TryRenewalWithTerminal(ctx context.Context, orderID uint, terminal pelecard.Terminal) (*Payment, error) {
+	order, err := o.GetOrderByID(ctx, orderID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: o.GetOrderByID: %w", common.ErrPrePayment, err)
+	}
+
+	p, err := o.GetPaymentForOrderID(ctx, orderID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: o.GetPaymentForOrderID: %w", common.ErrPrePayment, err)
+	}
+
+	a, err := o.GetAccountForOrderID(ctx, orderID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: o.GetAccountForOrderID: %w", common.ErrPrePayment, err)
+	}
+
+	pr, newp, err := o.createRequestPayByToken(ctx, a, order, p, null.StringFrom(terminal.PMX))
+	if err != nil {
+		return nil, fmt.Errorf("%w: o.createRequestPayByToken: %w", common.ErrPrePayment, err)
+	}
+
+	// Store terminal name in payment record
+	newp.Terminal = null.StringFrom(terminal.Name)
+
+	var resp interface{}
+	var payErr error
+	if o.dryRunChargeExecutor != nil {
+		m, err := o.dryRunChargeExecutor.Execute(ctx, pr, terminal.PMX, orderID)
+		resp, payErr = m, err
+	} else {
+		resp, payErr = o.renewPaymentByToken(ctx, pr, terminal.PMX)
+	}
+	if payErr != nil {
+		// Payment gateway error
+		newp.PaymentStatus = null.StringFrom("failed")
+		newp.Success = null.StringFrom("0")
+	} else {
+		answers, ok := resp.(map[string]interface{})
+		if !ok {
+			return newp, fmt.Errorf("unexpected gateway response type: %T", resp)
+		}
+		status, _ := answers["status"].(string)
+		if status == "success" {
+			newp.PaymentStatus = null.StringFrom("success")
+			newp.Success = null.StringFrom("1")
+		} else {
+			newp.PaymentStatus = null.StringFrom("failed")
+			newp.Success = null.StringFrom("0")
+			utils.LogFor(ctx).Info("payment declined",
+				slog.String("terminal", terminal.Name),
+				slog.Any("gateway_response", resp))
+		}
+	}
+
+	// All post-gateway DB writes in a single transaction to prevent partial updates.
+	tx, err := o.Begin(ctx)
+	if err != nil {
+		return newp, fmt.Errorf("%w: o.Begin: %w", common.ErrPostPayment, err)
+	}
+	defer tx.Rollback(ctx)
+
+	if newp.Success.String == "1" {
+		if _, err := tx.Exec(ctx, `UPDATE orders SET "Flag"=$1, updated_at=$2 WHERE id = $3`,
+			common.OrderFlagRenewed, time.Now(), orderID); err != nil {
+			return newp, fmt.Errorf("%w: tx.Exec [flag renewed]: %w", common.ErrPostPayment, err)
+		}
+	}
+
+	// Update payments table
+	toUpdate, toUpdateArgs := preparePaymentUpdateQuery(*newp)
+	_, err = tx.Exec(ctx,
+		fmt.Sprintf(`UPDATE payments SET %s WHERE id=%d`, toUpdate, newp.ID), toUpdateArgs...)
+	if err != nil {
+		return newp, fmt.Errorf("%w: tx.Exec [update payment]: %w", common.ErrPostPayment, err)
+	}
+
+	// Update payments_pelecard table (includes Terminal now)
+	toUpdatePelecard, toUpdateArgsPeleCard := preparePelecardPaymentUpdateViaPaymentStructQuery(*newp)
+	_, err = tx.Exec(ctx,
+		fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdatePelecard, newp.ID),
+		toUpdateArgsPeleCard...)
+	if err != nil {
+		return newp, fmt.Errorf("%w: tx.Exec [update pelecard_payment]: %w", common.ErrPostPayment, err)
+	}
+
+	// Update order status (inlined from UpdateOrderAfterPayment to stay within the transaction)
+	now := time.Now()
+	if newp.Success.String == "1" {
+		_, err = tx.Exec(ctx, `UPDATE orders SET "Status"=$1, "PaymentDate"=$2, updated_at=$3 WHERE id = $4`,
+			common.OrderStatusPaid, now, now, newp.OrderID.Int)
+	} else {
+		_, err = tx.Exec(ctx, `UPDATE orders SET "Status"=$1, updated_at=$2 WHERE id = $3`,
+			common.OrderStatusNoSuccess, now, newp.OrderID.Int)
+	}
+	if err != nil {
+		return newp, fmt.Errorf("%w: tx.Exec [update order status]: %w", common.ErrPostPayment, err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return newp, fmt.Errorf("%w: tx.Commit: %w", common.ErrPostPayment, err)
+	}
+
+	// Emit event after successful commit to avoid emitting for rolled-back changes
+	o.emitEvent(ctx, events.TypeUpdateOrder, map[string]interface{}{"order_id": newp.OrderID.Int})
+
+	// Check if payment was successful
+	if payErr != nil {
+		return newp, fmt.Errorf("payment failed: %w", payErr)
+	}
+
+	return newp, nil
 }
 
 func (o *OrdersDB) ChargeOrdersToRenew(ctx context.Context, pmx string) (int, error) {
@@ -675,7 +805,7 @@ func prepareOrderCreateQuery(req Order) (string, string, []interface{}) {
 	if req.CardDetailsId.Valid {
 		createStrings = append(createStrings, `"card_details_id"`)
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.StartingDate.Time)
+		args = append(args, req.CardDetailsId.Int)
 	}
 
 	if len(args) != 0 {
@@ -1049,4 +1179,133 @@ func (o *OrdersDB) GetTokensForOrders(ctx context.Context, orderIDs []int) (map[
 	}
 
 	return result, nil
+}
+
+// UpdateOrdersUserKeyFromAccounts updates orders.userkey from accounts.UserKey
+func (o *OrdersDB) UpdateOrdersUserKeyFromAccounts(ctx context.Context) error {
+	query := `
+		UPDATE orders 
+		SET userkey = accounts."UserKey" 
+		FROM accounts 
+		WHERE orders."AccountID" = accounts.id
+	`
+	_, err := o.Exec(ctx, query)
+	return err
+}
+
+// GetPaidOrdersCount returns the count of paid orders for a specific month/year
+// lastDay should be the last day of the month (e.g., from period.GetEndOfMonth())
+func (o *OrdersDB) GetPaidOrdersCount(ctx context.Context, year, month int, lastDay time.Time) (int64, error) {
+	query := `
+		SELECT COUNT(*)
+		FROM orders
+		WHERE "ProductType" = $1
+		AND "Status" = $2
+		AND "PaymentDate" >= $3
+		AND "PaymentDate" <= $4
+	`
+
+	startDate := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
+
+	var count int64
+	err := o.QueryRow(ctx, query, common.ProductTypeGlobalMembership, common.OrderStatusPaid, startDate, lastDay).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("query row scan: %w", err)
+	}
+	return count, nil
+}
+
+// GetOrdersToSkipDouble returns userkeys that have multiple paid/cancelled orders in the specified month
+func (o *OrdersDB) GetOrdersToSkipDouble(ctx context.Context, year, month int, lastDay time.Time) ([]string, error) {
+	query := `
+		SELECT userkey
+		FROM orders
+		WHERE ("Status" = $1 OR "Status" = $2)
+		AND "ProductType" = $3
+		AND "PaymentDate" >= $4
+		AND "PaymentDate" <= $5
+		GROUP BY userkey
+		HAVING COUNT(userkey) > 1
+	`
+
+	startDate := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
+
+	rows, err := o.Query(ctx, query, common.OrderStatusPaid, common.OrderStatusCancelled, common.ProductTypeGlobalMembership, startDate, lastDay)
+	if err != nil {
+		return nil, fmt.Errorf("query: %w", err)
+	}
+	defer rows.Close()
+
+	var userkeys []string
+	for rows.Next() {
+		var userkey null.String
+		if err := rows.Scan(&userkey); err != nil {
+			return nil, fmt.Errorf("rows scan: %w", err)
+		}
+		if userkey.Valid {
+			userkeys = append(userkeys, userkey.String)
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows err: %w", err)
+	}
+
+	return userkeys, nil
+}
+
+// GetOrdersToSkipFresh returns userkeys who already paid or cancelled this month
+func (o *OrdersDB) GetOrdersToSkipFresh(ctx context.Context, year, month int, lastDay time.Time) ([]string, error) {
+	query := `
+		SELECT DISTINCT userkey
+		FROM orders
+		WHERE ("Status" = $1 OR "Status" = $2)
+		AND "ProductType" = $3
+		AND ("Flag" = '' OR "Flag" IS NULL)
+		AND "PaymentDate" >= $4
+		AND "PaymentDate" <= $5
+	`
+
+	startDate := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
+
+	rows, err := o.Query(ctx, query, common.OrderStatusPaid, common.OrderStatusCancelled, common.ProductTypeGlobalMembership, startDate, lastDay)
+	if err != nil {
+		return nil, fmt.Errorf("query: %w", err)
+	}
+	defer rows.Close()
+
+	var userkeys []string
+	for rows.Next() {
+		var userkey null.String
+		if err := rows.Scan(&userkey); err != nil {
+			return nil, fmt.Errorf("rows scan: %w", err)
+		}
+		if userkey.Valid {
+			userkeys = append(userkeys, userkey.String)
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows err: %w", err)
+	}
+
+	return userkeys, nil
+}
+
+// SkipOrdersByUserKey sets Flag='skip' for all orders with the given userkey that are currently flagged as 'torenew'
+func (o *OrdersDB) SkipOrdersByUserKey(ctx context.Context, userkey string) (int, error) {
+	query := `
+		UPDATE orders
+		SET "Flag" = $1
+		WHERE "Flag" = $2
+		AND userkey = $3
+	`
+
+	result, err := o.Exec(ctx, query, common.OrderFlagSkip, common.OrderFlagToRenew, userkey)
+	if err != nil {
+		return 0, fmt.Errorf("exec: %w", err)
+	}
+
+	rowsAffected := result.RowsAffected()
+	return int(rowsAffected), nil
 }

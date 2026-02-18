@@ -81,6 +81,7 @@ type Payment struct {
 	TransactionInitTime   null.String `json:"TransactionInitTime" gorm:"Column:TransactionInitTime"`
 	TransactionUpdateTime null.String `json:"TransactionUpdateTime" gorm:"Column:TransactionUpdateTime"`
 	VoucherID             null.String `json:"VoucherID" gorm:"Column:VoucherID"`
+	Terminal              null.String `json:"terminal" gorm:"Column:Terminal"`
 }
 
 // RequestOrder ...

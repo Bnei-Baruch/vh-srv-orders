@@ -146,3 +146,10 @@ __debug_bin
 google_application_credentials.json
 muhlafim.json
 orders
+
+# Test coverage
+coverage.out
+coverage.html
+coverage.txt
+
+*.log

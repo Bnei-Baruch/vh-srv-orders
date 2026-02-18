@@ -70,6 +70,7 @@ const (
 	OrderFlagMuhLotakin     = "muh_lotakin"
 	OrderFlagMuhAher        = "muh_aher"
 	OrderFlagPaused         = "paused"
+	OrderFlagSkip          = "skip"
 )
 
 var RoleAnyAdmin = []string{RoleRoot, RoleAdmin, RoleHelpHaverAdmin}

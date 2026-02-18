@@ -267,7 +267,11 @@ func (o *OrdersDB) CreatePayment(ctx context.Context, req RequestOrder, orderID 
 	return &p, nil
 }
 
-func (o *OrdersDB) createPendingPayment(ctx context.Context, order *Order, pmx null.String) (*Payment, error) {
+// createPendingPayment creates a pending payment record for the given order.
+// When suppressEvent is true, the TypeCreatePayment event is not emitted.
+// This is used during renewal to prevent double membership evaluation (since
+// TypeUpdateOrder is already emitted by UpdateOrderAfterPayment).
+func (o *OrdersDB) createPendingPayment(ctx context.Context, order *Order, pmx null.String, suppressEvent bool) (*Payment, error) {
 	p := Payment{
 		Amount:        order.Amount,
 		Currency:      order.Currency,
@@ -317,7 +321,9 @@ func (o *OrdersDB) createPendingPayment(ctx context.Context, order *Order, pmx n
 		return nil, fmt.Errorf("o.Exec [update pelecard]: %w", err)
 	}
 
-	o.emitEvent(ctx, events.TypeCreatePayment, map[string]interface{}{"payment_id": p.ID})
+	if !suppressEvent {
+		o.emitEvent(ctx, events.TypeCreatePayment, map[string]interface{}{"payment_id": p.ID})
+	}
 
 	return &p, nil
 }
@@ -980,6 +986,10 @@ func preparePelecardPaymentUpdateViaPaymentStructQuery(req Payment) (string, []i
 	if req.Ordkey.Valid {
 		updateStrings = append(updateStrings, fmt.Sprintf("ord_key=$%d", len(updateStrings)+1))
 		args = append(args, req.Ordkey.String)
+	}
+	if req.Terminal.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("terminal=$%d", len(updateStrings)+1))
+		args = append(args, req.Terminal.String)
 	}
 
 	if len(args) != 0 {

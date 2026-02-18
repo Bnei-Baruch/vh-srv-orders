@@ -18,6 +18,7 @@ const (
 	ComponentSpecialImporter         = "special_importer"
 	ComponentSpecialActivator        = "special_activator"
 	ComponentProfileEventHandler     = "profile_event_handler"
+	ComponentBillingWorkflow         = "billing_workflow"
 
 	TypeCreateAccount     = "create_account"
 	TypeUpdateAccount     = "update_account"

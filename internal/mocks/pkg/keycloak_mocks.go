@@ -35,6 +35,39 @@ func (_m *MockTokenSource) EXPECT() *MockTokenSource_Expecter {
 	return &MockTokenSource_Expecter{mock: &_m.Mock}
 }
 
+// Invalidate provides a mock function for the type MockTokenSource
+func (_mock *MockTokenSource) Invalidate() {
+	_mock.Called()
+	return
+}
+
+// MockTokenSource_Invalidate_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Invalidate'
+type MockTokenSource_Invalidate_Call struct {
+	*mock.Call
+}
+
+// Invalidate is a helper method to define mock.On call
+func (_e *MockTokenSource_Expecter) Invalidate() *MockTokenSource_Invalidate_Call {
+	return &MockTokenSource_Invalidate_Call{Call: _e.mock.On("Invalidate")}
+}
+
+func (_c *MockTokenSource_Invalidate_Call) Run(run func()) *MockTokenSource_Invalidate_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockTokenSource_Invalidate_Call) Return() *MockTokenSource_Invalidate_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockTokenSource_Invalidate_Call) RunAndReturn(run func()) *MockTokenSource_Invalidate_Call {
+	_c.Run(run)
+	return _c
+}
+
 // Token provides a mock function for the type MockTokenSource
 func (_mock *MockTokenSource) Token() (string, error) {
 	ret := _mock.Called()
@@ -84,38 +117,6 @@ func (_c *MockTokenSource_Token_Call) Return(s string, err error) *MockTokenSour
 }
 
 func (_c *MockTokenSource_Token_Call) RunAndReturn(run func() (string, error)) *MockTokenSource_Token_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// Invalidate provides a mock function for the type MockTokenSource
-func (_mock *MockTokenSource) Invalidate() {
-	_mock.Called()
-}
-
-// MockTokenSource_Invalidate_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Invalidate'
-type MockTokenSource_Invalidate_Call struct {
-	*mock.Call
-}
-
-// Invalidate is a helper method to define mock.On call
-func (_e *MockTokenSource_Expecter) Invalidate() *MockTokenSource_Invalidate_Call {
-	return &MockTokenSource_Invalidate_Call{Call: _e.mock.On("Invalidate")}
-}
-
-func (_c *MockTokenSource_Invalidate_Call) Run(run func()) *MockTokenSource_Invalidate_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockTokenSource_Invalidate_Call) Return() *MockTokenSource_Invalidate_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockTokenSource_Invalidate_Call) RunAndReturn(run func()) *MockTokenSource_Invalidate_Call {
 	_c.Call.Return(run)
 	return _c
 }

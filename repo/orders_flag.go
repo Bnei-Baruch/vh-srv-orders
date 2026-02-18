@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
@@ -13,9 +14,9 @@ func (o *OrdersDB) FlagOrdersToRenew(ctx context.Context, month int64, year int6
 	// Select all unique individuals who have an active renewable order
 	qOPotentialStr := `
 	select userkey, count(userkey) as qt
-	from orders where ("Status" = 'paid'
-	or "Status" = 'nosuccess')
+	from orders where ("Status" = 'paid' or "Status" = 'nosuccess')
 	and "ProductType" = 'globalmembership'
+	and "Type" = 'recurring'
 	group by userkey
 	order by qt desc
 	`
@@ -40,14 +41,11 @@ func (o *OrdersDB) FlagOrdersToRenew(ctx context.Context, month int64, year int6
 		}
 
 		qOSelectStr := `
-		select 
-		id,
-		"Type",
-		"PaymentDate" from orders
+		select id, "Type", "PaymentDate" from orders
 		where userkey = $1
-		and ("Status"='paid'
-		or "Status"='nosuccess')
+		and ("Status"='paid' or "Status"='nosuccess')
 		and "ProductType" = 'globalmembership'
+		and "Type" = 'recurring'
 		order by "PaymentDate" desc
 		limit 1
 		`
@@ -65,18 +63,16 @@ func (o *OrdersDB) FlagOrdersToRenew(ctx context.Context, month int64, year int6
 				return counter, fmt.Errorf("rows.Scan [selected]: %w", err)
 			}
 
-			if int64(aOSelect.PaymentDate.Time.Month()) >= month && int64(aOSelect.PaymentDate.Time.Year()) >= year {
-				utils.LogFor(ctx).Info("No need to charge order", slog.Int("order_id", aOSelect.ID))
-				continue
-			}
-
-			if aOSelect.Type.String == "regular" {
-				utils.LogFor(ctx).Info("No need to charge regular order", slog.Int("order_id", aOSelect.ID))
+			// Check if payment date is in or after the billing month
+			paymentDate := aOSelect.PaymentDate.Time
+			billingDate := time.Date(int(year), time.Month(month), 1, 0, 0, 0, 0, time.UTC)
+			if !paymentDate.Before(billingDate) {
+				utils.LogFor(ctx).Debug("Order payment date is in or after the billing month", slog.Int("order_id", aOSelect.ID))
 				continue
 			}
 
 			// if not this month and not regular, go ahead
-			utils.LogFor(ctx).Info("marking order for renewal", slog.Int("order_id", aOSelect.ID))
+			utils.LogFor(ctx).Debug("marking order for renewal", slog.Int("order_id", aOSelect.ID))
 			err = o.FlagOrder(ctx, aOSelect.ID, common.OrderFlagToRenew)
 			if err != nil {
 				return counter, fmt.Errorf("o.FlagOrder: %w", err)
@@ -159,11 +155,22 @@ func (o *OrdersDB) FlagOrder(ctx context.Context, id int, flag string) error {
 	return err
 }
 
+func (o *OrdersDB) FlagOrderAsRenewed(ctx context.Context, orderID uint) error {
+	res, err := o.Exec(ctx, `UPDATE orders SET "Flag"=$1, updated_at=$2 WHERE id = $3`, common.OrderFlagRenewed, time.Now(), orderID)
+	if err != nil {
+		return fmt.Errorf("o.Exec: %w", err)
+	}
+	if res.RowsAffected() == 0 {
+		return common.ErrNoRowsAffected
+	}
+	return nil
+}
+
 // GetFlaggedOrders returns all orders with Flag='torenew'
 // Returns a slice of orders with id, Flag, and AccountID
 func (o *OrdersDB) GetFlaggedOrders(ctx context.Context) ([]Order, error) {
 	query := `
-		SELECT id, "Flag", "AccountID"
+		SELECT id, "Flag", "AccountID", "Status"
 		FROM orders
 		WHERE "Flag" = $1
 	`
@@ -177,7 +184,7 @@ func (o *OrdersDB) GetFlaggedOrders(ctx context.Context) ([]Order, error) {
 	var orders []Order
 	for rows.Next() {
 		var order Order
-		if err := rows.Scan(&order.ID, &order.Flag, &order.AccountID); err != nil {
+		if err := rows.Scan(&order.ID, &order.Flag, &order.AccountID, &order.Status); err != nil {
 			return nil, fmt.Errorf("rows.Scan: %w", err)
 		}
 		orders = append(orders, order)
@@ -188,4 +195,46 @@ func (o *OrdersDB) GetFlaggedOrders(ctx context.Context) ([]Order, error) {
 	}
 
 	return orders, nil
+}
+
+func (o *OrdersDB) GetOrderIDsToRenew(ctx context.Context) ([]uint, error) {
+	sqlQuery := `
+	SELECT id FROM orders 
+	WHERE ("Status" = $1 OR "Status" = $2)
+	AND "Type" = 'recurring'
+	AND "Flag" = $3
+	`
+
+	rows, err := o.Query(ctx, sqlQuery, common.OrderStatusPaid, common.OrderStatusNoSuccess, common.OrderFlagToRenew)
+	if err != nil {
+		return nil, fmt.Errorf("o.Query: %w", err)
+	}
+	defer rows.Close()
+
+	var orderIDs []uint
+	for rows.Next() {
+		var id uint
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("rows.Scan: %w", err)
+		}
+		orderIDs = append(orderIDs, id)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows.Err: %w", err)
+	}
+
+	return orderIDs, nil
+}
+
+// ClearAllFlags clears all order flags
+// Note: We are not filtering by Flag here, so all flags will be cleared. On all orders.
+// This is intentional as all flags are billing related and should be cleared on all orders.
+func (o *OrdersDB) ClearAllFlags(ctx context.Context) error {
+	_, err := o.Exec(ctx, `UPDATE orders SET "Flag" = ''`)
+	if err != nil {
+		return fmt.Errorf("o.Exec: %w", err)
+	}
+	// No need to check RowsAffected() as zero rows affected is not an error.
+	return nil
 }

@@ -34,8 +34,22 @@ tasks:
 
   test:
     desc: Run all Go tests for vh-srv-orders (go test)
+    vars:
+      COVERAGE: '{{default "false" .COVERAGE}}'
+      RACE: '{{default "false" .RACE}}'
     cmds:
-      - go test ./...
+      - |
+        TEST_FLAGS=""
+        {{if eq .RACE "true"}}TEST_FLAGS="$TEST_FLAGS -race"{{end}}
+        {{if eq .COVERAGE "true"}}TEST_FLAGS="$TEST_FLAGS -coverprofile=coverage.out"{{end}}
+        go test $TEST_FLAGS -v ./...
+        {{if eq .COVERAGE "true"}}
+        echo ""
+        echo "Coverage report:"
+        go tool cover -func=coverage.out
+        echo ""
+        echo "Generate HTML coverage report with: go tool cover -html=coverage.out -o coverage.html"
+        {{end}}
 
   build:
     desc: Build vh-srv-orders (go build)
@@ -46,6 +60,11 @@ tasks:
     desc: Run vh-srv-orders (go run)
     cmds:
       - go run ./... server
+
+  run:cmd:
+    desc: "Run vh-srv-orders with arbitrary args (e.g. task run:cmd -- billing start --dry-run)"
+    cmds:
+      - go run ./... {{.CLI_ARGS}}
 
   docker:build:
     desc: Build vh-srv-orders Docker image (docker build)

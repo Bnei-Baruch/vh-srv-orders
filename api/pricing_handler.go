@@ -34,7 +34,7 @@ func (o *OrdersAPI) handleMonthlyPriceByKCID(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "The given KeycloakID is not found.", "success": false})
 		} else {
 			c.Status(http.StatusInternalServerError)
-			_ = c.Error(fmt.Errorf("repo.handleMonthlyPriceByKCID: %w", err))
+			_ = c.Error(fmt.Errorf("repo.GetMonthlyPriceByKCID: %w", err))
 		}
 		return
 	}

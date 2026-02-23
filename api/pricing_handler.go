@@ -25,8 +25,8 @@ func (o *OrdersAPI) handleMonthlyPriceByKCID(c *gin.Context) {
 	//   v1: Static pricing (legacy frontend pricing)
 	//   v2: Country-based tiered pricing
 	//   t1: Tier 1 rollout (IL/NIS scope uses v2, others use v1)
-	// Example: /pay/v2/pricing/monthly/{keycloak_id}?pricingVersion=t1
-	pricingVersion := c.Query("pricingVersion")
+	// Example: /pay/v2/pricing/monthly/{keycloak_id}?pricing_version=t1
+	pricingVersion := c.Query("pricing_version")
 
 	price, err := o.repo.GetMonthlyPriceByKCID(c.Request.Context(), keycloakId, preferredCurrency, pricingVersion)
 	if err != nil {

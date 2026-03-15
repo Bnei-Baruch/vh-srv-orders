@@ -23,6 +23,7 @@ LOG_FILE="/tmp/billing_$TIMESTAMP.log"
 
 cleanup() {
   find /tmp -name "billing_*.log" -type f -mtime +180 -exec rm -f {} \;
+  rm -f "${PAYLOAD_FILE}"
 }
 
 cd ${BASE_DIR} &&
@@ -36,11 +37,20 @@ else
   SUBJECT="ERROR: VH orders - billing workflow (exit $EXIT_CODE)"
 fi
 
+# Build JSON body in a file to avoid "Argument list too long" when log is large
+PAYLOAD_FILE="/tmp/billing_payload_$$.json"
+{
+  printf '{"personalizations":[{"to":[{"email":"edoshor@gmail.com"}]}],"from":{"email":"vh-srv-orders@kli.one"},"subject":"%s","content":[{"type":"text/html","value":"Hey,<br>Please see attached log file."}],"attachments":[{"content":"' "$SUBJECT"
+  base64 -w 0 "${LOG_FILE}" 2>/dev/null || base64 < "${LOG_FILE}" | tr -d '\n'
+  printf '","type":"text/plain","filename":"billing.log"}]}\n'
+} > "${PAYLOAD_FILE}"
+trap 'rm -f "${PAYLOAD_FILE}"' EXIT
+
 curl --request POST \
   --url https://api.sendgrid.com/v3/mail/send \
   --header "authorization: Bearer ${SENDGRID_API_KEY}" \
   --header 'Content-Type: application/json' \
-  --data '{"personalizations": [{"to": [{"email": "edoshor@gmail.com"}]}],"from": {"email": "vh-srv-orders@kli.one"},"subject":"'"${SUBJECT}"'","content": [{"type": "text/html","value": "Hey,<br>Please see attached log file."}], "attachments": [{"content": "'$(base64 -w 0 ${LOG_FILE})'", "type": "text/plain", "filename": "billing.log"}]}'
+  --data @"${PAYLOAD_FILE}"
 
 cleanup
 exit $EXIT_CODE

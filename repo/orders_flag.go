@@ -3,11 +3,9 @@ package repo
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 )
 
 func (o *OrdersDB) FlagOrdersToRenew(ctx context.Context, month int64, year int64) (int64, error) {
@@ -16,7 +14,6 @@ func (o *OrdersDB) FlagOrdersToRenew(ctx context.Context, month int64, year int6
 	select userkey, count(userkey) as qt
 	from orders where ("Status" = 'paid' or "Status" = 'nosuccess')
 	and "ProductType" = 'globalmembership'
-	and "Type" = 'recurring'
 	group by userkey
 	order by qt desc
 	`
@@ -45,7 +42,6 @@ func (o *OrdersDB) FlagOrdersToRenew(ctx context.Context, month int64, year int6
 		where userkey = $1
 		and ("Status"='paid' or "Status"='nosuccess')
 		and "ProductType" = 'globalmembership'
-		and "Type" = 'recurring'
 		order by "PaymentDate" desc
 		limit 1
 		`
@@ -67,12 +63,16 @@ func (o *OrdersDB) FlagOrdersToRenew(ctx context.Context, month int64, year int6
 			paymentDate := aOSelect.PaymentDate.Time
 			billingDate := time.Date(int(year), time.Month(month), 1, 0, 0, 0, 0, time.UTC)
 			if !paymentDate.Before(billingDate) {
-				utils.LogFor(ctx).Debug("Order payment date is in or after the billing month", slog.Int("order_id", aOSelect.ID))
+				continue
+			}
+
+			// we skip regular here instead of in the query for a reason.
+			// Mostly for cases where the last order is regular but a user still has previous non-cancelled  recurring orders.
+			if aOSelect.Type.String == "regular" {
 				continue
 			}
 
 			// if not this month and not regular, go ahead
-			utils.LogFor(ctx).Debug("marking order for renewal", slog.Int("order_id", aOSelect.ID))
 			err = o.FlagOrder(ctx, aOSelect.ID, common.OrderFlagToRenew)
 			if err != nil {
 				return counter, fmt.Errorf("o.FlagOrder: %w", err)

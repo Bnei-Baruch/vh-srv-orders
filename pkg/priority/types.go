@@ -1,5 +1,19 @@
 package priority
 
+import "strings"
+
+// IsActive returns true if the customer is considered active.
+// Checks InactiveFlag first; falls back to StatDes Hebrew text.
+func (c *Customer) IsActive() bool {
+	if c.InactiveFlag != nil && *c.InactiveFlag == "Y" {
+		return false
+	}
+	if strings.Contains(c.StatDes, "לא פעיל") {
+		return false
+	}
+	return true
+}
+
 // Customer represents a customer record from Priority ERP
 // Fields match the actual OData entity fields from Priority ERP API response
 type Customer struct {

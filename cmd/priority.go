@@ -70,54 +70,54 @@ func accountReceivablesFn(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	// Create Priority client
 	client := priority.NewClient()
-
 	ctx := context.Background()
 
 	slog.Info("Fetching account receivables from Priority ERP", slog.String("email", email))
 
-	// Fetch customer information first using email
-	customer, err := client.GetCustomerByEmail(ctx, email)
+	customers, err := client.GetActiveCustomersByEmail(ctx, email)
 	if err != nil {
-		slog.Error("Failed to fetch customer information", slog.Any("error", err))
+		slog.Error("Failed to fetch customers", slog.Any("error", err))
 		os.Exit(1)
 	}
-	if customer == nil {
-		fmt.Printf("\nNo customer found for email: %s\n", email)
+	if len(customers) == 0 {
+		fmt.Printf("\nNo active customers found for email: %s\n", email)
 		os.Exit(0)
 	}
 
-	// Use the customer's CUSTNAME as the customerID for account receivables
-	accountReceivables, err := client.GetAccountReceivables(ctx, customer.CustName)
-	if err != nil {
-		slog.Error("Failed to fetch account receivables", slog.Any("error", err))
-		os.Exit(1)
-	}
-
-	// Print results
-	if len(accountReceivables) == 0 {
-		fmt.Printf("\nNo account receivables found for email: %s\n", email)
-		return
-	}
-
-	fmt.Printf("\nFound %d account receivable item(s) for email: %s\n\n", len(accountReceivables), email)
-	fmt.Println(strings.Repeat("=", 82))
-
-	// Print account receivables in a readable format
-	for i, item := range accountReceivables {
-		fmt.Printf("\nAccount Receivable Item #%d:\n", i+1)
-
-		// Use JSON marshaling for clean output
-		itemJSON, err := json.MarshalIndent(item, "  ", "  ")
+	totalItems := 0
+	for _, customer := range customers {
+		accountReceivables, err := client.GetAccountReceivables(ctx, customer.CustName)
 		if err != nil {
-			fmt.Printf("  Error formatting account receivable item: %v\n", err)
+			slog.Error("Failed to fetch account receivables", slog.String("custName", customer.CustName), slog.Any("error", err))
+			os.Exit(1)
+		}
+
+		if len(accountReceivables) == 0 {
+			fmt.Printf("\nNo account receivables found for customer: %s (%s)\n", customer.CustName, customer.CustDes)
 			continue
 		}
-		fmt.Println(string(itemJSON))
+
+		totalItems += len(accountReceivables)
+		fmt.Printf("\nFound %d account receivable item(s) for customer: %s (%s)\n\n", len(accountReceivables), customer.CustName, customer.CustDes)
+		fmt.Println(strings.Repeat("=", 82))
+
+		for i, item := range accountReceivables {
+			fmt.Printf("\nAccount Receivable Item #%d:\n", i+1)
+			itemJSON, err := json.MarshalIndent(item, "  ", "  ")
+			if err != nil {
+				fmt.Printf("  Error formatting account receivable item: %v\n", err)
+				continue
+			}
+			fmt.Println(string(itemJSON))
+		}
+
+		fmt.Println("\n" + strings.Repeat("=", 82))
 	}
 
-	fmt.Println("\n" + strings.Repeat("=", 82))
+	if totalItems == 0 {
+		fmt.Printf("\nNo account receivables found for email: %s\n", email)
+	}
 }
 
 func getCustomerFn(cmd *cobra.Command, args []string) {
@@ -150,30 +150,31 @@ func getCustomerFn(cmd *cobra.Command, args []string) {
 
 	ctx := context.Background()
 
-	slog.Info("Fetching customer from Priority ERP", slog.String("email", email))
+	slog.Info("Fetching customers from Priority ERP", slog.String("email", email))
 
-	// Fetch customer
-	customer, err := client.GetCustomerByEmail(ctx, email)
+	customers, err := client.GetCustomersByEmail(ctx, email)
 	if err != nil {
-		slog.Error("Failed to fetch customer", slog.Any("error", err))
+		slog.Error("Failed to fetch customers", slog.Any("error", err))
 		os.Exit(1)
 	}
 
-	if customer == nil {
-		fmt.Printf("\nNo customer found for email: %s\n", email)
+	if len(customers) == 0 {
+		fmt.Printf("\nNo customers found for email: %s\n", email)
 		return
 	}
 
-	fmt.Printf("\nCustomer found for email: %s\n", email)
+	fmt.Printf("\nFound %d customer(s) for email: %s\n", len(customers), email)
 	fmt.Println(strings.Repeat("=", 82))
 
-	// Use JSON marshaling for clean output
-	customerJSON, err := json.MarshalIndent(customer, "  ", "  ")
-	if err != nil {
-		fmt.Printf("  Error formatting customer: %v\n", err)
-		return
+	for i, customer := range customers {
+		fmt.Printf("\nCustomer #%d (Status: %s):\n", i+1, customer.StatDes)
+		customerJSON, err := json.MarshalIndent(customer, "  ", "  ")
+		if err != nil {
+			fmt.Printf("  Error formatting customer: %v\n", err)
+			continue
+		}
+		fmt.Println(string(customerJSON))
 	}
-	fmt.Println(string(customerJSON))
 
 	fmt.Println("\n" + strings.Repeat("=", 82))
 }

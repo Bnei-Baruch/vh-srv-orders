@@ -24,7 +24,7 @@ func newTestClient(baseURL string) *Client {
 	return &Client{client: client}
 }
 
-func TestGetCustomerByEmail_Success(t *testing.T) {
+func TestGetCustomersByEmail_Success(t *testing.T) {
 	customer := Customer{
 		CustName: "CUST001",
 		CustDes:  "Test Customer",
@@ -37,7 +37,7 @@ func TestGetCustomerByEmail_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/CUSTOMERS", r.URL.Path)
 		assert.Equal(t, "EMAIL eq 'test@example.com'", r.URL.Query().Get("$filter"))
-		assert.Equal(t, "1", r.URL.Query().Get("$top"))
+		assert.Empty(t, r.URL.Query().Get("$top"))
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(response)
@@ -45,29 +45,52 @@ func TestGetCustomerByEmail_Success(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	result, err := client.GetCustomerByEmail(context.Background(), "test@example.com")
+	result, err := client.GetCustomersByEmail(context.Background(), "test@example.com")
 
 	require.NoError(t, err)
-	require.NotNil(t, result)
-	assert.Equal(t, "CUST001", result.CustName)
-	assert.Equal(t, "Test Customer", result.CustDes)
-	assert.Equal(t, "test@example.com", result.Email)
+	require.Len(t, result, 1)
+	assert.Equal(t, "CUST001", result[0].CustName)
+	assert.Equal(t, "Test Customer", result[0].CustDes)
+	assert.Equal(t, "test@example.com", result[0].Email)
 }
 
-func TestGetCustomerByEmail_NotFound_Returns404(t *testing.T) {
+func TestGetCustomersByEmail_MultipleCustomers(t *testing.T) {
+	response := CustomerODataResponse{
+		Value: []Customer{
+			{CustName: "CUST001", CustDes: "First Customer", Email: "shared@example.com"},
+			{CustName: "CUST002", CustDes: "Second Customer", Email: "shared@example.com"},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	result, err := client.GetCustomersByEmail(context.Background(), "shared@example.com")
+
+	require.NoError(t, err)
+	require.Len(t, result, 2)
+	assert.Equal(t, "CUST001", result[0].CustName)
+	assert.Equal(t, "CUST002", result[1].CustName)
+}
+
+func TestGetCustomersByEmail_NotFound_Returns404(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	result, err := client.GetCustomerByEmail(context.Background(), "notfound@example.com")
+	result, err := client.GetCustomersByEmail(context.Background(), "notfound@example.com")
 
 	require.NoError(t, err)
-	assert.Nil(t, result)
+	assert.Empty(t, result)
 }
 
-func TestGetCustomerByEmail_EmptyResult(t *testing.T) {
+func TestGetCustomersByEmail_EmptyResult(t *testing.T) {
 	response := CustomerODataResponse{
 		Value: []Customer{},
 	}
@@ -79,13 +102,13 @@ func TestGetCustomerByEmail_EmptyResult(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	result, err := client.GetCustomerByEmail(context.Background(), "empty@example.com")
+	result, err := client.GetCustomersByEmail(context.Background(), "empty@example.com")
 
 	require.NoError(t, err)
-	assert.Nil(t, result)
+	assert.Empty(t, result)
 }
 
-func TestGetCustomerByEmail_NilValue(t *testing.T) {
+func TestGetCustomersByEmail_NilValue(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{}`))
@@ -93,13 +116,13 @@ func TestGetCustomerByEmail_NilValue(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	result, err := client.GetCustomerByEmail(context.Background(), "test@example.com")
+	result, err := client.GetCustomersByEmail(context.Background(), "test@example.com")
 
 	require.NoError(t, err)
-	assert.Nil(t, result)
+	assert.Empty(t, result)
 }
 
-func TestGetCustomerByEmail_APIError(t *testing.T) {
+func TestGetCustomersByEmail_APIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(`{"error": "internal server error"}`))
@@ -107,21 +130,87 @@ func TestGetCustomerByEmail_APIError(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	result, err := client.GetCustomerByEmail(context.Background(), "test@example.com")
+	result, err := client.GetCustomersByEmail(context.Background(), "test@example.com")
 
 	require.Error(t, err)
 	assert.Nil(t, result)
 	assert.Contains(t, err.Error(), "priority API error [500]")
 }
 
-func TestGetCustomerByEmail_RequestError(t *testing.T) {
-	// Use an invalid URL to trigger a connection error
+func TestGetCustomersByEmail_RequestError(t *testing.T) {
 	client := newTestClient("http://localhost:1") // port 1 is typically closed
-	result, err := client.GetCustomerByEmail(context.Background(), "test@example.com")
+	result, err := client.GetCustomersByEmail(context.Background(), "test@example.com")
 
 	require.Error(t, err)
 	assert.Nil(t, result)
 	assert.Contains(t, err.Error(), "priority client request failed")
+}
+
+func TestGetActiveCustomersByEmail_FiltersInactiveFlag(t *testing.T) {
+	inactive := "Y"
+	response := CustomerODataResponse{
+		Value: []Customer{
+			{CustName: "CUST001", Email: "test@example.com", InactiveFlag: &inactive},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	result, err := client.GetActiveCustomersByEmail(context.Background(), "test@example.com")
+
+	require.NoError(t, err)
+	assert.Empty(t, result)
+}
+
+func TestGetActiveCustomersByEmail_FiltersStatDes(t *testing.T) {
+	response := CustomerODataResponse{
+		Value: []Customer{
+			{CustName: "CUST001", Email: "test@example.com", StatDes: "לא פעיל"},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	result, err := client.GetActiveCustomersByEmail(context.Background(), "test@example.com")
+
+	require.NoError(t, err)
+	assert.Empty(t, result)
+}
+
+func TestGetActiveCustomersByEmail_MixedReturnsOnlyActive(t *testing.T) {
+	inactive := "Y"
+	response := CustomerODataResponse{
+		Value: []Customer{
+			{CustName: "CUST001", Email: "test@example.com"},
+			{CustName: "CUST002", Email: "test@example.com", InactiveFlag: &inactive},
+			{CustName: "CUST003", Email: "test@example.com", StatDes: "לא פעיל"},
+			{CustName: "CUST004", Email: "test@example.com", StatDes: "פעיל"},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	result, err := client.GetActiveCustomersByEmail(context.Background(), "test@example.com")
+
+	require.NoError(t, err)
+	require.Len(t, result, 2)
+	assert.Equal(t, "CUST001", result[0].CustName)
+	assert.Equal(t, "CUST004", result[1].CustName)
 }
 
 func TestGetAccountReceivables_Success(t *testing.T) {
@@ -317,6 +406,115 @@ func TestGetLastContributions_Success(t *testing.T) {
 	assert.Equal(t, 50.0, result["ILS"])
 }
 
+func TestGetLastContributions_MultipleActiveCustomers(t *testing.T) {
+	now := time.Now()
+	validDate := now.AddDate(0, -6, 0).Format(time.RFC3339)
+
+	customerResponse := CustomerODataResponse{
+		Value: []Customer{
+			{CustName: "CUST001", Email: "shared@example.com"},
+			{CustName: "CUST002", Email: "shared@example.com"},
+		},
+	}
+
+	receivables1 := AccountReceivableODataResponse{
+		Value: []AccountReceivableItem{
+			{FNCNUM: "FNC001", ACCNAME: "40001", DEBIT: 100.0, CODE: "USD", FNCDATE: validDate},
+		},
+	}
+	receivables2 := AccountReceivableODataResponse{
+		Value: []AccountReceivableItem{
+			{FNCNUM: "FNC002", ACCNAME: "40001", DEBIT: 200.0, CODE: "USD", FNCDATE: validDate},
+			{FNCNUM: "FNC003", ACCNAME: "40001", DEBIT: 50.0, CODE: "ILS", FNCDATE: validDate},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/CUSTOMERS":
+			json.NewEncoder(w).Encode(customerResponse)
+		case "/ACCOUNTS_RECEIVABLE('CUST001')/ACCFNCITEMS2_SUBFORM":
+			json.NewEncoder(w).Encode(receivables1)
+		case "/ACCOUNTS_RECEIVABLE('CUST002')/ACCFNCITEMS2_SUBFORM":
+			json.NewEncoder(w).Encode(receivables2)
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	result, err := client.GetLastContributions(context.Background(), "shared@example.com")
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, 300.0, result["USD"]) // 100 + 200
+	assert.Equal(t, 50.0, result["ILS"])
+}
+
+func TestGetLastContributions_InactiveCustomerSkipped(t *testing.T) {
+	now := time.Now()
+	validDate := now.AddDate(0, -6, 0).Format(time.RFC3339)
+	inactive := "Y"
+
+	customerResponse := CustomerODataResponse{
+		Value: []Customer{
+			{CustName: "CUST001", Email: "test@example.com"},
+			{CustName: "CUST002", Email: "test@example.com", InactiveFlag: &inactive},
+		},
+	}
+
+	receivables1 := AccountReceivableODataResponse{
+		Value: []AccountReceivableItem{
+			{FNCNUM: "FNC001", ACCNAME: "40001", DEBIT: 150.0, CODE: "ILS", FNCDATE: validDate},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/CUSTOMERS":
+			json.NewEncoder(w).Encode(customerResponse)
+		case "/ACCOUNTS_RECEIVABLE('CUST001')/ACCFNCITEMS2_SUBFORM":
+			json.NewEncoder(w).Encode(receivables1)
+		default:
+			// CUST002 receivables should not be requested
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	result, err := client.GetLastContributions(context.Background(), "test@example.com")
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, 150.0, result["ILS"])
+	assert.NotContains(t, result, "USD")
+}
+
+func TestGetLastContributions_NoActiveCustomers(t *testing.T) {
+	inactive := "Y"
+	customerResponse := CustomerODataResponse{
+		Value: []Customer{
+			{CustName: "CUST001", Email: "test@example.com", InactiveFlag: &inactive},
+			{CustName: "CUST002", Email: "test@example.com", StatDes: "לא פעיל"},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(customerResponse)
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	result, err := client.GetLastContributions(context.Background(), "test@example.com")
+
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "no active customers found")
+}
+
 func TestGetLastContributions_CustomerNotFound(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -329,7 +527,7 @@ func TestGetLastContributions_CustomerNotFound(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "customer not found")
+	assert.Contains(t, err.Error(), "no active customers found")
 }
 
 func TestGetLastContributions_CustomerEmptyCustName(t *testing.T) {
@@ -348,7 +546,7 @@ func TestGetLastContributions_CustomerEmptyCustName(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "customer not found")
+	assert.Contains(t, err.Error(), "no active customers found")
 }
 
 func TestGetLastContributions_GetCustomerError(t *testing.T) {
@@ -362,7 +560,7 @@ func TestGetLastContributions_GetCustomerError(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "c.GetCustomerByEmail")
+	assert.Contains(t, err.Error(), "c.GetActiveCustomersByEmail")
 }
 
 func TestGetLastContributions_GetReceivablesError(t *testing.T) {
@@ -568,4 +766,3 @@ func TestGetLastContributions_MultipleCurrencies(t *testing.T) {
 	assert.Equal(t, 200.0, result["ILS"])  // 200
 	assert.Equal(t, 125.5, result["EUR"])  // 50 + 75.5
 }
-

@@ -1,0 +1,228 @@
+package cmd
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"os"
+	"strings"
+
+	"github.com/spf13/cobra"
+
+	"gitlab.bbdev.team/vh/pay/orders/common"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/priority"
+)
+
+var priorityCmd = &cobra.Command{
+	Use:   "priority",
+	Short: "Priority ERP commands",
+	Long:  "Commands for interacting with Priority ERP system",
+}
+
+// Command: get-customer nested under priorityCmd
+var getCustomerCmd = &cobra.Command{
+	Use:   "get-customer",
+	Short: "Get customer details by email from Priority ERP",
+	Run:   getCustomerFn,
+}
+
+var accountReceivablesCmd = &cobra.Command{
+	Use:   "account-receivables [email]",
+	Short: "Fetch account receivables for a customer",
+	Long:  "Fetch all account receivables associated with the given customer from Priority ERP",
+	Args:  cobra.ExactArgs(1),
+	Run:   accountReceivablesFn,
+}
+
+var lastContributionsCmd = &cobra.Command{
+	Use:   "last-contributions [email]",
+	Short: "Get last contributions by email",
+	Long:  "Get the last 12 months of contributions (summed by currency) for a customer from Priority ERP",
+	Args:  cobra.ExactArgs(1),
+	Run:   lastContributionsFn,
+}
+
+func init() {
+	rootCmd.AddCommand(priorityCmd)
+
+	getCustomerCmd.Flags().String("email", "", "Email address to query")
+	priorityCmd.AddCommand(getCustomerCmd)
+
+	priorityCmd.AddCommand(accountReceivablesCmd)
+	priorityCmd.AddCommand(lastContributionsCmd)
+}
+
+func accountReceivablesFn(cmd *cobra.Command, args []string) {
+	email := args[0]
+
+	// Validate configuration
+	if common.Config.PriorityBaseURL == "" {
+		slog.Error("PRIORITY_BASE_URL environment variable is required")
+		os.Exit(1)
+	}
+	if common.Config.PriorityUsername == "" {
+		slog.Error("PRIORITY_USERNAME environment variable is required")
+		os.Exit(1)
+	}
+	if common.Config.PriorityPassword == "" {
+		slog.Error("PRIORITY_PASSWORD environment variable is required")
+		os.Exit(1)
+	}
+
+	// Create Priority client
+	client := priority.NewClient()
+
+	ctx := context.Background()
+
+	slog.Info("Fetching account receivables from Priority ERP", slog.String("email", email))
+
+	// Fetch customer information first using email
+	customer, err := client.GetCustomerByEmail(ctx, email)
+	if err != nil {
+		slog.Error("Failed to fetch customer information", slog.Any("error", err))
+		os.Exit(1)
+	}
+	if customer == nil {
+		fmt.Printf("\nNo customer found for email: %s\n", email)
+		os.Exit(0)
+	}
+
+	// Use the customer's CUSTNAME as the customerID for account receivables
+	accountReceivables, err := client.GetAccountReceivables(ctx, customer.CustName)
+	if err != nil {
+		slog.Error("Failed to fetch account receivables", slog.Any("error", err))
+		os.Exit(1)
+	}
+
+	// Print results
+	if len(accountReceivables) == 0 {
+		fmt.Printf("\nNo account receivables found for email: %s\n", email)
+		return
+	}
+
+	fmt.Printf("\nFound %d account receivable item(s) for email: %s\n\n", len(accountReceivables), email)
+	fmt.Println(strings.Repeat("=", 82))
+
+	// Print account receivables in a readable format
+	for i, item := range accountReceivables {
+		fmt.Printf("\nAccount Receivable Item #%d:\n", i+1)
+
+		// Use JSON marshaling for clean output
+		itemJSON, err := json.MarshalIndent(item, "  ", "  ")
+		if err != nil {
+			fmt.Printf("  Error formatting account receivable item: %v\n", err)
+			continue
+		}
+		fmt.Println(string(itemJSON))
+	}
+
+	fmt.Println("\n" + strings.Repeat("=", 82))
+}
+
+func getCustomerFn(cmd *cobra.Command, args []string) {
+	email, err := cmd.Flags().GetString("email")
+	if err != nil {
+		slog.Error("Failed to read email flag", slog.Any("error", err))
+		os.Exit(1)
+	}
+	if email == "" {
+		fmt.Println("Email is required (use --email flag)")
+		os.Exit(1)
+	}
+
+	// Check for required Priority credentials in environment/config
+	if common.Config.PriorityBaseURL == "" {
+		slog.Error("PRIORITY_BASE_URL environment variable is required")
+		os.Exit(1)
+	}
+	if common.Config.PriorityUsername == "" {
+		slog.Error("PRIORITY_USERNAME environment variable is required")
+		os.Exit(1)
+	}
+	if common.Config.PriorityPassword == "" {
+		slog.Error("PRIORITY_PASSWORD environment variable is required")
+		os.Exit(1)
+	}
+
+	// Create Priority client
+	client := priority.NewClient()
+
+	ctx := context.Background()
+
+	slog.Info("Fetching customer from Priority ERP", slog.String("email", email))
+
+	// Fetch customer
+	customer, err := client.GetCustomerByEmail(ctx, email)
+	if err != nil {
+		slog.Error("Failed to fetch customer", slog.Any("error", err))
+		os.Exit(1)
+	}
+
+	if customer == nil {
+		fmt.Printf("\nNo customer found for email: %s\n", email)
+		return
+	}
+
+	fmt.Printf("\nCustomer found for email: %s\n", email)
+	fmt.Println(strings.Repeat("=", 82))
+
+	// Use JSON marshaling for clean output
+	customerJSON, err := json.MarshalIndent(customer, "  ", "  ")
+	if err != nil {
+		fmt.Printf("  Error formatting customer: %v\n", err)
+		return
+	}
+	fmt.Println(string(customerJSON))
+
+	fmt.Println("\n" + strings.Repeat("=", 82))
+}
+
+func lastContributionsFn(cmd *cobra.Command, args []string) {
+	email := args[0]
+
+	// Validate configuration
+	if common.Config.PriorityBaseURL == "" {
+		slog.Error("PRIORITY_BASE_URL environment variable is required")
+		os.Exit(1)
+	}
+	if common.Config.PriorityUsername == "" {
+		slog.Error("PRIORITY_USERNAME environment variable is required")
+		os.Exit(1)
+	}
+	if common.Config.PriorityPassword == "" {
+		slog.Error("PRIORITY_PASSWORD environment variable is required")
+		os.Exit(1)
+	}
+
+	// Create Priority client
+	client := priority.NewClient()
+
+	ctx := context.Background()
+
+	slog.Info("Fetching last contributions from Priority ERP", slog.String("email", email))
+
+	// Fetch last contributions
+	contributions, err := client.GetLastContributions(ctx, email)
+	if err != nil {
+		slog.Error("Failed to fetch last contributions", slog.Any("error", err))
+		os.Exit(1)
+	}
+
+	// Print results
+	if len(contributions) == 0 {
+		fmt.Printf("\nNo contributions found for email: %s (last 12 months)\n", email)
+		return
+	}
+
+	fmt.Printf("\nLast 12 months contributions for email: %s\n", email)
+	fmt.Println(strings.Repeat("=", 82))
+
+	// Print contributions grouped by currency
+	for currency, amount := range contributions {
+		fmt.Printf("\nCurrency: %s\n", currency)
+		fmt.Printf("  Total Amount: %.2f\n", amount)
+	}
+
+	fmt.Println("\n" + strings.Repeat("=", 82))
+}

@@ -39,6 +39,10 @@ type envConfig struct {
 	DebugIgnoreAdminRoles bool `envconfig:"DEBUG_IGNORE_ADMIN_ROLES" default:"false"`
 
 	RenewalMaxWorkers int `envconfig:"RENEWAL_MAX_WORKERS" default:"5"`
+
+	PriorityBaseURL  string `envconfig:"PRIORITY_BASE_URL"`
+	PriorityUsername string `envconfig:"PRIORITY_USERNAME"`
+	PriorityPassword string `envconfig:"PRIORITY_PASSWORD"`
 }
 
 var Config = new(envConfig)

@@ -536,6 +536,7 @@ type Special struct {
 	EndDate     null.Time   `json:"end_date"`
 	Category    null.String `json:"category"`
 	SubCategory null.String `json:"subcategory"`
+	CreatedAt   null.Time   `json:"created_at"`
 }
 
 type SpecialKeycloakIdUpdate struct {

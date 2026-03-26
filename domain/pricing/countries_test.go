@@ -17,27 +17,24 @@ func TestGetCountryBasePrice_Israel(t *testing.T) {
 			name: "Israel uppercase",
 			code: "IL",
 			expected: CountryBasePrice{
-				Amount:   180.0,
-				Currency: common.CurrencyNIS,
-				Group:    "High",
+				Price: Price{Amount: 180.0, Currency: common.CurrencyNIS},
+				Group: "High",
 			},
 		},
 		{
 			name: "Israel lowercase",
 			code: "il",
 			expected: CountryBasePrice{
-				Amount:   180.0,
-				Currency: common.CurrencyNIS,
-				Group:    "High",
+				Price: Price{Amount: 180.0, Currency: common.CurrencyNIS},
+				Group: "High",
 			},
 		},
 		{
 			name: "Israel mixed case",
 			code: "Il",
 			expected: CountryBasePrice{
-				Amount:   180.0,
-				Currency: common.CurrencyNIS,
-				Group:    "High",
+				Price: Price{Amount: 180.0, Currency: common.CurrencyNIS},
+				Group: "High",
 			},
 		},
 	}
@@ -65,76 +62,44 @@ func TestGetCountryBasePrice_EuropeanCountries(t *testing.T) {
 		expected CountryBasePrice
 	}{
 		{
-			name: "Germany High group",
-			code: "DE",
-			expected: CountryBasePrice{
-				Amount:   50.0,
-				Currency: common.CurrencyEUR,
-				Group:    "High",
-			},
+			name:     "Germany High group",
+			code:     "DE",
+			expected: CountryBasePrice{Price: Price{Amount: 50.0, Currency: common.CurrencyEUR}, Group: "High"},
 		},
 		{
-			name: "France High group",
-			code: "FR",
-			expected: CountryBasePrice{
-				Amount:   50.0,
-				Currency: common.CurrencyEUR,
-				Group:    "High",
-			},
+			name:     "France High group",
+			code:     "FR",
+			expected: CountryBasePrice{Price: Price{Amount: 50.0, Currency: common.CurrencyEUR}, Group: "High"},
 		},
 		{
-			name: "Bulgaria Medium group",
-			code: "BG",
-			expected: CountryBasePrice{
-				Amount:   30.0,
-				Currency: common.CurrencyEUR,
-				Group:    "Medium",
-			},
+			name:     "Bulgaria Medium group",
+			code:     "BG",
+			expected: CountryBasePrice{Price: Price{Amount: 30.0, Currency: common.CurrencyEUR}, Group: "Medium"},
 		},
 		{
-			name: "Romania Medium group",
-			code: "RO",
-			expected: CountryBasePrice{
-				Amount:   30.0,
-				Currency: common.CurrencyEUR,
-				Group:    "Medium",
-			},
+			name:     "Romania Medium group",
+			code:     "RO",
+			expected: CountryBasePrice{Price: Price{Amount: 30.0, Currency: common.CurrencyEUR}, Group: "Medium"},
 		},
 		{
-			name: "Ukraine Low group",
-			code: "UA",
-			expected: CountryBasePrice{
-				Amount:   20.0,
-				Currency: common.CurrencyUSD, // Ukraine is not in European currency map
-				Group:    "Low",
-			},
+			name:     "Ukraine Low group",
+			code:     "UA",
+			expected: CountryBasePrice{Price: Price{Amount: 20.0, Currency: common.CurrencyUSD}, Group: "Low"}, // Ukraine is not in European currency map
 		},
 		{
-			name: "Liechtenstein High group",
-			code: "LI",
-			expected: CountryBasePrice{
-				Amount:   50.0,
-				Currency: common.CurrencyEUR,
-				Group:    "High",
-			},
+			name:     "Liechtenstein High group",
+			code:     "LI",
+			expected: CountryBasePrice{Price: Price{Amount: 50.0, Currency: common.CurrencyEUR}, Group: "High"},
 		},
 		{
-			name: "Switzerland High group",
-			code: "CH",
-			expected: CountryBasePrice{
-				Amount:   50.0,
-				Currency: common.CurrencyEUR,
-				Group:    "High",
-			},
+			name:     "Switzerland High group",
+			code:     "CH",
+			expected: CountryBasePrice{Price: Price{Amount: 50.0, Currency: common.CurrencyEUR}, Group: "High"},
 		},
 		{
-			name: "United Kingdom High group",
-			code: "GB",
-			expected: CountryBasePrice{
-				Amount:   50.0,
-				Currency: common.CurrencyEUR,
-				Group:    "High",
-			},
+			name:     "United Kingdom High group",
+			code:     "GB",
+			expected: CountryBasePrice{Price: Price{Amount: 50.0, Currency: common.CurrencyEUR}, Group: "High"},
 		},
 	}
 
@@ -161,67 +126,39 @@ func TestGetCountryBasePrice_USDCountries(t *testing.T) {
 		expected CountryBasePrice
 	}{
 		{
-			name: "United States High group",
-			code: "US",
-			expected: CountryBasePrice{
-				Amount:   55.0,
-				Currency: common.CurrencyUSD,
-				Group:    "High",
-			},
+			name:     "United States High group",
+			code:     "US",
+			expected: CountryBasePrice{Price: Price{Amount: 55.0, Currency: common.CurrencyUSD}, Group: "High"},
 		},
 		{
-			name: "Canada High group",
-			code: "CA",
-			expected: CountryBasePrice{
-				Amount:   55.0,
-				Currency: common.CurrencyUSD,
-				Group:    "High",
-			},
+			name:     "Canada High group",
+			code:     "CA",
+			expected: CountryBasePrice{Price: Price{Amount: 55.0, Currency: common.CurrencyUSD}, Group: "High"},
 		},
 		{
-			name: "Brazil Low group",
-			code: "BR",
-			expected: CountryBasePrice{
-				Amount:   20.0,
-				Currency: common.CurrencyUSD,
-				Group:    "Low",
-			},
+			name:     "Brazil Low group",
+			code:     "BR",
+			expected: CountryBasePrice{Price: Price{Amount: 20.0, Currency: common.CurrencyUSD}, Group: "Low"},
 		},
 		{
-			name: "Mexico Low group",
-			code: "MX",
-			expected: CountryBasePrice{
-				Amount:   20.0,
-				Currency: common.CurrencyUSD,
-				Group:    "Low",
-			},
+			name:     "Mexico Low group",
+			code:     "MX",
+			expected: CountryBasePrice{Price: Price{Amount: 20.0, Currency: common.CurrencyUSD}, Group: "Low"},
 		},
 		{
-			name: "India Low group",
-			code: "IN",
-			expected: CountryBasePrice{
-				Amount:   20.0,
-				Currency: common.CurrencyUSD,
-				Group:    "Low",
-			},
+			name:     "India Low group",
+			code:     "IN",
+			expected: CountryBasePrice{Price: Price{Amount: 20.0, Currency: common.CurrencyUSD}, Group: "Low"},
 		},
 		{
-			name: "China Medium group",
-			code: "CN",
-			expected: CountryBasePrice{
-				Amount:   35.0,
-				Currency: common.CurrencyUSD,
-				Group:    "Medium",
-			},
+			name:     "China Medium group",
+			code:     "CN",
+			expected: CountryBasePrice{Price: Price{Amount: 35.0, Currency: common.CurrencyUSD}, Group: "Medium"},
 		},
 		{
-			name: "Japan High group",
-			code: "JP",
-			expected: CountryBasePrice{
-				Amount:   55.0,
-				Currency: common.CurrencyUSD,
-				Group:    "High",
-			},
+			name:     "Japan High group",
+			code:     "JP",
+			expected: CountryBasePrice{Price: Price{Amount: 55.0, Currency: common.CurrencyUSD}, Group: "High"},
 		},
 	}
 
@@ -242,8 +179,6 @@ func TestGetCountryBasePrice_USDCountries(t *testing.T) {
 }
 
 func TestGetCountryBasePrice_AllGroupsForILS(t *testing.T) {
-	// Note: Israel is High group, but we can test the price mapping
-	// by checking that ILS-High returns the correct price
 	result := GetCountryBasePrice("IL")
 	if result.Amount != 180.0 {
 		t.Errorf("ILS-High Amount = %v, want 180.0", result.Amount)
@@ -268,8 +203,6 @@ func TestGetCountryBasePrice_AllGroupsForEUR(t *testing.T) {
 		{"EUR High", "DE", 50.0, "High"},
 	}
 
-	// Find actual EUR countries with Low group
-	// Since we don't have EUR-Low in the map, let's test what we have
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := GetCountryBasePrice(tt.code)
@@ -312,17 +245,14 @@ func TestGetCountryBasePrice_AllGroupsForUSD(t *testing.T) {
 }
 
 func TestGetCountryBasePrice_UnknownCountry(t *testing.T) {
-	// Test with a country code that doesn't exist in the maps
 	result := GetCountryBasePrice("XX")
 
-	// Should default to High group and USD currency
 	if result.Group != "High" {
 		t.Errorf("Unknown country Group = %v, want High", result.Group)
 	}
 	if result.Currency != common.CurrencyUSD {
 		t.Errorf("Unknown country Currency = %v, want USD", result.Currency)
 	}
-	// Should use default amount for USD-High
 	if result.Amount != 55.0 {
 		t.Errorf("Unknown country Amount = %v, want 55.0", result.Amount)
 	}
@@ -331,7 +261,6 @@ func TestGetCountryBasePrice_UnknownCountry(t *testing.T) {
 func TestGetCountryBasePrice_EmptyString(t *testing.T) {
 	result := GetCountryBasePrice("")
 
-	// Should default to High group and USD currency
 	if result.Group != "High" {
 		t.Errorf("Empty string Group = %v, want High", result.Group)
 	}
@@ -385,49 +314,29 @@ func TestGetCountryBasePrice_SpecificCountries(t *testing.T) {
 		expected CountryBasePrice
 	}{
 		{
-			name: "Kosovo (XK) - not in database but in map",
-			code: "XK",
-			expected: CountryBasePrice{
-				Amount:   35.0,
-				Currency: common.CurrencyUSD,
-				Group:    "Medium",
-			},
+			name:     "Kosovo (XK) - not in database but in map",
+			code:     "XK",
+			expected: CountryBasePrice{Price: Price{Amount: 35.0, Currency: common.CurrencyUSD}, Group: "Medium"},
 		},
 		{
-			name: "Vatican City",
-			code: "VA",
-			expected: CountryBasePrice{
-				Amount:   35.0,
-				Currency: common.CurrencyUSD,
-				Group:    "Medium",
-			},
+			name:     "Vatican City",
+			code:     "VA",
+			expected: CountryBasePrice{Price: Price{Amount: 35.0, Currency: common.CurrencyUSD}, Group: "Medium"},
 		},
 		{
-			name: "Macao",
-			code: "MO",
-			expected: CountryBasePrice{
-				Amount:   55.0,
-				Currency: common.CurrencyUSD,
-				Group:    "High",
-			},
+			name:     "Macao",
+			code:     "MO",
+			expected: CountryBasePrice{Price: Price{Amount: 55.0, Currency: common.CurrencyUSD}, Group: "High"},
 		},
 		{
-			name: "North Korea",
-			code: "KP",
-			expected: CountryBasePrice{
-				Amount:   20.0,
-				Currency: common.CurrencyUSD,
-				Group:    "Low",
-			},
+			name:     "North Korea",
+			code:     "KP",
+			expected: CountryBasePrice{Price: Price{Amount: 20.0, Currency: common.CurrencyUSD}, Group: "Low"},
 		},
 		{
-			name: "Timor-Leste",
-			code: "TL",
-			expected: CountryBasePrice{
-				Amount:   20.0,
-				Currency: common.CurrencyUSD,
-				Group:    "Low",
-			},
+			name:     "Timor-Leste",
+			code:     "TL",
+			expected: CountryBasePrice{Price: Price{Amount: 20.0, Currency: common.CurrencyUSD}, Group: "Low"},
 		},
 	}
 
@@ -448,7 +357,6 @@ func TestGetCountryBasePrice_SpecificCountries(t *testing.T) {
 }
 
 func TestGetCountryBasePrice_PriceMapping(t *testing.T) {
-	// Test that all price combinations are correctly mapped
 	priceTests := []struct {
 		currency string
 		group    string
@@ -465,10 +373,9 @@ func TestGetCountryBasePrice_PriceMapping(t *testing.T) {
 		{common.CurrencyUSD, "High", 55.0},
 	}
 
-	// Find countries that match each combination
 	countryMap := map[string]string{
 		"NIS-High":   "IL",
-		"EUR-Low":    "", // No EUR country with Low group currently
+		"EUR-Low":    "",
 		"EUR-Medium": "RO",
 		"EUR-High":   "DE",
 		"USD-Low":    "IN",
@@ -480,7 +387,6 @@ func TestGetCountryBasePrice_PriceMapping(t *testing.T) {
 		key := pt.currency + "-" + pt.group
 		countryCode := countryMap[key]
 		if countryCode == "" {
-			// Skip if no country matches this combination
 			continue
 		}
 
@@ -495,15 +401,14 @@ func TestGetCountryBasePrice_PriceMapping(t *testing.T) {
 
 func TestGetCountryBasePrice_EdgeCases(t *testing.T) {
 	tests := []struct {
-		name     string
-		code     string
-		checkFn  func(t *testing.T, result CountryBasePrice)
+		name    string
+		code    string
+		checkFn func(t *testing.T, result CountryBasePrice)
 	}{
 		{
 			name: "Very long string",
 			code: "USALONGSTRING",
 			checkFn: func(t *testing.T, result CountryBasePrice) {
-				// Should default since it's not a valid 2-letter code
 				if result.Group != "High" {
 					t.Errorf("Long string should default to High, got %v", result.Group)
 				}
@@ -513,7 +418,6 @@ func TestGetCountryBasePrice_EdgeCases(t *testing.T) {
 			name: "Single character",
 			code: "U",
 			checkFn: func(t *testing.T, result CountryBasePrice) {
-				// Should default
 				if result.Group != "High" {
 					t.Errorf("Single char should default to High, got %v", result.Group)
 				}
@@ -523,7 +427,6 @@ func TestGetCountryBasePrice_EdgeCases(t *testing.T) {
 			name: "Special characters",
 			code: "!!",
 			checkFn: func(t *testing.T, result CountryBasePrice) {
-				// Should default
 				if result.Group != "High" {
 					t.Errorf("Special chars should default to High, got %v", result.Group)
 				}
@@ -538,4 +441,3 @@ func TestGetCountryBasePrice_EdgeCases(t *testing.T) {
 		})
 	}
 }
-

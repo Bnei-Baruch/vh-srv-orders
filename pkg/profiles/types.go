@@ -51,6 +51,7 @@ type Profile struct {
 	HasGroup            *bool      `json:"has_ten_group,omitempty"`
 	WantsGroup          *bool      `json:"wants_ten_group,omitempty"`
 	NameOfGroup         *string    `json:"name_ten_group,omitempty"`
+	SpouseKeycloakID    *string    `json:"spouse_keycloak_id,omitempty"`
 }
 
 type Status struct {

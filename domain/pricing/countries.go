@@ -6,11 +6,16 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/common"
 )
 
-// CountryBasePrice represents the base price information for a country
+// Price is a bare amount and currency with no pricing-tier metadata.
+type Price struct {
+	Amount   float64 `json:"amount"`
+	Currency string  `json:"currency"`
+}
+
+// CountryBasePrice is a Price with a pricing-tier group attached.
 type CountryBasePrice struct {
-	Amount   float64
-	Currency string
-	Group    string
+	Price
+	Group string `json:"group"`
 }
 
 // countryToGroup maps country codes to their pricing groups (Low, Medium, High)
@@ -22,7 +27,6 @@ var countryToGroup = map[string]string{
 	"AG": "High",   // Antigua and Barbuda
 	"AI": "High",   // Anguilla
 	"AL": "Medium", // Albania
-	"AN": "High",   // Netherlands Antilles
 	"AS": "High",   // American Samoa
 	"AW": "High",   // Aruba
 	"AM": "Low",    // Armenia
@@ -103,7 +107,7 @@ var countryToGroup = map[string]string{
 	"IQ": "Medium", // Iraq
 	"IR": "Medium", // Iran
 	"IS": "High",   // Iceland
-	"IT": "High",   // Italy
+	"IT": "Medium", // Italy
 	"JM": "Medium", // Jamaica
 	"JO": "Low",    // Jordan
 	"JP": "High",   // Japan
@@ -219,6 +223,54 @@ var countryToGroup = map[string]string{
 	"ZA": "Medium", // South Africa
 	"ZM": "Low",    // Zambia
 	"ZW": "Low",    // Zimbabwe
+
+	// Territories and dependencies — groups not yet assigned
+	"AQ": "Undefined", // Antarctica
+	"AX": "Undefined", // Alland Islands
+	"BL": "Undefined", // Saint Barthelemy
+	"BM": "Undefined", // Bermuda
+	"BV": "Undefined", // Bouvet Island
+	"CC": "Undefined", // Cocos (Keeling) Islands
+	"CK": "Undefined", // Cook Islands
+	"CW": "Undefined", // Curacao
+	"CX": "Undefined", // Christmas Island
+	"EH": "Undefined", // Western Sahara
+	"FK": "Undefined", // Falkland Islands (Malvinas)
+	"FO": "Undefined", // Faroe Islands
+	"GF": "Undefined", // French Guiana
+	"GG": "Undefined", // Guernsey
+	"GI": "Undefined", // Gibraltar
+	"GL": "Undefined", // Greenland
+	"GP": "Undefined", // Guadeloupe
+	"GS": "Undefined", // South Georgia and the South Sandwich Islands
+	"GU": "Undefined", // Guam
+	"HM": "Undefined", // Heard Island and McDonald Islands
+	"IM": "Undefined", // Isle of Man
+	"IO": "Undefined", // British Indian Ocean Territory
+	"JE": "Undefined", // Jersey
+	"MF": "Undefined", // Saint Martin (French part)
+	"MP": "Undefined", // Northern Mariana Islands
+	"MQ": "Undefined", // Martinique
+	"MS": "Undefined", // Montserrat
+	"NC": "Undefined", // New Caledonia
+	"NF": "Undefined", // Norfolk Island
+	"NU": "Undefined", // Niue
+	"PF": "Undefined", // French Polynesia
+	"PM": "Undefined", // Saint Pierre and Miquelon
+	"PN": "Undefined", // Pitcairn
+	"PR": "Undefined", // Puerto Rico
+	"RE": "Undefined", // Reunion
+	"SH": "Undefined", // Saint Helena
+	"SJ": "Undefined", // Svalbard and Jan Mayen
+	"SS": "Undefined", // South Sudan
+	"SX": "Undefined", // Sint Maarten (Dutch part)
+	"TC": "Undefined", // Turks and Caicos Islands
+	"TF": "Undefined", // French Southern Territories
+	"TK": "Undefined", // Tokelau
+	"VG": "Undefined", // British Virgin Islands
+	"VI": "Undefined", // US Virgin Islands
+	"WF": "Undefined", // Wallis and Futuna
+	"YT": "Undefined", // Mayotte
 }
 
 // countryToCurrency maps country codes to their currencies
@@ -263,23 +315,22 @@ var countryToCurrency = map[string]string{
 }
 
 // priceByCurrencyAndGroup maps (Currency, Group) combinations to base prices
-// Key format: "CURRENCY-GROUP" (e.g., "ILS-Low", "EUR-Medium", "USD-High")
-// Prices will be added manually based on the spreadsheet data
+// Key format: "CURRENCY-GROUP" (e.g., "NIS-Low", "EUR-Medium", "USD-High")
 var priceByCurrencyAndGroup = map[string]float64{
-	// ILS prices
-	"NIS-Low":    60.0,
-	"NIS-Medium": 90.0,
-	"NIS-High":   180.0,
+	// NIS prices
+	common.CurrencyNIS + "-Low":    60.0,
+	common.CurrencyNIS + "-Medium": 90.0,
+	common.CurrencyNIS + "-High":   180.0,
 
 	// EUR prices
-	"EUR-Low":    20.0,
-	"EUR-Medium": 30.0,
-	"EUR-High":   50.0,
+	common.CurrencyEUR + "-Low":    20.0,
+	common.CurrencyEUR + "-Medium": 30.0,
+	common.CurrencyEUR + "-High":   50.0,
 
 	// USD prices
-	"USD-Low":    20.0,
-	"USD-Medium": 35.0,
-	"USD-High":   55.0,
+	common.CurrencyUSD + "-Low":    20.0,
+	common.CurrencyUSD + "-Medium": 35.0,
+	common.CurrencyUSD + "-High":   55.0,
 }
 
 // GetCountryBasePrice returns the base price information for a given country code
@@ -309,8 +360,271 @@ func GetCountryBasePrice(countryCode string) CountryBasePrice {
 	}
 
 	return CountryBasePrice{
-		Amount:   amount,
-		Currency: currency,
-		Group:    group,
+		Price: Price{Amount: amount, Currency: currency},
+		Group: group,
 	}
+}
+
+// countryToName maps ISO-3166 alpha-2 country codes to human-readable names.
+var countryToName = map[string]string{
+	"AD": "Andorra",
+	"AE": "United Arab Emirates",
+	"AF": "Afghanistan",
+	"AG": "Antigua and Barbuda",
+	"AI": "Anguilla",
+	"AL": "Albania",
+	"AS": "American Samoa",
+	"AW": "Aruba",
+	"AM": "Armenia",
+	"AO": "Angola",
+	"AR": "Argentina",
+	"AT": "Austria",
+	"AU": "Australia",
+	"AZ": "Azerbaijan",
+	"BA": "Bosnia and Herzegovina",
+	"BB": "Barbados",
+	"BD": "Bangladesh",
+	"BE": "Belgium",
+	"BF": "Burkina Faso",
+	"BG": "Bulgaria",
+	"BH": "Bahrain",
+	"BI": "Burundi",
+	"BJ": "Benin",
+	"BN": "Brunei Darussalam",
+	"BO": "Bolivia",
+	"BR": "Brazil",
+	"BS": "Bahamas",
+	"BT": "Bhutan",
+	"BW": "Botswana",
+	"BY": "Belarus",
+	"BZ": "Belize",
+	"CA": "Canada",
+	"CD": "Congo, Democratic Republic of the",
+	"CF": "Central African Republic",
+	"CG": "Congo, Republic of the",
+	"CH": "Switzerland",
+	"CI": "Cote d'Ivoire",
+	"CL": "Chile",
+	"CM": "Cameroon",
+	"CN": "China",
+	"CO": "Colombia",
+	"CR": "Costa Rica",
+	"CU": "Cuba",
+	"CV": "Cape Verde",
+	"CY": "Cyprus",
+	"CZ": "Czech Republic",
+	"DE": "Germany",
+	"DJ": "Djibouti",
+	"DK": "Denmark",
+	"DM": "Dominica",
+	"DO": "Dominican Republic",
+	"DZ": "Algeria",
+	"EC": "Ecuador",
+	"EE": "Estonia",
+	"EG": "Egypt",
+	"ER": "Eritrea",
+	"ES": "Spain",
+	"ET": "Ethiopia",
+	"FI": "Finland",
+	"FJ": "Fiji",
+	"FM": "Micronesia, Federated States of",
+	"FR": "France",
+	"GA": "Gabon",
+	"GB": "United Kingdom",
+	"GD": "Grenada",
+	"GE": "Georgia",
+	"GH": "Ghana",
+	"GM": "Gambia",
+	"GN": "Guinea",
+	"GQ": "Equatorial Guinea",
+	"GR": "Greece",
+	"GT": "Guatemala",
+	"GW": "Guinea-Bissau",
+	"GY": "Guyana",
+	"HK": "Hong Kong",
+	"HN": "Honduras",
+	"HR": "Croatia",
+	"HT": "Haiti",
+	"HU": "Hungary",
+	"ID": "Indonesia",
+	"IE": "Ireland",
+	"IL": "Israel",
+	"IN": "India",
+	"IQ": "Iraq",
+	"IR": "Iran, Islamic Republic of",
+	"IS": "Iceland",
+	"IT": "Italy",
+	"JM": "Jamaica",
+	"JO": "Jordan",
+	"JP": "Japan",
+	"KE": "Kenya",
+	"KG": "Kyrgyzstan",
+	"KH": "Cambodia",
+	"KI": "Kiribati",
+	"KM": "Comoros",
+	"KN": "Saint Kitts and Nevis",
+	"KP": "Korea, Democratic People's Republic of",
+	"KR": "Korea, Republic of",
+	"KW": "Kuwait",
+	"KY": "Cayman Islands",
+	"KZ": "Kazakhstan",
+	"LA": "Lao People's Democratic Republic",
+	"LB": "Lebanon",
+	"LC": "Saint Lucia",
+	"LK": "Sri Lanka",
+	"LI": "Liechtenstein",
+	"LR": "Liberia",
+	"LS": "Lesotho",
+	"LT": "Lithuania",
+	"LU": "Luxembourg",
+	"LV": "Latvia",
+	"LY": "Libya",
+	"MA": "Morocco",
+	"MC": "Monaco",
+	"MD": "Moldova, Republic of",
+	"ME": "Montenegro",
+	"MG": "Madagascar",
+	"MH": "Marshall Islands",
+	"MK": "Macedonia, the Former Yugoslav Republic of",
+	"ML": "Mali",
+	"MM": "Myanmar",
+	"MN": "Mongolia",
+	"MO": "Macao",
+	"MR": "Mauritania",
+	"MT": "Malta",
+	"MU": "Mauritius",
+	"MV": "Maldives",
+	"MW": "Malawi",
+	"MX": "Mexico",
+	"MY": "Malaysia",
+	"MZ": "Mozambique",
+	"NA": "Namibia",
+	"NE": "Niger",
+	"NG": "Nigeria",
+	"NI": "Nicaragua",
+	"NL": "Netherlands",
+	"NO": "Norway",
+	"NP": "Nepal",
+	"NR": "Nauru",
+	"NZ": "New Zealand",
+	"OM": "Oman",
+	"PA": "Panama",
+	"PE": "Peru",
+	"PG": "Papua New Guinea",
+	"PH": "Philippines",
+	"PK": "Pakistan",
+	"PL": "Poland",
+	"PS": "Palestine, State of",
+	"PT": "Portugal",
+	"PW": "Palau",
+	"PY": "Paraguay",
+	"QA": "Qatar",
+	"RO": "Romania",
+	"RS": "Serbia",
+	"RU": "Russian Federation",
+	"RW": "Rwanda",
+	"SA": "Saudi Arabia",
+	"SB": "Solomon Islands",
+	"SC": "Seychelles",
+	"SD": "Sudan",
+	"SE": "Sweden",
+	"SG": "Singapore",
+	"SI": "Slovenia",
+	"SK": "Slovakia",
+	"SL": "Sierra Leone",
+	"SM": "San Marino",
+	"SN": "Senegal",
+	"SO": "Somalia",
+	"SR": "Suriname",
+	"ST": "Sao Tome and Principe",
+	"SV": "El Salvador",
+	"SY": "Syrian Arab Republic",
+	"SZ": "Swaziland",
+	"TD": "Chad",
+	"TG": "Togo",
+	"TH": "Thailand",
+	"TJ": "Tajikistan",
+	"TL": "Timor-Leste",
+	"TM": "Turkmenistan",
+	"TN": "Tunisia",
+	"TO": "Tonga",
+	"TR": "Turkey",
+	"TT": "Trinidad and Tobago",
+	"TV": "Tuvalu",
+	"TW": "Taiwan, Province of China",
+	"TZ": "United Republic of Tanzania",
+	"UA": "Ukraine",
+	"UG": "Uganda",
+	"US": "United States",
+	"UY": "Uruguay",
+	"UZ": "Uzbekistan",
+	"VA": "Holy See (Vatican City State)",
+	"VC": "Saint Vincent and the Grenadines",
+	"VE": "Venezuela",
+	"VN": "Vietnam",
+	"VU": "Vanuatu",
+	"WS": "Samoa",
+	"XK": "Kosovo",
+	"YE": "Yemen",
+	"ZA": "South Africa",
+	"ZM": "Zambia",
+	"ZW": "Zimbabwe",
+
+	// Territories and dependencies — names aligned with frontend
+	"AQ": "Antarctica",
+	"AX": "Alland Islands",
+	"BL": "Saint Barthelemy",
+	"BM": "Bermuda",
+	"BV": "Bouvet Island",
+	"CC": "Cocos (Keeling) Islands",
+	"CK": "Cook Islands",
+	"CW": "Curacao",
+	"CX": "Christmas Island",
+	"EH": "Western Sahara",
+	"FK": "Falkland Islands (Malvinas)",
+	"FO": "Faroe Islands",
+	"GF": "French Guiana",
+	"GG": "Guernsey",
+	"GI": "Gibraltar",
+	"GL": "Greenland",
+	"GP": "Guadeloupe",
+	"GS": "South Georgia and the South Sandwich Islands",
+	"GU": "Guam",
+	"HM": "Heard Island and McDonald Islands",
+	"IM": "Isle of Man",
+	"IO": "British Indian Ocean Territory",
+	"JE": "Jersey",
+	"MF": "Saint Martin (French part)",
+	"MP": "Northern Mariana Islands",
+	"MQ": "Martinique",
+	"MS": "Montserrat",
+	"NC": "New Caledonia",
+	"NF": "Norfolk Island",
+	"NU": "Niue",
+	"PF": "French Polynesia",
+	"PM": "Saint Pierre and Miquelon",
+	"PN": "Pitcairn",
+	"PR": "Puerto Rico",
+	"RE": "Reunion",
+	"SH": "Saint Helena",
+	"SJ": "Svalbard and Jan Mayen",
+	"SS": "South Sudan",
+	"SX": "Sint Maarten (Dutch part)",
+	"TC": "Turks and Caicos Islands",
+	"TF": "French Southern Territories",
+	"TK": "Tokelau",
+	"VG": "British Virgin Islands",
+	"VI": "US Virgin Islands",
+	"WF": "Wallis and Futuna",
+	"YT": "Mayotte",
+}
+
+// GetCountryName returns the human-readable country name for an ISO-3166 alpha-2 code.
+// Returns the code itself if not found.
+func GetCountryName(code string) string {
+	code = strings.ToUpper(code)
+	if name, ok := countryToName[code]; ok {
+		return name
+	}
+	return code
 }

@@ -3,11 +3,16 @@ package api
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v4"
+
 	"gitlab.bbdev.team/vh/pay/orders/common"
+	"gitlab.bbdev.team/vh/pay/orders/domain/pricing"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 )
 
 func (o *OrdersAPI) handleMonthlyPriceByKCID(c *gin.Context) {
@@ -16,27 +21,47 @@ func (o *OrdersAPI) handleMonthlyPriceByKCID(c *gin.Context) {
 		return
 	}
 
-	// Get user's preferred currency from query parameter (optional)
-	// Example: /pay/v2/pricing/monthly/{keycloak_id}?currency=nis
-	preferredCurrency := c.Query("currency")
-
-	// Get pricing version from query parameter (optional, defaults to v1)
-	// Supported versions:
-	//   v1: Static pricing (legacy frontend pricing)
-	//   v2: Country-based tiered pricing
-	//   t1: Tier 1 rollout (IL/NIS scope uses v2, others use v1)
-	// Example: /pay/v2/pricing/monthly/{keycloak_id}?pricing_version=t1
+	preferredCurrency := strings.ToUpper(c.Query("currency"))
 	pricingVersion := c.Query("pricing_version")
 
-	price, err := o.repo.GetMonthlyPriceByKCID(c.Request.Context(), keycloakId, preferredCurrency, pricingVersion)
+	utils.LogFor(c.Request.Context()).Info("handleMonthlyPriceByKCID",
+		slog.String("keycloak_id", keycloakId),
+		slog.String("pricing_version", pricingVersion),
+		slog.String("currency", preferredCurrency),
+	)
+
+	accountID, err := o.repo.GetAccountIDByKeycloakID(c.Request.Context(), keycloakId)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "The given KeycloakID is not found.", "success": false})
 		} else {
 			c.Status(http.StatusInternalServerError)
-			_ = c.Error(fmt.Errorf("repo.GetMonthlyPriceByKCID: %w", err))
+			_ = c.Error(fmt.Errorf("repo.GetAccountIDByKeycloakID: %w", err))
 		}
 		return
+	}
+
+	account, err := o.repo.GetAccount(c.Request.Context(), accountID, "")
+	if err != nil {
+		c.Status(http.StatusInternalServerError)
+		_ = c.Error(fmt.Errorf("repo.GetAccount: %w", err))
+		return
+	}
+
+	price, err := pricing.GetMonthlyPrice(
+		c.Request.Context(),
+		o.repo, o.profileService, o.priorityClient,
+		account.ID, account.UserKey.String, account.Email.String, account.Country.String,
+		preferredCurrency, pricingVersion,
+	)
+	if err != nil {
+		c.Status(http.StatusInternalServerError)
+		_ = c.Error(fmt.Errorf("pricing.GetMonthlyPrice: %w", err))
+		return
+	}
+
+	if price.V2Details != nil && !o.HasAnyRole(c, common.RoleAdmin, common.RoleRoot) {
+		price.V2Details = price.V2Details.Public()
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": price, "success": true})

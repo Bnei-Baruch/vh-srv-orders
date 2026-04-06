@@ -44,7 +44,7 @@ func GetMonthlyPrice(
 		preferredCurrency = common.CurrencyUSD
 	}
 	if pricingVersion == "" {
-		pricingVersion = "v2"
+		pricingVersion = "v1"
 	}
 
 	var (

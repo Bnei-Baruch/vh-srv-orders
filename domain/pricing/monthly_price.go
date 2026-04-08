@@ -3,6 +3,7 @@ package pricing
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/volatiletech/null/v9"
 
@@ -17,6 +18,7 @@ type MonthlyPriceRes struct {
 	Currency       null.String          `json:"currency"`
 	PricingVersion null.String          `json:"pricing_version"`
 	V2Details      *V2PricingEvaluation `json:"v2_details,omitempty"`
+	V1AllPrices    map[string]float64   `json:"v1_all_prices,omitempty"`
 }
 
 // v1Pricing contains static monthly prices for legacy v1 pricing.
@@ -55,6 +57,7 @@ func GetMonthlyPrice(
 	switch pricingVersion {
 	case "v1":
 		price = selectV1Price(preferredCurrency)
+		res.V1AllPrices = allV1Prices()
 
 	case "v2":
 		v2eval, err := evaluateV2(ctx, accounts, profileService, priorityClient, accountID, keycloakID, email, country)
@@ -74,10 +77,12 @@ func GetMonthlyPrice(
 			res.V2Details = v2eval
 		} else {
 			price = selectV1Price(preferredCurrency)
+			res.V1AllPrices = allV1Prices()
 		}
 
 	default:
 		price = selectV1Price(preferredCurrency)
+		res.V1AllPrices = allV1Prices()
 	}
 
 	res.Amount = null.Float64From(price.Amount)
@@ -91,6 +96,14 @@ func selectV1Price(currency string) Price {
 		return p
 	}
 	return v1Pricing[common.CurrencyUSD]
+}
+
+func allV1Prices() map[string]float64 {
+	result := make(map[string]float64, len(v1Pricing))
+	for currency, price := range v1Pricing {
+		result[strings.ToLower(currency)] = price.Amount
+	}
+	return result
 }
 
 func evaluateV2(

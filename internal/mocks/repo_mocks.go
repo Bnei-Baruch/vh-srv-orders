@@ -9,7 +9,7 @@ import (
 	"time"
 
 	mock "github.com/stretchr/testify/mock"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/pelecard"
+	"github.com/volatiletech/null/v9"
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
@@ -38,72 +38,6 @@ type MockOrdersRepository_Expecter struct {
 
 func (_m *MockOrdersRepository) EXPECT() *MockOrdersRepository_Expecter {
 	return &MockOrdersRepository_Expecter{mock: &_m.Mock}
-}
-
-// ChargeOrdersToRenew provides a mock function for the type MockOrdersRepository
-func (_mock *MockOrdersRepository) ChargeOrdersToRenew(ctx context.Context, pmx string) (int, error) {
-	ret := _mock.Called(ctx, pmx)
-
-	if len(ret) == 0 {
-		panic("no return value specified for ChargeOrdersToRenew")
-	}
-
-	var r0 int
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (int, error)); ok {
-		return returnFunc(ctx, pmx)
-	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) int); ok {
-		r0 = returnFunc(ctx, pmx)
-	} else {
-		r0 = ret.Get(0).(int)
-	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
-		r1 = returnFunc(ctx, pmx)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// MockOrdersRepository_ChargeOrdersToRenew_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ChargeOrdersToRenew'
-type MockOrdersRepository_ChargeOrdersToRenew_Call struct {
-	*mock.Call
-}
-
-// ChargeOrdersToRenew is a helper method to define mock.On call
-//   - ctx context.Context
-//   - pmx string
-func (_e *MockOrdersRepository_Expecter) ChargeOrdersToRenew(ctx interface{}, pmx interface{}) *MockOrdersRepository_ChargeOrdersToRenew_Call {
-	return &MockOrdersRepository_ChargeOrdersToRenew_Call{Call: _e.mock.On("ChargeOrdersToRenew", ctx, pmx)}
-}
-
-func (_c *MockOrdersRepository_ChargeOrdersToRenew_Call) Run(run func(ctx context.Context, pmx string)) *MockOrdersRepository_ChargeOrdersToRenew_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 context.Context
-		if args[0] != nil {
-			arg0 = args[0].(context.Context)
-		}
-		var arg1 string
-		if args[1] != nil {
-			arg1 = args[1].(string)
-		}
-		run(
-			arg0,
-			arg1,
-		)
-	})
-	return _c
-}
-
-func (_c *MockOrdersRepository_ChargeOrdersToRenew_Call) Return(n int, err error) *MockOrdersRepository_ChargeOrdersToRenew_Call {
-	_c.Call.Return(n, err)
-	return _c
-}
-
-func (_c *MockOrdersRepository_ChargeOrdersToRenew_Call) RunAndReturn(run func(ctx context.Context, pmx string) (int, error)) *MockOrdersRepository_ChargeOrdersToRenew_Call {
-	_c.Call.Return(run)
-	return _c
 }
 
 // ClearAllFlags provides a mock function for the type MockOrdersRepository
@@ -830,6 +764,104 @@ func (_c *MockOrdersRepository_CreatePayment_Call) RunAndReturn(run func(ctx con
 	return _c
 }
 
+// CreateRenewalPayment provides a mock function for the type MockOrdersRepository
+func (_mock *MockOrdersRepository) CreateRenewalPayment(ctx context.Context, data *repo.RenewalData, amount float64, currency string, pricingVersion string, pricingEvaluation null.JSON, pmx string) (*repo.Payment, error) {
+	ret := _mock.Called(ctx, data, amount, currency, pricingVersion, pricingEvaluation, pmx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateRenewalPayment")
+	}
+
+	var r0 *repo.Payment
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *repo.RenewalData, float64, string, string, null.JSON, string) (*repo.Payment, error)); ok {
+		return returnFunc(ctx, data, amount, currency, pricingVersion, pricingEvaluation, pmx)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *repo.RenewalData, float64, string, string, null.JSON, string) *repo.Payment); ok {
+		r0 = returnFunc(ctx, data, amount, currency, pricingVersion, pricingEvaluation, pmx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*repo.Payment)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, *repo.RenewalData, float64, string, string, null.JSON, string) error); ok {
+		r1 = returnFunc(ctx, data, amount, currency, pricingVersion, pricingEvaluation, pmx)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockOrdersRepository_CreateRenewalPayment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateRenewalPayment'
+type MockOrdersRepository_CreateRenewalPayment_Call struct {
+	*mock.Call
+}
+
+// CreateRenewalPayment is a helper method to define mock.On call
+//   - ctx context.Context
+//   - data *repo.RenewalData
+//   - amount float64
+//   - currency string
+//   - pricingVersion string
+//   - pricingEvaluation null.JSON
+//   - pmx string
+func (_e *MockOrdersRepository_Expecter) CreateRenewalPayment(ctx interface{}, data interface{}, amount interface{}, currency interface{}, pricingVersion interface{}, pricingEvaluation interface{}, pmx interface{}) *MockOrdersRepository_CreateRenewalPayment_Call {
+	return &MockOrdersRepository_CreateRenewalPayment_Call{Call: _e.mock.On("CreateRenewalPayment", ctx, data, amount, currency, pricingVersion, pricingEvaluation, pmx)}
+}
+
+func (_c *MockOrdersRepository_CreateRenewalPayment_Call) Run(run func(ctx context.Context, data *repo.RenewalData, amount float64, currency string, pricingVersion string, pricingEvaluation null.JSON, pmx string)) *MockOrdersRepository_CreateRenewalPayment_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 *repo.RenewalData
+		if args[1] != nil {
+			arg1 = args[1].(*repo.RenewalData)
+		}
+		var arg2 float64
+		if args[2] != nil {
+			arg2 = args[2].(float64)
+		}
+		var arg3 string
+		if args[3] != nil {
+			arg3 = args[3].(string)
+		}
+		var arg4 string
+		if args[4] != nil {
+			arg4 = args[4].(string)
+		}
+		var arg5 null.JSON
+		if args[5] != nil {
+			arg5 = args[5].(null.JSON)
+		}
+		var arg6 string
+		if args[6] != nil {
+			arg6 = args[6].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+			arg4,
+			arg5,
+			arg6,
+		)
+	})
+	return _c
+}
+
+func (_c *MockOrdersRepository_CreateRenewalPayment_Call) Return(payment *repo.Payment, err error) *MockOrdersRepository_CreateRenewalPayment_Call {
+	_c.Call.Return(payment, err)
+	return _c
+}
+
+func (_c *MockOrdersRepository_CreateRenewalPayment_Call) RunAndReturn(run func(ctx context.Context, data *repo.RenewalData, amount float64, currency string, pricingVersion string, pricingEvaluation null.JSON, pmx string) (*repo.Payment, error)) *MockOrdersRepository_CreateRenewalPayment_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateSpecial provides a mock function for the type MockOrdersRepository
 func (_mock *MockOrdersRepository) CreateSpecial(ctx context.Context, s repo.Special) (int, error) {
 	ret := _mock.Called(ctx, s)
@@ -1210,6 +1242,69 @@ func (_c *MockOrdersRepository_FetchPaymentByParamX_Call) RunAndReturn(run func(
 	return _c
 }
 
+// FinalizeRenewal provides a mock function for the type MockOrdersRepository
+func (_mock *MockOrdersRepository) FinalizeRenewal(ctx context.Context, orderID uint, payment *repo.Payment) error {
+	ret := _mock.Called(ctx, orderID, payment)
+
+	if len(ret) == 0 {
+		panic("no return value specified for FinalizeRenewal")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint, *repo.Payment) error); ok {
+		r0 = returnFunc(ctx, orderID, payment)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockOrdersRepository_FinalizeRenewal_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FinalizeRenewal'
+type MockOrdersRepository_FinalizeRenewal_Call struct {
+	*mock.Call
+}
+
+// FinalizeRenewal is a helper method to define mock.On call
+//   - ctx context.Context
+//   - orderID uint
+//   - payment *repo.Payment
+func (_e *MockOrdersRepository_Expecter) FinalizeRenewal(ctx interface{}, orderID interface{}, payment interface{}) *MockOrdersRepository_FinalizeRenewal_Call {
+	return &MockOrdersRepository_FinalizeRenewal_Call{Call: _e.mock.On("FinalizeRenewal", ctx, orderID, payment)}
+}
+
+func (_c *MockOrdersRepository_FinalizeRenewal_Call) Run(run func(ctx context.Context, orderID uint, payment *repo.Payment)) *MockOrdersRepository_FinalizeRenewal_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 uint
+		if args[1] != nil {
+			arg1 = args[1].(uint)
+		}
+		var arg2 *repo.Payment
+		if args[2] != nil {
+			arg2 = args[2].(*repo.Payment)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockOrdersRepository_FinalizeRenewal_Call) Return(err error) *MockOrdersRepository_FinalizeRenewal_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockOrdersRepository_FinalizeRenewal_Call) RunAndReturn(run func(ctx context.Context, orderID uint, payment *repo.Payment) error) *MockOrdersRepository_FinalizeRenewal_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // FlagDuplicateOrders provides a mock function for the type MockOrdersRepository
 func (_mock *MockOrdersRepository) FlagDuplicateOrders(ctx context.Context, ProductType string) (int, error) {
 	ret := _mock.Called(ctx, ProductType)
@@ -1335,6 +1430,63 @@ func (_c *MockOrdersRepository_FlagOrder_Call) Return(err error) *MockOrdersRepo
 }
 
 func (_c *MockOrdersRepository_FlagOrder_Call) RunAndReturn(run func(ctx context.Context, id int, flag string) error) *MockOrdersRepository_FlagOrder_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// FlagOrderAsRenewed provides a mock function for the type MockOrdersRepository
+func (_mock *MockOrdersRepository) FlagOrderAsRenewed(ctx context.Context, orderID uint) error {
+	ret := _mock.Called(ctx, orderID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for FlagOrderAsRenewed")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint) error); ok {
+		r0 = returnFunc(ctx, orderID)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockOrdersRepository_FlagOrderAsRenewed_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FlagOrderAsRenewed'
+type MockOrdersRepository_FlagOrderAsRenewed_Call struct {
+	*mock.Call
+}
+
+// FlagOrderAsRenewed is a helper method to define mock.On call
+//   - ctx context.Context
+//   - orderID uint
+func (_e *MockOrdersRepository_Expecter) FlagOrderAsRenewed(ctx interface{}, orderID interface{}) *MockOrdersRepository_FlagOrderAsRenewed_Call {
+	return &MockOrdersRepository_FlagOrderAsRenewed_Call{Call: _e.mock.On("FlagOrderAsRenewed", ctx, orderID)}
+}
+
+func (_c *MockOrdersRepository_FlagOrderAsRenewed_Call) Run(run func(ctx context.Context, orderID uint)) *MockOrdersRepository_FlagOrderAsRenewed_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 uint
+		if args[1] != nil {
+			arg1 = args[1].(uint)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockOrdersRepository_FlagOrderAsRenewed_Call) Return(err error) *MockOrdersRepository_FlagOrderAsRenewed_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockOrdersRepository_FlagOrderAsRenewed_Call) RunAndReturn(run func(ctx context.Context, orderID uint) error) *MockOrdersRepository_FlagOrderAsRenewed_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2311,7 +2463,6 @@ func (_c *MockOrdersRepository_GetEmailByKeycloakID_Call) RunAndReturn(run func(
 	return _c
 }
 
-
 // GetFlaggedOrders provides a mock function for the type MockOrdersRepository
 func (_mock *MockOrdersRepository) GetFlaggedOrders(ctx context.Context) ([]repo.Order, error) {
 	ret := _mock.Called(ctx)
@@ -2656,6 +2807,130 @@ func (_c *MockOrdersRepository_GetOrderByID_Call) Return(order *repo.Order, err 
 }
 
 func (_c *MockOrdersRepository_GetOrderByID_Call) RunAndReturn(run func(ctx context.Context, orderID uint) (*repo.Order, error)) *MockOrdersRepository_GetOrderByID_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetOrderIDsToRenew provides a mock function for the type MockOrdersRepository
+func (_mock *MockOrdersRepository) GetOrderIDsToRenew(ctx context.Context) ([]uint, error) {
+	ret := _mock.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetOrderIDsToRenew")
+	}
+
+	var r0 []uint
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context) ([]uint, error)); ok {
+		return returnFunc(ctx)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context) []uint); ok {
+		r0 = returnFunc(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]uint)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = returnFunc(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockOrdersRepository_GetOrderIDsToRenew_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetOrderIDsToRenew'
+type MockOrdersRepository_GetOrderIDsToRenew_Call struct {
+	*mock.Call
+}
+
+// GetOrderIDsToRenew is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockOrdersRepository_Expecter) GetOrderIDsToRenew(ctx interface{}) *MockOrdersRepository_GetOrderIDsToRenew_Call {
+	return &MockOrdersRepository_GetOrderIDsToRenew_Call{Call: _e.mock.On("GetOrderIDsToRenew", ctx)}
+}
+
+func (_c *MockOrdersRepository_GetOrderIDsToRenew_Call) Run(run func(ctx context.Context)) *MockOrdersRepository_GetOrderIDsToRenew_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockOrdersRepository_GetOrderIDsToRenew_Call) Return(uints []uint, err error) *MockOrdersRepository_GetOrderIDsToRenew_Call {
+	_c.Call.Return(uints, err)
+	return _c
+}
+
+func (_c *MockOrdersRepository_GetOrderIDsToRenew_Call) RunAndReturn(run func(ctx context.Context) ([]uint, error)) *MockOrdersRepository_GetOrderIDsToRenew_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetOrderIDsWithPricingError provides a mock function for the type MockOrdersRepository
+func (_mock *MockOrdersRepository) GetOrderIDsWithPricingError(ctx context.Context) ([]uint, error) {
+	ret := _mock.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetOrderIDsWithPricingError")
+	}
+
+	var r0 []uint
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context) ([]uint, error)); ok {
+		return returnFunc(ctx)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context) []uint); ok {
+		r0 = returnFunc(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]uint)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = returnFunc(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockOrdersRepository_GetOrderIDsWithPricingError_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetOrderIDsWithPricingError'
+type MockOrdersRepository_GetOrderIDsWithPricingError_Call struct {
+	*mock.Call
+}
+
+// GetOrderIDsWithPricingError is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockOrdersRepository_Expecter) GetOrderIDsWithPricingError(ctx interface{}) *MockOrdersRepository_GetOrderIDsWithPricingError_Call {
+	return &MockOrdersRepository_GetOrderIDsWithPricingError_Call{Call: _e.mock.On("GetOrderIDsWithPricingError", ctx)}
+}
+
+func (_c *MockOrdersRepository_GetOrderIDsWithPricingError_Call) Run(run func(ctx context.Context)) *MockOrdersRepository_GetOrderIDsWithPricingError_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockOrdersRepository_GetOrderIDsWithPricingError_Call) Return(uints []uint, err error) *MockOrdersRepository_GetOrderIDsWithPricingError_Call {
+	_c.Call.Return(uints, err)
+	return _c
+}
+
+func (_c *MockOrdersRepository_GetOrderIDsWithPricingError_Call) RunAndReturn(run func(ctx context.Context) ([]uint, error)) *MockOrdersRepository_GetOrderIDsWithPricingError_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -3941,6 +4216,131 @@ func (_c *MockOrdersRepository_IsSubjectID_Call) Return(b bool, err error) *Mock
 }
 
 func (_c *MockOrdersRepository_IsSubjectID_Call) RunAndReturn(run func(ctx context.Context, keycloakID string, userID string) (bool, error)) *MockOrdersRepository_IsSubjectID_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// LoadRenewalData provides a mock function for the type MockOrdersRepository
+func (_mock *MockOrdersRepository) LoadRenewalData(ctx context.Context, orderID uint) (*repo.RenewalData, error) {
+	ret := _mock.Called(ctx, orderID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for LoadRenewalData")
+	}
+
+	var r0 *repo.RenewalData
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint) (*repo.RenewalData, error)); ok {
+		return returnFunc(ctx, orderID)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint) *repo.RenewalData); ok {
+		r0 = returnFunc(ctx, orderID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*repo.RenewalData)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, uint) error); ok {
+		r1 = returnFunc(ctx, orderID)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockOrdersRepository_LoadRenewalData_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LoadRenewalData'
+type MockOrdersRepository_LoadRenewalData_Call struct {
+	*mock.Call
+}
+
+// LoadRenewalData is a helper method to define mock.On call
+//   - ctx context.Context
+//   - orderID uint
+func (_e *MockOrdersRepository_Expecter) LoadRenewalData(ctx interface{}, orderID interface{}) *MockOrdersRepository_LoadRenewalData_Call {
+	return &MockOrdersRepository_LoadRenewalData_Call{Call: _e.mock.On("LoadRenewalData", ctx, orderID)}
+}
+
+func (_c *MockOrdersRepository_LoadRenewalData_Call) Run(run func(ctx context.Context, orderID uint)) *MockOrdersRepository_LoadRenewalData_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 uint
+		if args[1] != nil {
+			arg1 = args[1].(uint)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockOrdersRepository_LoadRenewalData_Call) Return(renewalData *repo.RenewalData, err error) *MockOrdersRepository_LoadRenewalData_Call {
+	_c.Call.Return(renewalData, err)
+	return _c
+}
+
+func (_c *MockOrdersRepository_LoadRenewalData_Call) RunAndReturn(run func(ctx context.Context, orderID uint) (*repo.RenewalData, error)) *MockOrdersRepository_LoadRenewalData_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// MarkResolvedForRenew provides a mock function for the type MockOrdersRepository
+func (_mock *MockOrdersRepository) MarkResolvedForRenew(ctx context.Context, orderIDs []uint) error {
+	ret := _mock.Called(ctx, orderIDs)
+
+	if len(ret) == 0 {
+		panic("no return value specified for MarkResolvedForRenew")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, []uint) error); ok {
+		r0 = returnFunc(ctx, orderIDs)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockOrdersRepository_MarkResolvedForRenew_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MarkResolvedForRenew'
+type MockOrdersRepository_MarkResolvedForRenew_Call struct {
+	*mock.Call
+}
+
+// MarkResolvedForRenew is a helper method to define mock.On call
+//   - ctx context.Context
+//   - orderIDs []uint
+func (_e *MockOrdersRepository_Expecter) MarkResolvedForRenew(ctx interface{}, orderIDs interface{}) *MockOrdersRepository_MarkResolvedForRenew_Call {
+	return &MockOrdersRepository_MarkResolvedForRenew_Call{Call: _e.mock.On("MarkResolvedForRenew", ctx, orderIDs)}
+}
+
+func (_c *MockOrdersRepository_MarkResolvedForRenew_Call) Run(run func(ctx context.Context, orderIDs []uint)) *MockOrdersRepository_MarkResolvedForRenew_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 []uint
+		if args[1] != nil {
+			arg1 = args[1].([]uint)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockOrdersRepository_MarkResolvedForRenew_Call) Return(err error) *MockOrdersRepository_MarkResolvedForRenew_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockOrdersRepository_MarkResolvedForRenew_Call) RunAndReturn(run func(ctx context.Context, orderIDs []uint) error) *MockOrdersRepository_MarkResolvedForRenew_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -5340,188 +5740,6 @@ func (_c *MockOrdersRepository_UpdatePelecardPayment_Call) Return(err error) *Mo
 }
 
 func (_c *MockOrdersRepository_UpdatePelecardPayment_Call) RunAndReturn(run func(c context.Context, req repo.PaymentUpdate) error) *MockOrdersRepository_UpdatePelecardPayment_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// FlagOrderAsRenewed provides a mock function for the type MockOrdersRepository
-func (_mock *MockOrdersRepository) FlagOrderAsRenewed(ctx context.Context, orderID uint) error {
-	ret := _mock.Called(ctx, orderID)
-
-	if len(ret) == 0 {
-		panic("no return value specified for FlagOrderAsRenewed")
-	}
-
-	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, uint) error); ok {
-		r0 = returnFunc(ctx, orderID)
-	} else {
-		r0 = ret.Error(0)
-	}
-	return r0
-}
-
-// MockOrdersRepository_FlagOrderAsRenewed_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FlagOrderAsRenewed'
-type MockOrdersRepository_FlagOrderAsRenewed_Call struct {
-	*mock.Call
-}
-
-// FlagOrderAsRenewed is a helper method to define mock.On call
-//   - ctx context.Context
-//   - orderID uint
-func (_e *MockOrdersRepository_Expecter) FlagOrderAsRenewed(ctx interface{}, orderID interface{}) *MockOrdersRepository_FlagOrderAsRenewed_Call {
-	return &MockOrdersRepository_FlagOrderAsRenewed_Call{Call: _e.mock.On("FlagOrderAsRenewed", ctx, orderID)}
-}
-
-func (_c *MockOrdersRepository_FlagOrderAsRenewed_Call) Run(run func(ctx context.Context, orderID uint)) *MockOrdersRepository_FlagOrderAsRenewed_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 context.Context
-		if args[0] != nil {
-			arg0 = args[0].(context.Context)
-		}
-		var arg1 uint
-		if args[1] != nil {
-			arg1 = args[1].(uint)
-		}
-		run(arg0, arg1)
-	})
-	return _c
-}
-
-func (_c *MockOrdersRepository_FlagOrderAsRenewed_Call) Return(err error) *MockOrdersRepository_FlagOrderAsRenewed_Call {
-	_c.Call.Return(err)
-	return _c
-}
-
-func (_c *MockOrdersRepository_FlagOrderAsRenewed_Call) RunAndReturn(run func(context.Context, uint) error) *MockOrdersRepository_FlagOrderAsRenewed_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// TryRenewalWithTerminal provides a mock function for the type MockOrdersRepository
-func (_mock *MockOrdersRepository) TryRenewalWithTerminal(ctx context.Context, orderID uint, terminal pelecard.Terminal) (*repo.Payment, error) {
-	ret := _mock.Called(ctx, orderID, terminal)
-
-	if len(ret) == 0 {
-		panic("no return value specified for TryRenewalWithTerminal")
-	}
-
-	var r0 *repo.Payment
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, uint, pelecard.Terminal) (*repo.Payment, error)); ok {
-		return returnFunc(ctx, orderID, terminal)
-	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, uint, pelecard.Terminal) *repo.Payment); ok {
-		r0 = returnFunc(ctx, orderID, terminal)
-	} else if ret.Get(0) != nil {
-		r0 = ret.Get(0).(*repo.Payment)
-	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, uint, pelecard.Terminal) error); ok {
-		r1 = returnFunc(ctx, orderID, terminal)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// MockOrdersRepository_TryRenewalWithTerminal_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TryRenewalWithTerminal'
-type MockOrdersRepository_TryRenewalWithTerminal_Call struct {
-	*mock.Call
-}
-
-// TryRenewalWithTerminal is a helper method to define mock.On call
-//   - ctx context.Context
-//   - orderID uint
-//   - terminal pelecard.Terminal
-func (_e *MockOrdersRepository_Expecter) TryRenewalWithTerminal(ctx interface{}, orderID interface{}, terminal interface{}) *MockOrdersRepository_TryRenewalWithTerminal_Call {
-	return &MockOrdersRepository_TryRenewalWithTerminal_Call{Call: _e.mock.On("TryRenewalWithTerminal", ctx, orderID, terminal)}
-}
-
-func (_c *MockOrdersRepository_TryRenewalWithTerminal_Call) Run(run func(ctx context.Context, orderID uint, terminal pelecard.Terminal)) *MockOrdersRepository_TryRenewalWithTerminal_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 context.Context
-		if args[0] != nil {
-			arg0 = args[0].(context.Context)
-		}
-		var arg1 uint
-		if args[1] != nil {
-			arg1 = args[1].(uint)
-		}
-		var arg2 pelecard.Terminal
-		if args[2] != nil {
-			arg2 = args[2].(pelecard.Terminal)
-		}
-		run(arg0, arg1, arg2)
-	})
-	return _c
-}
-
-func (_c *MockOrdersRepository_TryRenewalWithTerminal_Call) Return(payment *repo.Payment, err error) *MockOrdersRepository_TryRenewalWithTerminal_Call {
-	_c.Call.Return(payment, err)
-	return _c
-}
-
-func (_c *MockOrdersRepository_TryRenewalWithTerminal_Call) RunAndReturn(run func(context.Context, uint, pelecard.Terminal) (*repo.Payment, error)) *MockOrdersRepository_TryRenewalWithTerminal_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// GetOrderIDsToRenew provides a mock function for the type MockOrdersRepository
-func (_mock *MockOrdersRepository) GetOrderIDsToRenew(ctx context.Context) ([]uint, error) {
-	ret := _mock.Called(ctx)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetOrderIDsToRenew")
-	}
-
-	var r0 []uint
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context) ([]uint, error)); ok {
-		return returnFunc(ctx)
-	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context) []uint); ok {
-		r0 = returnFunc(ctx)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]uint)
-		}
-	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = returnFunc(ctx)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// MockOrdersRepository_GetOrderIDsToRenew_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetOrderIDsToRenew'
-type MockOrdersRepository_GetOrderIDsToRenew_Call struct {
-	*mock.Call
-}
-
-// GetOrderIDsToRenew is a helper method to define mock.On call
-//   - ctx context.Context
-func (_e *MockOrdersRepository_Expecter) GetOrderIDsToRenew(ctx interface{}) *MockOrdersRepository_GetOrderIDsToRenew_Call {
-	return &MockOrdersRepository_GetOrderIDsToRenew_Call{Call: _e.mock.On("GetOrderIDsToRenew", ctx)}
-}
-
-func (_c *MockOrdersRepository_GetOrderIDsToRenew_Call) Run(run func(ctx context.Context)) *MockOrdersRepository_GetOrderIDsToRenew_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 context.Context
-		if args[0] != nil {
-			arg0 = args[0].(context.Context)
-		}
-		run(arg0)
-	})
-	return _c
-}
-
-func (_c *MockOrdersRepository_GetOrderIDsToRenew_Call) Return(orderIDs []uint, err error) *MockOrdersRepository_GetOrderIDsToRenew_Call {
-	_c.Call.Return(orderIDs, err)
-	return _c
-}
-
-func (_c *MockOrdersRepository_GetOrderIDsToRenew_Call) RunAndReturn(run func(context.Context) ([]uint, error)) *MockOrdersRepository_GetOrderIDsToRenew_Call {
 	_c.Call.Return(run)
 	return _c
 }

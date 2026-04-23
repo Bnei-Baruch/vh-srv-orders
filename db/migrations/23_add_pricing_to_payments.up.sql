@@ -1,0 +1,4 @@
+BEGIN;
+ALTER TABLE payments ADD COLUMN pricing_version VARCHAR(10) DEFAULT NULL;
+ALTER TABLE payments ADD COLUMN pricing_evaluation JSONB DEFAULT NULL;
+COMMIT;

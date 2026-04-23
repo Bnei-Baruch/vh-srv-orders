@@ -6,11 +6,11 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v4/pgxpool"
+	"github.com/volatiletech/null/v9"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/events"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/keycloak"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/pelecard"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
 )
 
@@ -34,14 +34,17 @@ type OrdersRepository interface {
 	GetOrderByID(ctx context.Context, orderID uint) (*Order, error)
 	GetPaymentForOrderID(ctx context.Context, orderID uint) (*Payment, error)
 	GetAccountForOrderID(ctx context.Context, orderID uint) (*Account, error)
-	ChargeOrdersToRenew(ctx context.Context, pmx string) (int, error)
-	TryRenewalWithTerminal(ctx context.Context, orderID uint, terminal pelecard.Terminal) (*Payment, error)
+	LoadRenewalData(ctx context.Context, orderID uint) (*RenewalData, error)
+	CreateRenewalPayment(ctx context.Context, data *RenewalData, amount float64, currency, pricingVersion string, pricingEvaluation null.JSON, pmx string) (*Payment, error)
+	FinalizeRenewal(ctx context.Context, orderID uint, payment *Payment) error
 	FlagDuplicateOrders(ctx context.Context, ProductType string) (int, error)
 	FlagOrdersToRenew(ctx context.Context, month int64, year int64) (int64, error)
 	FlagOrder(ctx context.Context, id int, flag string) error
 	FlagOrderAsRenewed(ctx context.Context, orderID uint) error
 	GetFlaggedOrders(ctx context.Context) ([]Order, error)
 	GetOrderIDsToRenew(ctx context.Context) ([]uint, error)
+	GetOrderIDsWithPricingError(ctx context.Context) ([]uint, error)
+	MarkResolvedForRenew(ctx context.Context, orderIDs []uint) error
 	GetTokensForOrders(ctx context.Context, orderIDs []int) (map[int]string, error)
 	ClearAllFlags(ctx context.Context) error
 	UpdateOrdersUserKeyFromAccounts(ctx context.Context) error
@@ -114,18 +117,10 @@ type OrdersRepository interface {
 	Close()
 }
 
-// ChargeExecutor executes a payment request. When set on OrdersDB, TryRenewalWithTerminal
-// (and optionally renewOrder) use it instead of calling the live terminal (renewPaymentByToken).
-// Used for dry-run: same DB flow, simulated gateway response.
-type ChargeExecutor interface {
-	Execute(ctx context.Context, request *RequestPayment, pmx string, orderID uint) (response map[string]interface{}, err error)
-}
-
 type OrdersDB struct {
 	*pgxpool.Pool
-	eventEmitter         events.EventEmitter
-	profileService       profiles.ProfileService
-	dryRunChargeExecutor ChargeExecutor
+	eventEmitter   events.EventEmitter
+	profileService profiles.ProfileService
 }
 
 func NewOrdersDB(ctx context.Context, eventEmitter events.EventEmitter) (*OrdersDB, error) {
@@ -146,12 +141,6 @@ func NewOrdersDBUrl(ctx context.Context, db_url string, eventEmitter events.Even
 
 func (o *OrdersDB) SetProfileService(ps profiles.ProfileService) {
 	o.profileService = ps
-}
-
-// SetDryRunChargeExecutor sets the executor used for payment terminal calls when non-nil.
-// When set, TryRenewalWithTerminal (and renewOrder) use it instead of the live gateway.
-func (o *OrdersDB) SetDryRunChargeExecutor(exec ChargeExecutor) {
-	o.dryRunChargeExecutor = exec
 }
 
 func (o *OrdersDB) emitEvent(ctx context.Context, eventType string, payload map[string]interface{}) {

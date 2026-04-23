@@ -71,6 +71,7 @@ const (
 	OrderFlagMuhAher        = "muh_aher"
 	OrderFlagPaused         = "paused"
 	OrderFlagSkip          = "skip"
+	OrderFlagPricingError  = "pricing_error"
 )
 
 var RoleAnyAdmin = []string{RoleRoot, RoleAdmin, RoleHelpHaverAdmin}

@@ -50,19 +50,24 @@ func (o *OrdersAPI) handleMonthlyPriceByKCID(c *gin.Context) {
 
 	price, err := pricing.GetMonthlyPrice(
 		c.Request.Context(),
-		o.repo, o.profileService, o.priorityClient,
+		o.profileService, o.priorityClient,
 		account.ID, account.UserKey.String, account.Email.String, account.Country.String,
 		preferredCurrency, pricingVersion,
 	)
 	if err != nil {
+		if errors.Is(err, pricing.ErrDonationFetch) {
+			utils.LogFor(c.Request.Context()).Warn("handleMonthlyPriceByKCID: donation fetch failed, returning degraded response",
+				slog.String("keycloak_id", keycloakId),
+				slog.Any("err", err),
+			)
+			c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": buildDegradedMonthlyPriceResponse(account), "success": true})
+			return
+		}
 		c.Status(http.StatusInternalServerError)
 		_ = c.Error(fmt.Errorf("pricing.GetMonthlyPrice: %w", err))
 		return
 	}
 
-	if price.V2Details != nil && !o.HasAnyRole(c, common.RoleAdmin, common.RoleRoot) {
-		price.V2Details = price.V2Details.Public()
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": price, "success": true})
+	isAdmin := o.HasAnyRole(c, common.RoleAdmin, common.RoleRoot)
+	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": toMonthlyPriceResponse(price, isAdmin), "success": true})
 }

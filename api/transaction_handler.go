@@ -18,6 +18,7 @@ import (
 	"github.com/volatiletech/null/v9"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/pelecard"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
@@ -86,7 +87,7 @@ func (o *OrdersAPI) handleTransactionOrderAndPay(c *gin.Context) {
 	}
 
 	if req.TerminalId.String == "" {
-		if p.PaymentType.String == "pelecard" {
+		if p.PaymentType.String == common.PaymentTypePelecard {
 			if strings.ToLower(req.Type.String) == "recurring" {
 				req.TerminalId = null.StringFrom("ben_recurring_pelecard")
 			} else {
@@ -94,10 +95,10 @@ func (o *OrdersAPI) handleTransactionOrderAndPay(c *gin.Context) {
 			}
 		}
 
-		if p.PaymentType.String == "helphaver" {
+		if p.PaymentType.String == common.PaymentTypeHelpHaver {
 			req.TerminalId = null.StringFrom("ben_helphaver")
 		}
-		if p.PaymentType.String == "offline" {
+		if p.PaymentType.String == common.PaymentTypeOffline {
 			req.TerminalId = null.StringFrom("ben_offline")
 		}
 	}
@@ -131,7 +132,7 @@ func (o *OrdersAPI) handleTransactionOrderAndPay(c *gin.Context) {
 	errorurl := req.ErrorURL.String + "/" + ordkey + "/" + paramx
 	cancelurl := req.CancelURL.String + "/" + ordkey + "/" + paramx
 
-	extPay := repo.RequestPayment{
+	extPay := pelecard.ChargeRequest{
 		UserKey: ordkey,
 
 		GoodURL:   req.SuccessURL.String,
@@ -170,7 +171,7 @@ func (o *OrdersAPI) handleTransactionOrderAndPay(c *gin.Context) {
 	payload, err := json.Marshal(extPay)
 	if err != nil {
 		c.Status(http.StatusInternalServerError)
-		_ = c.Error(fmt.Errorf("json.Marshal repo.RequestPayment: %w", err))
+		_ = c.Error(fmt.Errorf("json.Marshal pelecard.ChargeRequest: %w", err))
 		return
 	}
 

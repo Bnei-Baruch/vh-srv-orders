@@ -10,7 +10,8 @@ api/            Gin HTTP handlers, middleware, route definitions
   middleware/   Auth, logging, recovery, sentry, events
 common/         Shared config (global singleton), constants, sentinel errors
 domain/         Business logic orchestration
-  billing/      Billing workflow (flag, skip, charge, muhlafim)
+  billing/      Billing workflow (flag, skip, muhlafim, charge, reconcile)
+  pricing/      Pricing resolution (v1 static, v2 country-based with donations)
 repo/           Data access layer (pgx, raw SQL)
 events/         Event system (NATS JetStream emitter + handlers)
 pkg/            Reusable packages
@@ -32,6 +33,12 @@ Do NOT restructure toward `internal/service/`, `internal/repository/`, etc. The 
 - New features and bug fixes should include tests
 - Follow the existing test style in the file you're working in (scenario-based, testify, mockery)
 - Use `require` for preconditions that should abort the test, `assert` for checks that should report and continue
+- **Invariant: `domain/pricing` and `domain/billing` must have comprehensive test coverage.** These packages handle money — pricing resolution, charge orchestration, terminal fallback, error handling, and stats tracking must all be tested. Never merge changes to these packages with skipped or missing tests
+
+#### Test infrastructure strategy
+- **PostgreSQL & NATS**: Always use real instances via `pgtestdb` / test NATS. Never mock DB or message broker unless there is a very strong reason — mocks miss column mismatches, NULL constraints, transaction behavior, and query builder bugs
+- **Internal vh services** (`vh-srv-*`): Can be mocked, but planning and reasoning should scan/analyze their codebase first. Git clones normally exist in adjacent directories (`../../`)
+- **External services** (Keycloak, Priority, Pelecard, etc.): Should be mocked. Reasoning should use generally available public knowledge about their APIs
 
 ### Naming
 - English only for all identifiers, comments, and log messages. Hebrew domain terms (muhlafim, masof) are acceptable when they match external API terminology
@@ -356,3 +363,45 @@ Build injects git SHA: `-ldflags "-X gitlab.bbdev.team/vh/pay/orders/common.GitS
 | Nullable types | volatiletech/null/v9                   |
 
 No gRPC. No ORM. No wire/fx/dig. No zap/logrus.
+
+## Billing Charge Flow
+
+Monthly billing uses a two-phase architecture:
+
+**Phase 1 — Pre-resolution** (`domain/billing/charge.go: preResolve`): Loads renewal data from DB + resolves pricing for all orders in parallel. Orders that fail pricing are flagged `pricing_error` and excluded. Uses the same worker pool size as the charge phase.
+
+**Phase 2 — Charge** (`domain/billing/charge.go: chargeResolved`): Processes resolved orders concurrently with terminal fallback (token → EMV). Each order: `CreateRenewalPayment` → gateway call → `FinalizeRenewal`.
+
+### Key components
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| `PriceResolver` | `domain/pricing/resolver.go` | Routes v1/v2 by country, caches per account ID |
+| `EvaluateV2Price` | `domain/pricing/v2_evaluation.go` | Profiles + Priority donations → discount calculation |
+| `V2Eligible` | `domain/pricing/v2_rollout.go` | Country exclusion list (US, GB, EU-27, TR, RU, UA) |
+| `processOrder` | `domain/billing/renewal.go` | Single order: create payment → charge → finalize |
+| `BuildChargeRequest` | `domain/billing/renewal.go` | Maps renewal data + price → pelecard request |
+| `LoadRenewalData` | `repo/renewal.go` | DB-only: loads order + account + payment + card |
+| `CreateRenewalPayment` | `repo/renewal.go` | DB-only: creates pending payment with resolved price |
+| `FinalizeRenewal` | `repo/renewal.go` | DB-only: transaction updating payment + order status |
+| `ChargeExecutor` | `pkg/pelecard/types.go` | Interface for gateway calls (live + dry-run) |
+
+### CLI subcommands
+
+```
+billing start                        # Full workflow: flag → skip → muhlafim → charge
+billing retry-pricing-errors         # Retry only orders flagged pricing_error
+billing reconcile --log-file <path>  # Parse CHARGE_SUCCESS_DB_FAIL log markers, retry FinalizeRenewal
+```
+
+Shared flags on `billing` parent: `--dry-run`, `--max-workers`.
+
+### Error handling
+
+- `CHARGE_SUCCESS_DB_FAIL` — structured slog marker when gateway succeeds but `FinalizeRenewal` fails. Contains order_id, payment_id, amount, currency, terminal. Reconciled via `billing reconcile`.
+- `pricing_error` flag — set on orders where `LoadRenewalData` or `Resolve` fails. Retried via `billing retry-pricing-errors`.
+- `ErrPrePayment` / `ErrPostPayment` — sentinel errors controlling terminal fallback behavior.
+
+### Priority contribution cache
+
+`pkg/priority/client.go` has an optional TTL cache (30 min) for `GetLastContributions` per email. **Disabled by default** — billing commands enable it via `SetCacheEnabled(true)`. `ErrNoActiveCustomers` sentinel error replaces string matching for "no active customers" responses.

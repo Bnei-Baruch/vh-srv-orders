@@ -228,7 +228,7 @@ func TestMockPelecardAPI_Error(t *testing.T) {
 }
 
 // newTestClient creates a Client configured to use a test server
-func newTestClient(t *testing.T, serverURL string, user, password, terminalNumber string) *pelecard.Client {
+func newTestClient(_ *testing.T, serverURL string, user, password, terminalNumber string) *pelecard.Client {
 	restyClient := resty.New()
 	restyClient.SetHeaders(map[string]string{
 		"Content-Type": "application/json",

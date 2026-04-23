@@ -82,6 +82,9 @@ type Payment struct {
 	TransactionUpdateTime null.String `json:"TransactionUpdateTime" gorm:"Column:TransactionUpdateTime"`
 	VoucherID             null.String `json:"VoucherID" gorm:"Column:VoucherID"`
 	Terminal              null.String `json:"terminal" gorm:"Column:Terminal"`
+
+	PricingVersion    null.String `json:"pricing_version"`
+	PricingEvaluation null.JSON   `json:"pricing_evaluation"`
 }
 
 // RequestOrder ...
@@ -288,34 +291,6 @@ type AccountMergeRequest struct {
 	DestinationKeycloakID null.String `json:"destination_keycloak_id"`
 }
 
-// RequestPayment ..
-type RequestPayment struct {
-	// Part for Pelecard
-	GoodURL    string `json:"GoodURL"`
-	ErrorURL   string `json:"ErrorURL"`
-	CancelURL  string `json:"CancelURL"`
-	ApprovalNo string `json:"ApprovalNo"`
-	Token      string `json:"Token"`
-
-	// Part for Priority
-	Name         string  `json:"Name"`
-	Price        float64 `json:"Price"`
-	Currency     string  `json:"Currency"`
-	Email        string  `json:"Email"`
-	Phone        string  `json:"Phone"`
-	Street       string  `json:"Street"`
-	City         string  `json:"City"`
-	Country      string  `json:"Country"`
-	Participans  string  `json:"Participants"`
-	Details      string  `json:"Details"`
-	SKU          string  `json:"SKU"`
-	VAT          string  `json:"VAT"`
-	Installments int     `json:"Installments"`
-	Language     string  `json:"Language"`
-	Reference    string  `json:"Reference"`
-	Organization string  `json:"Organization"`
-	UserKey      string  `json:"UserKey"`
-}
 
 type RequestNewToken struct {
 	// Part for Pelecard

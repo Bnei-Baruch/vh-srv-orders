@@ -185,7 +185,7 @@ func (o *OrdersAPI) handlePaymentUpdate(c *gin.Context) {
 			}
 			return
 		}
-	} else if req.PaymentType.String == "pelecard" {
+	} else if req.PaymentType.String == common.PaymentTypePelecard {
 		if req.PaymentStatus.String != "" {
 			paymentStatus = req.PaymentStatus.String
 		}

@@ -7,24 +7,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"github.com/volatiletech/null/v9"
+	"github.com/stretchr/testify/require"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/internal/mocks"
 	pelecardmock "gitlab.bbdev.team/vh/pay/orders/internal/mocks/pkg"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/pelecard"
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
-
-// successfulPayment returns a *repo.Payment that processOrderWithRecovery treats as success (Success.String == "1").
-func successfulPayment(terminalName string) *repo.Payment {
-	return &repo.Payment{
-		Success:  null.StringFrom("1"),
-		Terminal: null.StringFrom(terminalName),
-		Currency: null.StringFrom(common.CurrencyNIS),
-		Amount:   null.Float64From(10),
-	}
-}
 
 // ---------------------------------------------------------------------------
 // Constructor
@@ -34,7 +23,7 @@ func TestNewBillingService(t *testing.T) {
 	mockRepo := mocks.NewMockOrdersRepository(t)
 	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
 
-	service := NewBillingService(mockRepo, mockPelecard)
+	service := NewBillingService(mockRepo, mockPelecard, nil, nil, nil)
 
 	assert.NotNil(t, service)
 	assert.Equal(t, mockRepo, service.repo)
@@ -49,7 +38,7 @@ func TestFlagAndSkipOperations_SkippedWhenFlagsFalse(t *testing.T) {
 	ctx := context.Background()
 	mockRepo := mocks.NewMockOrdersRepository(t)
 	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
-	service := NewBillingService(mockRepo, mockPelecard)
+	service := NewBillingService(mockRepo, mockPelecard, nil, nil, nil)
 
 	period := NewBillingPeriodWithDate(6, 2024)
 	opts := &WorkflowOptions{Flags: false}
@@ -63,7 +52,7 @@ func TestFlagAndSkipOperations_FullFlow(t *testing.T) {
 	ctx := context.Background()
 	mockRepo := mocks.NewMockOrdersRepository(t)
 	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
-	service := NewBillingService(mockRepo, mockPelecard)
+	service := NewBillingService(mockRepo, mockPelecard, nil, nil, nil)
 
 	period := NewBillingPeriodWithDate(6, 2024)
 	opts := &WorkflowOptions{Flags: true}
@@ -92,7 +81,7 @@ func TestFlagAndSkipOperations_ClearFlagsError(t *testing.T) {
 	ctx := context.Background()
 	mockRepo := mocks.NewMockOrdersRepository(t)
 	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
-	service := NewBillingService(mockRepo, mockPelecard)
+	service := NewBillingService(mockRepo, mockPelecard, nil, nil, nil)
 
 	period := NewBillingPeriodWithDate(6, 2024)
 	opts := &WorkflowOptions{Flags: true}
@@ -108,7 +97,7 @@ func TestFlagAndSkipOperations_UpdateUserKeysError(t *testing.T) {
 	ctx := context.Background()
 	mockRepo := mocks.NewMockOrdersRepository(t)
 	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
-	service := NewBillingService(mockRepo, mockPelecard)
+	service := NewBillingService(mockRepo, mockPelecard, nil, nil, nil)
 
 	period := NewBillingPeriodWithDate(6, 2024)
 	opts := &WorkflowOptions{Flags: true}
@@ -125,7 +114,7 @@ func TestFlagAndSkipOperations_FlagOrdersError(t *testing.T) {
 	ctx := context.Background()
 	mockRepo := mocks.NewMockOrdersRepository(t)
 	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
-	service := NewBillingService(mockRepo, mockPelecard)
+	service := NewBillingService(mockRepo, mockPelecard, nil, nil, nil)
 
 	period := NewBillingPeriodWithDate(6, 2024)
 	opts := &WorkflowOptions{Flags: true}
@@ -144,7 +133,7 @@ func TestFlagAndSkipOperations_JanuaryWrapsToDecember(t *testing.T) {
 	ctx := context.Background()
 	mockRepo := mocks.NewMockOrdersRepository(t)
 	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
-	service := NewBillingService(mockRepo, mockPelecard)
+	service := NewBillingService(mockRepo, mockPelecard, nil, nil, nil)
 
 	period := NewBillingPeriodWithDate(1, 2024)
 	opts := &WorkflowOptions{Flags: true}
@@ -169,7 +158,7 @@ func TestFlagAndSkipOperations_SkipDoubleContinuesOnError(t *testing.T) {
 	ctx := context.Background()
 	mockRepo := mocks.NewMockOrdersRepository(t)
 	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
-	service := NewBillingService(mockRepo, mockPelecard)
+	service := NewBillingService(mockRepo, mockPelecard, nil, nil, nil)
 
 	period := NewBillingPeriodWithDate(6, 2024)
 	opts := &WorkflowOptions{Flags: true}
@@ -195,7 +184,7 @@ func TestProcessMuhlafim_SkippedWhenMuhlafimFalse(t *testing.T) {
 	ctx := context.Background()
 	mockRepo := mocks.NewMockOrdersRepository(t)
 	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
-	service := NewBillingService(mockRepo, mockPelecard)
+	service := NewBillingService(mockRepo, mockPelecard, nil, nil, nil)
 
 	period := NewBillingPeriodWithDate(6, 2024)
 	opts := &WorkflowOptions{Muhlafim: false}
@@ -208,7 +197,7 @@ func TestProcessMuhlafim_CallsProcessMuhlafimWithCorrectDates(t *testing.T) {
 	ctx := context.Background()
 	mockRepo := mocks.NewMockOrdersRepository(t)
 	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
-	service := NewBillingService(mockRepo, mockPelecard)
+	service := NewBillingService(mockRepo, mockPelecard, nil, nil, nil)
 
 	period := NewBillingPeriodWithDate(6, 2024)
 	opts := &WorkflowOptions{Muhlafim: true}
@@ -224,7 +213,7 @@ func TestProcessMuhlafim_ErrorPropagated(t *testing.T) {
 	ctx := context.Background()
 	mockRepo := mocks.NewMockOrdersRepository(t)
 	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
-	service := NewBillingService(mockRepo, mockPelecard)
+	service := NewBillingService(mockRepo, mockPelecard, nil, nil, nil)
 
 	period := NewBillingPeriodWithDate(6, 2024)
 	opts := &WorkflowOptions{Muhlafim: true}
@@ -244,7 +233,7 @@ func TestChargeOperations_SkippedWhenChargeFalse(t *testing.T) {
 	ctx := context.Background()
 	mockRepo := mocks.NewMockOrdersRepository(t)
 	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
-	service := NewBillingService(mockRepo, mockPelecard)
+	service := NewBillingService(mockRepo, mockPelecard, nil, nil, nil)
 
 	opts := &WorkflowOptions{Charge: false}
 
@@ -252,182 +241,44 @@ func TestChargeOperations_SkippedWhenChargeFalse(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestChargeOperations_SequentialCharging(t *testing.T) {
+func TestChargeOperations_NoOrders(t *testing.T) {
 	ctx := context.Background()
 	mockRepo := mocks.NewMockOrdersRepository(t)
 	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
-	service := NewBillingService(mockRepo, mockPelecard)
+	service := NewBillingService(mockRepo, mockPelecard, nil, nil, nil)
 
-	opts := &WorkflowOptions{Charge: true, UseConcurrent: false}
+	opts := &WorkflowOptions{Charge: true, MaxWorkers: 1}
 
-	// Charge masof oorat keva (token terminal)
-	mockRepo.EXPECT().ChargeOrdersToRenew(ctx, pelecard.TokenTerminal.PMX).Return(5, nil)
-	// Charge masof ragil (emv terminal)
-	mockRepo.EXPECT().ChargeOrdersToRenew(ctx, pelecard.EMVTerminal.PMX).Return(3, nil)
+	mockRepo.EXPECT().GetOrderIDsToRenew(ctx).Return([]uint{}, nil)
 
 	err := service.chargeOperations(ctx, opts)
 	assert.NoError(t, err)
 }
 
-func TestChargeOperations_NilOpts_SequentialCharging(t *testing.T) {
-	// nil opts should default to sequential charging
+func TestChargeOperations_GetOrderIDsError(t *testing.T) {
 	ctx := context.Background()
 	mockRepo := mocks.NewMockOrdersRepository(t)
 	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
-	service := NewBillingService(mockRepo, mockPelecard)
+	service := NewBillingService(mockRepo, mockPelecard, nil, nil, nil)
 
-	mockRepo.EXPECT().ChargeOrdersToRenew(ctx, pelecard.TokenTerminal.PMX).Return(5, nil)
-	mockRepo.EXPECT().ChargeOrdersToRenew(ctx, pelecard.EMVTerminal.PMX).Return(3, nil)
+	opts := &WorkflowOptions{Charge: true, MaxWorkers: 1}
 
-	err := service.chargeOperations(ctx, nil)
-	assert.NoError(t, err)
-}
-
-func TestChargeOperations_SequentialFirstChargeError(t *testing.T) {
-	ctx := context.Background()
-	mockRepo := mocks.NewMockOrdersRepository(t)
-	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
-	service := NewBillingService(mockRepo, mockPelecard)
-
-	opts := &WorkflowOptions{Charge: true, UseConcurrent: false}
-
-	mockRepo.EXPECT().ChargeOrdersToRenew(ctx, pelecard.TokenTerminal.PMX).Return(0, errors.New("charge error"))
+	mockRepo.EXPECT().GetOrderIDsToRenew(ctx).Return(nil, errors.New("db down"))
 
 	err := service.chargeOperations(ctx, opts)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "charge masof oorat keva")
-}
-
-func TestChargeOperations_SequentialSecondChargeError(t *testing.T) {
-	ctx := context.Background()
-	mockRepo := mocks.NewMockOrdersRepository(t)
-	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
-	service := NewBillingService(mockRepo, mockPelecard)
-
-	opts := &WorkflowOptions{Charge: true, UseConcurrent: false}
-
-	mockRepo.EXPECT().ChargeOrdersToRenew(ctx, pelecard.TokenTerminal.PMX).Return(5, nil)
-	mockRepo.EXPECT().ChargeOrdersToRenew(ctx, pelecard.EMVTerminal.PMX).Return(0, errors.New("charge error"))
-
-	err := service.chargeOperations(ctx, opts)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "charge masof ragil")
-}
-
-func TestChargeOperations_ConcurrentNoOrders(t *testing.T) {
-	ctx := context.Background()
-	mockRepo := mocks.NewMockOrdersRepository(t)
-	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
-	service := NewBillingService(mockRepo, mockPelecard)
-
-	opts := &WorkflowOptions{Charge: true, UseConcurrent: true, MaxWorkers: 2}
-
-	mockRepo.EXPECT().GetOrderIDsToRenew(mock.Anything).Return([]uint{}, nil)
-
-	err := service.chargeOperations(ctx, opts)
-	assert.NoError(t, err)
-}
-
-func TestChargeOperations_ConcurrentWithOrders(t *testing.T) {
-	ctx := context.Background()
-	mockRepo := mocks.NewMockOrdersRepository(t)
-	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
-	service := NewBillingService(mockRepo, mockPelecard)
-
-	opts := &WorkflowOptions{Charge: true, UseConcurrent: true, MaxWorkers: 2}
-
-	// Two orders to renew
-	mockRepo.EXPECT().GetOrderIDsToRenew(mock.Anything).Return([]uint{100, 200}, nil)
-	// Both succeed on token terminal (Payment must have Success=="1" so processOrderWithRecovery returns)
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(100), pelecard.TokenTerminal).Return(successfulPayment(pelecard.TokenTerminal.Name), nil)
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(200), pelecard.TokenTerminal).Return(successfulPayment(pelecard.TokenTerminal.Name), nil)
-
-	err := service.chargeOperations(ctx, opts)
-	assert.NoError(t, err)
-}
-
-func TestChargeOperations_ConcurrentFallbackToEMV(t *testing.T) {
-	ctx := context.Background()
-	mockRepo := mocks.NewMockOrdersRepository(t)
-	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
-	service := NewBillingService(mockRepo, mockPelecard)
-
-	opts := &WorkflowOptions{Charge: true, UseConcurrent: true, MaxWorkers: 1}
-
-	// One order, token fails -> emv succeeds
-	mockRepo.EXPECT().GetOrderIDsToRenew(mock.Anything).Return([]uint{100}, nil)
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(100), pelecard.TokenTerminal).Return(nil, errors.New("token fail"))
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(100), pelecard.EMVTerminal).Return(successfulPayment(pelecard.EMVTerminal.Name), nil)
-
-	err := service.chargeOperations(ctx, opts)
-	assert.NoError(t, err)
-}
-
-func TestChargeOperations_ConcurrentGetOrderIDsError(t *testing.T) {
-	ctx := context.Background()
-	mockRepo := mocks.NewMockOrdersRepository(t)
-	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
-	service := NewBillingService(mockRepo, mockPelecard)
-
-	opts := &WorkflowOptions{Charge: true, UseConcurrent: true, MaxWorkers: 2}
-
-	mockRepo.EXPECT().GetOrderIDsToRenew(mock.Anything).Return(nil, errors.New("db error"))
-
-	err := service.chargeOperations(ctx, opts)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "charge orders concurrently")
+	assert.Contains(t, err.Error(), "charge with pricing")
 }
 
 // ---------------------------------------------------------------------------
 // RunBillingWorkflow
 // ---------------------------------------------------------------------------
 
-func TestRunBillingWorkflow_AllStepsSucceed(t *testing.T) {
-	ctx := context.Background()
-	mockRepo := mocks.NewMockOrdersRepository(t)
-	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
-	service := NewBillingService(mockRepo, mockPelecard)
-
-	month := 6
-	year := 2024
-	period := NewBillingPeriodWithDate(month, year)
-	opts := &WorkflowOptions{
-		Flags:    true,
-		Muhlafim: true,
-		Charge:   true,
-	}
-
-	lastDayLastMonth := period.GetLastDayOfLastMonth()
-	lastDayThisMonth := period.GetEndOfMonth()
-
-	// Step 1: Flag & Skip (does not call GetFlaggedOrders)
-	mockRepo.EXPECT().ClearAllFlags(ctx).Return(nil)
-	mockRepo.EXPECT().UpdateOrdersUserKeyFromAccounts(ctx).Return(nil)
-	mockRepo.EXPECT().FlagOrdersToRenew(ctx, int64(month), int64(year)).Return(int64(5), nil)
-	mockRepo.EXPECT().GetOrdersToSkipDouble(ctx, 2024, 5, lastDayLastMonth).Return([]string{}, nil)
-	mockRepo.EXPECT().GetOrdersToSkipFresh(ctx, 2024, 6, lastDayThisMonth).Return([]string{}, nil)
-
-	// logOrdersCountByStatus after Step 1
-	flaggedOrders := []repo.Order{{ID: 1}, {ID: 2}}
-	mockRepo.EXPECT().GetFlaggedOrders(ctx).Return(flaggedOrders, nil).Once()
-	// Step 2: Muhlafim - return no flagged orders so ProcessMuhlafim exits early (no GetTokensForOrders)
-	mockRepo.EXPECT().GetFlaggedOrders(ctx).Return([]repo.Order{}, nil).Once()
-	// logOrdersCountByStatus after Step 2
-	mockRepo.EXPECT().GetFlaggedOrders(ctx).Return(flaggedOrders, nil).Once()
-
-	// Step 3: Charge (sequential)
-	mockRepo.EXPECT().ChargeOrdersToRenew(ctx, pelecard.TokenTerminal.PMX).Return(3, nil)
-	mockRepo.EXPECT().ChargeOrdersToRenew(ctx, pelecard.EMVTerminal.PMX).Return(2, nil)
-
-	err := service.RunBillingWorkflow(ctx, month, year, opts)
-	assert.NoError(t, err)
-}
-
 func TestRunBillingWorkflow_AllStepsSkipped(t *testing.T) {
 	ctx := context.Background()
 	mockRepo := mocks.NewMockOrdersRepository(t)
 	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
-	service := NewBillingService(mockRepo, mockPelecard)
+	service := NewBillingService(mockRepo, mockPelecard, nil, nil, nil)
 
 	opts := &WorkflowOptions{
 		Flags:    false,
@@ -445,7 +296,7 @@ func TestRunBillingWorkflow_ErrorInFlagging(t *testing.T) {
 	ctx := context.Background()
 	mockRepo := mocks.NewMockOrdersRepository(t)
 	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
-	service := NewBillingService(mockRepo, mockPelecard)
+	service := NewBillingService(mockRepo, mockPelecard, nil, nil, nil)
 
 	opts := &WorkflowOptions{Flags: true, Muhlafim: true, Charge: true}
 
@@ -461,7 +312,7 @@ func TestRunBillingWorkflow_ErrorInMuhlafim(t *testing.T) {
 	ctx := context.Background()
 	mockRepo := mocks.NewMockOrdersRepository(t)
 	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
-	service := NewBillingService(mockRepo, mockPelecard)
+	service := NewBillingService(mockRepo, mockPelecard, nil, nil, nil)
 
 	month := 6
 	year := 2024
@@ -493,74 +344,75 @@ func TestRunBillingWorkflow_ErrorInCharging(t *testing.T) {
 	ctx := context.Background()
 	mockRepo := mocks.NewMockOrdersRepository(t)
 	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
-	service := NewBillingService(mockRepo, mockPelecard)
+	service := NewBillingService(mockRepo, mockPelecard, nil, nil, nil)
 
 	month := 6
 	year := 2024
 	period := NewBillingPeriodWithDate(month, year)
-	opts := &WorkflowOptions{Flags: true, Muhlafim: true, Charge: true}
+	opts := &WorkflowOptions{Flags: true, Muhlafim: false, Charge: true, MaxWorkers: 1}
 
 	lastDayLastMonth := period.GetLastDayOfLastMonth()
 	lastDayThisMonth := period.GetEndOfMonth()
 
-	// Step 1: Flag & Skip succeeds
+	// Step 1: succeeds
 	mockRepo.EXPECT().ClearAllFlags(ctx).Return(nil)
 	mockRepo.EXPECT().UpdateOrdersUserKeyFromAccounts(ctx).Return(nil)
-	mockRepo.EXPECT().FlagOrdersToRenew(ctx, int64(month), int64(year)).Return(int64(5), nil)
+	mockRepo.EXPECT().FlagOrdersToRenew(ctx, int64(month), int64(year)).Return(int64(1), nil)
+	mockRepo.EXPECT().GetFlaggedOrders(mock.Anything).Return([]repo.Order{}, nil).Times(2)
 	mockRepo.EXPECT().GetOrdersToSkipDouble(ctx, 2024, 5, lastDayLastMonth).Return([]string{}, nil)
 	mockRepo.EXPECT().GetOrdersToSkipFresh(ctx, 2024, 6, lastDayThisMonth).Return([]string{}, nil)
 
-	// logOrdersCountByStatus after Step 1, then processMuhlafim (empty), then log after Step 2
-	mockRepo.EXPECT().GetFlaggedOrders(ctx).Return([]repo.Order{{ID: 1}}, nil).Once()
-	mockRepo.EXPECT().GetFlaggedOrders(ctx).Return([]repo.Order{}, nil).Once()
-	mockRepo.EXPECT().GetFlaggedOrders(ctx).Return([]repo.Order{{ID: 1}}, nil).Once()
-
-	// Step 3: Charge fails
-	mockRepo.EXPECT().ChargeOrdersToRenew(ctx, pelecard.TokenTerminal.PMX).Return(0, errors.New("charge error"))
+	// Step 3: charge fails at GetOrderIDsToRenew
+	mockRepo.EXPECT().GetOrderIDsToRenew(mock.Anything).Return(nil, errors.New("db error"))
 
 	err := service.RunBillingWorkflow(ctx, month, year, opts)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "charge operations")
+	assert.Contains(t, err.Error(), "charge with pricing")
 }
 
-func TestRunBillingWorkflow_ConcurrentCharging(t *testing.T) {
+// ---------------------------------------------------------------------------
+// RetryPricingErrors
+// ---------------------------------------------------------------------------
+
+func TestRetryPricingErrors_NoPricingErrorOrders(t *testing.T) {
 	ctx := context.Background()
 	mockRepo := mocks.NewMockOrdersRepository(t)
 	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
-	service := NewBillingService(mockRepo, mockPelecard)
+	service := NewBillingService(mockRepo, mockPelecard, nil, nil, nil)
 
-	month := 6
-	year := 2024
-	period := NewBillingPeriodWithDate(month, year)
-	opts := &WorkflowOptions{
-		Flags:         true,
-		Muhlafim:      true,
-		Charge:        true,
-		UseConcurrent: true,
-		MaxWorkers:    2,
-	}
+	mockRepo.EXPECT().GetOrderIDsWithPricingError(ctx).Return([]uint{}, nil)
 
-	lastDayLastMonth := period.GetLastDayOfLastMonth()
-	lastDayThisMonth := period.GetEndOfMonth()
+	count, err := service.RetryPricingErrors(ctx, 1)
+	require.NoError(t, err)
+	assert.Equal(t, 0, count)
+}
 
-	// Step 1: Flag & Skip
-	mockRepo.EXPECT().ClearAllFlags(ctx).Return(nil)
-	mockRepo.EXPECT().UpdateOrdersUserKeyFromAccounts(ctx).Return(nil)
-	mockRepo.EXPECT().FlagOrdersToRenew(ctx, int64(month), int64(year)).Return(int64(2), nil)
-	mockRepo.EXPECT().GetOrdersToSkipDouble(ctx, 2024, 5, lastDayLastMonth).Return([]string{}, nil)
-	mockRepo.EXPECT().GetOrdersToSkipFresh(ctx, 2024, 6, lastDayThisMonth).Return([]string{}, nil)
+func TestRetryPricingErrors_GetOrdersError(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := mocks.NewMockOrdersRepository(t)
+	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
+	service := NewBillingService(mockRepo, mockPelecard, nil, nil, nil)
 
-	// logOrdersCountByStatus after Step 1, then processMuhlafim (empty), then log after Step 2
-	mockRepo.EXPECT().GetFlaggedOrders(ctx).Return([]repo.Order{{ID: 1}}, nil).Once()
-	mockRepo.EXPECT().GetFlaggedOrders(ctx).Return([]repo.Order{}, nil).Once()
-	mockRepo.EXPECT().GetFlaggedOrders(ctx).Return([]repo.Order{{ID: 1}}, nil).Once()
+	mockRepo.EXPECT().GetOrderIDsWithPricingError(ctx).Return(nil, errors.New("db error"))
 
-	// Step 3: Concurrent charge
-	mockRepo.EXPECT().GetOrderIDsToRenew(mock.Anything).Return([]uint{100}, nil)
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(100), pelecard.TokenTerminal).Return(successfulPayment(pelecard.TokenTerminal.Name), nil)
+	_, err := service.RetryPricingErrors(ctx, 1)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "GetOrderIDsWithPricingError")
+}
 
-	err := service.RunBillingWorkflow(ctx, month, year, opts)
-	assert.NoError(t, err)
+func TestRetryPricingErrors_AllStillFail(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := mocks.NewMockOrdersRepository(t)
+	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
+	service := NewBillingService(mockRepo, mockPelecard, nil, nil, nil)
+
+	mockRepo.EXPECT().GetOrderIDsWithPricingError(ctx).Return([]uint{1}, nil)
+	mockRepo.EXPECT().LoadRenewalData(ctx, uint(1)).Return(nil, errors.New("not found"))
+	mockRepo.EXPECT().FlagOrder(ctx, 1, common.OrderFlagPricingError).Return(nil)
+
+	count, err := service.RetryPricingErrors(ctx, 1)
+	require.NoError(t, err)
+	assert.Equal(t, 0, count)
 }
 
 // ---------------------------------------------------------------------------

@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
@@ -16,6 +19,19 @@ import (
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
 )
+
+// migrationsDir resolves the db/migrations directory relative to the project root.
+// Works regardless of which package the test runs from.
+func migrationsDir() string {
+	// Try the GO_MIGRATE_DIR env var first (CI/custom setups).
+	if dir := os.Getenv("GO_MIGRATE_DIR"); dir != "" {
+		return dir
+	}
+	// Walk up from this source file to find the project root.
+	_, thisFile, _, _ := runtime.Caller(0)
+	projectRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
+	return filepath.Join(projectRoot, "db", "migrations")
+}
 
 // NewTestOrdersDB is a helper that returns an open connection to a unique and isolated
 // test database, fully migrated and ready for testing, it will be deleted if the
@@ -31,7 +47,7 @@ func NewTestOrdersDB(t *testing.T, ctx context.Context) (string, error) {
 		Options:    "sslmode=disable",
 	}
 
-	gm := golangmigrator.New("../db/migrations")
+	gm := golangmigrator.New(migrationsDir())
 	if err := gm.Migrate(ctx, nil, config); err != nil {
 		if err == migrate.ErrNoChange {
 			fmt.Printf("Migrations ok, no change.\n")
@@ -40,5 +56,6 @@ func NewTestOrdersDB(t *testing.T, ctx context.Context) (string, error) {
 		}
 	}
 
+	t.Log("testdbconf:", pgtestdb.Custom(t, config, gm).URL())
 	return pgtestdb.Custom(t, config, gm).URL(), nil
 }

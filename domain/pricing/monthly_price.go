@@ -29,10 +29,10 @@ var v1Pricing = map[string]Price{
 }
 
 // GetMonthlyPrice resolves the monthly price for a member account.
-// Supported versions: v1 (static), v2 (country-based), t1 (tier-1 rollout: IL/NIS → v2, others → v1).
+// Pass pricingVersion "v1" or "v2" to force a specific version.
+// Any other value (including empty) auto-routes via V2Eligible — the same logic billing uses.
 func GetMonthlyPrice(
 	ctx context.Context,
-	accounts AccountRepository,
 	profileService profiles.ProfileService,
 	priorityClient *priority.Client,
 	accountID int,
@@ -44,9 +44,6 @@ func GetMonthlyPrice(
 ) (*MonthlyPriceRes, error) {
 	if preferredCurrency == "" {
 		preferredCurrency = common.CurrencyUSD
-	}
-	if pricingVersion == "" {
-		pricingVersion = "v1"
 	}
 
 	var (
@@ -60,29 +57,28 @@ func GetMonthlyPrice(
 		res.V1AllPrices = allV1Prices()
 
 	case "v2":
-		v2eval, err := evaluateV2(ctx, accounts, profileService, priorityClient, accountID, keycloakID, email, country)
+		v2eval, err := evaluateV2(ctx, profileService, priorityClient, accountID, keycloakID, email, country)
 		if err != nil {
 			return nil, err
 		}
 		price = v2eval.FinalPrice
 		res.V2Details = v2eval
 
-	case "t1":
-		if country == "IL" || preferredCurrency == common.CurrencyNIS {
-			v2eval, err := evaluateV2(ctx, accounts, profileService, priorityClient, accountID, keycloakID, email, country)
+	default:
+		// Auto-route using the same eligibility criteria as billing.
+		if V2Eligible(country) {
+			pricingVersion = "v2"
+			v2eval, err := evaluateV2(ctx, profileService, priorityClient, accountID, keycloakID, email, country)
 			if err != nil {
 				return nil, err
 			}
 			price = v2eval.FinalPrice
 			res.V2Details = v2eval
 		} else {
+			pricingVersion = "v1"
 			price = selectV1Price(preferredCurrency)
 			res.V1AllPrices = allV1Prices()
 		}
-
-	default:
-		price = selectV1Price(preferredCurrency)
-		res.V1AllPrices = allV1Prices()
 	}
 
 	res.Amount = null.Float64From(price.Amount)
@@ -108,7 +104,6 @@ func allV1Prices() map[string]float64 {
 
 func evaluateV2(
 	ctx context.Context,
-	accounts AccountRepository,
 	profileService profiles.ProfileService,
 	priorityClient *priority.Client,
 	accountID int,
@@ -119,5 +114,5 @@ func evaluateV2(
 	if common.Config.PriorityBaseURL == "" {
 		return nil, fmt.Errorf("v2 pricing requires PRIORITY_BASE_URL to be configured")
 	}
-	return EvaluateV2Price(ctx, accounts, profileService, priorityClient, accountID, keycloakID, email, country)
+	return EvaluateV2Price(ctx, profileService, priorityClient, accountID, keycloakID, email, country)
 }

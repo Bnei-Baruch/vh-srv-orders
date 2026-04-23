@@ -3,7 +3,6 @@ package repo
 import (
 	"context"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -19,18 +18,18 @@ func (o *OrdersDB) GetPaymentByID(ctx context.Context, id int) (*Payment, error)
 		pay      Payment
 		addQuery string
 	)
-	if err := o.QueryRow(ctx, `SELECT 
-	id, created_at, updated_at, deleted_at, "Amount", "Currency", "PaymentStatus", "PaymentType", "OrderID", "ParamX", 
-	"Ordkey", "AuthNo", confirmation_key, success, pelecard_token, "TransactionID", "ErrorMsg", "CardHebrewName", 
-	"CCAbroadCard", "CCBrand", "CCCompanyClearer", "CCCompanyIssuer", credit_type, "CCExpDate", "CCNumber", "DebitCode", 
-	"DebitCurrency", "DebitTotal", "DebitType", "FirstPaymentTotal", "FixedPaymentTotal", "TotalPayments", j_param, 
-	"TransactionInitTime", "TransactionUpdateTime", "VoucherID" from payments where id = $1`+addQuery, id).Scan(
+	if err := o.QueryRow(ctx, `SELECT
+	id, created_at, updated_at, deleted_at, "Amount", "Currency", "PaymentStatus", "PaymentType", "OrderID", "ParamX",
+	"Ordkey", "AuthNo", confirmation_key, success, pelecard_token, "TransactionID", "ErrorMsg", "CardHebrewName",
+	"CCAbroadCard", "CCBrand", "CCCompanyClearer", "CCCompanyIssuer", credit_type, "CCExpDate", "CCNumber", "DebitCode",
+	"DebitCurrency", "DebitTotal", "DebitType", "FirstPaymentTotal", "FixedPaymentTotal", "TotalPayments", j_param,
+	"TransactionInitTime", "TransactionUpdateTime", "VoucherID", pricing_version from payments where id = $1`+addQuery, id).Scan(
 		&pay.ID, &pay.CreatedAt, &pay.UpdatedAt, &pay.DeletedAt, &pay.Amount, &pay.Currency, &pay.PaymentStatus,
 		&pay.PaymentType, &pay.OrderID, &pay.ParamX, &pay.Ordkey, &pay.AuthNo, &pay.ConfirmationKey, &pay.Success,
 		&pay.PelecardToken, &pay.TransactionID, &pay.ErrorMsg, &pay.CardHebrewName, &pay.CCAbroadCard, &pay.CCBrand,
 		&pay.CCCompanyClearer, &pay.CCCompanyIssuer, &pay.CreditType, &pay.CCExpDate, &pay.CCNumber, &pay.DebitCode,
 		&pay.DebitCurrency, &pay.DebitTotal, &pay.DebitType, &pay.FirstPaymentTotal, &pay.FixedPaymentTotal,
-		&pay.TotalPayments, &pay.JParam, &pay.TransactionInitTime, &pay.TransactionUpdateTime, &pay.VoucherID); err != nil {
+		&pay.TotalPayments, &pay.JParam, &pay.TransactionInitTime, &pay.TransactionUpdateTime, &pay.VoucherID, &pay.PricingVersion); err != nil {
 		return nil, err
 	}
 
@@ -221,7 +220,7 @@ func (o *OrdersDB) CreatePayment(ctx context.Context, req RequestOrder, orderID 
 		paymentStatus = req.PaymentStatus.String
 	}
 
-	paymentType := "pelecard"
+	paymentType := common.PaymentTypePelecard
 	if req.PaymentType.IsValid() {
 		paymentType = req.PaymentType.String
 	}
@@ -263,67 +262,6 @@ func (o *OrdersDB) CreatePayment(ctx context.Context, req RequestOrder, orderID 
 	}
 
 	o.emitEvent(ctx, events.TypeCreatePayment, map[string]interface{}{"payment_id": p.ID})
-
-	return &p, nil
-}
-
-// createPendingPayment creates a pending payment record for the given order.
-// When suppressEvent is true, the TypeCreatePayment event is not emitted.
-// This is used during renewal to prevent double membership evaluation (since
-// TypeUpdateOrder is already emitted by UpdateOrderAfterPayment).
-func (o *OrdersDB) createPendingPayment(ctx context.Context, order *Order, pmx null.String, suppressEvent bool) (*Payment, error) {
-	p := Payment{
-		Amount:        order.Amount,
-		Currency:      order.Currency,
-		PaymentType:   null.NewString("pelecard", true),
-		OrderID:       null.NewInt(order.ID, true),
-		PaymentStatus: null.NewString("pending", true),
-	}
-
-	createString, numString, createQueryArgs := preparePaymentCreateQuery(p)
-	if err := o.QueryRow(ctx, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createString, numString),
-		createQueryArgs...).Scan(&p.ID); err != nil {
-		return nil, fmt.Errorf("o.QueryRow.Scan [insert payment]: %w", err)
-	}
-
-	createPelecardString, numPelecardString, createPelecardQueryArgs := preparePelecardPaymentCreateQuery(p, p.ID)
-	_, err := o.Exec(ctx, fmt.Sprintf(`INSERT INTO payments_pelecard (%s) VALUES (%s)`, createPelecardString, numPelecardString),
-		createPelecardQueryArgs...)
-	if err != nil {
-		return nil, fmt.Errorf("o.Exec [insert pelecard]: %w", err)
-	}
-
-	paramx := "m-" + strconv.FormatUint(uint64(p.ID), 10) + os.Getenv("SUFX") + pmx.String
-	ordkey := "ord-" + strconv.FormatUint(uint64(order.ID), 10) + os.Getenv("SUFX")
-	p.ParamX = null.NewString(paramx, true)
-	p.Ordkey = null.NewString(ordkey, true)
-
-	toUpdate, toUpdateArgs := preparePaymentUpdateQuery(p)
-	_, err = o.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=%d`, toUpdate, p.ID), toUpdateArgs...)
-	if err != nil {
-		return nil, fmt.Errorf("o.Exec [update payment]: %w", err)
-	}
-
-	pu := PaymentUpdate{
-		PaymentID:     null.NewInt(p.ID, true),
-		Amount:        p.Amount,
-		PaymentType:   p.PaymentType,
-		OrderID:       p.OrderID,
-		PaymentStatus: p.PaymentStatus,
-		ParamX:        p.ParamX,
-		Ordkey:        p.Ordkey,
-	}
-
-	toUpdatePelecard, toUpdatePelecardArgs := preparePelecardPaymentUpdateQuery(pu)
-	_, err = o.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdatePelecard, int(p.ID)),
-		toUpdatePelecardArgs...)
-	if err != nil {
-		return nil, fmt.Errorf("o.Exec [update pelecard]: %w", err)
-	}
-
-	if !suppressEvent {
-		o.emitEvent(ctx, events.TypeCreatePayment, map[string]interface{}{"payment_id": p.ID})
-	}
 
 	return &p, nil
 }
@@ -382,7 +320,7 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 
 	if req.Success.String == "1" {
 		p.PaymentStatus = null.NewString("success", true)
-		p.PaymentType = null.NewString("pelecard", true)
+		p.PaymentType = null.StringFrom(common.PaymentTypePelecard)
 		p.ParamX = req.ParamX
 		p.AuthNo = req.AuthNo
 		p.ConfirmationKey = req.ConfirmationKey
@@ -410,7 +348,7 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 	} else {
 		p.PaymentStatus = null.NewString("failed", true)
 		p.ErrorMsg = null.NewString("Failed", true) // TODO: improve
-		p.PaymentType = null.NewString("pelecard", true)
+		p.PaymentType = null.StringFrom(common.PaymentTypePelecard)
 	}
 
 	toUpdate, toUpdateArgs := preparePaymentUpdateQuery(p)
@@ -991,6 +929,7 @@ func preparePelecardPaymentUpdateViaPaymentStructQuery(req Payment) (string, []i
 		updateStrings = append(updateStrings, fmt.Sprintf("terminal=$%d", len(updateStrings)+1))
 		args = append(args, req.Terminal.String)
 	}
+	// pricing_version and pricing_evaluation live on the payments table only, not payments_pelecard.
 
 	if len(args) != 0 {
 		updateStrings = append(updateStrings, fmt.Sprintf("updated_at=$%d", len(updateStrings)+1))
@@ -1648,6 +1587,14 @@ func preparePaymentUpdateQuery(req Payment) (string, []interface{}) {
 	if req.Ordkey.Valid {
 		updateStrings = append(updateStrings, fmt.Sprintf(`"Ordkey"=$%d`, len(updateStrings)+1))
 		args = append(args, req.Ordkey.String)
+	}
+	if req.PricingVersion.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("pricing_version=$%d", len(updateStrings)+1))
+		args = append(args, req.PricingVersion.String)
+	}
+	if req.PricingEvaluation.Valid {
+		updateStrings = append(updateStrings, fmt.Sprintf("pricing_evaluation=$%d", len(updateStrings)+1))
+		args = append(args, req.PricingEvaluation.JSON)
 	}
 
 	if len(args) != 0 {

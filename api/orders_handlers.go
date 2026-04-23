@@ -151,37 +151,6 @@ func (o *OrdersAPI) handleOrderGetByID(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": order, "success": true})
 }
 
-func (o *OrdersAPI) handleOrdersRenew(c *gin.Context) {
-	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
-		return
-	}
-	type req struct {
-		User string `json:"user"`
-		Key  string `json:"key"`
-	}
-
-	var body req
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	if body.User == "admin" && (body.Key == "t" || body.Key == "e") {
-		var count int
-		var err error
-
-		count, err = o.repo.ChargeOrdersToRenew(c.Request.Context(), body.Key)
-		if err != nil {
-			c.Status(http.StatusInternalServerError)
-			_ = c.Error(fmt.Errorf("repo.ChargeOrdersToRenew: %w", err))
-			return
-		}
-
-		c.JSON(http.StatusOK, gin.H{"count": count})
-	} else {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "You are not allowed here"})
-	}
-}
 
 func (o *OrdersAPI) handleOrdersUpdateToken(c *gin.Context) {
 	var (

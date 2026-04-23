@@ -227,6 +227,55 @@ func (o *OrdersDB) GetOrderIDsToRenew(ctx context.Context) ([]uint, error) {
 	return orderIDs, nil
 }
 
+// MarkResolvedForRenew transitions orders from pricing_error to torenew.
+// Called by retry-pricing-errors after successful re-resolution so that a subsequent
+// card decline doesn't leave orders stuck with a stale pricing_error flag.
+// Only rows currently flagged pricing_error are updated (guarded against races).
+// Processed in batches to keep individual statements cheap on large retry sets.
+func (o *OrdersDB) MarkResolvedForRenew(ctx context.Context, orderIDs []uint) error {
+	const batchSize = 500
+	for i := 0; i < len(orderIDs); i += batchSize {
+		end := min(i+batchSize, len(orderIDs))
+		batch := orderIDs[i:end]
+		_, err := o.Exec(ctx, `
+			UPDATE orders SET "Flag" = $1
+			WHERE id = ANY($2) AND "Flag" = $3
+		`, common.OrderFlagToRenew, batch, common.OrderFlagPricingError)
+		if err != nil {
+			return fmt.Errorf("o.Exec (batch offset %d): %w", i, err)
+		}
+	}
+	return nil
+}
+
+// GetOrderIDsWithPricingError returns IDs of recurring orders flagged as pricing_error.
+func (o *OrdersDB) GetOrderIDsWithPricingError(ctx context.Context) ([]uint, error) {
+	rows, err := o.Query(ctx, `
+		SELECT id FROM orders
+		WHERE "Type" = 'recurring'
+		AND "Flag" = $1
+	`, common.OrderFlagPricingError)
+	if err != nil {
+		return nil, fmt.Errorf("o.Query: %w", err)
+	}
+	defer rows.Close()
+
+	var orderIDs []uint
+	for rows.Next() {
+		var id uint
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("rows.Scan: %w", err)
+		}
+		orderIDs = append(orderIDs, id)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows.Err: %w", err)
+	}
+
+	return orderIDs, nil
+}
+
 // ClearAllFlags clears all order flags
 // Note: We are not filtering by Flag here, so all flags will be cleared. On all orders.
 // This is intentional as all flags are billing related and should be cleared on all orders.

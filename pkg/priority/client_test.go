@@ -403,7 +403,7 @@ func TestGetLastContributions_Success(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, 300.0, result["USD"]) // 100 + 200, excludes the old one and wrong ACCNAME
-	assert.Equal(t, 50.0, result["ILS"])
+	assert.Equal(t, 50.0, result["NIS"])  // ILS normalized to NIS
 }
 
 func TestGetLastContributions_MultipleActiveCustomers(t *testing.T) {
@@ -448,7 +448,7 @@ func TestGetLastContributions_MultipleActiveCustomers(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, 300.0, result["USD"]) // 100 + 200
-	assert.Equal(t, 50.0, result["ILS"])
+	assert.Equal(t, 50.0, result["NIS"])  // ILS normalized to NIS
 }
 
 func TestGetLastContributions_InactiveCustomerSkipped(t *testing.T) {
@@ -488,7 +488,7 @@ func TestGetLastContributions_InactiveCustomerSkipped(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	assert.Equal(t, 150.0, result["ILS"])
+	assert.Equal(t, 150.0, result["NIS"]) // ILS normalized to NIS
 	assert.NotContains(t, result, "USD")
 }
 
@@ -686,6 +686,48 @@ func TestGetLastContributions_OnlyWrongACCNAME(t *testing.T) {
 	assert.Empty(t, result) // All filtered out by ACCNAME
 }
 
+func TestGetLastContributions_AllValidACCNAMEs(t *testing.T) {
+	customerResponse := CustomerODataResponse{
+		Value: []Customer{{CustName: "CUST001", Email: "test@example.com"}},
+	}
+
+	now := time.Now()
+	validDate := now.AddDate(0, -6, 0).Format(time.RFC3339)
+
+	receivablesResponse := AccountReceivableODataResponse{
+		Value: []AccountReceivableItem{
+			{FNCNUM: "FNC001", ACCNAME: "40001", DEBIT: 10.0, CODE: "USD", FNCDATE: validDate},
+			{FNCNUM: "FNC002", ACCNAME: "40002", DEBIT: 20.0, CODE: "USD", FNCDATE: validDate},
+			{FNCNUM: "FNC003", ACCNAME: "40004", DEBIT: 30.0, CODE: "USD", FNCDATE: validDate},
+			{FNCNUM: "FNC004", ACCNAME: "40038", DEBIT: 40.0, CODE: "USD", FNCDATE: validDate},
+			{FNCNUM: "FNC005", ACCNAME: "40049", DEBIT: 50.0, CODE: "USD", FNCDATE: validDate},
+			{FNCNUM: "FNC006", ACCNAME: "40050", DEBIT: 60.0, CODE: "USD", FNCDATE: validDate},
+			{FNCNUM: "FNC007", ACCNAME: "40053", DEBIT: 70.0, CODE: "USD", FNCDATE: validDate},
+			{FNCNUM: "FNC008", ACCNAME: "40054", DEBIT: 80.0, CODE: "USD", FNCDATE: validDate},
+			{FNCNUM: "FNC009", ACCNAME: "40061", DEBIT: 90.0, CODE: "USD", FNCDATE: validDate},
+			{FNCNUM: "FNC010", ACCNAME: "40100", DEBIT: 100.0, CODE: "USD", FNCDATE: validDate},
+			{FNCNUM: "FNC011", ACCNAME: "99999", DEBIT: 999.0, CODE: "USD", FNCDATE: validDate}, // unknown — excluded
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/CUSTOMERS" {
+			json.NewEncoder(w).Encode(customerResponse)
+		} else {
+			json.NewEncoder(w).Encode(receivablesResponse)
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	result, err := client.GetLastContributions(context.Background(), "test@example.com")
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, 550.0, result["USD"]) // 10+20+30+40+50+60+70+80+90+100, excludes 99999
+}
+
 func TestGetLastContributions_BoundaryDateExactly12MonthsAgo(t *testing.T) {
 	customerResponse := CustomerODataResponse{
 		Value: []Customer{{CustName: "CUST001", Email: "test@example.com"}},
@@ -739,7 +781,7 @@ func TestGetLastContributions_MultipleCurrencies(t *testing.T) {
 	receivablesResponse := AccountReceivableODataResponse{
 		Value: []AccountReceivableItem{
 			{FNCNUM: "FNC001", ACCNAME: "40001", DEBIT: 100.0, CODE: "USD", FNCDATE: validDate},
-			{FNCNUM: "FNC002", ACCNAME: "40001", DEBIT: 200.0, CODE: "ILS", FNCDATE: validDate},
+			{FNCNUM: "FNC002", ACCNAME: "40001", DEBIT: 200.0, CODE: `ש"ח`, FNCDATE: validDate},
 			{FNCNUM: "FNC003", ACCNAME: "40001", DEBIT: 50.0, CODE: "EUR", FNCDATE: validDate},
 			{FNCNUM: "FNC004", ACCNAME: "40001", DEBIT: 150.0, CODE: "USD", FNCDATE: validDate},
 			{FNCNUM: "FNC005", ACCNAME: "40001", DEBIT: 75.5, CODE: "EUR", FNCDATE: validDate},
@@ -763,6 +805,75 @@ func TestGetLastContributions_MultipleCurrencies(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, 250.0, result["USD"])  // 100 + 150
-	assert.Equal(t, 200.0, result["ILS"])  // 200
+	assert.Equal(t, 200.0, result["NIS"])  // ש"ח normalized to NIS
 	assert.Equal(t, 125.5, result["EUR"])  // 50 + 75.5
+}
+
+func TestGetLastContributions_HebrewShekelNormalizedToNIS(t *testing.T) {
+	customerResponse := CustomerODataResponse{
+		Value: []Customer{{CustName: "CUST001", Email: "test@example.com"}},
+	}
+
+	now := time.Now()
+	validDate := now.AddDate(0, -6, 0).Format(time.RFC3339)
+
+	receivablesResponse := AccountReceivableODataResponse{
+		Value: []AccountReceivableItem{
+			{FNCNUM: "FNC001", ACCNAME: "40001", DEBIT: 100.0, CODE: `ש"ח`, FNCDATE: validDate},
+			{FNCNUM: "FNC002", ACCNAME: "40002", DEBIT: 54.0, CODE: `ש"ח`, FNCDATE: validDate},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/CUSTOMERS" {
+			json.NewEncoder(w).Encode(customerResponse)
+		} else {
+			json.NewEncoder(w).Encode(receivablesResponse)
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	result, err := client.GetLastContributions(context.Background(), "test@example.com")
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, 154.0, result["NIS"])
+	assert.NotContains(t, result, `ש"ח`, "raw Hebrew code must not leak to callers")
+}
+
+func TestGetLastContributions_UnknownCodeTreatedAsNIS(t *testing.T) {
+	customerResponse := CustomerODataResponse{
+		Value: []Customer{{CustName: "CUST001", Email: "test@example.com"}},
+	}
+
+	now := time.Now()
+	validDate := now.AddDate(0, -6, 0).Format(time.RFC3339)
+
+	receivablesResponse := AccountReceivableODataResponse{
+		Value: []AccountReceivableItem{
+			{FNCNUM: "FNC001", ACCNAME: "40001", DEBIT: 200.0, CODE: "GBP", FNCDATE: validDate}, // unknown
+			{FNCNUM: "FNC002", ACCNAME: "40001", DEBIT: 100.0, CODE: `ש"ח`, FNCDATE: validDate},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/CUSTOMERS" {
+			json.NewEncoder(w).Encode(customerResponse)
+		} else {
+			json.NewEncoder(w).Encode(receivablesResponse)
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	result, err := client.GetLastContributions(context.Background(), "test@example.com")
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	// Unknown GBP falls back to NIS (Priority's internal currency), sums with ש"ח.
+	assert.Equal(t, 300.0, result["NIS"])
+	assert.NotContains(t, result, "GBP")
 }

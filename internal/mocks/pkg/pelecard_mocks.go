@@ -38,8 +38,82 @@ func (_m *MockPelecardAPI) EXPECT() *MockPelecardAPI_Expecter {
 	return &MockPelecardAPI_Expecter{mock: &_m.Mock}
 }
 
+// ChargeByToken provides a mock function for the type MockPelecardAPI
+func (_mock *MockPelecardAPI) ChargeByToken(ctx context.Context, request *pelecard.ChargeRequest, terminal pelecard.Terminal) (map[string]interface{}, error) {
+	ret := _mock.Called(ctx, request, terminal)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ChargeByToken")
+	}
+
+	var r0 map[string]interface{}
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *pelecard.ChargeRequest, pelecard.Terminal) (map[string]interface{}, error)); ok {
+		return returnFunc(ctx, request, terminal)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *pelecard.ChargeRequest, pelecard.Terminal) map[string]interface{}); ok {
+		r0 = returnFunc(ctx, request, terminal)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]interface{})
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, *pelecard.ChargeRequest, pelecard.Terminal) error); ok {
+		r1 = returnFunc(ctx, request, terminal)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockPelecardAPI_ChargeByToken_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ChargeByToken'
+type MockPelecardAPI_ChargeByToken_Call struct {
+	*mock.Call
+}
+
+// ChargeByToken is a helper method to define mock.On call
+//   - ctx context.Context
+//   - request *pelecard.ChargeRequest
+//   - terminal pelecard.Terminal
+func (_e *MockPelecardAPI_Expecter) ChargeByToken(ctx interface{}, request interface{}, terminal interface{}) *MockPelecardAPI_ChargeByToken_Call {
+	return &MockPelecardAPI_ChargeByToken_Call{Call: _e.mock.On("ChargeByToken", ctx, request, terminal)}
+}
+
+func (_c *MockPelecardAPI_ChargeByToken_Call) Run(run func(ctx context.Context, request *pelecard.ChargeRequest, terminal pelecard.Terminal)) *MockPelecardAPI_ChargeByToken_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 *pelecard.ChargeRequest
+		if args[1] != nil {
+			arg1 = args[1].(*pelecard.ChargeRequest)
+		}
+		var arg2 pelecard.Terminal
+		if args[2] != nil {
+			arg2 = args[2].(pelecard.Terminal)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockPelecardAPI_ChargeByToken_Call) Return(stringToIfaceVal map[string]interface{}, err error) *MockPelecardAPI_ChargeByToken_Call {
+	_c.Call.Return(stringToIfaceVal, err)
+	return _c
+}
+
+func (_c *MockPelecardAPI_ChargeByToken_Call) RunAndReturn(run func(ctx context.Context, request *pelecard.ChargeRequest, terminal pelecard.Terminal) (map[string]interface{}, error)) *MockPelecardAPI_ChargeByToken_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // FetchMuhlafim provides a mock function for the type MockPelecardAPI
-func (_mock *MockPelecardAPI) FetchMuhlafim(ctx context.Context, startDate, endDate string) (map[string]pelecard.MuhlafimEntry, error) {
+func (_mock *MockPelecardAPI) FetchMuhlafim(ctx context.Context, startDate string, endDate string) (map[string]pelecard.MuhlafimEntry, error) {
 	ret := _mock.Called(ctx, startDate, endDate)
 
 	if len(ret) == 0 {
@@ -79,7 +153,7 @@ func (_e *MockPelecardAPI_Expecter) FetchMuhlafim(ctx interface{}, startDate int
 	return &MockPelecardAPI_FetchMuhlafim_Call{Call: _e.mock.On("FetchMuhlafim", ctx, startDate, endDate)}
 }
 
-func (_c *MockPelecardAPI_FetchMuhlafim_Call) Run(run func(ctx context.Context, startDate, endDate string)) *MockPelecardAPI_FetchMuhlafim_Call {
+func (_c *MockPelecardAPI_FetchMuhlafim_Call) Run(run func(ctx context.Context, startDate string, endDate string)) *MockPelecardAPI_FetchMuhlafim_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -102,12 +176,119 @@ func (_c *MockPelecardAPI_FetchMuhlafim_Call) Run(run func(ctx context.Context, 
 	return _c
 }
 
-func (_c *MockPelecardAPI_FetchMuhlafim_Call) Return(_a0 map[string]pelecard.MuhlafimEntry, _a1 error) *MockPelecardAPI_FetchMuhlafim_Call {
-	_c.Call.Return(_a0, _a1)
+func (_c *MockPelecardAPI_FetchMuhlafim_Call) Return(stringToMuhlafimEntry map[string]pelecard.MuhlafimEntry, err error) *MockPelecardAPI_FetchMuhlafim_Call {
+	_c.Call.Return(stringToMuhlafimEntry, err)
 	return _c
 }
 
-func (_c *MockPelecardAPI_FetchMuhlafim_Call) RunAndReturn(run func(context.Context, string, string) (map[string]pelecard.MuhlafimEntry, error)) *MockPelecardAPI_FetchMuhlafim_Call {
+func (_c *MockPelecardAPI_FetchMuhlafim_Call) RunAndReturn(run func(ctx context.Context, startDate string, endDate string) (map[string]pelecard.MuhlafimEntry, error)) *MockPelecardAPI_FetchMuhlafim_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// NewMockChargeExecutor creates a new instance of MockChargeExecutor. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
+// The first argument is typically a *testing.T value.
+func NewMockChargeExecutor(t interface {
+	mock.TestingT
+	Cleanup(func())
+}) *MockChargeExecutor {
+	mock := &MockChargeExecutor{}
+	mock.Mock.Test(t)
+
+	t.Cleanup(func() { mock.AssertExpectations(t) })
+
+	return mock
+}
+
+// MockChargeExecutor is an autogenerated mock type for the ChargeExecutor type
+type MockChargeExecutor struct {
+	mock.Mock
+}
+
+type MockChargeExecutor_Expecter struct {
+	mock *mock.Mock
+}
+
+func (_m *MockChargeExecutor) EXPECT() *MockChargeExecutor_Expecter {
+	return &MockChargeExecutor_Expecter{mock: &_m.Mock}
+}
+
+// Execute provides a mock function for the type MockChargeExecutor
+func (_mock *MockChargeExecutor) Execute(ctx context.Context, request *pelecard.ChargeRequest, terminal pelecard.Terminal, orderID uint) (map[string]interface{}, error) {
+	ret := _mock.Called(ctx, request, terminal, orderID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Execute")
+	}
+
+	var r0 map[string]interface{}
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *pelecard.ChargeRequest, pelecard.Terminal, uint) (map[string]interface{}, error)); ok {
+		return returnFunc(ctx, request, terminal, orderID)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *pelecard.ChargeRequest, pelecard.Terminal, uint) map[string]interface{}); ok {
+		r0 = returnFunc(ctx, request, terminal, orderID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]interface{})
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, *pelecard.ChargeRequest, pelecard.Terminal, uint) error); ok {
+		r1 = returnFunc(ctx, request, terminal, orderID)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockChargeExecutor_Execute_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Execute'
+type MockChargeExecutor_Execute_Call struct {
+	*mock.Call
+}
+
+// Execute is a helper method to define mock.On call
+//   - ctx context.Context
+//   - request *pelecard.ChargeRequest
+//   - terminal pelecard.Terminal
+//   - orderID uint
+func (_e *MockChargeExecutor_Expecter) Execute(ctx interface{}, request interface{}, terminal interface{}, orderID interface{}) *MockChargeExecutor_Execute_Call {
+	return &MockChargeExecutor_Execute_Call{Call: _e.mock.On("Execute", ctx, request, terminal, orderID)}
+}
+
+func (_c *MockChargeExecutor_Execute_Call) Run(run func(ctx context.Context, request *pelecard.ChargeRequest, terminal pelecard.Terminal, orderID uint)) *MockChargeExecutor_Execute_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 *pelecard.ChargeRequest
+		if args[1] != nil {
+			arg1 = args[1].(*pelecard.ChargeRequest)
+		}
+		var arg2 pelecard.Terminal
+		if args[2] != nil {
+			arg2 = args[2].(pelecard.Terminal)
+		}
+		var arg3 uint
+		if args[3] != nil {
+			arg3 = args[3].(uint)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+		)
+	})
+	return _c
+}
+
+func (_c *MockChargeExecutor_Execute_Call) Return(response map[string]interface{}, err error) *MockChargeExecutor_Execute_Call {
+	_c.Call.Return(response, err)
+	return _c
+}
+
+func (_c *MockChargeExecutor_Execute_Call) RunAndReturn(run func(ctx context.Context, request *pelecard.ChargeRequest, terminal pelecard.Terminal, orderID uint) (map[string]interface{}, error)) *MockChargeExecutor_Execute_Call {
 	_c.Call.Return(run)
 	return _c
 }

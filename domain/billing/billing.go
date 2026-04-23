@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"time"
 
+	"gitlab.bbdev.team/vh/pay/orders/domain/pricing"
+	"gitlab.bbdev.team/vh/pay/orders/events"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/pelecard"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 	"gitlab.bbdev.team/vh/pay/orders/repo"
@@ -15,13 +17,25 @@ import (
 type BillingService struct {
 	repo           repo.OrdersRepository
 	pelecardClient pelecard.PelecardAPI
+	eventEmitter   events.EventEmitter
+	resolver       *pricing.PriceResolver
+	chargeExecutor pelecard.ChargeExecutor
 }
 
 // NewBillingService creates a new billing service
-func NewBillingService(repo repo.OrdersRepository, pelecardClient pelecard.PelecardAPI) *BillingService {
+func NewBillingService(
+	repo repo.OrdersRepository,
+	pelecardClient pelecard.PelecardAPI,
+	eventEmitter events.EventEmitter,
+	resolver *pricing.PriceResolver,
+	chargeExecutor pelecard.ChargeExecutor,
+) *BillingService {
 	return &BillingService{
 		repo:           repo,
 		pelecardClient: pelecardClient,
+		eventEmitter:   eventEmitter,
+		resolver:       resolver,
+		chargeExecutor: chargeExecutor,
 	}
 }
 
@@ -32,10 +46,7 @@ type WorkflowOptions struct {
 	Charge   bool
 	// DryRun when true means the payment terminal call is simulated (no live gateway); all DB operations are real.
 	DryRun bool
-	// UseConcurrent enables concurrent order processing with goroutines.
-	// When enabled, ChargeOrdersConcurrent is used instead of ChargeOrdersToRenew.
-	UseConcurrent bool
-	// MaxWorkers sets the number of concurrent workers when UseConcurrent or UseFullCycle is true.
+	// MaxWorkers sets the number of concurrent workers for the charge phase.
 	// If <= 0, defaults to 5 (or RENEWAL_MAX_WORKERS env var).
 	MaxWorkers int
 }
@@ -72,6 +83,52 @@ func (s *BillingService) RunBillingWorkflow(ctx context.Context, month, year int
 
 	utils.LogFor(ctx).Info("=== Billing Workflow Completed Successfully ===")
 	return nil
+}
+
+// RetryPricingErrors retries pricing resolution and charging for orders previously flagged as pricing_error.
+// It is designed to be called as a standalone operation — separate from the main billing workflow.
+func (s *BillingService) RetryPricingErrors(ctx context.Context, maxWorkers int) (int, error) {
+	log := utils.LogFor(ctx)
+	log.Info("=== Retrying Pricing Errors ===")
+
+	orderIDs, err := s.repo.GetOrderIDsWithPricingError(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("GetOrderIDsWithPricingError: %w", err)
+	}
+	if len(orderIDs) == 0 {
+		log.Info("No orders with pricing errors to retry")
+		return 0, nil
+	}
+	log.Info("Found orders with pricing errors", slog.Int("count", len(orderIDs)))
+
+	resolved, pricingErrors := s.preResolve(ctx, orderIDs, maxWorkers)
+	log.Info("Retry pre-resolution complete",
+		slog.Int("resolved", len(resolved)),
+		slog.Int("still_failing", pricingErrors))
+
+	if len(resolved) == 0 {
+		log.Warn("All orders still fail pricing resolution")
+		return 0, nil
+	}
+
+	// Transition pricing_error → torenew before charge so a subsequent card decline
+	// doesn't leave orders looking like they still have a pricing error. Fatal on
+	// failure: this is the retry's semantic contract, not housekeeping.
+	resolvedIDs := make([]uint, len(resolved))
+	for i, ro := range resolved {
+		resolvedIDs[i] = ro.OrderID
+	}
+	if err := s.repo.MarkResolvedForRenew(ctx, resolvedIDs); err != nil {
+		return 0, fmt.Errorf("MarkResolvedForRenew: %w", err)
+	}
+
+	count, err := s.chargeResolved(ctx, resolved, maxWorkers)
+	if err != nil {
+		return 0, fmt.Errorf("chargeResolved: %w", err)
+	}
+
+	log.Info("Retry pricing errors completed", slog.Int("orders_charged", count))
+	return count, nil
 }
 
 // flagAndSkipOperations handles flagging orders and skipping operations
@@ -164,7 +221,7 @@ func (s *BillingService) processMuhlafim(ctx context.Context, period *BillingPer
 	return nil
 }
 
-// chargeOperations handles charging orders
+// chargeOperations handles charging orders using pricing-aware pre-resolution + charge.
 func (s *BillingService) chargeOperations(ctx context.Context, opts *WorkflowOptions) error {
 	if opts != nil && !opts.Charge {
 		utils.LogFor(ctx).Info("Skipping charging operations")
@@ -172,30 +229,16 @@ func (s *BillingService) chargeOperations(ctx context.Context, opts *WorkflowOpt
 	}
 	utils.LogFor(ctx).Info("Step 3: Charging flagged orders", slog.Bool("dry-run", opts != nil && opts.DryRun))
 
-	if opts != nil && opts.UseConcurrent {
-		// Charge orders concurrently, full terminal fallback (token -> emv)
-		count, err := chargeOrdersConcurrent(ctx, s.repo, opts.MaxWorkers)
-		if err != nil {
-			return fmt.Errorf("charge orders concurrently: %w", err)
-		}
-		utils.LogFor(ctx).Info("Completed charging orders concurrently", slog.Int("orders_charged", count))
-	} else {
-		// Charge "masof oorat keva" (key="t")
-		utils.LogFor(ctx).Info("Charging orders: masof oorat keva (token)")
-		count, err := s.repo.ChargeOrdersToRenew(ctx, pelecard.TokenTerminal.PMX)
-		if err != nil {
-			return fmt.Errorf("charge masof oorat keva: %w", err)
-		}
-		utils.LogFor(ctx).Info("Completed charging masof oorat keva", slog.Int("orders_charged", count))
-
-		// Charge "masof ragil" (key="e")
-		utils.LogFor(ctx).Info("Charging orders: masof ragil (emv)")
-		count, err = s.repo.ChargeOrdersToRenew(ctx, pelecard.EMVTerminal.PMX)
-		if err != nil {
-			return fmt.Errorf("charge masof ragil: %w", err)
-		}
-		utils.LogFor(ctx).Info("Completed charging masof ragil", slog.Int("orders_charged", count))
+	maxWorkers := getDefaultMaxWorkers()
+	if opts != nil && opts.MaxWorkers > 0 {
+		maxWorkers = opts.MaxWorkers
 	}
+
+	count, err := s.chargeWithPricing(ctx, maxWorkers)
+	if err != nil {
+		return fmt.Errorf("charge with pricing: %w", err)
+	}
+	utils.LogFor(ctx).Info("Completed charging orders", slog.Int("orders_charged", count))
 	return nil
 }
 

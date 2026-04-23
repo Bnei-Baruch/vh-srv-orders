@@ -146,7 +146,6 @@ func (a *App) initRoutes() {
 	orders := a.gEngine.Group("/orders")
 	{
 		orders.POST("/paid", a.ordersAPI.handleTransactionPaid)     // vh-payments (deprecated in favor of PATCH /v2/transaction)
-		orders.POST("/renew", a.ordersAPI.handleOrdersRenew)        // charge (python)
 		orders.GET("/count/:filter", a.ordersAPI.handleOrdersCount) // charge (python)
 		orders.POST("/flag", a.ordersAPI.handleOrdersFlag)          // charge (python)
 	}

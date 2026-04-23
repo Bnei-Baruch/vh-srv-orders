@@ -414,6 +414,207 @@ func TestGetFlaggedOrders(t *testing.T) {
 	assert.False(t, orderIDs[order3.ID])
 }
 
+// ---------------------------------------------------------------------------
+// GetOrderIDsWithPricingError
+// ---------------------------------------------------------------------------
+
+func TestGetOrderIDsWithPricingError_Empty(t *testing.T) {
+	db, ctx := setupFlagTestDB(t)
+	accountID := createTestAccount(t, db, ctx, "test@example.com")
+	// Order with torenew flag — should NOT appear
+	insertOrder(t, db, ctx, Order{
+		AccountID: null.IntFrom(accountID),
+		Amount:    null.Float64From(100),
+		Status:    null.StringFrom(common.OrderStatusPaid),
+		Type:      null.StringFrom(common.OrderTypeRecurring),
+		Flag:      null.StringFrom(common.OrderFlagToRenew),
+	}, "")
+
+	ids, err := db.GetOrderIDsWithPricingError(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, ids)
+}
+
+func TestGetOrderIDsWithPricingError_ReturnsFlaggedOrders(t *testing.T) {
+	db, ctx := setupFlagTestDB(t)
+	acc1 := createTestAccount(t, db, ctx, "a1@example.com")
+	acc2 := createTestAccount(t, db, ctx, "a2@example.com")
+	acc3 := createTestAccount(t, db, ctx, "a3@example.com")
+
+	id1 := insertOrder(t, db, ctx, Order{
+		AccountID: null.IntFrom(acc1),
+		Amount:    null.Float64From(100),
+		Status:    null.StringFrom(common.OrderStatusPaid),
+		Type:      null.StringFrom(common.OrderTypeRecurring),
+		Flag:      null.StringFrom(common.OrderFlagPricingError),
+	}, "")
+	id2 := insertOrder(t, db, ctx, Order{
+		AccountID: null.IntFrom(acc2),
+		Amount:    null.Float64From(100),
+		Status:    null.StringFrom(common.OrderStatusNoSuccess),
+		Type:      null.StringFrom(common.OrderTypeRecurring),
+		Flag:      null.StringFrom(common.OrderFlagPricingError),
+	}, "")
+	// torenew order — should NOT appear
+	insertOrder(t, db, ctx, Order{
+		AccountID: null.IntFrom(acc3),
+		Amount:    null.Float64From(100),
+		Status:    null.StringFrom(common.OrderStatusPaid),
+		Type:      null.StringFrom(common.OrderTypeRecurring),
+		Flag:      null.StringFrom(common.OrderFlagToRenew),
+	}, "")
+
+	ids, err := db.GetOrderIDsWithPricingError(ctx)
+	require.NoError(t, err)
+	assert.Len(t, ids, 2)
+	idSet := make(map[uint]bool)
+	for _, id := range ids {
+		idSet[id] = true
+	}
+	assert.True(t, idSet[uint(id1)])
+	assert.True(t, idSet[uint(id2)])
+}
+
+func TestGetOrderIDsWithPricingError_IgnoresNonRecurring(t *testing.T) {
+	db, ctx := setupFlagTestDB(t)
+	acc := createTestAccount(t, db, ctx, "test@example.com")
+
+	// Non-recurring order with pricing_error — should be excluded
+	insertOrder(t, db, ctx, Order{
+		AccountID: null.IntFrom(acc),
+		Amount:    null.Float64From(100),
+		Status:    null.StringFrom(common.OrderStatusPaid),
+		Type:      null.StringFrom("one-time"),
+		Flag:      null.StringFrom(common.OrderFlagPricingError),
+	}, "")
+
+	ids, err := db.GetOrderIDsWithPricingError(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, ids)
+}
+
+// ---------------------------------------------------------------------------
+// MarkResolvedForRenew
+// ---------------------------------------------------------------------------
+
+func TestMarkResolvedForRenew_EmptyInputIsNoOp(t *testing.T) {
+	db, ctx := setupFlagTestDB(t)
+
+	err := db.MarkResolvedForRenew(ctx, nil)
+	require.NoError(t, err)
+
+	err = db.MarkResolvedForRenew(ctx, []uint{})
+	require.NoError(t, err)
+}
+
+func TestMarkResolvedForRenew_TransitionsPricingErrorToToRenew(t *testing.T) {
+	db, ctx := setupFlagTestDB(t)
+	acc := createTestAccount(t, db, ctx, "test@example.com")
+
+	id1 := insertOrder(t, db, ctx, Order{
+		AccountID: null.IntFrom(acc),
+		Amount:    null.Float64From(100),
+		Status:    null.StringFrom(common.OrderStatusPaid),
+		Type:      null.StringFrom(common.OrderTypeRecurring),
+		Flag:      null.StringFrom(common.OrderFlagPricingError),
+	}, "")
+	id2 := insertOrder(t, db, ctx, Order{
+		AccountID: null.IntFrom(acc),
+		Amount:    null.Float64From(100),
+		Status:    null.StringFrom(common.OrderStatusNoSuccess),
+		Type:      null.StringFrom(common.OrderTypeRecurring),
+		Flag:      null.StringFrom(common.OrderFlagPricingError),
+	}, "")
+
+	err := db.MarkResolvedForRenew(ctx, []uint{uint(id1), uint(id2)})
+	require.NoError(t, err)
+
+	assert.Equal(t, common.OrderFlagToRenew, getOrderFlag(t, db, ctx, id1))
+	assert.Equal(t, common.OrderFlagToRenew, getOrderFlag(t, db, ctx, id2))
+}
+
+func TestMarkResolvedForRenew_LeavesNonPricingErrorFlagsIntact(t *testing.T) {
+	db, ctx := setupFlagTestDB(t)
+	acc := createTestAccount(t, db, ctx, "test@example.com")
+
+	// Order with torenew flag — should NOT be changed even if its ID is passed.
+	toRenewID := insertOrder(t, db, ctx, Order{
+		AccountID: null.IntFrom(acc),
+		Amount:    null.Float64From(100),
+		Status:    null.StringFrom(common.OrderStatusPaid),
+		Type:      null.StringFrom(common.OrderTypeRecurring),
+		Flag:      null.StringFrom(common.OrderFlagToRenew),
+	}, "")
+	// Order with renewed flag — should NOT be changed.
+	renewedID := insertOrder(t, db, ctx, Order{
+		AccountID: null.IntFrom(acc),
+		Amount:    null.Float64From(100),
+		Status:    null.StringFrom(common.OrderStatusPaid),
+		Type:      null.StringFrom(common.OrderTypeRecurring),
+		Flag:      null.StringFrom(common.OrderFlagRenewed),
+	}, "")
+	// Order with pricing_error flag — should transition.
+	pricingErrorID := insertOrder(t, db, ctx, Order{
+		AccountID: null.IntFrom(acc),
+		Amount:    null.Float64From(100),
+		Status:    null.StringFrom(common.OrderStatusPaid),
+		Type:      null.StringFrom(common.OrderTypeRecurring),
+		Flag:      null.StringFrom(common.OrderFlagPricingError),
+	}, "")
+
+	err := db.MarkResolvedForRenew(ctx, []uint{uint(toRenewID), uint(renewedID), uint(pricingErrorID)})
+	require.NoError(t, err)
+
+	assert.Equal(t, common.OrderFlagToRenew, getOrderFlag(t, db, ctx, toRenewID))
+	assert.Equal(t, common.OrderFlagRenewed, getOrderFlag(t, db, ctx, renewedID))
+	assert.Equal(t, common.OrderFlagToRenew, getOrderFlag(t, db, ctx, pricingErrorID))
+}
+
+func TestMarkResolvedForRenew_Idempotent(t *testing.T) {
+	db, ctx := setupFlagTestDB(t)
+	acc := createTestAccount(t, db, ctx, "test@example.com")
+	id := insertOrder(t, db, ctx, Order{
+		AccountID: null.IntFrom(acc),
+		Amount:    null.Float64From(100),
+		Status:    null.StringFrom(common.OrderStatusPaid),
+		Type:      null.StringFrom(common.OrderTypeRecurring),
+		Flag:      null.StringFrom(common.OrderFlagPricingError),
+	}, "")
+
+	require.NoError(t, db.MarkResolvedForRenew(ctx, []uint{uint(id)}))
+	require.NoError(t, db.MarkResolvedForRenew(ctx, []uint{uint(id)})) // flag already torenew — no-op
+
+	assert.Equal(t, common.OrderFlagToRenew, getOrderFlag(t, db, ctx, id))
+}
+
+func TestMarkResolvedForRenew_HandlesBatchBoundary(t *testing.T) {
+	db, ctx := setupFlagTestDB(t)
+	acc := createTestAccount(t, db, ctx, "test@example.com")
+
+	// 1200 orders spans 3 batches of 500 (500+500+200).
+	const total = 1200
+	ids := make([]uint, total)
+	for i := 0; i < total; i++ {
+		id := insertOrder(t, db, ctx, Order{
+			AccountID: null.IntFrom(acc),
+			Amount:    null.Float64From(100),
+			Status:    null.StringFrom(common.OrderStatusPaid),
+			Type:      null.StringFrom(common.OrderTypeRecurring),
+			Flag:      null.StringFrom(common.OrderFlagPricingError),
+		}, "")
+		ids[i] = uint(id)
+	}
+
+	err := db.MarkResolvedForRenew(ctx, ids)
+	require.NoError(t, err)
+
+	// Spot-check first, boundary, and last to confirm all batches executed.
+	for _, idx := range []int{0, 499, 500, 999, 1000, total - 1} {
+		assert.Equal(t, common.OrderFlagToRenew, getOrderFlag(t, db, ctx, int(ids[idx])),
+			"order at index %d should be torenew", idx)
+	}
+}
+
 func TestFlagOrder(t *testing.T) {
 	dbURL, err := testutil.NewTestOrdersDB(t, context.Background())
 	require.NoError(t, err)

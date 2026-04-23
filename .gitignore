@@ -153,3 +153,5 @@ coverage.html
 coverage.txt
 
 *.log
+
+priority_data

@@ -4,14 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"github.com/go-resty/resty/v2"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 )
 
 type PelecardAPI interface {
 	FetchMuhlafim(ctx context.Context, startDate, endDate string) (map[string]MuhlafimEntry, error)
+	ChargeByToken(ctx context.Context, request *ChargeRequest, terminal Terminal) (map[string]interface{}, error)
 }
 
 // Client is a client for interacting with Pelecard API
@@ -75,6 +78,53 @@ func (c *Client) FetchMuhlafim(ctx context.Context, startDate, endDate string) (
 	}
 
 	return result, nil
+}
+
+// ChargeByToken sends a token-based charge request to the payment gateway.
+func (c *Client) ChargeByToken(ctx context.Context, request *ChargeRequest, terminal Terminal) (map[string]interface{}, error) {
+	log := utils.LogFor(ctx)
+
+	if terminal.ChargeURL == "" {
+		return nil, fmt.Errorf("no charge URL for terminal %q", terminal.Name)
+	}
+
+	resp, err := c.Client.NewRequest().
+		SetContext(ctx).
+		SetBody(request).
+		Post(terminal.ChargeURL)
+	if err != nil {
+		return nil, fmt.Errorf("charge request failed: %w", err)
+	}
+
+	log.Info("charge gateway response",
+		slog.String("terminal", terminal.Name),
+		slog.Int("http_status", resp.StatusCode()),
+		slog.Int("body_size", len(resp.Body())))
+
+	if resp.IsError() {
+		log.Error("charge gateway HTTP error",
+			slog.String("terminal", terminal.Name),
+			slog.Int("http_status", resp.StatusCode()),
+			slog.String("body", string(resp.Body())))
+		return nil, fmt.Errorf("charge gateway HTTP error [%d]", resp.StatusCode())
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(resp.Body(), &result); err != nil {
+		log.Error("charge gateway unmarshal error",
+			slog.String("terminal", terminal.Name),
+			slog.String("body", string(resp.Body())),
+			slog.Any("err", err))
+		return nil, fmt.Errorf("failed to unmarshal charge response: %w", err)
+	}
+
+	return result, nil
+}
+
+// Execute implements ChargeExecutor by delegating to ChargeByToken.
+// The orderID parameter is ignored — it exists for dry-run determinism only.
+func (c *Client) Execute(ctx context.Context, request *ChargeRequest, terminal Terminal, _ uint) (map[string]interface{}, error) {
+	return c.ChargeByToken(ctx, request, terminal)
 }
 
 func (c *Client) newTerminalRequest() TerminalRequest {

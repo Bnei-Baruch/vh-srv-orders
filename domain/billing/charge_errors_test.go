@@ -8,496 +8,510 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/volatiletech/null/v9"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
+	"gitlab.bbdev.team/vh/pay/orders/domain/pricing"
+	"gitlab.bbdev.team/vh/pay/orders/events"
 	"gitlab.bbdev.team/vh/pay/orders/internal/mocks"
+	pelecardmock "gitlab.bbdev.team/vh/pay/orders/internal/mocks/pkg"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/pelecard"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
 // ---------------------------------------------------------------------------
-// Error Handling Tests for processOrderWithRecovery
+// helpers
 // ---------------------------------------------------------------------------
 
-func TestChargeOperations_PrePaymentError_StopsRetry(t *testing.T) {
-	ctx := context.Background()
+func newTestService(t *testing.T) (*BillingService, *mocks.MockOrdersRepository, *pelecardmock.MockChargeExecutor) {
 	mockRepo := mocks.NewMockOrdersRepository(t)
-
-	opts := &WorkflowOptions{Charge: true, UseConcurrent: true, MaxWorkers: 1}
-
-	// Order with pre-payment error (e.g., missing card details)
-	mockRepo.EXPECT().GetOrderIDsToRenew(mock.Anything).Return([]uint{100}, nil)
-	prePaymentErr := fmt.Errorf("%w: o.GetCardDetailById: no rows in result set", common.ErrPrePayment)
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(100), pelecard.TokenTerminal).Return(nil, prePaymentErr)
-	// Should NOT try EMV terminal after pre-payment error
-
-	count, err := chargeOrdersConcurrent(ctx, mockRepo, opts.MaxWorkers)
-
-	assert.NoError(t, err)
-	assert.Equal(t, 0, count) // No successful renewals
-	// Verify only token terminal was tried (EMV should not be called)
-	mockRepo.AssertNotCalled(t, "TryRenewalWithTerminal", mock.Anything, uint(100), pelecard.EMVTerminal)
+	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
+	mockExecutor := pelecardmock.NewMockChargeExecutor(t)
+	resolver := pricing.NewPriceResolver(nil, nil) // not used in charge phase
+	emitter := &events.NoopEmitter{}
+	service := NewBillingService(mockRepo, mockPelecard, emitter, resolver, mockExecutor)
+	return service, mockRepo, mockExecutor
 }
 
-func TestChargeOperations_PostPaymentError_StopsRetry(t *testing.T) {
-	ctx := context.Background()
-	mockRepo := mocks.NewMockOrdersRepository(t)
-
-	opts := &WorkflowOptions{Charge: true, UseConcurrent: true, MaxWorkers: 1}
-
-	// Order with post-payment error (payment succeeded but DB update failed)
-	mockRepo.EXPECT().GetOrderIDsToRenew(mock.Anything).Return([]uint{100}, nil)
-	postPaymentErr := fmt.Errorf("%w: o.FlagOrderAsRenewed: db error", common.ErrPostPayment)
-	// Return payment record indicating potential success
-	payment := &repo.Payment{
-		Success:  null.StringFrom("1"),
-		Terminal: null.StringFrom("token"),
-		Currency: null.StringFrom(common.CurrencyNIS),
-		Amount:   null.Float64From(100),
+// expectProcessOrder sets up mock expectations for a single processOrder call.
+// Returns the payment that will be returned from CreateRenewalPayment.
+func expectProcessOrder(
+	mockRepo *mocks.MockOrdersRepository,
+	mockExecutor *pelecardmock.MockChargeExecutor,
+	orderID uint,
+	terminal pelecard.Terminal,
+	gatewayResp map[string]interface{},
+	gatewayErr error,
+) *repo.Payment {
+	pending := &repo.Payment{
+		ID:            int(orderID*10 + 1),
+		OrderID:       null.IntFrom(int(orderID)),
+		Amount:        null.Float64From(80),
+		Currency:      null.StringFrom(common.CurrencyNIS),
+		PaymentStatus: null.StringFrom(common.PaymentStatusPending),
+		ParamX:        null.StringFrom(fmt.Sprintf("m-%d%s", orderID*10+1, terminal.PMX)),
+		Ordkey:        null.StringFrom(fmt.Sprintf("ord-%d", orderID)),
+		AuthNo:        null.StringFrom("AUTH"),
+		PelecardToken: null.StringFrom("TOKEN"),
 	}
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(100), pelecard.TokenTerminal).Return(payment, postPaymentErr)
-	// Should NOT try EMV terminal - payment may have gone through
 
-	count, err := chargeOrdersConcurrent(ctx, mockRepo, opts.MaxWorkers)
+	mockRepo.EXPECT().CreateRenewalPayment(mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+		mock.Anything, mock.Anything, terminal.PMX).Return(pending, nil).Once()
+	mockExecutor.EXPECT().Execute(mock.Anything, mock.Anything, terminal, orderID).
+		Return(gatewayResp, gatewayErr).Once()
+	mockRepo.EXPECT().FinalizeRenewal(mock.Anything, orderID, mock.Anything).Return(nil).Once()
 
-	assert.NoError(t, err)
-	assert.Equal(t, 0, count) // No successful renewals (error occurred)
-	mockRepo.AssertNotCalled(t, "TryRenewalWithTerminal", mock.Anything, uint(100), pelecard.EMVTerminal)
+	return pending
 }
 
-func TestChargeOperations_GatewayError_TriesNextTerminal(t *testing.T) {
+// ---------------------------------------------------------------------------
+// preResolve
+// ---------------------------------------------------------------------------
+
+func TestPreResolve_AllOrdersResolved(t *testing.T) {
+	service, mockRepo, _ := newTestService(t)
 	ctx := context.Background()
-	mockRepo := mocks.NewMockOrdersRepository(t)
 
-	opts := &WorkflowOptions{Charge: true, UseConcurrent: true, MaxWorkers: 1}
+	data := testRenewalData()
+	data.Account.Country = null.StringFrom("US")
+	data.Order.Currency = null.StringFrom(common.CurrencyUSD)
 
-	// Order with gateway error on token, succeeds on EMV
-	mockRepo.EXPECT().GetOrderIDsToRenew(mock.Anything).Return([]uint{100}, nil)
-	gatewayErr := errors.New("payment failed: gateway timeout")
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(100), pelecard.TokenTerminal).Return(nil, gatewayErr)
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(100), pelecard.EMVTerminal).Return(successfulPayment(pelecard.EMVTerminal.Name), nil)
+	mockRepo.EXPECT().LoadRenewalData(ctx, uint(1)).Return(data, nil)
+	mockRepo.EXPECT().LoadRenewalData(ctx, uint(2)).Return(data, nil)
 
-	count, err := chargeOrdersConcurrent(ctx, mockRepo, opts.MaxWorkers)
+	resolved, pricingErrors := service.preResolve(ctx, []uint{1, 2}, 1)
 
-	assert.NoError(t, err)
-	assert.Equal(t, 1, count) // Successfully renewed via EMV
+	require.Equal(t, 2, len(resolved))
+	assert.Equal(t, "v1", resolved[0].Price.PricingVersion)
+	assert.Equal(t, "v1", resolved[1].Price.PricingVersion)
+	assert.Equal(t, 0, pricingErrors)
 }
 
-func TestChargeOperations_GatewayError_BothTerminalsFail(t *testing.T) {
+func TestPreResolve_V1CountryResolvesSuccessfully(t *testing.T) {
+	service, mockRepo, _ := newTestService(t)
 	ctx := context.Background()
-	mockRepo := mocks.NewMockOrdersRepository(t)
 
-	opts := &WorkflowOptions{Charge: true, UseConcurrent: true, MaxWorkers: 1}
+	data := testRenewalData()
+	data.Account.Country = null.StringFrom("US") // V1 country
+	data.Order.Currency = null.StringFrom(common.CurrencyUSD)
 
-	// Order with gateway errors on both terminals
-	mockRepo.EXPECT().GetOrderIDsToRenew(mock.Anything).Return([]uint{100}, nil)
-	gatewayErr := errors.New("payment failed: network error")
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(100), pelecard.TokenTerminal).Return(nil, gatewayErr)
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(100), pelecard.EMVTerminal).Return(nil, gatewayErr)
+	mockRepo.EXPECT().LoadRenewalData(ctx, uint(1)).Return(data, nil)
 
-	count, err := chargeOrdersConcurrent(ctx, mockRepo, opts.MaxWorkers)
+	resolved, pricingErrors := service.preResolve(ctx, []uint{1}, 1)
 
-	assert.NoError(t, err)
-	assert.Equal(t, 0, count) // No successful renewals
+	require.Equal(t, 1, len(resolved))
+	assert.Equal(t, uint(1), resolved[0].OrderID)
+	assert.Equal(t, "v1", resolved[0].Price.PricingVersion)
+	assert.Equal(t, 20.0, resolved[0].Price.Amount)
+	assert.Equal(t, 0, pricingErrors)
 }
 
-func TestChargeOperations_DeclinedPayment_TriesNextTerminal(t *testing.T) {
+func TestPreResolve_LoadDataError_FlagsPricingError(t *testing.T) {
+	service, mockRepo, _ := newTestService(t)
 	ctx := context.Background()
-	mockRepo := mocks.NewMockOrdersRepository(t)
 
-	opts := &WorkflowOptions{Charge: true, UseConcurrent: true, MaxWorkers: 1}
+	mockRepo.EXPECT().LoadRenewalData(ctx, uint(1)).Return(nil, errors.New("db error"))
+	mockRepo.EXPECT().FlagOrder(ctx, 1, common.OrderFlagPricingError).Return(nil)
 
-	// Order declined on token terminal, succeeds on EMV
-	declinedPayment := &repo.Payment{
-		Success:  null.StringFrom("0"), // Declined
-		Terminal: null.StringFrom("token"),
-		Currency: null.StringFrom(common.CurrencyNIS),
-		Amount:   null.Float64From(100),
-	}
-	mockRepo.EXPECT().GetOrderIDsToRenew(mock.Anything).Return([]uint{100}, nil)
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(100), pelecard.TokenTerminal).Return(declinedPayment, nil)
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(100), pelecard.EMVTerminal).Return(successfulPayment(pelecard.EMVTerminal.Name), nil)
+	resolved, pricingErrors := service.preResolve(ctx, []uint{1}, 1)
 
-	count, err := chargeOrdersConcurrent(ctx, mockRepo, opts.MaxWorkers)
-
-	assert.NoError(t, err)
-	assert.Equal(t, 1, count) // Successfully renewed via EMV
+	assert.Equal(t, 0, len(resolved))
+	assert.Equal(t, 1, pricingErrors)
 }
 
-func TestChargeOperations_DeclinedPayment_BothTerminals(t *testing.T) {
+func TestPreResolve_PricingError_FlagsPricingError(t *testing.T) {
+	// Ensure Priority is not configured so V2 pricing fails cleanly (no nil panic on profileService)
+	origURL := common.Config.PriorityBaseURL
+	common.Config.PriorityBaseURL = ""
+	defer func() { common.Config.PriorityBaseURL = origURL }()
+
+	service, mockRepo, _ := newTestService(t)
 	ctx := context.Background()
-	mockRepo := mocks.NewMockOrdersRepository(t)
 
-	opts := &WorkflowOptions{Charge: true, UseConcurrent: true, MaxWorkers: 1}
+	data := testRenewalData()
+	data.Account.Country = null.StringFrom("IL") // V2 eligible but no Priority configured
 
-	// Order declined on both terminals
-	declinedPayment := &repo.Payment{
-		Success:  null.StringFrom("0"),
-		Terminal: null.StringFrom("token"),
-		Currency: null.StringFrom(common.CurrencyNIS),
-		Amount:   null.Float64From(100),
-	}
-	mockRepo.EXPECT().GetOrderIDsToRenew(mock.Anything).Return([]uint{100}, nil)
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(100), pelecard.TokenTerminal).Return(declinedPayment, nil)
-	// Return a copy with EMV terminal name
-	declinedPaymentEMV := &repo.Payment{
-		Success:  null.StringFrom("0"),
-		Terminal: null.StringFrom("emv"),
-		Currency: null.StringFrom(common.CurrencyNIS),
-		Amount:   null.Float64From(100),
-	}
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(100), pelecard.EMVTerminal).Return(declinedPaymentEMV, nil)
+	mockRepo.EXPECT().LoadRenewalData(ctx, uint(1)).Return(data, nil)
+	mockRepo.EXPECT().FlagOrder(ctx, 1, common.OrderFlagPricingError).Return(nil)
 
-	count, err := chargeOrdersConcurrent(ctx, mockRepo, opts.MaxWorkers)
+	resolved, pricingErrors := service.preResolve(ctx, []uint{1}, 1)
 
-	assert.NoError(t, err)
-	assert.Equal(t, 0, count) // No successful renewals
+	assert.Equal(t, 0, len(resolved))
+	assert.Equal(t, 1, pricingErrors)
 }
 
-func TestChargeOperations_MultipleOrders_MixedOutcomes(t *testing.T) {
+func TestPreResolve_MixedSuccessAndFailure(t *testing.T) {
+	service, mockRepo, _ := newTestService(t)
 	ctx := context.Background()
-	mockRepo := mocks.NewMockOrdersRepository(t)
 
-	opts := &WorkflowOptions{Charge: true, UseConcurrent: true, MaxWorkers: 2}
+	goodData := testRenewalData()
+	goodData.Account.Country = null.StringFrom("US")
+	goodData.Order.Currency = null.StringFrom(common.CurrencyUSD)
 
-	// Order 100: succeeds on token
-	// Order 200: pre-payment error
-	// Order 300: declined on token, succeeds on EMV
-	// Order 400: gateway error on token, succeeds on EMV
-	mockRepo.EXPECT().GetOrderIDsToRenew(mock.Anything).Return([]uint{100, 200, 300, 400}, nil)
+	mockRepo.EXPECT().LoadRenewalData(ctx, uint(1)).Return(goodData, nil)
+	mockRepo.EXPECT().LoadRenewalData(ctx, uint(2)).Return(nil, errors.New("not found"))
+	mockRepo.EXPECT().FlagOrder(ctx, 2, common.OrderFlagPricingError).Return(nil)
 
-	// Order 100: success on token
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(100), pelecard.TokenTerminal).Return(successfulPayment(pelecard.TokenTerminal.Name), nil)
+	resolved, pricingErrors := service.preResolve(ctx, []uint{1, 2}, 1)
 
-	// Order 200: pre-payment error (no retry)
-	prePaymentErr := fmt.Errorf("%w: missing card details", common.ErrPrePayment)
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(200), pelecard.TokenTerminal).Return(nil, prePaymentErr)
-
-	// Order 300: declined on token, succeeds on EMV
-	declinedPayment := &repo.Payment{
-		Success:  null.StringFrom("0"),
-		Terminal: null.StringFrom("token"),
-		Currency: null.StringFrom(common.CurrencyNIS),
-		Amount:   null.Float64From(100),
-	}
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(300), pelecard.TokenTerminal).Return(declinedPayment, nil)
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(300), pelecard.EMVTerminal).Return(successfulPayment(pelecard.EMVTerminal.Name), nil)
-
-	// Order 400: gateway error on token, succeeds on EMV
-	gatewayErr := errors.New("payment failed: timeout")
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(400), pelecard.TokenTerminal).Return(nil, gatewayErr)
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(400), pelecard.EMVTerminal).Return(successfulPayment(pelecard.EMVTerminal.Name), nil)
-
-	count, err := chargeOrdersConcurrent(ctx, mockRepo, opts.MaxWorkers)
-
-	assert.NoError(t, err)
-	assert.Equal(t, 3, count) // Orders 100, 300, 400 succeeded
+	assert.Equal(t, 1, len(resolved))
+	assert.Equal(t, uint(1), resolved[0].OrderID)
+	assert.Equal(t, 1, pricingErrors)
 }
 
-func TestChargeOperations_PostPaymentError_PaymentInfoPreserved(t *testing.T) {
+func TestPreResolve_FlagOrderError_ContinuesProcessing(t *testing.T) {
+	service, mockRepo, _ := newTestService(t)
 	ctx := context.Background()
-	mockRepo := mocks.NewMockOrdersRepository(t)
 
-	opts := &WorkflowOptions{Charge: true, UseConcurrent: true, MaxWorkers: 1}
+	goodData := testRenewalData()
+	goodData.Account.Country = null.StringFrom("US")
+	goodData.Order.Currency = null.StringFrom(common.CurrencyUSD)
 
-	// Post-payment error should preserve payment info for stats
-	payment := &repo.Payment{
-		Success:  null.StringFrom("1"), // Payment may have succeeded
-		Terminal: null.StringFrom("token"),
-		Currency: null.StringFrom(common.CurrencyUSD),
-		Amount:   null.Float64From(50.0),
-	}
-	postPaymentErr := fmt.Errorf("%w: UPDATE payments failed", common.ErrPostPayment)
-	mockRepo.EXPECT().GetOrderIDsToRenew(mock.Anything).Return([]uint{100}, nil)
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(100), pelecard.TokenTerminal).Return(payment, postPaymentErr)
+	mockRepo.EXPECT().LoadRenewalData(ctx, uint(1)).Return(nil, errors.New("fail"))
+	mockRepo.EXPECT().FlagOrder(ctx, 1, common.OrderFlagPricingError).Return(errors.New("flag failed"))
+	mockRepo.EXPECT().LoadRenewalData(ctx, uint(2)).Return(goodData, nil)
 
-	count, err := chargeOrdersConcurrent(ctx, mockRepo, opts.MaxWorkers)
+	resolved, pricingErrors := service.preResolve(ctx, []uint{1, 2}, 1)
 
-	// Should not panic even though error occurred
-	assert.NoError(t, err)
+	assert.Equal(t, 1, len(resolved), "should continue after flag error")
+	assert.Equal(t, 1, pricingErrors)
+}
+
+// ---------------------------------------------------------------------------
+// chargeWithPricing
+// ---------------------------------------------------------------------------
+
+func TestChargeWithPricing_NoOrders(t *testing.T) {
+	service, mockRepo, _ := newTestService(t)
+	ctx := context.Background()
+
+	mockRepo.EXPECT().GetOrderIDsToRenew(ctx).Return([]uint{}, nil)
+
+	count, err := service.chargeWithPricing(ctx, 5)
+	require.NoError(t, err)
 	assert.Equal(t, 0, count)
 }
 
+func TestChargeWithPricing_GetOrderIDsError(t *testing.T) {
+	service, mockRepo, _ := newTestService(t)
+	ctx := context.Background()
+
+	mockRepo.EXPECT().GetOrderIDsToRenew(ctx).Return(nil, errors.New("db down"))
+
+	_, err := service.chargeWithPricing(ctx, 5)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "GetOrderIDsToRenew")
+}
+
+func TestChargeWithPricing_AllPricingFails(t *testing.T) {
+	service, mockRepo, _ := newTestService(t)
+	ctx := context.Background()
+
+	mockRepo.EXPECT().GetOrderIDsToRenew(ctx).Return([]uint{1, 2}, nil)
+	mockRepo.EXPECT().LoadRenewalData(ctx, uint(1)).Return(nil, errors.New("fail"))
+	mockRepo.EXPECT().FlagOrder(ctx, 1, common.OrderFlagPricingError).Return(nil)
+	mockRepo.EXPECT().LoadRenewalData(ctx, uint(2)).Return(nil, errors.New("fail"))
+	mockRepo.EXPECT().FlagOrder(ctx, 2, common.OrderFlagPricingError).Return(nil)
+
+	count, err := service.chargeWithPricing(ctx, 5)
+	require.NoError(t, err)
+	assert.Equal(t, 0, count)
+}
+
+// ---------------------------------------------------------------------------
+// processWithRecovery — terminal fallback
+// ---------------------------------------------------------------------------
+
+func TestProcessWithRecovery_TokenSucceeds(t *testing.T) {
+	service, mockRepo, mockExecutor := newTestService(t)
+	ctx := context.Background()
+
+	data := testRenewalData()
+	price := testV1Price()
+
+	expectProcessOrder(mockRepo, mockExecutor, 100, pelecard.TokenTerminal, gatewaySuccess(), nil)
+
+	stats := newChargeStats(1)
+
+	ro := resolvedOrder{OrderID: 100, Data: data, Price: price}
+	service.processWithRecovery(ctx, 0, ro, &stats)
+
+	assert.Equal(t, int64(1), stats.successCount.Get(pelecard.TokenTerminal.Name))
+	assert.Equal(t, int64(0), stats.successCount.Get(pelecard.EMVTerminal.Name))
+}
+
+func TestProcessWithRecovery_TokenGatewayError_EMVSucceeds(t *testing.T) {
+	service, mockRepo, mockExecutor := newTestService(t)
+	ctx := context.Background()
+
+	data := testRenewalData()
+	price := testV1Price()
+
+	// Token: gateway error (processOrder returns error + payment with Success="0")
+	tokenPending := &repo.Payment{
+		ID: 201, OrderID: null.IntFrom(100), PaymentStatus: null.StringFrom(common.PaymentStatusPending),
+		Amount: null.Float64From(20), Currency: null.StringFrom(common.CurrencyUSD),
+		ParamX: null.StringFrom("m-201t"), Ordkey: null.StringFrom("ord-100"),
+		AuthNo: null.StringFrom("A"), PelecardToken: null.StringFrom("T"),
+	}
+	mockRepo.EXPECT().CreateRenewalPayment(mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+		mock.Anything, mock.Anything, pelecard.TokenTerminal.PMX).Return(tokenPending, nil).Once()
+	mockExecutor.EXPECT().Execute(mock.Anything, mock.Anything, pelecard.TokenTerminal, uint(100)).
+		Return(nil, errors.New("timeout")).Once()
+	mockRepo.EXPECT().FinalizeRenewal(mock.Anything, uint(100), mock.Anything).Return(nil).Once()
+
+	// EMV: succeeds
+	expectProcessOrder(mockRepo, mockExecutor, 100, pelecard.EMVTerminal, gatewaySuccess(), nil)
+
+	stats := newChargeStats(1)
+
+	ro := resolvedOrder{OrderID: 100, Data: data, Price: price}
+	service.processWithRecovery(ctx, 0, ro, &stats)
+
+	assert.Equal(t, int64(1), stats.successCount.Get(pelecard.EMVTerminal.Name))
+}
+
+func TestProcessWithRecovery_BothGatewayError(t *testing.T) {
+	service, mockRepo, mockExecutor := newTestService(t)
+	ctx := context.Background()
+
+	data := testRenewalData()
+	price := testV1Price()
+
+	for _, terminal := range []pelecard.Terminal{pelecard.TokenTerminal, pelecard.EMVTerminal} {
+		p := &repo.Payment{
+			ID: 201, OrderID: null.IntFrom(100), PaymentStatus: null.StringFrom(common.PaymentStatusPending),
+			Amount: null.Float64From(20), Currency: null.StringFrom(common.CurrencyUSD),
+			ParamX: null.StringFrom("m-201"), Ordkey: null.StringFrom("ord-100"),
+			AuthNo: null.StringFrom("A"), PelecardToken: null.StringFrom("T"),
+		}
+		mockRepo.EXPECT().CreateRenewalPayment(mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+			mock.Anything, mock.Anything, terminal.PMX).Return(p, nil).Once()
+		mockExecutor.EXPECT().Execute(mock.Anything, mock.Anything, terminal, uint(100)).
+			Return(nil, errors.New("timeout")).Once()
+		mockRepo.EXPECT().FinalizeRenewal(mock.Anything, uint(100), mock.Anything).Return(nil).Once()
+	}
+
+	stats := newChargeStats(1)
+
+	ro := resolvedOrder{OrderID: 100, Data: data, Price: price}
+	service.processWithRecovery(ctx, 0, ro, &stats)
+
+	assert.Equal(t, int64(1), stats.errorCount.Get("gateway"))
+}
+
+// ---------------------------------------------------------------------------
+// processWithRecovery — pre/post-payment errors
+// ---------------------------------------------------------------------------
+
+func TestProcessWithRecovery_PrePaymentError_StopsRetry(t *testing.T) {
+	service, mockRepo, mockExecutor := newTestService(t)
+	ctx := context.Background()
+
+	data := testRenewalData()
+	price := testV1Price()
+
+	// Token: CreateRenewalPayment fails → wrapped as pre-payment by processOrder
+	mockRepo.EXPECT().CreateRenewalPayment(mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+		mock.Anything, mock.Anything, pelecard.TokenTerminal.PMX).
+		Return(nil, fmt.Errorf("%w: db error", common.ErrPrePayment)).Once()
+
+	// EMV should NOT be attempted
+
+	stats := newChargeStats(1)
+
+	ro := resolvedOrder{OrderID: 100, Data: data, Price: price}
+	service.processWithRecovery(ctx, 0, ro, &stats)
+
+	assert.Equal(t, int64(1), stats.errorCount.Get("pre_payment"))
+	assert.Equal(t, int64(0), stats.successCount.Get(pelecard.TokenTerminal.Name))
+	assert.Equal(t, int64(0), stats.successCount.Get(pelecard.EMVTerminal.Name))
+	mockExecutor.AssertNotCalled(t, "Execute")
+}
+
+func TestProcessWithRecovery_PostPaymentError_StopsRetry(t *testing.T) {
+	service, mockRepo, mockExecutor := newTestService(t)
+	ctx := context.Background()
+
+	data := testRenewalData()
+	price := testV1Price()
+
+	pending := testPendingPayment()
+	mockRepo.EXPECT().CreateRenewalPayment(mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+		mock.Anything, mock.Anything, pelecard.TokenTerminal.PMX).Return(pending, nil).Once()
+	mockExecutor.EXPECT().Execute(mock.Anything, mock.Anything, pelecard.TokenTerminal, uint(100)).
+		Return(gatewaySuccess(), nil).Once()
+	mockRepo.EXPECT().FinalizeRenewal(mock.Anything, uint(100), mock.Anything).
+		Return(fmt.Errorf("%w: tx commit failed", common.ErrPostPayment)).Once()
+
+	// EMV should NOT be attempted
+
+	stats := newChargeStats(1)
+
+	ro := resolvedOrder{OrderID: 100, Data: data, Price: price}
+	service.processWithRecovery(ctx, 0, ro, &stats)
+
+	assert.Equal(t, int64(1), stats.errorCount.Get("post_payment"))
+	assert.Equal(t, int64(0), stats.successCount.Get(pelecard.EMVTerminal.Name))
+}
+
+// ---------------------------------------------------------------------------
+// Error wrapping sanity checks
+// ---------------------------------------------------------------------------
+
 func TestChargeOperations_ErrorWrapping_PrePayment(t *testing.T) {
-	// Verify that we can detect wrapped pre-payment errors
 	err := fmt.Errorf("%w: o.GetOrderByID: order not found", common.ErrPrePayment)
 	assert.True(t, errors.Is(err, common.ErrPrePayment))
 	assert.Contains(t, err.Error(), "GetOrderByID")
 }
 
 func TestChargeOperations_ErrorWrapping_PostPayment(t *testing.T) {
-	// Verify that we can detect wrapped post-payment errors
 	err := fmt.Errorf("%w: o.FlagOrderAsRenewed: database locked", common.ErrPostPayment)
 	assert.True(t, errors.Is(err, common.ErrPostPayment))
 	assert.Contains(t, err.Error(), "FlagOrderAsRenewed")
 }
 
 func TestChargeOperations_ErrorWrapping_Gateway(t *testing.T) {
-	// Gateway errors should NOT match pre/post payment sentinels
 	err := errors.New("payment failed: connection timeout")
 	assert.False(t, errors.Is(err, common.ErrPrePayment))
 	assert.False(t, errors.Is(err, common.ErrPostPayment))
 }
 
-func TestChargeOperations_GatewayErrorThenDecline_TreatedAsDeclined(t *testing.T) {
-	// This test verifies the fix for the scenario where:
-	// - Terminal 1 (Token) has a gateway error
-	// - Terminal 2 (EMV) cleanly declines (no error, just payment declined)
-	// Expected: This should be treated as a declined payment, NOT as a gateway error
-	ctx := context.Background()
-	mockRepo := mocks.NewMockOrdersRepository(t)
-
-	opts := &WorkflowOptions{Charge: true, UseConcurrent: true, MaxWorkers: 1}
-
-	// Order with gateway error on token, then declined on EMV
-	mockRepo.EXPECT().GetOrderIDsToRenew(mock.Anything).Return([]uint{100}, nil)
-	gatewayErr := errors.New("payment failed: gateway timeout")
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(100), pelecard.TokenTerminal).Return(nil, gatewayErr)
-	
-	// EMV terminal responds with clean decline (no error)
-	declinedPaymentEMV := &repo.Payment{
-		Success:  null.StringFrom("0"), // Declined
-		Terminal: null.StringFrom("emv"),
-		Currency: null.StringFrom(common.CurrencyNIS),
-		Amount:   null.Float64From(100),
-	}
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(100), pelecard.EMVTerminal).Return(declinedPaymentEMV, nil)
-
-	count, err := chargeOrdersConcurrent(ctx, mockRepo, opts.MaxWorkers)
-
-	// Should not error out - this is a clean decline scenario
-	assert.NoError(t, err)
-	assert.Equal(t, 0, count) // No successful renewals (payment declined)
-	
-	// The critical assertion: This scenario should NOT be logged as a gateway error
-	// because the last terminal (EMV) responded successfully (just declined the payment)
-	// With the fix, lastError is cleared when terminal responds without error,
-	// so the outcome is correctly classified as "declined" not "gateway error"
-}
-
 // ---------------------------------------------------------------------------
-// Edge case tests for bug fixes
+// processWithRecovery — panic recovery
 // ---------------------------------------------------------------------------
 
-// newTestStats returns a zero-value chargeStats ready for use in direct processOrderWithRecovery tests.
-func newTestStats() *chargeStats {
-	return &chargeStats{
-		successCount: utils.NewCounterMap[int64](),
-		successSum:   utils.NewCounterMap[float64](),
-		failedCount:  utils.NewCounterMap[int64](),
-		failedSum:    utils.NewCounterMap[float64](),
-		errorCount:   utils.NewCounterMap[int64](),
-	}
+// panicChargeExecutor always panics on Execute.
+type panicChargeExecutor struct{}
+
+func (p *panicChargeExecutor) Execute(_ context.Context, _ *pelecard.ChargeRequest, _ pelecard.Terminal, _ uint) (map[string]interface{}, error) {
+	panic("simulated gateway panic")
 }
 
-// Bug 1: Post-payment error with nil payment must not panic and must not retry on EMV.
-func TestProcessOrder_PostPaymentNilPayment_NoPanic(t *testing.T) {
-	ctx := context.Background()
+func TestProcessWithRecovery_PanicRecovery(t *testing.T) {
 	mockRepo := mocks.NewMockOrdersRepository(t)
-	stats := newTestStats()
-
-	postPaymentErr := fmt.Errorf("%w: connection lost after gateway call", common.ErrPostPayment)
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(100), pelecard.TokenTerminal).Return(nil, postPaymentErr)
-
-	// Must not panic despite nil payment
-	processOrderWithRecovery(ctx, mockRepo, 0, 100, stats)
-
-	assert.Equal(t, int64(1), stats.errorCount.Get("post_payment"))
-	assert.Equal(t, int64(0), stats.errorCount.Get("panic"))
-	assert.Equal(t, float64(0), stats.failedSum.Get(common.CurrencyNIS))
-	// EMV must NOT be tried after post-payment error
-	mockRepo.AssertNotCalled(t, "TryRenewalWithTerminal", mock.Anything, uint(100), pelecard.EMVTerminal)
-}
-
-// Bug 2: Panic in processing is caught by recovery and counted in stats.
-func TestProcessOrder_PanicRecovery_CountedInStats(t *testing.T) {
+	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
+	resolver := pricing.NewPriceResolver(nil, nil)
+	emitter := &events.NoopEmitter{}
+	panicExec := &panicChargeExecutor{}
+	service := NewBillingService(mockRepo, mockPelecard, emitter, resolver, panicExec)
 	ctx := context.Background()
-	mockRepo := mocks.NewMockOrdersRepository(t)
-	stats := newTestStats()
 
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(100), pelecard.TokenTerminal).
-		RunAndReturn(func(_ context.Context, _ uint, _ pelecard.Terminal) (*repo.Payment, error) {
-			panic("unexpected nil pointer in test")
-		})
+	data := testRenewalData()
+	data.Account.Country = null.StringFrom("US")
+	price := testV1Price()
 
-	// Must not crash the caller
-	processOrderWithRecovery(ctx, mockRepo, 0, 100, stats)
+	// processOrder will call CreateRenewalPayment, then Execute panics
+	pending := testPendingPayment()
+	mockRepo.EXPECT().CreateRenewalPayment(mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+		mock.Anything, mock.Anything, pelecard.TokenTerminal.PMX).Return(pending, nil).Once()
 
-	assert.Equal(t, int64(1), stats.errorCount.Get("panic"))
+	stats := newChargeStats(1)
+
+	// Should NOT panic — recovery catches it
+	ro := resolvedOrder{OrderID: 100, Data: data, Price: price}
+	service.processWithRecovery(ctx, 0, ro, &stats)
+
+	assert.Equal(t, int64(1), stats.errorCount.Get("panic"), "panic should be recorded in stats")
 	assert.Equal(t, int64(0), stats.successCount.Get(pelecard.TokenTerminal.Name))
 	assert.Equal(t, int64(0), stats.successCount.Get(pelecard.EMVTerminal.Name))
 }
 
-// Bug 3: Token declined + EMV gateway error must still record the declined amount.
-func TestProcessOrder_DeclinedThenGateway_FailedSumRecorded(t *testing.T) {
+// ---------------------------------------------------------------------------
+// processWithRecovery — mixed outcomes across multiple orders
+// ---------------------------------------------------------------------------
+
+func TestProcessWithRecovery_TokenDeclined_EMVPostPaymentError(t *testing.T) {
+	service, mockRepo, mockExecutor := newTestService(t)
 	ctx := context.Background()
-	mockRepo := mocks.NewMockOrdersRepository(t)
-	stats := newTestStats()
 
-	declinedPayment := &repo.Payment{
-		Success:  null.StringFrom("0"),
-		Terminal: null.StringFrom("token"),
-		Currency: null.StringFrom(common.CurrencyNIS),
-		Amount:   null.Float64From(150),
+	data := testRenewalData()
+	price := testV1Price()
+
+	// Token: declined
+	expectProcessOrder(mockRepo, mockExecutor, 100, pelecard.TokenTerminal, gatewayDeclined(), nil)
+
+	// EMV: post-payment error (gateway succeeded but DB update failed)
+	emvPending := &repo.Payment{
+		ID: 202, OrderID: null.IntFrom(100), PaymentStatus: null.StringFrom(common.PaymentStatusPending),
+		Amount: null.Float64From(20), Currency: null.StringFrom(common.CurrencyUSD),
+		ParamX: null.StringFrom("m-202e"), Ordkey: null.StringFrom("ord-100"),
+		AuthNo: null.StringFrom("A"), PelecardToken: null.StringFrom("T"),
 	}
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(100), pelecard.TokenTerminal).Return(declinedPayment, nil)
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(100), pelecard.EMVTerminal).Return(nil, errors.New("connection timeout"))
+	mockRepo.EXPECT().CreateRenewalPayment(mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+		mock.Anything, mock.Anything, pelecard.EMVTerminal.PMX).Return(emvPending, nil).Once()
+	mockExecutor.EXPECT().Execute(mock.Anything, mock.Anything, pelecard.EMVTerminal, uint(100)).
+		Return(gatewaySuccess(), nil).Once()
+	mockRepo.EXPECT().FinalizeRenewal(mock.Anything, uint(100), mock.Anything).
+		Return(fmt.Errorf("%w: tx commit failed", common.ErrPostPayment)).Once()
 
-	processOrderWithRecovery(ctx, mockRepo, 0, 100, stats)
+	stats := newChargeStats(1)
 
-	assert.Equal(t, float64(150), stats.failedSum.Get(common.CurrencyNIS))
-	assert.Equal(t, int64(1), stats.errorCount.Get("gateway"))
-}
-
-// Bug 4: Both terminals declined must increment the declined order count.
-func TestProcessOrder_DeclinedBoth_FailedCountIncremented(t *testing.T) {
-	ctx := context.Background()
-	mockRepo := mocks.NewMockOrdersRepository(t)
-	stats := newTestStats()
-
-	declinedToken := &repo.Payment{
-		Success:  null.StringFrom("0"),
-		Terminal: null.StringFrom("token"),
-		Currency: null.StringFrom(common.CurrencyNIS),
-		Amount:   null.Float64From(100),
-	}
-	declinedEMV := &repo.Payment{
-		Success:  null.StringFrom("0"),
-		Terminal: null.StringFrom("emv"),
-		Currency: null.StringFrom(common.CurrencyNIS),
-		Amount:   null.Float64From(100),
-	}
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(100), pelecard.TokenTerminal).Return(declinedToken, nil)
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(100), pelecard.EMVTerminal).Return(declinedEMV, nil)
-
-	processOrderWithRecovery(ctx, mockRepo, 0, 100, stats)
-
-	assert.Equal(t, int64(1), stats.failedCount.Get("total"))
-	assert.Equal(t, float64(100), stats.failedSum.Get(common.CurrencyNIS))
-	assert.Equal(t, int64(0), stats.errorCount.Get("gateway"))
-}
-
-// Bug 5a: Post-payment error where payment succeeded (Success="1") must NOT add to failedSum.
-func TestProcessOrder_PostPaymentSuccess_NotInFailedSum(t *testing.T) {
-	ctx := context.Background()
-	mockRepo := mocks.NewMockOrdersRepository(t)
-	stats := newTestStats()
-
-	payment := &repo.Payment{
-		Success:       null.StringFrom("1"),
-		Terminal:      null.StringFrom("token"),
-		Currency:      null.StringFrom(common.CurrencyNIS),
-		Amount:        null.Float64From(200),
-		PaymentStatus: null.StringFrom("completed"),
-	}
-	postPaymentErr := fmt.Errorf("%w: UPDATE orders SET renewed failed", common.ErrPostPayment)
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(100), pelecard.TokenTerminal).Return(payment, postPaymentErr)
-
-	processOrderWithRecovery(ctx, mockRepo, 0, 100, stats)
+	ro := resolvedOrder{OrderID: 100, Data: data, Price: price}
+	service.processWithRecovery(ctx, 0, ro, &stats)
 
 	assert.Equal(t, int64(1), stats.errorCount.Get("post_payment"))
-	// Money was charged — must NOT appear in failedSum
-	assert.Equal(t, float64(0), stats.failedSum.Get(common.CurrencyNIS))
+	assert.Equal(t, int64(0), stats.successCount.Get(pelecard.TokenTerminal.Name))
+	assert.Equal(t, int64(0), stats.successCount.Get(pelecard.EMVTerminal.Name))
 }
 
-// Bug 5b: Post-payment error where payment failed (Success="0") SHOULD add to failedSum.
-func TestProcessOrder_PostPaymentFailed_InFailedSum(t *testing.T) {
+// ---------------------------------------------------------------------------
+// chargeWithPricing — multi-order with mixed outcomes
+// ---------------------------------------------------------------------------
+
+func TestChargeWithPricing_MultipleOrders_MixedOutcomes(t *testing.T) {
+	service, mockRepo, mockExecutor := newTestService(t)
 	ctx := context.Background()
-	mockRepo := mocks.NewMockOrdersRepository(t)
-	stats := newTestStats()
 
-	payment := &repo.Payment{
-		Success:       null.StringFrom("0"),
-		Terminal:      null.StringFrom("token"),
-		Currency:      null.StringFrom(common.CurrencyNIS),
-		Amount:        null.Float64From(200),
-		PaymentStatus: null.StringFrom("declined"),
-	}
-	postPaymentErr := fmt.Errorf("%w: UPDATE payments failed", common.ErrPostPayment)
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(100), pelecard.TokenTerminal).Return(payment, postPaymentErr)
+	// Order 1: succeeds on token
+	data1 := testRenewalData()
+	data1.Account.Country = null.StringFrom("US")
+	data1.Order.ID = 101
 
-	processOrderWithRecovery(ctx, mockRepo, 0, 100, stats)
+	// Order 2: fails pricing (load data error)
+	// Order 3: declined on both terminals
+
+	data3 := testRenewalData()
+	data3.Account.Country = null.StringFrom("US")
+	data3.Order.ID = 103
+
+	mockRepo.EXPECT().GetOrderIDsToRenew(ctx).Return([]uint{101, 102, 103}, nil)
+	mockRepo.EXPECT().LoadRenewalData(ctx, uint(101)).Return(data1, nil)
+	mockRepo.EXPECT().LoadRenewalData(ctx, uint(102)).Return(nil, errors.New("not found"))
+	mockRepo.EXPECT().FlagOrder(ctx, 102, common.OrderFlagPricingError).Return(nil)
+	mockRepo.EXPECT().LoadRenewalData(ctx, uint(103)).Return(data3, nil)
+
+	// Order 101: token succeeds
+	expectProcessOrder(mockRepo, mockExecutor, 101, pelecard.TokenTerminal, gatewaySuccess(), nil)
+
+	// Order 103: both declined
+	expectProcessOrder(mockRepo, mockExecutor, 103, pelecard.TokenTerminal, gatewayDeclined(), nil)
+	expectProcessOrder(mockRepo, mockExecutor, 103, pelecard.EMVTerminal, gatewayDeclined(), nil)
+
+	count, err := service.chargeWithPricing(ctx, 1)
+	require.NoError(t, err)
+	assert.Equal(t, 1, count, "only order 101 should succeed")
+}
+
+// ---------------------------------------------------------------------------
+// recordPostPaymentError — nil payment edge case
+// ---------------------------------------------------------------------------
+
+func TestRecordPostPaymentError_NilPayment_NoPanic(t *testing.T) {
+	stats := newChargeStats(1)
+
+	// Should not panic with nil payment
+	recordPostPaymentError(
+		context.Background(),
+		utils.SentryFor(context.Background()),
+		&stats,
+		"token",
+		nil, // nil payment
+		errors.New("post-payment error"),
+	)
 
 	assert.Equal(t, int64(1), stats.errorCount.Get("post_payment"))
-	assert.Equal(t, float64(200), stats.failedSum.Get(common.CurrencyNIS))
 }
 
-// Bug 6: Token gateway error + EMV decline must not count a gateway error (order outcome = declined).
-func TestProcessOrder_GatewayThenDecline_NoGatewayErrorCounted(t *testing.T) {
-	ctx := context.Background()
-	mockRepo := mocks.NewMockOrdersRepository(t)
-	stats := newTestStats()
-
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(100), pelecard.TokenTerminal).Return(nil, errors.New("gateway timeout"))
-	declinedEMV := &repo.Payment{
-		Success:  null.StringFrom("0"),
-		Terminal: null.StringFrom("emv"),
-		Currency: null.StringFrom(common.CurrencyNIS),
-		Amount:   null.Float64From(80),
-	}
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(100), pelecard.EMVTerminal).Return(declinedEMV, nil)
-
-	processOrderWithRecovery(ctx, mockRepo, 0, 100, stats)
-
-	// Outcome is "declined", not "gateway error"
-	assert.Equal(t, int64(0), stats.errorCount.Get("gateway"))
-	assert.Equal(t, int64(1), stats.failedCount.Get("total"))
-	assert.Equal(t, float64(80), stats.failedSum.Get(common.CurrencyNIS))
-}
-
-// Cross-terminal error combinations that previously had no coverage.
-
-func TestChargeOperations_GatewayThenPostPayment_NilPayment_NoPanic(t *testing.T) {
-	ctx := context.Background()
-	mockRepo := mocks.NewMockOrdersRepository(t)
-
-	// Token gateway error, EMV post-payment error with nil payment
-	mockRepo.EXPECT().GetOrderIDsToRenew(mock.Anything).Return([]uint{100}, nil)
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(100), pelecard.TokenTerminal).Return(nil, errors.New("gateway timeout"))
-	postPaymentErr := fmt.Errorf("%w: connection reset", common.ErrPostPayment)
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(100), pelecard.EMVTerminal).Return(nil, postPaymentErr)
-
-	count, err := chargeOrdersConcurrent(ctx, mockRepo, 1)
-
-	assert.NoError(t, err)
-	assert.Equal(t, 0, count)
-}
-
-func TestChargeOperations_GatewayThenPrePayment(t *testing.T) {
-	ctx := context.Background()
-	mockRepo := mocks.NewMockOrdersRepository(t)
-
-	// Token gateway error, EMV pre-payment error
-	mockRepo.EXPECT().GetOrderIDsToRenew(mock.Anything).Return([]uint{100}, nil)
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(100), pelecard.TokenTerminal).Return(nil, errors.New("gateway timeout"))
-	prePaymentErr := fmt.Errorf("%w: card details missing for EMV", common.ErrPrePayment)
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(100), pelecard.EMVTerminal).Return(nil, prePaymentErr)
-
-	count, err := chargeOrdersConcurrent(ctx, mockRepo, 1)
-
-	assert.NoError(t, err)
-	assert.Equal(t, 0, count)
-}
-
-func TestChargeOperations_DeclinedThenGatewayError(t *testing.T) {
-	ctx := context.Background()
-	mockRepo := mocks.NewMockOrdersRepository(t)
-
-	// Token declined, EMV gateway error — should not panic, count = 0
-	declinedPayment := &repo.Payment{
-		Success:  null.StringFrom("0"),
-		Terminal: null.StringFrom("token"),
-		Currency: null.StringFrom(common.CurrencyNIS),
-		Amount:   null.Float64From(100),
-	}
-	mockRepo.EXPECT().GetOrderIDsToRenew(mock.Anything).Return([]uint{100}, nil)
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(100), pelecard.TokenTerminal).Return(declinedPayment, nil)
-	mockRepo.EXPECT().TryRenewalWithTerminal(mock.Anything, uint(100), pelecard.EMVTerminal).Return(nil, errors.New("network error"))
-
-	count, err := chargeOrdersConcurrent(ctx, mockRepo, 1)
-
-	assert.NoError(t, err)
-	assert.Equal(t, 0, count)
-}

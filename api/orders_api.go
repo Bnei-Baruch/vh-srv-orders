@@ -20,3 +20,11 @@ func NewOrdersAPI(db repo.OrdersRepository) *OrdersAPI {
 		priorityClient: priority.NewClient(),
 	}
 }
+
+func (o *OrdersAPI) SetProfileService(ps profiles.ProfileService) {
+	o.profileService = ps
+}
+
+func (o *OrdersAPI) SetPriorityClient(c *priority.Client) {
+	o.priorityClient = c
+}

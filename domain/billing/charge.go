@@ -218,6 +218,7 @@ dispatchLoop:
 		slog.Int64("v1_orders", stats.pricingVersionCount.Get("v1")),
 		slog.Int64("v2_orders", stats.pricingVersionCount.Get("v2")),
 		slog.Int64("v2_discounted", stats.v2DiscountCount.Get("eligible")),
+		slog.Int64("v2_manual_matched", stats.v2DiscountCount.Get("manual_matched")),
 		slog.Float64("v1_success_nis", stats.versionSuccessSum.Get("v1:"+common.CurrencyNIS)),
 		slog.Float64("v1_success_usd", stats.versionSuccessSum.Get("v1:"+common.CurrencyUSD)),
 		slog.Float64("v1_success_eur", stats.versionSuccessSum.Get("v1:"+common.CurrencyEUR)),
@@ -272,15 +273,25 @@ func (s *BillingService) processWithRecovery(ctx context.Context, workerID int, 
 	log := utils.LogFor(ctx)
 
 	// Track pricing version and v2-specific discount stats up front.
+	// Order-level booleans (no per-type double-count): "eligible" = this order
+	// had at least one eligible discount; "manual_matched" = a manual entry
+	// was matched for this order (regardless of whether it won).
 	stats.pricingVersionCount.Inc(ro.Price.PricingVersion, 1)
 	if ro.Price.PricingVersion == "v2" && ro.Price.V2Evaluation != nil {
+		hasEligible, hasManual := false, false
 		for _, d := range ro.Price.V2Evaluation.Discounts {
-			if d.Type == pricing.DiscountTypeDonations {
-				if d.Eligible {
-					stats.v2DiscountCount.Inc("eligible", 1)
+			if d.Eligible {
+				hasEligible = true
+				if d.Type == pricing.DiscountTypeManual {
+					hasManual = true
 				}
-				break
 			}
+		}
+		if hasEligible {
+			stats.v2DiscountCount.Inc("eligible", 1)
+		}
+		if hasManual {
+			stats.v2DiscountCount.Inc("manual_matched", 1)
 		}
 	}
 
@@ -356,7 +367,7 @@ type chargeStats struct {
 
 	// Pricing version breakdown
 	pricingVersionCount *utils.CounterMap[int64]   // "v1", "v2"
-	v2DiscountCount     *utils.CounterMap[int64]   // "eligible"
+	v2DiscountCount     *utils.CounterMap[int64]   // "eligible" | "manual_matched"
 	versionSuccessSum   *utils.CounterMap[float64] // "v1:NIS", "v2:USD", etc.
 	versionFailedSum    *utils.CounterMap[float64] // total not-collected per version+currency
 	reasonFailedSum     *utils.CounterMap[float64] // "declined:NIS", "gateway:USD", "post_payment:EUR", etc.
@@ -425,18 +436,18 @@ func recordDeclinedOrder(ctx context.Context, stats *chargeStats, price *pricing
 	utils.LogFor(ctx).Info("Order declined on all terminals")
 }
 
-// logDiscountStats logs discount statistics for all resolved orders, grouped by discount type.
-// Each log line represents one discount type and shows how much we are giving away vs. the base price.
-// Only v2 orders have discount evaluations; v1 orders are skipped.
-func logDiscountStats(log *slog.Logger, orders []resolvedOrder) {
-	type discountTypeStat struct {
-		eligibleOrders   int
-		ineligibleOrders int
-		amountByCurrency map[string]float64
-	}
+// discountTypeStat aggregates per-type discount statistics across resolved orders.
+type discountTypeStat struct {
+	eligibleOrders   int
+	ineligibleOrders int
+	amountByCurrency map[string]float64
+}
 
+// aggregateDiscountStats computes per-type discount stats across resolved v2 orders.
+// Amount attribution is gated on Discount.Applied so orders with multiple eligible
+// discounts (e.g. donations + manual) aren't double-counted across buckets.
+func aggregateDiscountStats(orders []resolvedOrder) map[pricing.DiscountType]*discountTypeStat {
 	byType := make(map[pricing.DiscountType]*discountTypeStat)
-
 	for _, ro := range orders {
 		if ro.Price.V2Evaluation == nil {
 			continue
@@ -450,12 +461,22 @@ func logDiscountStats(log *slog.Logger, orders []resolvedOrder) {
 			}
 			if d.Eligible {
 				stat.eligibleOrders++
-				stat.amountByCurrency[eval.FinalPrice.Currency] += eval.CountryBase.Amount - eval.FinalPrice.Amount
 			} else {
 				stat.ineligibleOrders++
 			}
+			if d.Applied {
+				stat.amountByCurrency[eval.FinalPrice.Currency] += eval.CountryBase.Amount - eval.FinalPrice.Amount
+			}
 		}
 	}
+	return byType
+}
+
+// logDiscountStats logs discount statistics for all resolved orders, grouped by discount type.
+// Each log line represents one discount type and shows how much we are giving away vs. the base price.
+// Only v2 orders have discount evaluations; v1 orders are skipped.
+func logDiscountStats(log *slog.Logger, orders []resolvedOrder) {
+	byType := aggregateDiscountStats(orders)
 
 	for discountType, stat := range byType {
 		log.Info("Pre-charge discount statistics",

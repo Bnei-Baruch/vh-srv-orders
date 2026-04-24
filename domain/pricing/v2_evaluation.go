@@ -30,14 +30,36 @@ type DiscountType string
 
 const (
 	DiscountTypeDonations   DiscountType = "donations"
+	DiscountTypeManual      DiscountType = "manual"
 	DonationsDiscountAmtPct              = 55.0 // percent off: final price = base * (1 - DonationsDiscountAmtPct/100)
 )
 
+// manualDiscounts maps keycloak ID → percent off for admin-granted discounts,
+// used for users whose contribution is non-monetary (volunteering, consulting,
+// in-kind supplies, etc.). Temporary in-code storage; will move to an
+// admin-managed DB table later. Each entry MUST have an inline comment stating
+// who and why.
+var manualDiscounts = map[string]float64{}
+
+// lookupManualDiscount returns the manual discount percent for the given
+// keycloak ID, if any. Empty keycloak ID returns (0, false).
+func lookupManualDiscount(keycloakID string) (float64, bool) {
+	if keycloakID == "" {
+		return 0, false
+	}
+	pct, ok := manualDiscounts[keycloakID]
+	return pct, ok
+}
+
 // Discount is a generic discount record. Properties holds type-specific data as JSON.
+// Applied is true on the single discount whose AmountPct drove FinalPrice for this
+// evaluation — used for unambiguous amount attribution when multiple discounts
+// are Eligible on the same order.
 type Discount struct {
 	Type       DiscountType    `json:"type"`
 	AmountPct  float64         `json:"amount_pct"` // percent off (e.g. 55.0 means pay 45%)
 	Eligible   bool            `json:"eligible"`
+	Applied    bool            `json:"applied,omitempty"`
 	Properties json.RawMessage `json:"properties,omitempty"`
 }
 
@@ -96,6 +118,7 @@ func (e *V2PricingEvaluation) Public() *V2PricingEvaluation {
 			Type:      d.Type,
 			AmountPct: d.AmountPct,
 			Eligible:  d.Eligible,
+			Applied:   d.Applied,
 		}
 	}
 	return &pub
@@ -189,34 +212,63 @@ func EvaluateV2Price(
 
 	basePriceNIS := toNIS(base.Amount, base.Currency, USDToNIS, EURToNIS)
 
-	discount, primaryGetsDiscount := buildDonationsDiscount(
+	donationsDiscount := buildDonationsDiscount(
 		sums, base, basePriceNIS,
 		primaryEmailCount, spouseEmailCount,
 		spouseKeycloakID,
 	)
-	inputs.Discounts = []Discount{discount}
+	inputs.Discounts = append(inputs.Discounts, donationsDiscount)
 
-	if primaryGetsDiscount {
-		inputs.FinalPrice = Price{Amount: base.Amount * (1 - DonationsDiscountAmtPct/100), Currency: base.Currency}
+	manualPct, manualFound := lookupManualDiscount(primaryKeycloakID)
+	if manualFound {
+		inputs.Discounts = append(inputs.Discounts, Discount{
+			Type:      DiscountTypeManual,
+			AmountPct: manualPct,
+			Eligible:  true,
+		})
+	}
+
+	// Winner selection: highest eligible AmountPct wins; strict > means donations
+	// (always first in slice) wins ties with manual at the same percent.
+	winnerIdx, winnerPct := -1, 0.0
+	for i, d := range inputs.Discounts {
+		if d.Eligible && d.AmountPct > winnerPct {
+			winnerIdx, winnerPct = i, d.AmountPct
+		}
+	}
+	if winnerIdx >= 0 {
+		inputs.Discounts[winnerIdx].Applied = true
+		inputs.FinalPrice = Price{Amount: base.Amount * (1 - winnerPct/100), Currency: base.Currency}
 	} else {
 		inputs.FinalPrice = Price{Amount: base.Amount, Currency: base.Currency}
+	}
 
-		// A log marker for edge case where one is better off alone than with a spouse.
-		// TODO: revisit this logic when we have a better way to distinguish attribution.
-		if spouseKeycloakID != "" && sums.totalNIS > 12*basePriceNIS {
-			log.Warn("EvaluateV2Price: BETTER_OF_ALONE",
-				slog.String("keycloak_id", primaryKeycloakID),
-				slog.String("spouse_keycloak_id", spouseKeycloakID),
-			)
-		}
+	// BETTER_OF_ALONE: donations-specific edge case where primary alone would
+	// have met the 1x threshold but the couple's joint aggregate does not meet 2x.
+	// TODO: revisit this logic when we have a better way to distinguish attribution.
+	if !donationsDiscount.Eligible && spouseKeycloakID != "" && sums.totalNIS > 12*basePriceNIS {
+		log.Warn("EvaluateV2Price: BETTER_OF_ALONE",
+			slog.String("keycloak_id", primaryKeycloakID),
+			slog.String("spouse_keycloak_id", spouseKeycloakID),
+		)
+	}
+
+	if manualFound {
+		log.Info("EvaluateV2Price: manual discount matched",
+			slog.String("keycloak_id", primaryKeycloakID),
+			slog.Float64("manual_pct", manualPct),
+			slog.Bool("donations_eligible", donationsDiscount.Eligible),
+			slog.Float64("final_pct_applied", winnerPct),
+		)
 	}
 
 	inputs.Explain = buildExplain(inputs)
 	return inputs, nil
 }
 
-// buildDonationsDiscount returns the Discount record for the donations discount type
-// and a bool indicating whether the primary account receives the discounted price.
+// buildDonationsDiscount returns the Discount record for the donations discount type.
+// The Applied field is intentionally left unset here — the caller compares this
+// discount against other discount types and marks the winner.
 //
 // Threshold rule:
 //   - No spouse: eligible if totalNIS >= annual (12 months of base price)
@@ -227,7 +279,7 @@ func buildDonationsDiscount(
 	basePriceNIS float64,
 	primaryEmailCount, spouseEmailCount int,
 	spouseKeycloakID string,
-) (Discount, bool) {
+) Discount {
 	annualNIS := basePriceNIS * 12
 	hasSpouse := spouseKeycloakID != ""
 
@@ -236,7 +288,6 @@ func buildDonationsDiscount(
 		threshold = 2 * annualNIS
 	}
 	eligible := sums.totalNIS >= threshold
-	primaryGetsDiscount := eligible
 	spouseGetsDiscount := eligible && hasSpouse
 
 	props := DonationsDiscountProperties{
@@ -255,7 +306,7 @@ func buildDonationsDiscount(
 		AmountPct:  DonationsDiscountAmtPct,
 		Eligible:   eligible,
 		Properties: propsJSON,
-	}, primaryGetsDiscount
+	}
 }
 
 // deduplicateEmails merges two email slices, removing duplicates (case-insensitive).
@@ -365,74 +416,89 @@ func buildExplain(inputs *V2PricingEvaluation) []string {
 	annualBase := base.Amount * 12
 	cur := base.Currency
 
-	var props DonationsDiscountProperties
+	var donationsProps DonationsDiscountProperties
+	var donationsDiscount Discount
+	var manualDiscount Discount
+	var hasManualEntry bool
 	for _, d := range inputs.Discounts {
-		if d.Type == DiscountTypeDonations {
-			_ = json.Unmarshal(d.Properties, &props)
-			break
+		switch d.Type {
+		case DiscountTypeDonations:
+			_ = json.Unmarshal(d.Properties, &donationsProps)
+			donationsDiscount = d
+		case DiscountTypeManual:
+			manualDiscount = d
+			hasManualEntry = true
 		}
 	}
 
-	var lines [5]string
+	lines := make([]string, 0, 6)
 
 	// Step 1: country tier — original currency only, no NIS conversion shown
-	lines[0] = fmt.Sprintf("1. country[%s %q] → tier lookup → %s → base: %.2f %s/mo × 12 = %.2f %s/yr",
+	lines = append(lines, fmt.Sprintf("1. country[%s %q] → tier lookup → %s → base: %.2f %s/mo × 12 = %.2f %s/yr",
 		inputs.CountryCode, GetCountryName(inputs.CountryCode), base.Group,
-		base.Amount, cur, annualBase, cur)
+		base.Amount, cur, annualBase, cur))
 
 	// Step 2: email collection and Priority fetch
 	fetchStatus := "ok"
-	if props.DonationsFetchNote != "" {
-		fetchStatus += ": " + props.DonationsFetchNote
+	if donationsProps.DonationsFetchNote != "" {
+		fetchStatus += ": " + donationsProps.DonationsFetchNote
 	}
-	hasSpouse := props.SpouseKeycloakID != ""
+	hasSpouse := donationsProps.SpouseKeycloakID != ""
 	if hasSpouse {
-		total := props.PrimaryEmailCount + props.SpouseEmailCount
-		lines[1] = fmt.Sprintf("2. collect emails: primary(%d) + spouse(%d) = %d unique → fetch from Priority ERP (SKU=40001, last 12mo) → %s",
-			props.PrimaryEmailCount, props.SpouseEmailCount, total, fetchStatus)
+		total := donationsProps.PrimaryEmailCount + donationsProps.SpouseEmailCount
+		lines = append(lines, fmt.Sprintf("2. collect emails: primary(%d) + spouse(%d) = %d unique → fetch from Priority ERP (SKU=40001, last 12mo) → %s",
+			donationsProps.PrimaryEmailCount, donationsProps.SpouseEmailCount, total, fetchStatus))
 	} else {
-		lines[1] = fmt.Sprintf("2. collect emails: primary(%d) → fetch from Priority ERP (SKU=40001, last 12mo) → %s",
-			props.PrimaryEmailCount, fetchStatus)
+		lines = append(lines, fmt.Sprintf("2. collect emails: primary(%d) → fetch from Priority ERP (SKU=40001, last 12mo) → %s",
+			donationsProps.PrimaryEmailCount, fetchStatus))
 	}
 
 	// Step 3: aggregation — acknowledge NIS conversion but show no amounts
-	lines[2] = "3. sum all donations per currency → convert each to NIS"
+	lines = append(lines, "3. sum all donations per currency → convert each to NIS")
 
-	// Step 4: threshold logic — thresholds in original currency; append (→ NIS) only when not already NIS
+	// Step 4: donations threshold — thresholds in original currency; append (→ NIS) only when not already NIS
 	nisMarker := ""
 	if cur != common.CurrencyNIS {
 		nisMarker = " (→ NIS)"
 	}
-	primaryGetsDiscount := inputs.FinalPrice.Amount < base.Amount
-	discountPct := int(DonationsDiscountAmtPct)
+	donationsPct := int(DonationsDiscountAmtPct)
 	switch {
-	case hasSpouse && primaryGetsDiscount:
-		lines[3] = fmt.Sprintf("4. combined >= %.2f %s/yr%s (2× annual) → both members get %d%% off",
-			annualBase*2, cur, nisMarker, discountPct)
+	case hasSpouse && donationsDiscount.Eligible:
+		lines = append(lines, fmt.Sprintf("4. donations: combined >= %.2f %s/yr%s (2× annual) → both members eligible for %d%% off",
+			annualBase*2, cur, nisMarker, donationsPct))
 	case hasSpouse:
-		lines[3] = fmt.Sprintf("4. combined < %.2f %s/yr%s (2× annual) → no discount",
-			annualBase*2, cur, nisMarker)
-	case primaryGetsDiscount:
-		lines[3] = fmt.Sprintf("4. combined >= %.2f %s/yr%s → primary gets %d%% off",
-			annualBase, cur, nisMarker, discountPct)
+		lines = append(lines, fmt.Sprintf("4. donations: combined < %.2f %s/yr%s (2× annual) → not eligible",
+			annualBase*2, cur, nisMarker))
+	case donationsDiscount.Eligible:
+		lines = append(lines, fmt.Sprintf("4. donations: combined >= %.2f %s/yr%s → primary eligible for %d%% off",
+			annualBase, cur, nisMarker, donationsPct))
 	default:
-		lines[3] = fmt.Sprintf("4. combined < %.2f %s/yr%s → no discount",
-			annualBase, cur, nisMarker)
+		lines = append(lines, fmt.Sprintf("4. donations: combined < %.2f %s/yr%s → not eligible",
+			annualBase, cur, nisMarker))
 	}
 
-	// Step 5: final prices in original currency
+	// Step 4b: manual discount lookup (only when a manual entry exists)
+	if hasManualEntry {
+		lines = append(lines, fmt.Sprintf("4b. manual discount: primary matched → %.0f%% off",
+			manualDiscount.AmountPct))
+	}
+
+	// Step 5: final prices in original currency.
+	// Spouse price is derived from the donations rule only — a spouse who
+	// also has a manual entry will be evaluated accurately when their own
+	// account is billed (this evaluation is about the primary).
 	if hasSpouse {
 		spousePrice := base.Amount
-		if props.SpouseGetsDiscount {
+		if donationsProps.SpouseGetsDiscount {
 			spousePrice = base.Amount * (1 - DonationsDiscountAmtPct/100)
 		}
-		lines[4] = fmt.Sprintf("5. primary[#%d]: %.2f %s | spouse: %.2f %s",
+		lines = append(lines, fmt.Sprintf("5. primary[#%d]: %.2f %s | spouse: %.2f %s",
 			inputs.AccountID, inputs.FinalPrice.Amount, inputs.FinalPrice.Currency,
-			spousePrice, cur)
+			spousePrice, cur))
 	} else {
-		lines[4] = fmt.Sprintf("5. primary[#%d]: %.2f %s",
-			inputs.AccountID, inputs.FinalPrice.Amount, inputs.FinalPrice.Currency)
+		lines = append(lines, fmt.Sprintf("5. primary[#%d]: %.2f %s",
+			inputs.AccountID, inputs.FinalPrice.Amount, inputs.FinalPrice.Currency))
 	}
 
-	return lines[:]
+	return lines
 }

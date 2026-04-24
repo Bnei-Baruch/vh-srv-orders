@@ -33,6 +33,7 @@ type discountResponse struct {
 	Type       pricing.DiscountType `json:"type"`
 	AmountPct  float64              `json:"amount_pct"`
 	Eligible   bool                 `json:"eligible"`
+	Applied    bool                 `json:"applied,omitempty"`
 	Error      bool                 `json:"error,omitempty"`
 	Properties json.RawMessage      `json:"properties,omitempty"` // admin only
 }
@@ -64,6 +65,7 @@ func toV2DetailsResponse(eval *pricing.V2PricingEvaluation) *v2DetailsResponse {
 			Type:       d.Type,
 			AmountPct:  d.AmountPct,
 			Eligible:   d.Eligible,
+			Applied:    d.Applied,
 			Properties: d.Properties,
 		}
 	}

@@ -116,9 +116,8 @@ func TestBuildDonationsDiscount_WithSpouse_BelowDoubleAnnual_NeitherGets(t *test
 	// annual = 180*12 = 2160, 2×annual = 4320; combined = 3000 < 4320
 	base := nisBase(180)
 	sums := donationSums{perCurrency: map[string]float64{}, totalNIS: 3000}
-	d, primaryGets := buildDonationsDiscount(sums, base, 180, 1, 1, "spouse-kc")
+	d := buildDonationsDiscount(sums, base, 180, 1, 1, "spouse-kc")
 	assert.False(t, d.Eligible)
-	assert.False(t, primaryGets)
 	props := unmarshalDonationsProps(t, d)
 	assert.False(t, props.SpouseGetsDiscount)
 }
@@ -127,9 +126,8 @@ func TestBuildDonationsDiscount_WithSpouse_AboveDoubleAnnual_BothGet(t *testing.
 	// combined = 4400 >= 4320
 	base := nisBase(180)
 	sums := donationSums{perCurrency: map[string]float64{}, totalNIS: 4400}
-	d, primaryGets := buildDonationsDiscount(sums, base, 180, 1, 1, "spouse-kc")
+	d := buildDonationsDiscount(sums, base, 180, 1, 1, "spouse-kc")
 	assert.True(t, d.Eligible)
-	assert.True(t, primaryGets)
 	props := unmarshalDonationsProps(t, d)
 	assert.True(t, props.SpouseGetsDiscount)
 }
@@ -138,9 +136,8 @@ func TestBuildDonationsDiscount_NoSpouse_BelowAnnual_NoDiscount(t *testing.T) {
 	// annual = 2160; combined = 1200 < 2160
 	base := nisBase(180)
 	sums := donationSums{perCurrency: map[string]float64{}, totalNIS: 1200}
-	d, primaryGets := buildDonationsDiscount(sums, base, 180, 1, 0, "")
+	d := buildDonationsDiscount(sums, base, 180, 1, 0, "")
 	assert.False(t, d.Eligible)
-	assert.False(t, primaryGets)
 	props := unmarshalDonationsProps(t, d)
 	assert.False(t, props.SpouseGetsDiscount)
 }
@@ -149,9 +146,8 @@ func TestBuildDonationsDiscount_NoSpouse_AboveAnnual_PrimaryGets(t *testing.T) {
 	// combined = 2200 >= 2160
 	base := nisBase(180)
 	sums := donationSums{perCurrency: map[string]float64{}, totalNIS: 2200}
-	d, primaryGets := buildDonationsDiscount(sums, base, 180, 1, 0, "")
+	d := buildDonationsDiscount(sums, base, 180, 1, 0, "")
 	assert.True(t, d.Eligible)
-	assert.True(t, primaryGets)
 	props := unmarshalDonationsProps(t, d)
 	assert.False(t, props.SpouseGetsDiscount)
 }
@@ -164,7 +160,7 @@ func TestBuildDonationsDiscount_PropertiesStoredCorrectly(t *testing.T) {
 		successEmails: []string{"a@x.com"},
 		fetchNote:     "some note",
 	}
-	d, _ := buildDonationsDiscount(sums, base, 180, 2, 1, "spouse-kc-id")
+	d := buildDonationsDiscount(sums, base, 180, 2, 1, "spouse-kc-id")
 	props := unmarshalDonationsProps(t, d)
 	assert.Equal(t, 2, props.PrimaryEmailCount)
 	assert.Equal(t, 1, props.SpouseEmailCount)
@@ -335,7 +331,7 @@ func TestBuildFormula_NoSpouseNoDiscount(t *testing.T) {
 	assert.Contains(t, lines[1], "primary(2)")
 	assert.Contains(t, lines[1], "ok")
 	assert.Equal(t, "3. sum all donations per currency → convert each to NIS", lines[2])
-	assert.Contains(t, lines[3], "no discount")
+	assert.Contains(t, lines[3], "not eligible")
 	assert.Contains(t, lines[3], "2160.00 NIS/yr") // single-person threshold = annual
 	assert.NotContains(t, lines[3], "→ NIS")
 	assert.Contains(t, lines[4], "#101")
@@ -350,7 +346,7 @@ func TestBuildFormula_NoSpousePrimaryDiscount(t *testing.T) {
 
 	lines := buildExplain(eval)
 	require.Len(t, lines, 5)
-	assert.Contains(t, lines[3], "primary gets 55% off")
+	assert.Contains(t, lines[3], "primary eligible for 55% off")
 	assert.Contains(t, lines[3], "2160.00 NIS/yr") // single-person threshold = annual
 	assert.Contains(t, lines[4], "81.00 NIS")
 }
@@ -367,7 +363,7 @@ func TestBuildFormula_WithSpouseBothDiscount(t *testing.T) {
 	lines := buildExplain(eval)
 	require.Len(t, lines, 5)
 	assert.Contains(t, lines[1], "primary(2) + spouse(1) = 3 unique")
-	assert.Contains(t, lines[3], "both members get 55% off")
+	assert.Contains(t, lines[3], "both members eligible for 55% off")
 	assert.Contains(t, lines[3], "4320.00 NIS/yr") // 2×annual threshold
 	assert.Contains(t, lines[4], "#101")
 	assert.Contains(t, lines[4], "spouse:")
@@ -383,7 +379,7 @@ func TestBuildFormula_WithSpouseNeitherGetsDiscount(t *testing.T) {
 
 	lines := buildExplain(eval)
 	require.Len(t, lines, 5)
-	assert.Contains(t, lines[3], "no discount")
+	assert.Contains(t, lines[3], "not eligible")
 	assert.Contains(t, lines[3], "4320.00 NIS/yr") // 2×annual threshold shown
 }
 
@@ -505,7 +501,7 @@ func TestEvaluateV2Price_NoSpouse_WithDiscount(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.True(t, eval.Discounts[0].Eligible)
-	assert.Equal(t, base.Amount*(1-DonationsDiscountAmtPct/100), eval.FinalPrice.Amount, "should get 55% discount")
+	assert.InDelta(t, base.Amount*(1-DonationsDiscountAmtPct/100), eval.FinalPrice.Amount, 1e-9, "should get 55% discount")
 }
 
 func TestEvaluateV2Price_ProfileNotFound_FallsBackToAccountEmail(t *testing.T) {
@@ -571,7 +567,7 @@ func TestEvaluateV2Price_WithSpouse_BothGetDiscount(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.True(t, eval.Discounts[0].Eligible)
-	assert.Equal(t, base.Amount*(1-DonationsDiscountAmtPct/100), eval.FinalPrice.Amount, "primary should get discount")
+	assert.InDelta(t, base.Amount*(1-DonationsDiscountAmtPct/100), eval.FinalPrice.Amount, 1e-9, "primary should get discount")
 	props := unmarshalDonationsProps(t, eval.Discounts[0])
 	assert.True(t, props.SpouseGetsDiscount)
 }
@@ -761,4 +757,244 @@ func TestV2PricingEvaluation_Public_PreservesNonSensitiveFields(t *testing.T) {
 	assert.Equal(t, eval.CountryCode, pub.CountryCode)
 	assert.Equal(t, eval.CountryBase, pub.CountryBase)
 	assert.Equal(t, eval.FinalPrice, pub.FinalPrice)
+}
+
+// --- Manual discount ---
+
+// setManualDiscountForTest registers a manual discount entry for the duration
+// of the test and cleans it up afterwards. Not safe for t.Parallel with the
+// same keycloak ID.
+func setManualDiscountForTest(t *testing.T, keycloakID string, pct float64) {
+	t.Helper()
+	manualDiscounts[keycloakID] = pct
+	t.Cleanup(func() { delete(manualDiscounts, keycloakID) })
+}
+
+func TestLookupManualDiscount_Hit(t *testing.T) {
+	setManualDiscountForTest(t, "kc-hit", 40.0)
+	pct, ok := lookupManualDiscount("kc-hit")
+	assert.True(t, ok)
+	assert.Equal(t, 40.0, pct)
+}
+
+func TestLookupManualDiscount_Miss(t *testing.T) {
+	pct, ok := lookupManualDiscount("kc-unknown")
+	assert.False(t, ok)
+	assert.Equal(t, 0.0, pct)
+}
+
+func TestLookupManualDiscount_EmptyKey(t *testing.T) {
+	pct, ok := lookupManualDiscount("")
+	assert.False(t, ok)
+	assert.Equal(t, 0.0, pct)
+}
+
+// findDiscount returns the first discount of the given type in the slice.
+func findDiscount(discounts []Discount, t DiscountType) (Discount, bool) {
+	for _, d := range discounts {
+		if d.Type == t {
+			return d, true
+		}
+	}
+	return Discount{}, false
+}
+
+func TestEvaluateV2Price_ManualOnly_NotEligibleDonations(t *testing.T) {
+	// No donations → manual 30% wins.
+	setManualDiscountForTest(t, "kc-1", 30.0)
+
+	server := priorityServerNoContributions()
+	defer server.Close()
+	client := newPriorityTestClient(server.URL)
+
+	email := "primary@x.com"
+	profileSvc := &stubProfileService{
+		profiles: map[string]*profiles.Profile{"kc-1": {PrimaryEmail: &email}},
+	}
+
+	base := GetCountryBasePrice("IL")
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, 10, "kc-1", email, "IL")
+	require.NoError(t, err)
+
+	donations, ok := findDiscount(eval.Discounts, DiscountTypeDonations)
+	require.True(t, ok)
+	assert.False(t, donations.Eligible)
+	assert.False(t, donations.Applied)
+
+	manual, ok := findDiscount(eval.Discounts, DiscountTypeManual)
+	require.True(t, ok)
+	assert.True(t, manual.Eligible)
+	assert.True(t, manual.Applied)
+	assert.Equal(t, 30.0, manual.AmountPct)
+
+	assert.InDelta(t, base.Amount*0.70, eval.FinalPrice.Amount, 1e-9)
+}
+
+func TestEvaluateV2Price_ManualBeatsDonations(t *testing.T) {
+	// Manual 70% > donations 55%. Donations still appears as Eligible=true, Applied=false.
+	setManualDiscountForTest(t, "kc-1", 70.0)
+
+	base := GetCountryBasePrice("IL")
+	server := priorityServerWithContributions(base.Amount*12 + 100)
+	defer server.Close()
+	client := newPriorityTestClient(server.URL)
+
+	email := "primary@x.com"
+	profileSvc := &stubProfileService{
+		profiles: map[string]*profiles.Profile{"kc-1": {PrimaryEmail: &email}},
+	}
+
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, 10, "kc-1", email, "IL")
+	require.NoError(t, err)
+
+	donations, _ := findDiscount(eval.Discounts, DiscountTypeDonations)
+	assert.True(t, donations.Eligible)
+	assert.False(t, donations.Applied)
+
+	manual, _ := findDiscount(eval.Discounts, DiscountTypeManual)
+	assert.True(t, manual.Eligible)
+	assert.True(t, manual.Applied)
+
+	assert.InDelta(t, base.Amount*0.30, eval.FinalPrice.Amount, 1e-9)
+}
+
+func TestEvaluateV2Price_DonationsBeatsManual(t *testing.T) {
+	// Manual 30% < donations 55% → donations wins.
+	setManualDiscountForTest(t, "kc-1", 30.0)
+
+	base := GetCountryBasePrice("IL")
+	server := priorityServerWithContributions(base.Amount*12 + 100)
+	defer server.Close()
+	client := newPriorityTestClient(server.URL)
+
+	email := "primary@x.com"
+	profileSvc := &stubProfileService{
+		profiles: map[string]*profiles.Profile{"kc-1": {PrimaryEmail: &email}},
+	}
+
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, 10, "kc-1", email, "IL")
+	require.NoError(t, err)
+
+	donations, _ := findDiscount(eval.Discounts, DiscountTypeDonations)
+	assert.True(t, donations.Eligible)
+	assert.True(t, donations.Applied)
+
+	manual, _ := findDiscount(eval.Discounts, DiscountTypeManual)
+	assert.True(t, manual.Eligible)
+	assert.False(t, manual.Applied)
+
+	assert.InDelta(t, base.Amount*(1-DonationsDiscountAmtPct/100), eval.FinalPrice.Amount, 1e-9)
+}
+
+func TestEvaluateV2Price_TieGoesToDonations(t *testing.T) {
+	// Manual at exactly 55% — ties go to donations (first in slice, strict > in winner loop).
+	setManualDiscountForTest(t, "kc-1", 55.0)
+
+	base := GetCountryBasePrice("IL")
+	server := priorityServerWithContributions(base.Amount*12 + 100)
+	defer server.Close()
+	client := newPriorityTestClient(server.URL)
+
+	email := "primary@x.com"
+	profileSvc := &stubProfileService{
+		profiles: map[string]*profiles.Profile{"kc-1": {PrimaryEmail: &email}},
+	}
+
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, 10, "kc-1", email, "IL")
+	require.NoError(t, err)
+
+	donations, _ := findDiscount(eval.Discounts, DiscountTypeDonations)
+	manual, _ := findDiscount(eval.Discounts, DiscountTypeManual)
+	assert.True(t, donations.Applied, "donations wins ties (first in slice)")
+	assert.False(t, manual.Applied)
+}
+
+func TestEvaluateV2Price_ManualEntryOmittedWhenNotMatched(t *testing.T) {
+	// No manual entry for this keycloak — slice should contain only donations.
+	server := priorityServerNoContributions()
+	defer server.Close()
+	client := newPriorityTestClient(server.URL)
+
+	email := "primary@x.com"
+	profileSvc := &stubProfileService{
+		profiles: map[string]*profiles.Profile{"kc-unmatched": {PrimaryEmail: &email}},
+	}
+
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, 10, "kc-unmatched", email, "IL")
+	require.NoError(t, err)
+
+	require.Len(t, eval.Discounts, 1)
+	assert.Equal(t, DiscountTypeDonations, eval.Discounts[0].Type)
+}
+
+func TestEvaluateV2Price_SpouseInMap_PrimaryNot_DonationsNotEligible(t *testing.T) {
+	// Only the spouse has a manual entry. Primary's evaluation must NOT carry it.
+	// Spouse's own billing run will apply their manual entry in their own evaluation.
+	setManualDiscountForTest(t, "kc-spouse", 60.0)
+
+	server := priorityServerNoContributions()
+	defer server.Close()
+	client := newPriorityTestClient(server.URL)
+
+	primaryEmail := "primary@x.com"
+	spouseEmail := "spouse@x.com"
+	spouseKC := "kc-spouse"
+	profileSvc := &stubProfileService{
+		profiles: map[string]*profiles.Profile{
+			"kc-1":   {PrimaryEmail: &primaryEmail, SpouseKeycloakID: &spouseKC},
+			spouseKC: {PrimaryEmail: &spouseEmail},
+		},
+	}
+
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, 10, "kc-1", primaryEmail, "IL")
+	require.NoError(t, err)
+
+	_, hasManual := findDiscount(eval.Discounts, DiscountTypeManual)
+	assert.False(t, hasManual, "primary's evaluation must not leak spouse's manual entry")
+	assert.Equal(t, eval.CountryBase.Amount, eval.FinalPrice.Amount)
+}
+
+func TestV2PricingEvaluation_Public_PreservesApplied(t *testing.T) {
+	base := nisBase(180)
+	props := baseProps(1)
+	eval := makeEval(base, 101, Price{Amount: 81, Currency: common.CurrencyNIS}, props, true)
+	eval.Discounts[0].Applied = true
+	eval.Discounts = append(eval.Discounts, Discount{
+		Type: DiscountTypeManual, AmountPct: 30.0, Eligible: true, Applied: false,
+	})
+
+	pub := eval.Public()
+	require.Len(t, pub.Discounts, 2)
+	assert.True(t, pub.Discounts[0].Applied)
+	assert.False(t, pub.Discounts[1].Applied)
+	// Properties still stripped.
+	assert.Nil(t, pub.Discounts[0].Properties)
+}
+
+func TestBuildExplain_IncludesStep4bWhenManualMatched(t *testing.T) {
+	base := nisBase(180)
+	props := baseProps(1)
+	eval := makeEval(base, 101, Price{Amount: 180 * 0.70, Currency: common.CurrencyNIS}, props, false)
+	eval.Discounts = append(eval.Discounts, Discount{
+		Type: DiscountTypeManual, AmountPct: 30.0, Eligible: true, Applied: true,
+	})
+
+	lines := buildExplain(eval)
+	require.Len(t, lines, 6)
+	assert.Contains(t, lines[4], "4b. manual discount")
+	assert.Contains(t, lines[4], "30% off")
+	assert.Contains(t, lines[5], "#101")
+	assert.Contains(t, lines[5], "126.00 NIS") // 180 × 0.70
+}
+
+func TestBuildExplain_OmitsStep4bWhenNoManualEntry(t *testing.T) {
+	base := nisBase(180)
+	props := baseProps(1)
+	eval := makeEval(base, 101, Price{Amount: 180, Currency: common.CurrencyNIS}, props, false)
+
+	lines := buildExplain(eval)
+	assert.Len(t, lines, 5)
+	for _, line := range lines {
+		assert.NotContains(t, line, "manual discount")
+	}
 }

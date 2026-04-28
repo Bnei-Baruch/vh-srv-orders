@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"strings"
 	"time"
 
@@ -197,7 +198,7 @@ func EvaluateV2Price(
 	inputs.Discounts = []Discount{discount}
 
 	if primaryGetsDiscount {
-		inputs.FinalPrice = Price{Amount: base.Amount * (1 - DonationsDiscountAmtPct/100), Currency: base.Currency}
+		inputs.FinalPrice = Price{Amount: math.Round(base.Amount*(1-DonationsDiscountAmtPct/100)*100) / 100, Currency: base.Currency}
 	} else {
 		inputs.FinalPrice = Price{Amount: base.Amount, Currency: base.Currency}
 

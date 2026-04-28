@@ -435,7 +435,7 @@ func prepareOrderCreateQuery(req Order) (string, string, []interface{}) {
 	if req.AmountItem.Valid {
 		createStrings = append(createStrings, "amount_item")
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.AmountItem.Int)
+		args = append(args, req.AmountItem.Float64)
 	}
 	if req.StartingDate.Valid {
 		createStrings = append(createStrings, "starting_date")
@@ -534,7 +534,7 @@ func prepareOrderUpdateQuery(req Order) (string, []interface{}) {
 	}
 	if req.AmountItem.Valid {
 		updateStrings = append(updateStrings, fmt.Sprintf(`amount_item=$%d`, len(updateStrings)+1))
-		args = append(args, req.AmountItem.Int)
+		args = append(args, req.AmountItem.Float64)
 	}
 
 	if len(args) != 0 {

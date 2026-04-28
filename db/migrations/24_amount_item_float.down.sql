@@ -1,0 +1,3 @@
+BEGIN;
+ALTER TABLE orders ALTER COLUMN amount_item TYPE INT USING amount_item::INT;
+COMMIT;

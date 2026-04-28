@@ -576,6 +576,34 @@ func TestEvaluateV2Price_WithSpouse_BothGetDiscount(t *testing.T) {
 	assert.True(t, props.SpouseGetsDiscount)
 }
 
+func TestEvaluateV2Price_FinalPriceRoundedToTwoDecimals(t *testing.T) {
+	// $12.50 * 45% = $5.625 — three decimal places, requires rounding to $5.63.
+	// Without math.Round in EvaluateV2Price, FinalPrice.Amount = 5.625 and this test fails.
+	key := common.CurrencyUSD + "-High"
+	original := priceByCurrencyAndGroup[key]
+	priceByCurrencyAndGroup[key] = 12.50
+	defer func() { priceByCurrencyAndGroup[key] = original }()
+
+	base := GetCountryBasePrice("AU")
+	annualThresholdNIS := toNIS(base.Amount, base.Currency, USDToNIS, EURToNIS) * 12
+	server := priorityServerWithContributions(annualThresholdNIS + 100)
+	defer server.Close()
+
+	client := newPriorityTestClient(server.URL)
+	email := "primary@x.com"
+	profileSvc := &stubProfileService{
+		profiles: map[string]*profiles.Profile{
+			"kc-1": {PrimaryEmail: &email},
+		},
+	}
+
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, 10, "kc-1", email, "AU")
+	require.NoError(t, err)
+
+	assert.True(t, eval.Discounts[0].Eligible)
+	assert.Equal(t, 5.63, eval.FinalPrice.Amount, "$12.50 * 45%% = $5.625 must round to $5.63")
+}
+
 func TestEvaluateV2Price_SpouseDonationsCountedWithoutProfile(t *testing.T) {
 	// Spouse keycloak ID is set but spouse has no profile (ErrNotFound).
 	// Primary alone has contributions above single-person threshold → primary gets discount.

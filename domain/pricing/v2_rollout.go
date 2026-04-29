@@ -83,6 +83,8 @@ var v2ExcludedMajorMarkets = map[string]bool{
 	"TR": true, // Turkey
 	"RU": true, // Russia
 	"UA": true, // Ukraine
+	"NO": true, // Norway
+	"CH": true, // Switzerland
 }
 
 // V2Eligible returns true if the country should use v2 pricing.

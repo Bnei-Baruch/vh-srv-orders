@@ -42,6 +42,11 @@ func TestV2Eligible_TurkeyRussiaUkraineExcluded(t *testing.T) {
 	assert.False(t, V2Eligible("UA"))
 }
 
+func TestV2Eligible_NorwaySwitzerlandExcluded(t *testing.T) {
+	assert.False(t, V2Eligible("NO"))
+	assert.False(t, V2Eligible("CH"))
+}
+
 func TestV2Eligible_CanadaExcluded(t *testing.T) {
 	assert.False(t, V2Eligible("CA"))
 }

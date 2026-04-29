@@ -16,6 +16,66 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/pkg/testutil"
 )
 
+func TestCreateOrder_AmountItemFloat(t *testing.T) {
+	dbURL, err := testutil.NewTestOrdersDB(t, context.Background())
+	require.NoError(t, err)
+	db, err := NewOrdersDBUrl(context.Background(), dbURL, new(events.NoopEmitter))
+	require.NoError(t, err)
+	defer db.Close()
+
+	ctx := eventstest.WithTestEventBuilder(t, context.Background())
+
+	accountID, err := db.CreateAccount(ctx, Account{Email: null.StringFrom("test@example.com")})
+	require.NoError(t, err)
+
+	order := Order{
+		AccountID:  null.IntFrom(accountID),
+		Amount:     null.Float64From(55.0),
+		AmountItem: null.Float64From(24.75),
+	}
+	createString, numString, createQueryArgs := prepareOrderCreateQuery(order)
+	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+		createQueryArgs...).Scan(&order.ID)
+	require.NoError(t, err)
+
+	var amountItem null.Float64
+	err = db.QueryRow(ctx, `SELECT amount_item FROM orders WHERE id = $1`, order.ID).Scan(&amountItem)
+	require.NoError(t, err)
+	assert.True(t, amountItem.Valid)
+	assert.Equal(t, 24.75, amountItem.Float64)
+}
+
+func TestUpdateOrder_AmountItemFloat(t *testing.T) {
+	dbURL, err := testutil.NewTestOrdersDB(t, context.Background())
+	require.NoError(t, err)
+	db, err := NewOrdersDBUrl(context.Background(), dbURL, new(events.NoopEmitter))
+	require.NoError(t, err)
+	defer db.Close()
+
+	ctx := eventstest.WithTestEventBuilder(t, context.Background())
+
+	accountID, err := db.CreateAccount(ctx, Account{Email: null.StringFrom("test@example.com")})
+	require.NoError(t, err)
+
+	order := Order{
+		AccountID: null.IntFrom(accountID),
+		Amount:    null.Float64From(55.0),
+	}
+	createString, numString, createQueryArgs := prepareOrderCreateQuery(order)
+	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+		createQueryArgs...).Scan(&order.ID)
+	require.NoError(t, err)
+
+	err = db.PatchOrderByID(ctx, Order{AmountItem: null.Float64From(49.99)}, order.ID)
+	require.NoError(t, err)
+
+	var amountItem null.Float64
+	err = db.QueryRow(ctx, `SELECT amount_item FROM orders WHERE id = $1`, order.ID).Scan(&amountItem)
+	require.NoError(t, err)
+	assert.True(t, amountItem.Valid)
+	assert.Equal(t, 49.99, amountItem.Float64)
+}
+
 func TestGetTokensForOrders(t *testing.T) {
 	dbURL, err := testutil.NewTestOrdersDB(t, context.Background())
 	require.NoError(t, err)

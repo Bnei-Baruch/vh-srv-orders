@@ -29,7 +29,7 @@ type Order struct {
 	Note          null.String  `json:"Note" gorm:"Column:Note;type:varchar(200)"`
 	Flag          null.String  `json:"Flag" gorm:"Column:Flag;type:varchar(200)"`
 	Quantity      null.Int     `json:"Quantity"`
-	AmountItem    null.Int     `json:"AmountItem"`
+	AmountItem    null.Float64 `json:"AmountItem"`
 	StartingDate  null.Time    `json:"StartingDate"`
 	CardDetailsId null.Int     `json:"card_details_id" gorm:"Column:card_details_id"`
 	Payments      []Payment    `json:"Payments" gorm:"foreignkey:OrderID"`
@@ -113,7 +113,7 @@ type RequestOrder struct {
 	Organization  null.String  `json:"Organization"`
 	OrderLanguage null.String  `json:"OrderLanguage"`
 	Quantity      null.Int     `json:"Quantity"`
-	AmountItem    null.Int     `json:"AmountItem"`
+	AmountItem    null.Float64 `json:"AmountItem"`
 	TerminalId    null.String  `json:"TerminalId"`
 
 	//Transaction data

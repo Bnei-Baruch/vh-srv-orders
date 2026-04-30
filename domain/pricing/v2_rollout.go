@@ -11,7 +11,7 @@ var v2Excluded = map[string]bool{
 // v2ExcludedMajorMarkets lists major markets whose donation data is not yet available in any
 // connected accounting system. Remove countries as integrations expand.
 //
-// Current exclusions: US, UK, EU-27, Turkey, Russia, Ukraine, Canada,
+// Current exclusions: US, UK, EU-27, Turkey, Russia, Canada,
 // Latin America and the Caribbean.
 var v2ExcludedMajorMarkets = map[string]bool{
 	// United States
@@ -82,7 +82,6 @@ var v2ExcludedMajorMarkets = map[string]bool{
 	// Other major markets
 	"TR": true, // Turkey
 	"RU": true, // Russia
-	"UA": true, // Ukraine
 	"NO": true, // Norway
 	"CH": true, // Switzerland
 }

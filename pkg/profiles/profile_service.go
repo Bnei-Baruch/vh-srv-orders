@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/go-resty/resty/v2"
 
@@ -16,6 +17,24 @@ type ProfileService interface {
 	LookupProfile(ctx context.Context, email string) (*Profile, error)
 	LookupProfileByKeycloakId(ctx context.Context, keycloakId string) (*Profile, error)
 	GetProfileByKeycloakID(ctx context.Context, keycloakId string) (*Profile, error)
+	// GetActiveHHGrant returns the most recent active (APPROVED, not cancelled) HelpHaver grant
+	// for the given Keycloak ID, or nil if none exists.
+	GetActiveHHGrant(ctx context.Context, keycloakID string) (*HHGrant, error)
+}
+
+// hhRequestResponse is the shape of GET /v1/request response used to parse HH grant data.
+type hhRequestResponse struct {
+	Data []hhRequestAndGrant `json:"data"`
+}
+
+type hhRequestAndGrant struct {
+	Grant hhGrantData `json:"Grant"`
+}
+
+type hhGrantData struct {
+	CreatedAt   *time.Time             `json:"created_at"`
+	CancelledAt *time.Time             `json:"cancelled_at"`
+	Properties  map[string]interface{} `json:"properties"`
 }
 
 type ProfileServiceAPI struct {
@@ -114,6 +133,49 @@ func (p *ProfileServiceAPI) GetProfileByKeycloakID(ctx context.Context, keycloak
 	}
 
 	return resp.Result().(*Profile), nil
+}
+
+func (p *ProfileServiceAPI) GetActiveHHGrant(ctx context.Context, keycloakID string) (*HHGrant, error) {
+	resp, err := p.executeWithRetry(ctx, func(req *resty.Request) (*resty.Response, error) {
+		return req.
+			SetQueryParam("kcid", keycloakID).
+			SetQueryParam("status", "APPROVED").
+			SetQueryParam("limit", "1").
+			SetQueryParam("o_created_at", "desc").
+			SetResult(&hhRequestResponse{}).
+			Get("/v1/requests")
+	})
+	if err != nil {
+		return nil, fmt.Errorf("p.executeWithRetry: %w", err)
+	}
+	if resp.IsError() {
+		return nil, respError(resp)
+	}
+
+	result := resp.Result().(*hhRequestResponse)
+	if len(result.Data) == 0 {
+		return nil, nil
+	}
+
+	grantData := result.Data[0].Grant
+	if grantData.CreatedAt == nil || grantData.CancelledAt != nil {
+		return nil, nil
+	}
+
+	months, ok := grantData.Properties["months"].(float64)
+	if !ok || months <= 0 {
+		return nil, nil
+	}
+
+	grant := &HHGrant{
+		ExpiresAt: grantData.CreatedAt.AddDate(0, int(months), 0),
+	}
+
+	if pct, ok := grantData.Properties["discount_pct"].(float64); ok {
+		pctInt := int(pct)
+		grant.DiscountPct = &pctInt
+	}
+	return grant, nil
 }
 
 func (p *ProfileServiceAPI) baseRequest(ctx context.Context) (*resty.Request, error) {

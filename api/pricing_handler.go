@@ -48,6 +48,11 @@ func (o *OrdersAPI) handleMonthlyPriceByKCID(c *gin.Context) {
 		return
 	}
 
+	if account.UserKey.String == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "account does not have a keycloak ID", "success": false})
+		return
+	}
+
 	price, err := pricing.GetMonthlyPrice(
 		c.Request.Context(),
 		o.profileService, o.priorityClient,

@@ -37,67 +37,7 @@ func TestToNIS_UnknownCurrency(t *testing.T) {
 	assert.Equal(t, 310.0, toNIS(100.0, "GBP", 3.1, 3.6))
 }
 
-// --- deduplicateEmails ---
-
-func TestDeduplicateEmails_BothEmpty(t *testing.T) {
-	result := deduplicateEmails(nil, nil)
-	assert.Empty(t, result)
-}
-
-func TestDeduplicateEmails_NoDuplicates(t *testing.T) {
-	result := deduplicateEmails([]string{"a@x.com", "b@x.com"}, []string{"c@x.com"})
-	assert.Equal(t, []string{"a@x.com", "b@x.com", "c@x.com"}, result)
-}
-
-func TestDeduplicateEmails_CrossSliceDuplicate(t *testing.T) {
-	result := deduplicateEmails([]string{"a@x.com"}, []string{"a@x.com", "b@x.com"})
-	assert.Equal(t, []string{"a@x.com", "b@x.com"}, result)
-}
-
-func TestDeduplicateEmails_CaseInsensitive(t *testing.T) {
-	result := deduplicateEmails([]string{"A@X.com"}, []string{"a@x.com", "b@x.com"})
-	// "a@x.com" is considered a duplicate of "A@X.com"; original casing from first slice is kept
-	assert.Equal(t, []string{"A@X.com", "b@x.com"}, result)
-}
-
-// --- collectProfileEmails ---
-
-func TestCollectProfileEmails_NilProfileUsesFallback(t *testing.T) {
-	result := collectProfileEmails(nil, "fallback@x.com")
-	assert.Equal(t, []string{"fallback@x.com"}, result)
-}
-
-func TestCollectProfileEmails_AllThreeProfileEmails(t *testing.T) {
-	primary := "primary@x.com"
-	alt1 := "alt1@x.com"
-	alt2 := "alt2@x.com"
-	profile := &profiles.Profile{
-		PrimaryEmail:    &primary,
-		AlternateEmail1: &alt1,
-		AlternateEmail2: &alt2,
-	}
-	result := collectProfileEmails(profile, "fallback@x.com")
-	assert.Equal(t, []string{"primary@x.com", "alt1@x.com", "alt2@x.com"}, result)
-}
-
-func TestCollectProfileEmails_FallbackIgnoredWhenProfileHasEmails(t *testing.T) {
-	primary := "primary@x.com"
-	profile := &profiles.Profile{PrimaryEmail: &primary}
-	result := collectProfileEmails(profile, "fallback@x.com")
-	assert.Equal(t, []string{"primary@x.com"}, result)
-}
-
-func TestCollectProfileEmails_DeduplicatesWithinProfile(t *testing.T) {
-	addr := "same@x.com"
-	profile := &profiles.Profile{
-		PrimaryEmail:    &addr,
-		AlternateEmail1: &addr,
-	}
-	result := collectProfileEmails(profile, "fallback@x.com")
-	assert.Equal(t, []string{"same@x.com"}, result)
-}
-
-// --- buildDonationsDiscount ---
+// --- nisBase / unmarshalDonationsProps (used by EvaluateV2Price and Public tests) ---
 
 // nisBase returns a NIS-denominated CountryBasePrice for testing.
 func nisBase(amount float64) CountryBasePrice {
@@ -112,188 +52,13 @@ func unmarshalDonationsProps(t *testing.T, d Discount) DonationsDiscountProperti
 	return props
 }
 
-func TestBuildDonationsDiscount_WithSpouse_BelowDoubleAnnual_NeitherGets(t *testing.T) {
-	// annual = 180*12 = 2160, 2×annual = 4320; combined = 3000 < 4320
-	base := nisBase(180)
-	sums := donationSums{perCurrency: map[string]float64{}, totalNIS: 3000}
-	d, primaryGets := buildDonationsDiscount(sums, base, 180, 1, 1, "spouse-kc")
-	assert.False(t, d.Eligible)
-	assert.False(t, primaryGets)
-	props := unmarshalDonationsProps(t, d)
-	assert.False(t, props.SpouseGetsDiscount)
-}
-
-func TestBuildDonationsDiscount_WithSpouse_AboveDoubleAnnual_BothGet(t *testing.T) {
-	// combined = 4400 >= 4320
-	base := nisBase(180)
-	sums := donationSums{perCurrency: map[string]float64{}, totalNIS: 4400}
-	d, primaryGets := buildDonationsDiscount(sums, base, 180, 1, 1, "spouse-kc")
-	assert.True(t, d.Eligible)
-	assert.True(t, primaryGets)
-	props := unmarshalDonationsProps(t, d)
-	assert.True(t, props.SpouseGetsDiscount)
-}
-
-func TestBuildDonationsDiscount_NoSpouse_BelowAnnual_NoDiscount(t *testing.T) {
-	// annual = 2160; combined = 1200 < 2160
-	base := nisBase(180)
-	sums := donationSums{perCurrency: map[string]float64{}, totalNIS: 1200}
-	d, primaryGets := buildDonationsDiscount(sums, base, 180, 1, 0, "")
-	assert.False(t, d.Eligible)
-	assert.False(t, primaryGets)
-	props := unmarshalDonationsProps(t, d)
-	assert.False(t, props.SpouseGetsDiscount)
-}
-
-func TestBuildDonationsDiscount_NoSpouse_AboveAnnual_PrimaryGets(t *testing.T) {
-	// combined = 2200 >= 2160
-	base := nisBase(180)
-	sums := donationSums{perCurrency: map[string]float64{}, totalNIS: 2200}
-	d, primaryGets := buildDonationsDiscount(sums, base, 180, 1, 0, "")
-	assert.True(t, d.Eligible)
-	assert.True(t, primaryGets)
-	props := unmarshalDonationsProps(t, d)
-	assert.False(t, props.SpouseGetsDiscount)
-}
-
-func TestBuildDonationsDiscount_PropertiesStoredCorrectly(t *testing.T) {
-	base := nisBase(180)
-	sums := donationSums{
-		perCurrency:   map[string]float64{},
-		totalNIS:      4400, // above 2×annual to make eligible
-		successEmails: []string{"a@x.com"},
-		fetchNote:     "some note",
-	}
-	d, _ := buildDonationsDiscount(sums, base, 180, 2, 1, "spouse-kc-id")
-	props := unmarshalDonationsProps(t, d)
-	assert.Equal(t, 2, props.PrimaryEmailCount)
-	assert.Equal(t, 1, props.SpouseEmailCount)
-	assert.Equal(t, "spouse-kc-id", props.SpouseKeycloakID)
-	assert.Equal(t, []string{"a@x.com"}, props.DonationsFetchedEmails)
-	assert.Equal(t, "some note", props.DonationsFetchNote)
-	assert.Equal(t, Price{Amount: 180 * 12, Currency: common.CurrencyNIS}, props.AnnualBase)
-	assert.Equal(t, DiscountTypeDonations, d.Type)
-	assert.Equal(t, 55.0, d.AmountPct)
-}
-
-// --- fetchDonationSums ---
-
 // newPriorityTestClient creates a priority.Client pointed at the given test server URL.
 func newPriorityTestClient(serverURL string) *priority.Client {
 	common.Config.PriorityBaseURL = serverURL
 	return priority.NewClient()
 }
 
-func TestFetchDonationSums_NoAccount_TreatedAsZero(t *testing.T) {
-	// Empty customers list → GetLastContributions returns "no active customers found for email: ..."
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(priority.CustomerODataResponse{Value: []priority.Customer{}})
-	}))
-	defer server.Close()
-
-	client := newPriorityTestClient(server.URL)
-	result, err := fetchDonationSums(context.Background(), client, []string{"unknown@x.com"}, 3.1, 3.6)
-
-	require.NoError(t, err)
-	assert.Contains(t, result.fetchNote, "unknown@x.com") // recorded as "no Priority account"
-	assert.Equal(t, 0.0, result.totalNIS)
-}
-
-func TestFetchDonationSums_APIError_ReturnsError(t *testing.T) {
-	// Real API error (not "customer not found") on first email → fail immediately
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprint(w, "internal error")
-	}))
-	defer server.Close()
-
-	client := newPriorityTestClient(server.URL)
-	_, err := fetchDonationSums(context.Background(), client, []string{"bad@x.com"}, 3.1, 3.6)
-
-	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrDonationFetch)
-	assert.Contains(t, err.Error(), "bad@x.com")
-}
-
-func TestFetchDonationSums_PartialAPIError_ReturnsError(t *testing.T) {
-	// Good email succeeds, bad email errors → still returns error (fail-fast on second)
-	validDate := time.Now().AddDate(0, -3, 0).Format(time.RFC3339)
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.URL.Path == "/CUSTOMERS" {
-			email := r.URL.Query().Get("$filter")
-			if strings.Contains(email, "bad@x.com") {
-				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprint(w, "internal error")
-				return
-			}
-			json.NewEncoder(w).Encode(priority.CustomerODataResponse{
-				Value: []priority.Customer{{CustName: "CUST001"}},
-			})
-		} else {
-			json.NewEncoder(w).Encode(priority.AccountReceivableODataResponse{
-				Value: []priority.AccountReceivableItem{
-					{ACCNAME: "40001", DEBIT: 100, CODE: common.CurrencyNIS, FNCDATE: validDate},
-				},
-			})
-		}
-	}))
-	defer server.Close()
-
-	client := newPriorityTestClient(server.URL)
-	// good@x.com first (succeeds), bad@x.com second (errors) — result must still be an error
-	_, err := fetchDonationSums(context.Background(), client, []string{"good@x.com", "bad@x.com"}, 3.1, 3.6)
-
-	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrDonationFetch)
-	assert.Contains(t, err.Error(), "bad@x.com")
-}
-
-func TestFetchDonationSums_AggregatesAcrossEmails(t *testing.T) {
-	// Two emails: first has 100 USD, second has 200 NIS
-	validDate := time.Now().AddDate(0, -3, 0).Format(time.RFC3339)
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.URL.Path == "/CUSTOMERS" {
-			email := r.URL.Query().Get("$filter")
-			if strings.Contains(email, "usd@x.com") {
-				json.NewEncoder(w).Encode(priority.CustomerODataResponse{
-					Value: []priority.Customer{{CustName: "CUST_USD"}},
-				})
-			} else {
-				json.NewEncoder(w).Encode(priority.CustomerODataResponse{
-					Value: []priority.Customer{{CustName: "CUST_NIS"}},
-				})
-			}
-		} else if strings.Contains(r.URL.Path, "CUST_USD") {
-			json.NewEncoder(w).Encode(priority.AccountReceivableODataResponse{
-				Value: []priority.AccountReceivableItem{
-					{ACCNAME: "40001", DEBIT: 100, CODE: common.CurrencyUSD, FNCDATE: validDate},
-				},
-			})
-		} else {
-			json.NewEncoder(w).Encode(priority.AccountReceivableODataResponse{
-				Value: []priority.AccountReceivableItem{
-					{ACCNAME: "40001", DEBIT: 200, CODE: common.CurrencyNIS, FNCDATE: validDate},
-				},
-			})
-		}
-	}))
-	defer server.Close()
-
-	client := newPriorityTestClient(server.URL)
-	// usdRate=3.1: 100 USD = 310 NIS; plus 200 NIS = 510 NIS total
-	result, err := fetchDonationSums(context.Background(), client, []string{"usd@x.com", "nis@x.com"}, 3.1, 3.6)
-
-	require.NoError(t, err)
-	assert.Empty(t, result.fetchNote)
-	assert.InDelta(t, 510.0, result.totalNIS, 0.001)
-}
-
-// --- buildExplain ---
+// --- Public test helpers ---
 
 // baseProps returns a minimal DonationsDiscountProperties for formula tests.
 func baseProps(primaryEmailCount int) DonationsDiscountProperties {
@@ -321,100 +86,12 @@ func makeEval(base CountryBasePrice, accountID int, finalPrice Price, props Dona
 	}
 }
 
-func TestBuildFormula_NoSpouseNoDiscount(t *testing.T) {
-	base := nisBase(180)
-	props := baseProps(2)
-	eval := makeEval(base, 101, Price{Amount: 180, Currency: common.CurrencyNIS}, props, false)
-
-	lines := buildExplain(eval)
-	require.Len(t, lines, 5)
-	assert.Contains(t, lines[0], "IL")
-	assert.Contains(t, lines[0], "180.00 NIS/mo")
-	assert.Contains(t, lines[0], "2160.00 NIS/yr")
-	assert.NotContains(t, lines[0], "@ 1")
-	assert.Contains(t, lines[1], "primary(2)")
-	assert.Contains(t, lines[1], "ok")
-	assert.Equal(t, "3. sum all donations per currency → convert each to NIS", lines[2])
-	assert.Contains(t, lines[3], "no discount")
-	assert.Contains(t, lines[3], "2160.00 NIS/yr") // single-person threshold = annual
-	assert.NotContains(t, lines[3], "→ NIS")
-	assert.Contains(t, lines[4], "#101")
-	assert.Contains(t, lines[4], "180.00 NIS")
-}
-
-func TestBuildFormula_NoSpousePrimaryDiscount(t *testing.T) {
-	base := nisBase(180)
-	props := baseProps(2)
-	discounted := base.Amount * (1 - DonationsDiscountAmtPct/100)
-	eval := makeEval(base, 101, Price{Amount: discounted, Currency: common.CurrencyNIS}, props, true)
-
-	lines := buildExplain(eval)
-	require.Len(t, lines, 5)
-	assert.Contains(t, lines[3], "primary gets 55% off")
-	assert.Contains(t, lines[3], "2160.00 NIS/yr") // single-person threshold = annual
-	assert.Contains(t, lines[4], "81.00 NIS")
-}
-
-func TestBuildFormula_WithSpouseBothDiscount(t *testing.T) {
-	base := nisBase(180)
-	props := baseProps(2)
-	props.SpouseKeycloakID = "kc-spouse"
-	props.SpouseEmailCount = 1
-	props.SpouseGetsDiscount = true
-	discounted := base.Amount * (1 - DonationsDiscountAmtPct/100)
-	eval := makeEval(base, 101, Price{Amount: discounted, Currency: common.CurrencyNIS}, props, true)
-
-	lines := buildExplain(eval)
-	require.Len(t, lines, 5)
-	assert.Contains(t, lines[1], "primary(2) + spouse(1) = 3 unique")
-	assert.Contains(t, lines[3], "both members get 55% off")
-	assert.Contains(t, lines[3], "4320.00 NIS/yr") // 2×annual threshold
-	assert.Contains(t, lines[4], "#101")
-	assert.Contains(t, lines[4], "spouse:")
-}
-
-func TestBuildFormula_WithSpouseNeitherGetsDiscount(t *testing.T) {
-	base := nisBase(180)
-	props := baseProps(2)
-	props.SpouseKeycloakID = "kc-spouse"
-	props.SpouseEmailCount = 1
-	props.SpouseGetsDiscount = false
-	eval := makeEval(base, 101, Price{Amount: 180, Currency: common.CurrencyNIS}, props, false)
-
-	lines := buildExplain(eval)
-	require.Len(t, lines, 5)
-	assert.Contains(t, lines[3], "no discount")
-	assert.Contains(t, lines[3], "4320.00 NIS/yr") // 2×annual threshold shown
-}
-
-func TestBuildFormula_ForeignCurrencyOriginalCurrency(t *testing.T) {
-	base := CountryBasePrice{Price: Price{Amount: 10, Currency: common.CurrencyUSD}, Group: "Medium"}
-	props := DonationsDiscountProperties{
-		PrimaryEmailCount: 1,
-		AnnualBase:        Price{Amount: 10 * 12, Currency: common.CurrencyUSD},
-	}
-	eval := makeEval(base, 1, Price{Amount: 10, Currency: common.CurrencyUSD}, props, false)
-	eval.CountryCode = "US"
-
-	lines := buildExplain(eval)
-	require.Len(t, lines, 5)
-	// Step 1: original currency only, no NIS conversion
-	assert.Contains(t, lines[0], "10.00 USD/mo")
-	assert.Contains(t, lines[0], "120.00 USD/yr")
-	assert.NotContains(t, lines[0], "NIS")
-	assert.NotContains(t, lines[0], "@ 1")
-	// Step 3: acknowledges NIS conversion without showing amounts
-	assert.Equal(t, "3. sum all donations per currency → convert each to NIS", lines[2])
-	// Step 4: single-person threshold = annual (120 USD) with → NIS marker
-	assert.Contains(t, lines[3], "120.00 USD/yr (→ NIS)")
-	assert.NotContains(t, lines[3], "744") // 2×annual in NIS, must not appear
-}
-
 // --- EvaluateV2Price ---
 
 // stubProfileService is a minimal ProfileService for testing.
 type stubProfileService struct {
-	profiles map[string]*profiles.Profile
+	profiles    map[string]*profiles.Profile
+	activeGrant *profiles.HHGrant // returned by GetActiveHHGrant for any keycloak ID
 }
 
 func (s *stubProfileService) GetProfileByKeycloakID(_ context.Context, kcID string) (*profiles.Profile, error) {
@@ -430,6 +107,10 @@ func (s *stubProfileService) LookupProfile(context.Context, string) (*profiles.P
 
 func (s *stubProfileService) LookupProfileByKeycloakId(context.Context, string) (*profiles.Profile, error) {
 	return nil, profiles.ErrNotFound
+}
+
+func (s *stubProfileService) GetActiveHHGrant(_ context.Context, _ string) (*profiles.HHGrant, error) {
+	return s.activeGrant, nil
 }
 
 // priorityServerNoContributions returns a test server where all emails have active customers but zero qualifying contributions.
@@ -651,6 +332,9 @@ func (e *errorProfileService) LookupProfile(context.Context, string) (*profiles.
 func (e *errorProfileService) LookupProfileByKeycloakId(context.Context, string) (*profiles.Profile, error) {
 	return nil, e.err
 }
+func (e *errorProfileService) GetActiveHHGrant(context.Context, string) (*profiles.HHGrant, error) {
+	return nil, nil
+}
 
 func TestEvaluateV2Price_SpouseProfileError_ReturnsError(t *testing.T) {
 	server := priorityServerNoContributions()
@@ -687,6 +371,9 @@ func (s *spouseErrorProfileService) LookupProfile(context.Context, string) (*pro
 }
 func (s *spouseErrorProfileService) LookupProfileByKeycloakId(context.Context, string) (*profiles.Profile, error) {
 	return nil, profiles.ErrNotFound
+}
+func (s *spouseErrorProfileService) GetActiveHHGrant(context.Context, string) (*profiles.HHGrant, error) {
+	return nil, nil
 }
 
 func TestEvaluateV2Price_DonationFetchError_ReturnsError(t *testing.T) {

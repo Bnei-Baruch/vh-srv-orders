@@ -22,51 +22,28 @@ const (
 	EURToNIS = 3.6 // 1 EUR = 3.6 NIS
 )
 
-// ErrDonationFetch is returned when a real API error (not "customer not found") occurs
-// while fetching Priority ERP donation data. The price must not be used when this occurs.
-var ErrDonationFetch = fmt.Errorf("donation fetch error")
-
 // DiscountType identifies a discount by name.
 type DiscountType string
 
 const (
 	DiscountTypeDonations   DiscountType = "donations"
+	DiscountTypeHH          DiscountType = "Help Haver"
 	DonationsDiscountAmtPct              = 55.0 // percent off: final price = base * (1 - DonationsDiscountAmtPct/100)
 )
 
 // Discount is a generic discount record. Properties holds type-specific data as JSON.
+// Applied is true when this discount determined the final price (relevant when multiple discounts compete).
 type Discount struct {
 	Type       DiscountType    `json:"type"`
-	AmountPct  float64         `json:"amount_pct"` // percent off (e.g. 55.0 means pay 45%)
+	AmountPct  float64         `json:"amount_pct,omitempty"` // percent off (e.g. 55.0 means pay 45%)
 	Eligible   bool            `json:"eligible"`
+	Applied    bool            `json:"applied"`
 	Properties json.RawMessage `json:"properties,omitempty"`
 }
 
-// DonationsDiscountProperties holds all data specific to the donations discount type.
-//
-// Donation amounts fetched from Priority ERP are deliberately excluded — they are
-// used only during calculation and must never be persisted, logged, or returned.
-//
-// NOTE: Emails are deduplicated across primary and spouse before fetching, but if two
-// different users (not spouses) happen to share an email address, their donations may
-// be double-counted. This is a known limitation and is not validated here.
-type DonationsDiscountProperties struct {
-	// Email collection counts
-	PrimaryEmailCount int `json:"primary_email_count"`
-	SpouseEmailCount  int `json:"spouse_email_count,omitempty"`
-
-	// Spouse identity (omitted if no spouse)
-	SpouseKeycloakID   string `json:"spouse_keycloak_id,omitempty"`
-	SpouseGetsDiscount bool   `json:"spouse_gets_discount,omitempty"`
-
-	// Priority fetch metadata — DonationsFetchError and DonationsFetched removed:
-	// any real API error now surfaces as a pricing error before reaching this point,
-	// so donations are always successfully queried when this struct is populated.
-	DonationsFetchedEmails []string `json:"donations_fetched_emails,omitempty"`
-	DonationsFetchNote     string   `json:"donations_fetch_note,omitempty"`
-
-	// Annual threshold reference (monthly base × 12, in base currency — not a donation amount)
-	AnnualBase Price `json:"annual_base"`
+// HHDiscountProperties holds grant-specific data for the "Help Haver" discount.
+type HHDiscountProperties struct {
+	ExpiresAt time.Time `json:"expires_at"` // grant expiry: grant.created_at + months
 }
 
 // V2PricingEvaluation is the storable record of a v2 pricing evaluation.
@@ -97,18 +74,10 @@ func (e *V2PricingEvaluation) Public() *V2PricingEvaluation {
 			Type:      d.Type,
 			AmountPct: d.AmountPct,
 			Eligible:  d.Eligible,
+			Applied:   d.Applied,
 		}
 	}
 	return &pub
-}
-
-// donationSums holds aggregated Priority ERP donation data.
-// Used only during v2 price calculation — never stored, logged, or returned.
-type donationSums struct {
-	perCurrency   map[string]float64
-	totalNIS      float64
-	successEmails []string // emails that returned data from Priority without error
-	fetchNote     string   // informational (e.g. "customer not found" for some emails)
 }
 
 // EvaluateV2Price computes the full v2 pricing evaluation for a member account.
@@ -190,156 +159,91 @@ func EvaluateV2Price(
 
 	basePriceNIS := toNIS(base.Amount, base.Currency, USDToNIS, EURToNIS)
 
-	discount, primaryGetsDiscount := buildDonationsDiscount(
+	discount, primaryGetsDiscount, donationsLines := buildDonationsDiscount(
 		sums, base, basePriceNIS,
 		primaryEmailCount, spouseEmailCount,
 		spouseKeycloakID,
 	)
 	inputs.Discounts = []Discount{discount}
 
-	if primaryGetsDiscount {
-		inputs.FinalPrice = Price{Amount: math.Round(base.Amount*(1-DonationsDiscountAmtPct/100)*100) / 100, Currency: base.Currency}
-	} else {
-		inputs.FinalPrice = Price{Amount: base.Amount, Currency: base.Currency}
+	countryLine := fmt.Sprintf("country[%s] → %s → %.2f %s/mo",
+		country, base.Group, base.Amount, base.Currency)
 
-		// A log marker for edge case where one is better off alone than with a spouse.
-		// TODO: revisit this logic when we have a better way to distinguish attribution.
-		if spouseKeycloakID != "" && sums.totalNIS > 12*basePriceNIS {
-			log.Warn("EvaluateV2Price: BETTER_OF_ALONE",
-				slog.String("keycloak_id", primaryKeycloakID),
-				slog.String("spouse_keycloak_id", spouseKeycloakID),
-			)
-		}
+	// Log edge case: couple where individual threshold is met but not the couple threshold.
+	// TODO: revisit this logic when we have a better way to distinguish attribution.
+	if spouseKeycloakID != "" && !primaryGetsDiscount && sums.totalNIS > 12*basePriceNIS {
+		log.Warn("EvaluateV2Price: BETTER_OF_ALONE",
+			slog.String("keycloak_id", primaryKeycloakID),
+			slog.String("spouse_keycloak_id", spouseKeycloakID),
+		)
 	}
 
-	inputs.Explain = buildExplain(inputs)
+	// Add HH grant as an independent discount if available. Applied is not set here;
+	// resolveFinalPrice selects the winner by NIS comparison and sets Applied on it.
+	hhGrant, err := profileService.GetActiveHHGrant(ctx, primaryKeycloakID)
+	if err != nil {
+		log.Error("EvaluateV2Price: GetActiveHHGrant failed — skipping HH discount", slog.Any("err", err))
+	} else if hhGrant != nil && !hhGrant.IsExpired() {
+		inputs.Discounts = append(inputs.Discounts, buildHHDiscount(hhGrant))
+	}
+
+	// Pick the best eligible discount: converts each to NIS, sets Applied on the winner.
+	inputs.FinalPrice = resolveFinalPrice(inputs.Discounts, base.Price, USDToNIS, EURToNIS)
+
+	// Build explain: country line, then per-discount evaluation lines, then final price line.
+	// The final loop runs after resolveFinalPrice so each discount's Applied flag is set.
+	explain := make([]string, 0, 3+len(donationsLines))
+	explain = append(explain, countryLine)
+	explain = append(explain, donationsLines...)
+	for _, d := range inputs.Discounts {
+		if d.Type == DiscountTypeHH {
+			explain = append(explain, hhExplainLine(d))
+		}
+	}
+	if spouseKeycloakID != "" {
+		spousePrice := base.Amount
+		if discount.Eligible {
+			spousePrice = math.Round(base.Amount*(1-DonationsDiscountAmtPct/100)*100) / 100
+		}
+		explain = append(explain, fmt.Sprintf("final: primary[#%d] %.2f %s | spouse %.2f %s",
+			primaryAccountID, inputs.FinalPrice.Amount, inputs.FinalPrice.Currency,
+			spousePrice, base.Currency))
+	} else {
+		explain = append(explain, fmt.Sprintf("final: primary[#%d] %.2f %s",
+			primaryAccountID, inputs.FinalPrice.Amount, inputs.FinalPrice.Currency))
+	}
+	inputs.Explain = explain
 	return inputs, nil
 }
 
-// buildDonationsDiscount returns the Discount record for the donations discount type
-// and a bool indicating whether the primary account receives the discounted price.
-//
-// Threshold rule:
-//   - No spouse: eligible if totalNIS >= annual (12 months of base price)
-//   - With spouse: both eligible if totalNIS >= 2×annual (12 months per person); otherwise neither
-func buildDonationsDiscount(
-	sums donationSums,
-	base CountryBasePrice,
-	basePriceNIS float64,
-	primaryEmailCount, spouseEmailCount int,
-	spouseKeycloakID string,
-) (Discount, bool) {
-	annualNIS := basePriceNIS * 12
-	hasSpouse := spouseKeycloakID != ""
+// resolveFinalPrice picks the eligible discount with the lowest NIS-equivalent price,
+// marks it Applied, and returns the resulting price. Each discount is compared against base —
+// the one that gives the biggest absolute saving wins. If no eligible discount beats base,
+// base is returned unchanged.
+func resolveFinalPrice(discounts []Discount, base Price, usdToNIS, eurToNIS float64) Price {
+	bestNIS := toNIS(base.Amount, base.Currency, usdToNIS, eurToNIS)
+	bestPrice := base
+	bestIdx := -1
 
-	threshold := annualNIS
-	if hasSpouse {
-		threshold = 2 * annualNIS
-	}
-	eligible := sums.totalNIS >= threshold
-	primaryGetsDiscount := eligible
-	spouseGetsDiscount := eligible && hasSpouse
-
-	props := DonationsDiscountProperties{
-		PrimaryEmailCount:      primaryEmailCount,
-		SpouseEmailCount:       spouseEmailCount,
-		SpouseKeycloakID:       spouseKeycloakID,
-		SpouseGetsDiscount:     spouseGetsDiscount,
-		DonationsFetchedEmails: sums.successEmails,
-		DonationsFetchNote:     sums.fetchNote,
-		AnnualBase:             Price{Amount: base.Amount * 12, Currency: base.Currency},
-	}
-	propsJSON, _ := json.Marshal(props)
-
-	return Discount{
-		Type:       DiscountTypeDonations,
-		AmountPct:  DonationsDiscountAmtPct,
-		Eligible:   eligible,
-		Properties: propsJSON,
-	}, primaryGetsDiscount
-}
-
-// deduplicateEmails merges two email slices, removing duplicates (case-insensitive).
-// Order is preserved: all of a comes first, then new entries from b.
-func deduplicateEmails(a, b []string) []string {
-	seen := make(map[string]struct{}, len(a)+len(b))
-	result := make([]string, 0, len(a)+len(b))
-	for _, e := range append(a, b...) {
-		key := strings.ToLower(e)
-		if _, exists := seen[key]; exists {
+	for i := range discounts {
+		if !discounts[i].Eligible {
 			continue
 		}
-		seen[key] = struct{}{}
-		result = append(result, e)
-	}
-	return result
-}
-
-// collectProfileEmails returns a deduplicated, non-empty slice of emails from the profile.
-// Falls back to fallbackEmail if the profile has no usable emails.
-func collectProfileEmails(profile *profiles.Profile, fallbackEmail string) []string {
-	seen := make(map[string]struct{})
-	var emails []string
-
-	add := func(s *string) {
-		if s == nil || *s == "" {
-			return
-		}
-		key := strings.ToLower(*s)
-		if _, exists := seen[key]; exists {
-			return
-		}
-		seen[key] = struct{}{}
-		emails = append(emails, *s)
-	}
-
-	if profile != nil {
-		add(profile.PrimaryEmail)
-		add(profile.AlternateEmail1)
-		add(profile.AlternateEmail2)
-	}
-
-	if len(emails) == 0 && fallbackEmail != "" {
-		emails = append(emails, fallbackEmail)
-	}
-
-	return emails
-}
-
-// fetchDonationSums queries Priority ERP for each email and aggregates results.
-// "Customer not found" responses are treated as zero donations (not an error).
-// Any other API error is returned immediately — the price must not be used.
-// Donation amounts in the returned struct must never be stored, logged, or returned.
-func fetchDonationSums(ctx context.Context, client *priority.Client, emails []string, usdRate, eurRate float64) (donationSums, error) {
-	result := donationSums{
-		perCurrency: make(map[string]float64),
-	}
-
-	var notFoundNotes []string
-	for _, email := range emails {
-		contributions, err := client.GetLastContributions(ctx, email)
-		if err != nil {
-			if errors.Is(err, priority.ErrNoActiveCustomers) {
-				notFoundNotes = append(notFoundNotes, email)
-				continue // no Priority account for this email — treat as zero donations
+		effectiveNIS := toNIS(base.Amount*(1-discounts[i].AmountPct/100), base.Currency, usdToNIS, eurToNIS)
+		if effectiveNIS < bestNIS {
+			bestNIS = effectiveNIS
+			bestPrice = Price{
+				Amount:   math.Round(base.Amount*(100-discounts[i].AmountPct)) / 100,
+				Currency: base.Currency,
 			}
-			return donationSums{}, fmt.Errorf("client.GetLastContributions %w: %s: %v", ErrDonationFetch, email, err)
-		}
-		result.successEmails = append(result.successEmails, email)
-		for currency, amount := range contributions {
-			result.perCurrency[currency] += amount
+			bestIdx = i
 		}
 	}
 
-	if len(notFoundNotes) > 0 {
-		result.fetchNote = fmt.Sprintf("no Priority account for emails: %s", strings.Join(notFoundNotes, ", "))
+	if bestIdx >= 0 {
+		discounts[bestIdx].Applied = true
 	}
-
-	for currency, amount := range result.perCurrency {
-		result.totalNIS += toNIS(amount, currency, usdRate, eurRate)
-	}
-
-	return result, nil
+	return bestPrice
 }
 
 // toNIS converts an amount in the given currency to NIS using the provided rates.
@@ -355,85 +259,4 @@ func toNIS(amount float64, currency string, usdRate, eurRate float64) float64 {
 	default:
 		return amount * usdRate
 	}
-}
-
-// buildExplain produces a human-readable pseudo-code description of the v2 pricing logic
-// as it was applied for this evaluation. Donation amounts and NIS totals are never included.
-// All prices are shown in the account's base currency; NIS conversion is acknowledged but
-// rates and converted amounts are never revealed.
-func buildExplain(inputs *V2PricingEvaluation) []string {
-	base := inputs.CountryBase
-	annualBase := base.Amount * 12
-	cur := base.Currency
-
-	var props DonationsDiscountProperties
-	for _, d := range inputs.Discounts {
-		if d.Type == DiscountTypeDonations {
-			_ = json.Unmarshal(d.Properties, &props)
-			break
-		}
-	}
-
-	var lines [5]string
-
-	// Step 1: country tier — original currency only, no NIS conversion shown
-	lines[0] = fmt.Sprintf("1. country[%s %q] → tier lookup → %s → base: %.2f %s/mo × 12 = %.2f %s/yr",
-		inputs.CountryCode, GetCountryName(inputs.CountryCode), base.Group,
-		base.Amount, cur, annualBase, cur)
-
-	// Step 2: email collection and Priority fetch
-	fetchStatus := "ok"
-	if props.DonationsFetchNote != "" {
-		fetchStatus += ": " + props.DonationsFetchNote
-	}
-	hasSpouse := props.SpouseKeycloakID != ""
-	if hasSpouse {
-		total := props.PrimaryEmailCount + props.SpouseEmailCount
-		lines[1] = fmt.Sprintf("2. collect emails: primary(%d) + spouse(%d) = %d unique → fetch from Priority ERP (SKU=40001, last 12mo) → %s",
-			props.PrimaryEmailCount, props.SpouseEmailCount, total, fetchStatus)
-	} else {
-		lines[1] = fmt.Sprintf("2. collect emails: primary(%d) → fetch from Priority ERP (SKU=40001, last 12mo) → %s",
-			props.PrimaryEmailCount, fetchStatus)
-	}
-
-	// Step 3: aggregation — acknowledge NIS conversion but show no amounts
-	lines[2] = "3. sum all donations per currency → convert each to NIS"
-
-	// Step 4: threshold logic — thresholds in original currency; append (→ NIS) only when not already NIS
-	nisMarker := ""
-	if cur != common.CurrencyNIS {
-		nisMarker = " (→ NIS)"
-	}
-	primaryGetsDiscount := inputs.FinalPrice.Amount < base.Amount
-	discountPct := int(DonationsDiscountAmtPct)
-	switch {
-	case hasSpouse && primaryGetsDiscount:
-		lines[3] = fmt.Sprintf("4. combined >= %.2f %s/yr%s (2× annual) → both members get %d%% off",
-			annualBase*2, cur, nisMarker, discountPct)
-	case hasSpouse:
-		lines[3] = fmt.Sprintf("4. combined < %.2f %s/yr%s (2× annual) → no discount",
-			annualBase*2, cur, nisMarker)
-	case primaryGetsDiscount:
-		lines[3] = fmt.Sprintf("4. combined >= %.2f %s/yr%s → primary gets %d%% off",
-			annualBase, cur, nisMarker, discountPct)
-	default:
-		lines[3] = fmt.Sprintf("4. combined < %.2f %s/yr%s → no discount",
-			annualBase, cur, nisMarker)
-	}
-
-	// Step 5: final prices in original currency
-	if hasSpouse {
-		spousePrice := base.Amount
-		if props.SpouseGetsDiscount {
-			spousePrice = base.Amount * (1 - DonationsDiscountAmtPct/100)
-		}
-		lines[4] = fmt.Sprintf("5. primary[#%d]: %.2f %s | spouse: %.2f %s",
-			inputs.AccountID, inputs.FinalPrice.Amount, inputs.FinalPrice.Currency,
-			spousePrice, cur)
-	} else {
-		lines[4] = fmt.Sprintf("5. primary[#%d]: %.2f %s",
-			inputs.AccountID, inputs.FinalPrice.Amount, inputs.FinalPrice.Currency)
-	}
-
-	return lines[:]
 }

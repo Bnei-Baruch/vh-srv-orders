@@ -16,8 +16,25 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/internal/mocks"
 	pelecardmock "gitlab.bbdev.team/vh/pay/orders/internal/mocks/pkg"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/pelecard"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
+
+// stubProfileService returns no active HH grant — used in tests that don't exercise HH logic.
+type stubProfileService struct{}
+
+func (s *stubProfileService) LookupProfile(_ context.Context, _ string) (*profiles.Profile, error) {
+	return nil, nil
+}
+func (s *stubProfileService) LookupProfileByKeycloakId(_ context.Context, _ string) (*profiles.Profile, error) {
+	return nil, nil
+}
+func (s *stubProfileService) GetProfileByKeycloakID(_ context.Context, _ string) (*profiles.Profile, error) {
+	return nil, nil
+}
+func (s *stubProfileService) GetActiveHHGrant(_ context.Context, _ string) (*profiles.HHGrant, error) {
+	return nil, nil
+}
 
 // ---------------------------------------------------------------------------
 // Test helpers

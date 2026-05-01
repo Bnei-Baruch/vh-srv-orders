@@ -29,7 +29,7 @@ func newTestService(t *testing.T) (*BillingService, *mocks.MockOrdersRepository,
 	mockRepo := mocks.NewMockOrdersRepository(t)
 	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
 	mockExecutor := pelecardmock.NewMockChargeExecutor(t)
-	resolver := pricing.NewPriceResolver(nil, nil) // not used in charge phase
+	resolver := pricing.NewPriceResolver(&stubProfileService{}, nil) // not used in charge phase
 	emitter := &events.NoopEmitter{}
 	service := NewBillingService(mockRepo, mockPelecard, emitter, resolver, mockExecutor)
 	return service, mockRepo, mockExecutor
@@ -393,7 +393,7 @@ func (p *panicChargeExecutor) Execute(_ context.Context, _ *pelecard.ChargeReque
 func TestProcessWithRecovery_PanicRecovery(t *testing.T) {
 	mockRepo := mocks.NewMockOrdersRepository(t)
 	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
-	resolver := pricing.NewPriceResolver(nil, nil)
+	resolver := pricing.NewPriceResolver(&stubProfileService{}, nil)
 	emitter := &events.NoopEmitter{}
 	panicExec := &panicChargeExecutor{}
 	service := NewBillingService(mockRepo, mockPelecard, emitter, resolver, panicExec)

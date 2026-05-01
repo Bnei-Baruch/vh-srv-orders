@@ -7,6 +7,15 @@ import (
 	uuid "github.com/satori/go.uuid"
 )
 
+// HHGrant represents an active HelpHaver grant for a member.
+type HHGrant struct {
+	DiscountPct *int // percent off regular price (e.g. 80 → pay 20%; 100 → free)
+	ExpiresAt   time.Time
+}
+
+func (h *HHGrant) IsExpired() bool { return time.Now().After(h.ExpiresAt) }
+func (h *HHGrant) IsFree() bool    { return h.DiscountPct != nil && *h.DiscountPct == 100 }
+
 type APIError struct {
 	Error string `json:"error"`
 }

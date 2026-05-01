@@ -17,15 +17,9 @@ type MonthlyPriceRes struct {
 	Amount         null.Float64         `json:"amount"`
 	Currency       null.String          `json:"currency"`
 	PricingVersion null.String          `json:"pricing_version"`
-	V2Details      *V2PricingEvaluation `json:"v2_details,omitempty"`
+	V1Details      *V1PricingEvaluation `json:"v1_details,omitempty"`
 	V1AllPrices    map[string]float64   `json:"v1_all_prices,omitempty"`
-}
-
-// v1Pricing contains static monthly prices for legacy v1 pricing.
-var v1Pricing = map[string]Price{
-	common.CurrencyUSD: {Amount: 20, Currency: common.CurrencyUSD},
-	common.CurrencyEUR: {Amount: 20, Currency: common.CurrencyEUR},
-	common.CurrencyNIS: {Amount: 80, Currency: common.CurrencyNIS},
+	V2Details      *V2PricingEvaluation `json:"v2_details,omitempty"`
 }
 
 // GetMonthlyPrice resolves the monthly price for a member account.
@@ -46,6 +40,15 @@ func GetMonthlyPrice(
 		preferredCurrency = common.CurrencyUSD
 	}
 
+	// Resolve version: explicit "v1"/"v2" wins; otherwise auto-route by country eligibility.
+	if pricingVersion != "v1" && pricingVersion != "v2" {
+		if V2Eligible(country) {
+			pricingVersion = "v2"
+		} else {
+			pricingVersion = "v1"
+		}
+	}
+
 	var (
 		price Price
 		res   MonthlyPriceRes
@@ -53,9 +56,13 @@ func GetMonthlyPrice(
 
 	switch pricingVersion {
 	case "v1":
-		price = selectV1Price(preferredCurrency)
+		v1eval, err := evaluateV1(ctx, profileService, accountID, keycloakID, preferredCurrency)
+		if err != nil {
+			return nil, err
+		}
+		price = v1eval.FinalPrice
+		res.V1Details = v1eval
 		res.V1AllPrices = allV1Prices()
-
 	case "v2":
 		v2eval, err := evaluateV2(ctx, profileService, priorityClient, accountID, keycloakID, email, country)
 		if err != nil {
@@ -63,35 +70,12 @@ func GetMonthlyPrice(
 		}
 		price = v2eval.FinalPrice
 		res.V2Details = v2eval
-
-	default:
-		// Auto-route using the same eligibility criteria as billing.
-		if V2Eligible(country) {
-			pricingVersion = "v2"
-			v2eval, err := evaluateV2(ctx, profileService, priorityClient, accountID, keycloakID, email, country)
-			if err != nil {
-				return nil, err
-			}
-			price = v2eval.FinalPrice
-			res.V2Details = v2eval
-		} else {
-			pricingVersion = "v1"
-			price = selectV1Price(preferredCurrency)
-			res.V1AllPrices = allV1Prices()
-		}
 	}
 
 	res.Amount = null.Float64From(price.Amount)
 	res.Currency = null.StringFrom(price.Currency)
 	res.PricingVersion = null.StringFrom(pricingVersion)
 	return &res, nil
-}
-
-func selectV1Price(currency string) Price {
-	if p, ok := v1Pricing[currency]; ok {
-		return p
-	}
-	return v1Pricing[common.CurrencyUSD]
 }
 
 func allV1Prices() map[string]float64 {

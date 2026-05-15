@@ -79,6 +79,11 @@ var v2ExcludedMajorMarkets = map[string]bool{
 	"ES": true, // Spain
 	"SE": true, // Sweden
 
+	// Western Balkans
+	"AL": true, // Albania
+	"BA": true, // Bosnia and Herzegovina
+	"RS": true, // Serbia
+
 	// Other major markets
 	"TR": true, // Turkey
 	"RU": true, // Russia

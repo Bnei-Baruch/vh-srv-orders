@@ -302,6 +302,7 @@ var countryToCurrency = map[string]string{
 	"NL": common.CurrencyEUR, // Netherlands
 	"PL": common.CurrencyEUR, // Poland
 	"PT": common.CurrencyEUR, // Portugal
+	"RE": common.CurrencyEUR, // Reunion
 	"RO": common.CurrencyEUR, // Romania
 	"SK": common.CurrencyEUR, // Slovakia
 	"SI": common.CurrencyEUR, // Slovenia

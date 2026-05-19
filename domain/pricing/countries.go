@@ -173,6 +173,7 @@ var countryToGroup = map[string]string{
 	"PW": "Medium", // Palau
 	"PY": "Low",    // Paraguay
 	"QA": "High",   // Qatar
+	"RE": "Low",    // Reunion
 	"RO": "Medium", // Romania
 	"RS": "Medium", // Serbia
 	"RU": "Medium", // Russia
@@ -259,7 +260,6 @@ var countryToGroup = map[string]string{
 	"PM": "Undefined", // Saint Pierre and Miquelon
 	"PN": "Undefined", // Pitcairn
 	"PR": "Undefined", // Puerto Rico
-	"RE": "Undefined", // Reunion
 	"SH": "Undefined", // Saint Helena
 	"SJ": "Undefined", // Svalbard and Jan Mayen
 	"SS": "Undefined", // South Sudan

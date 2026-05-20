@@ -2,6 +2,7 @@ package billing
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -274,9 +275,9 @@ func TestProcessOrderIntegration_ResolvedPriceOverridesOrderAmount(t *testing.T)
 
 func TestChargeWithPricingIntegration_SingleOrder(t *testing.T) {
 	db, ctx := newIntegrationDB(t)
-	orderID := setupOrder(t, db, ctx, "US") // US = v1 pricing, no Priority needed
+	orderID := setupOrder(t, db, ctx, "GB") // GB = v1 (excluded from v2), no external deps needed
 
-	resolver := pricing.NewPriceResolver(nil, nil)
+	resolver := pricing.NewPriceResolver(nil, nil, nil, "")
 	executor := successExecutor()
 	service := NewBillingService(db, nil, &events.NoopEmitter{}, resolver, executor)
 
@@ -291,9 +292,9 @@ func TestChargeWithPricingIntegration_SingleOrder(t *testing.T) {
 
 func TestChargeWithPricingIntegration_TokenDeclined_EMVSucceeds(t *testing.T) {
 	db, ctx := newIntegrationDB(t)
-	orderID := setupOrder(t, db, ctx, "US")
+	orderID := setupOrder(t, db, ctx, "GB")
 
-	resolver := pricing.NewPriceResolver(nil, nil)
+	resolver := pricing.NewPriceResolver(nil, nil, nil, "")
 
 	// Executor that declines token, succeeds on EMV
 	callCount := 0
@@ -331,10 +332,10 @@ func (e *terminalSwitchExecutor) Execute(ctx context.Context, req *pelecard.Char
 
 func TestChargeWithPricingIntegration_MultipleOrders(t *testing.T) {
 	db, ctx := newIntegrationDB(t)
-	order1 := setupOrder(t, db, ctx, "US")
+	order1 := setupOrder(t, db, ctx, "FR") // FR = v1 (EU-27, excluded from v2)
 	order2 := setupOrder(t, db, ctx, "GB") // GB = v1 (excluded from v2)
 
-	resolver := pricing.NewPriceResolver(nil, nil)
+	resolver := pricing.NewPriceResolver(nil, nil, nil, "")
 	executor := successExecutor()
 	service := NewBillingService(db, nil, &events.NoopEmitter{}, resolver, executor)
 
@@ -353,9 +354,9 @@ func TestChargeWithPricingIntegration_MultipleOrders(t *testing.T) {
 
 func TestChargeWithPricingIntegration_BothDeclined(t *testing.T) {
 	db, ctx := newIntegrationDB(t)
-	orderID := setupOrder(t, db, ctx, "US")
+	orderID := setupOrder(t, db, ctx, "GB")
 
-	resolver := pricing.NewPriceResolver(nil, nil)
+	resolver := pricing.NewPriceResolver(nil, nil, nil, "")
 	executor := declinedExecutor()
 	service := NewBillingService(db, nil, &events.NoopEmitter{}, resolver, executor)
 
@@ -384,7 +385,7 @@ func TestRetryPricingErrorsIntegration_NoPricingErrors(t *testing.T) {
 	// Order has torenew flag, not pricing_error
 	setupOrder(t, db, ctx, "US")
 
-	resolver := pricing.NewPriceResolver(nil, nil)
+	resolver := pricing.NewPriceResolver(nil, nil, nil, "")
 	service := NewBillingService(db, nil, &events.NoopEmitter{}, resolver, successExecutor())
 
 	count, err := service.RetryPricingErrors(ctx, 1)
@@ -394,12 +395,12 @@ func TestRetryPricingErrorsIntegration_NoPricingErrors(t *testing.T) {
 
 func TestRetryPricingErrorsIntegration_SuccessfulRetry(t *testing.T) {
 	db, ctx := newIntegrationDB(t)
-	orderID := setupOrder(t, db, ctx, "US") // US = v1 pricing, always resolves
+	orderID := setupOrder(t, db, ctx, "GB") // GB = v1 (excluded from v2), always resolves
 
 	// Simulate a previous pricing failure by flagging the order
 	flagOrderAsPricingError(t, db, ctx, orderID)
 
-	resolver := pricing.NewPriceResolver(nil, nil)
+	resolver := pricing.NewPriceResolver(nil, nil, nil, "")
 	service := NewBillingService(db, nil, &events.NoopEmitter{}, resolver, successExecutor())
 
 	count, err := service.RetryPricingErrors(ctx, 1)
@@ -413,15 +414,14 @@ func TestRetryPricingErrorsIntegration_SuccessfulRetry(t *testing.T) {
 
 func TestRetryPricingErrorsIntegration_StillFailsPricing(t *testing.T) {
 	db, ctx := newIntegrationDB(t)
-	orderID := setupOrder(t, db, ctx, "IL") // IL = v2, requires Priority — nil here → always fails
+	orderID := setupOrder(t, db, ctx, "IL") // IL = v2 → resolver below forces it to fail
 
 	flagOrderAsPricingError(t, db, ctx, orderID)
 
-	origURL := common.Config.PriorityBaseURL
-	common.Config.PriorityBaseURL = ""
-	defer func() { common.Config.PriorityBaseURL = origURL }()
-
-	resolver := pricing.NewPriceResolver(nil, nil)
+	resolver := pricing.NewPriceResolver(
+		&failingProfileService{err: errors.New("forced profile error")},
+		nil, nil, "",
+	)
 	service := NewBillingService(db, nil, &events.NoopEmitter{}, resolver, successExecutor())
 
 	count, err := service.RetryPricingErrors(ctx, 1)
@@ -439,10 +439,10 @@ func TestRetryPricingErrorsIntegration_DeclinedOrderIsUnflagged(t *testing.T) {
 	// After the fix, pricing_error → torenew happens right after resolution, so a
 	// subsequent decline leaves the order with torenew, not pricing_error.
 	db, ctx := newIntegrationDB(t)
-	orderID := setupOrder(t, db, ctx, "US") // US = v1, resolves deterministically
+	orderID := setupOrder(t, db, ctx, "GB") // GB = v1 (excluded from v2), resolves deterministically
 	flagOrderAsPricingError(t, db, ctx, orderID)
 
-	resolver := pricing.NewPriceResolver(nil, nil)
+	resolver := pricing.NewPriceResolver(nil, nil, nil, "")
 	service := NewBillingService(db, nil, &events.NoopEmitter{}, resolver, declinedExecutor())
 
 	count, err := service.RetryPricingErrors(ctx, 1)
@@ -457,14 +457,14 @@ func TestRetryPricingErrorsIntegration_DeclinedOrderIsUnflagged(t *testing.T) {
 func TestRetryPricingErrorsIntegration_MixedOrders(t *testing.T) {
 	db, ctx := newIntegrationDB(t)
 
-	// Order 1: pricing_error, US → will resolve and succeed
-	order1 := setupOrder(t, db, ctx, "US")
+	// Order 1: pricing_error, GB → will resolve (v1) and succeed
+	order1 := setupOrder(t, db, ctx, "GB")
 	flagOrderAsPricingError(t, db, ctx, order1)
 
 	// Order 2: torenew (normal flow) → NOT picked up by retry
-	order2 := setupOrder(t, db, ctx, "US")
+	order2 := setupOrder(t, db, ctx, "FR") // different country to avoid email collision
 
-	resolver := pricing.NewPriceResolver(nil, nil)
+	resolver := pricing.NewPriceResolver(nil, nil, nil, "")
 	service := NewBillingService(db, nil, &events.NoopEmitter{}, resolver, successExecutor())
 
 	count, err := service.RetryPricingErrors(ctx, 1)

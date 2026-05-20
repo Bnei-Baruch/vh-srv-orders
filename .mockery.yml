@@ -16,4 +16,5 @@ packages:
   gitlab.bbdev.team/vh/pay/orders/pkg/keycloak:
   gitlab.bbdev.team/vh/pay/orders/pkg/profiles:
   gitlab.bbdev.team/vh/pay/orders/pkg/pelecard:
+  gitlab.bbdev.team/vh/pay/orders/pkg/accounting:
 

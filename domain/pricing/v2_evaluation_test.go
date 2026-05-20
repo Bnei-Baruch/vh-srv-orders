@@ -11,12 +11,26 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
+	accountingmocks "gitlab.bbdev.team/vh/pay/orders/internal/mocks/pkg"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/accounting"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/priority"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
 )
+
+// notFoundAccountingClient returns a mock that responds Found:false for any email,
+// effectively isolating the existing tests to Priority-only behavior.
+func notFoundAccountingClient(t *testing.T) accounting.AccountingService {
+	m := accountingmocks.NewMockAccountingService(t)
+	m.EXPECT().GetLastContributions(mock.Anything, mock.Anything, mock.Anything).
+		Return(&accounting.ContributionsResult{Found: false}, nil).Maybe()
+	return m
+}
+
+const testQuickbooksCompanyID = "test-co"
 
 // --- toNIS ---
 
@@ -193,7 +207,7 @@ func TestFetchDonationSums_NoAccount_TreatedAsZero(t *testing.T) {
 	defer server.Close()
 
 	client := newPriorityTestClient(server.URL)
-	result, err := fetchDonationSums(context.Background(), client, []string{"unknown@x.com"}, 3.1, 3.6)
+	result, err := fetchDonationSums(context.Background(), client, notFoundAccountingClient(t), testQuickbooksCompanyID, []string{"unknown@x.com"}, 3.1, 3.6)
 
 	require.NoError(t, err)
 	assert.Contains(t, result.fetchNote, "unknown@x.com") // recorded as "no Priority account"
@@ -209,7 +223,7 @@ func TestFetchDonationSums_APIError_ReturnsError(t *testing.T) {
 	defer server.Close()
 
 	client := newPriorityTestClient(server.URL)
-	_, err := fetchDonationSums(context.Background(), client, []string{"bad@x.com"}, 3.1, 3.6)
+	_, err := fetchDonationSums(context.Background(), client, notFoundAccountingClient(t), testQuickbooksCompanyID, []string{"bad@x.com"}, 3.1, 3.6)
 
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrDonationFetch)
@@ -244,7 +258,7 @@ func TestFetchDonationSums_PartialAPIError_ReturnsError(t *testing.T) {
 
 	client := newPriorityTestClient(server.URL)
 	// good@x.com first (succeeds), bad@x.com second (errors) — result must still be an error
-	_, err := fetchDonationSums(context.Background(), client, []string{"good@x.com", "bad@x.com"}, 3.1, 3.6)
+	_, err := fetchDonationSums(context.Background(), client, notFoundAccountingClient(t), testQuickbooksCompanyID, []string{"good@x.com", "bad@x.com"}, 3.1, 3.6)
 
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrDonationFetch)
@@ -286,11 +300,125 @@ func TestFetchDonationSums_AggregatesAcrossEmails(t *testing.T) {
 
 	client := newPriorityTestClient(server.URL)
 	// usdRate=3.1: 100 USD = 310 NIS; plus 200 NIS = 510 NIS total
-	result, err := fetchDonationSums(context.Background(), client, []string{"usd@x.com", "nis@x.com"}, 3.1, 3.6)
+	result, err := fetchDonationSums(context.Background(), client, notFoundAccountingClient(t), testQuickbooksCompanyID, []string{"usd@x.com", "nis@x.com"}, 3.1, 3.6)
 
 	require.NoError(t, err)
-	assert.Empty(t, result.fetchNote)
+	// Priority found both emails; accounting mock returns Found:false for both → note records the QB miss.
+	assert.NotContains(t, result.fetchNote, "Priority")
+	assert.Contains(t, result.fetchNote, "no QuickBooks record")
 	assert.InDelta(t, 510.0, result.totalNIS, 0.001)
+}
+
+// noPriorityCustomersServer returns a Priority test server where no customers exist for any email.
+func noPriorityCustomersServer() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(priority.CustomerODataResponse{Value: []priority.Customer{}})
+	}))
+}
+
+func TestFetchDonationSums_AccountingOnly_AggregatesContributions(t *testing.T) {
+	server := noPriorityCustomersServer()
+	defer server.Close()
+	priorityClient := newPriorityTestClient(server.URL)
+
+	mockAcc := accountingmocks.NewMockAccountingService(t)
+	mockAcc.EXPECT().GetLastContributions(mock.Anything, "qb@x.com", mock.Anything).Return(&accounting.ContributionsResult{
+		Found: true,
+		Total: map[string]float64{common.CurrencyUSD: 100},
+	}, nil).Once()
+
+	result, err := fetchDonationSums(context.Background(), priorityClient, mockAcc, testQuickbooksCompanyID, []string{"qb@x.com"}, 3.1, 3.6)
+
+	require.NoError(t, err)
+	assert.InDelta(t, 310.0, result.totalNIS, 0.001) // 100 USD * 3.1 = 310 NIS
+	assert.Equal(t, []string{"qb@x.com"}, result.successEmails)
+	assert.Contains(t, result.fetchNote, "no Priority record")
+	assert.NotContains(t, result.fetchNote, "no QuickBooks record")
+}
+
+func TestFetchDonationSums_BothSources_SumByCurrency(t *testing.T) {
+	// Priority returns 200 NIS; accounting returns 100 USD → total = 200 + 310 = 510 NIS.
+	validDate := time.Now().AddDate(0, -3, 0).Format(time.RFC3339)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "CUSTOMERS") && r.URL.Query().Get("$filter") != "" {
+			json.NewEncoder(w).Encode(priority.CustomerODataResponse{Value: []priority.Customer{{CustName: "C1"}}})
+		} else {
+			json.NewEncoder(w).Encode(priority.AccountReceivableODataResponse{Value: []priority.AccountReceivableItem{
+				{ACCNAME: "40001", DEBIT: 200, CODE: common.CurrencyNIS, FNCDATE: validDate},
+			}})
+		}
+	}))
+	defer server.Close()
+	priorityClient := newPriorityTestClient(server.URL)
+
+	mockAcc := accountingmocks.NewMockAccountingService(t)
+	mockAcc.EXPECT().GetLastContributions(mock.Anything, "user@x.com", mock.Anything).Return(&accounting.ContributionsResult{
+		Found: true,
+		Total: map[string]float64{common.CurrencyUSD: 100},
+	}, nil).Once()
+
+	result, err := fetchDonationSums(context.Background(), priorityClient, mockAcc, testQuickbooksCompanyID, []string{"user@x.com"}, 3.1, 3.6)
+
+	require.NoError(t, err)
+	assert.InDelta(t, 510.0, result.totalNIS, 0.001)
+	assert.Equal(t, []string{"user@x.com"}, result.successEmails)
+	assert.Empty(t, result.fetchNote)
+}
+
+func TestFetchDonationSums_AccountingError_ReturnsErrDonationFetch(t *testing.T) {
+	server := noPriorityCustomersServer()
+	defer server.Close()
+	priorityClient := newPriorityTestClient(server.URL)
+
+	mockAcc := accountingmocks.NewMockAccountingService(t)
+	mockAcc.EXPECT().GetLastContributions(mock.Anything, "user@x.com", mock.Anything).
+		Return(nil, fmt.Errorf("accounting service unreachable")).Once()
+
+	_, err := fetchDonationSums(context.Background(), priorityClient, mockAcc, testQuickbooksCompanyID, []string{"user@x.com"}, 3.1, 3.6)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDonationFetch)
+	assert.Contains(t, err.Error(), "user@x.com")
+}
+
+func TestFetchDonationSums_AccountingFoundEmptyContributions_StillCountsAsSuccess(t *testing.T) {
+	server := noPriorityCustomersServer()
+	defer server.Close()
+	priorityClient := newPriorityTestClient(server.URL)
+
+	// Found:true but Total is empty — user exists in QB but has no qualifying contributions.
+	mockAcc := accountingmocks.NewMockAccountingService(t)
+	mockAcc.EXPECT().GetLastContributions(mock.Anything, "user@x.com", mock.Anything).
+		Return(&accounting.ContributionsResult{Found: true, Total: map[string]float64{}}, nil).Once()
+
+	result, err := fetchDonationSums(context.Background(), priorityClient, mockAcc, testQuickbooksCompanyID, []string{"user@x.com"}, 3.1, 3.6)
+
+	require.NoError(t, err)
+	assert.Equal(t, 0.0, result.totalNIS)
+	assert.Equal(t, []string{"user@x.com"}, result.successEmails)
+	assert.Contains(t, result.fetchNote, "no Priority record")
+	assert.NotContains(t, result.fetchNote, "no QuickBooks record")
+}
+
+func TestFetchDonationSums_PassesConfiguredCompanyIDToAccountingClient(t *testing.T) {
+	server := noPriorityCustomersServer()
+	defer server.Close()
+	priorityClient := newPriorityTestClient(server.URL)
+
+	expectedCompany := "qb-realm-123"
+	mockAcc := accountingmocks.NewMockAccountingService(t)
+	mockAcc.EXPECT().GetLastContributions(
+		mock.Anything,
+		"user@x.com",
+		mock.MatchedBy(func(p *string) bool { return p != nil && *p == expectedCompany }),
+	).Return(&accounting.ContributionsResult{Found: false}, nil).Once()
+
+	_, err := fetchDonationSums(context.Background(), priorityClient, mockAcc, expectedCompany, []string{"user@x.com"}, 3.1, 3.6)
+
+	require.NoError(t, err)
 }
 
 // --- buildExplain ---
@@ -478,7 +606,7 @@ func TestEvaluateV2Price_NoSpouse_NoDiscount(t *testing.T) {
 		},
 	}
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, 10, "kc-1", email, "IL")
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL")
 	require.NoError(t, err)
 
 	assert.Equal(t, 10, eval.AccountID)
@@ -501,7 +629,7 @@ func TestEvaluateV2Price_NoSpouse_WithDiscount(t *testing.T) {
 		},
 	}
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, 10, "kc-1", email, "IL")
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL")
 	require.NoError(t, err)
 
 	assert.True(t, eval.Discounts[0].Eligible)
@@ -516,7 +644,7 @@ func TestEvaluateV2Price_ProfileNotFound_FallsBackToAccountEmail(t *testing.T) {
 	// No profile in stub → ErrNotFound → fallback to account email
 	profileSvc := &stubProfileService{profiles: map[string]*profiles.Profile{}}
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, 10, "kc-1", "fallback@x.com", "IL")
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", "fallback@x.com", "IL")
 	require.NoError(t, err)
 	assert.NotNil(t, eval)
 	assert.Equal(t, "IL", eval.CountryCode)
@@ -540,7 +668,7 @@ func TestEvaluateV2Price_WithSpouse_NeitherGetsDiscount(t *testing.T) {
 		},
 	}
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, 10, "kc-1", primaryEmail, "IL")
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", primaryEmail, "IL")
 	require.NoError(t, err)
 
 	assert.False(t, eval.Discounts[0].Eligible)
@@ -567,7 +695,7 @@ func TestEvaluateV2Price_WithSpouse_BothGetDiscount(t *testing.T) {
 		},
 	}
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, 10, "kc-1", primaryEmail, "IL")
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", primaryEmail, "IL")
 	require.NoError(t, err)
 
 	assert.True(t, eval.Discounts[0].Eligible)
@@ -597,7 +725,7 @@ func TestEvaluateV2Price_FinalPriceRoundedToTwoDecimals(t *testing.T) {
 		},
 	}
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, 10, "kc-1", email, "AU")
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "AU")
 	require.NoError(t, err)
 
 	assert.True(t, eval.Discounts[0].Eligible)
@@ -622,7 +750,7 @@ func TestEvaluateV2Price_SpouseDonationsCountedWithoutProfile(t *testing.T) {
 		},
 	}
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, 10, "kc-1", primaryEmail, "IL")
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", primaryEmail, "IL")
 	require.NoError(t, err)
 	assert.NotNil(t, eval)
 }
@@ -634,7 +762,7 @@ func TestEvaluateV2Price_ProfileServiceError_ReturnsError(t *testing.T) {
 	client := newPriorityTestClient(server.URL)
 	profileSvc := &errorProfileService{err: fmt.Errorf("connection refused")}
 
-	_, err := EvaluateV2Price(context.Background(), profileSvc, client, 10, "kc-1", "test@x.com", "IL")
+	_, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", "test@x.com", "IL")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "profileService.GetProfileByKeycloakID")
 }
@@ -665,7 +793,7 @@ func TestEvaluateV2Price_SpouseProfileError_ReturnsError(t *testing.T) {
 		spouseErr:      fmt.Errorf("timeout"),
 	}
 
-	_, err := EvaluateV2Price(context.Background(), profileSvc, client, 10, "kc-1", primaryEmail, "IL")
+	_, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", primaryEmail, "IL")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "spouse")
 }
@@ -704,7 +832,7 @@ func TestEvaluateV2Price_DonationFetchError_ReturnsError(t *testing.T) {
 		},
 	}
 
-	_, err := EvaluateV2Price(context.Background(), profileSvc, client, 10, "kc-1", email, "IL")
+	_, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrDonationFetch)
 }
@@ -743,7 +871,7 @@ func TestEvaluateV2Price_PartialDonationFetchError_ReturnsError(t *testing.T) {
 		},
 	}
 
-	_, err := EvaluateV2Price(context.Background(), profileSvc, client, 10, "kc-1", good, "IL")
+	_, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", good, "IL")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrDonationFetch)
 }

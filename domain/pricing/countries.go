@@ -87,12 +87,15 @@ var countryToGroup = map[string]string{
 	"GB": "High",   // United Kingdom
 	"GD": "Medium", // Grenada
 	"GE": "Low",    // Georgia
+	"GF": "High",   // French Guiana (French overseas department)
 	"GH": "Low",    // Ghana
 	"GM": "Low",    // Gambia
 	"GN": "Low",    // Guinea
+	"GP": "High",   // Guadeloupe (French overseas department)
 	"GQ": "Medium", // Equatorial Guinea
 	"GR": "High",   // Greece
 	"GT": "Low",    // Guatemala
+	"GU": "High",   // Guam (US territory)
 	"GW": "Low",    // Guinea-Bissau
 	"GY": "High",   // Guyana
 	"HK": "High",   // Hong Kong
@@ -144,6 +147,7 @@ var countryToGroup = map[string]string{
 	"MM": "Low",    // Myanmar
 	"MN": "Low",    // Mongolia
 	"MO": "High",   // Macao
+	"MQ": "High",   // Martinique (French overseas department)
 	"MR": "Low",    // Mauritania
 	"MT": "High",   // Malta
 	"MU": "Medium", // Mauritius
@@ -168,6 +172,7 @@ var countryToGroup = map[string]string{
 	"PH": "Low",    // Philippines
 	"PK": "Low",    // Pakistan
 	"PL": "Medium", // Poland
+	"PM": "High",   // Saint Pierre and Miquelon (French overseas collectivity)
 	"PS": "Low",    // Palestine
 	"PT": "Medium", // Portugal
 	"PW": "Medium", // Palau
@@ -216,11 +221,13 @@ var countryToGroup = map[string]string{
 	"VA": "Medium", // Vatican City
 	"VC": "Medium", // Saint Vincent and the Grenadines
 	"VE": "Low",    // Venezuela
+	"VG": "High",   // British Virgin Islands
 	"VN": "Low",    // Vietnam
 	"VU": "Low",    // Vanuatu
 	"WS": "Low",    // Samoa
 	"XK": "Medium", // Kosovo
 	"YE": "Low",    // Yemen
+	"YT": "High",   // Mayotte (French overseas department)
 	"ZA": "Medium", // South Africa
 	"ZM": "Low",    // Zambia
 	"ZW": "Low",    // Zimbabwe
@@ -238,26 +245,21 @@ var countryToGroup = map[string]string{
 	"EH": "Undefined", // Western Sahara
 	"FK": "Undefined", // Falkland Islands (Malvinas)
 	"FO": "Undefined", // Faroe Islands
-	"GF": "Undefined", // French Guiana
 	"GG": "Undefined", // Guernsey
 	"GI": "Undefined", // Gibraltar
 	"GL": "Undefined", // Greenland
-	"GP": "Undefined", // Guadeloupe
 	"GS": "Undefined", // South Georgia and the South Sandwich Islands
-	"GU": "Undefined", // Guam
 	"HM": "Undefined", // Heard Island and McDonald Islands
 	"IM": "Undefined", // Isle of Man
 	"IO": "Undefined", // British Indian Ocean Territory
 	"JE": "Undefined", // Jersey
 	"MF": "Undefined", // Saint Martin (French part)
 	"MP": "Undefined", // Northern Mariana Islands
-	"MQ": "Undefined", // Martinique
 	"MS": "Undefined", // Montserrat
 	"NC": "Undefined", // New Caledonia
 	"NF": "Undefined", // Norfolk Island
 	"NU": "Undefined", // Niue
 	"PF": "Undefined", // French Polynesia
-	"PM": "Undefined", // Saint Pierre and Miquelon
 	"PN": "Undefined", // Pitcairn
 	"PR": "Undefined", // Puerto Rico
 	"SH": "Undefined", // Saint Helena
@@ -267,10 +269,8 @@ var countryToGroup = map[string]string{
 	"TC": "Undefined", // Turks and Caicos Islands
 	"TF": "Undefined", // French Southern Territories
 	"TK": "Undefined", // Tokelau
-	"VG": "Undefined", // British Virgin Islands
 	"VI": "Undefined", // US Virgin Islands
 	"WF": "Undefined", // Wallis and Futuna
-	"YT": "Undefined", // Mayotte
 }
 
 // countryToCurrency maps country codes to their currencies
@@ -302,7 +302,6 @@ var countryToCurrency = map[string]string{
 	"NL": common.CurrencyEUR, // Netherlands
 	"PL": common.CurrencyEUR, // Poland
 	"PT": common.CurrencyEUR, // Portugal
-	"RE": common.CurrencyEUR, // Reunion
 	"RO": common.CurrencyEUR, // Romania
 	"SK": common.CurrencyEUR, // Slovakia
 	"SI": common.CurrencyEUR, // Slovenia
@@ -313,6 +312,14 @@ var countryToCurrency = map[string]string{
 	"IS": common.CurrencyEUR, // Iceland
 	"GB": common.CurrencyEUR, // United Kingdom
 	"LI": common.CurrencyEUR, // Liechtenstein
+
+	// French overseas departments — use EUR like metropolitan France
+	"RE": common.CurrencyEUR, // Réunion
+	"GP": common.CurrencyEUR, // Guadeloupe
+	"GF": common.CurrencyEUR, // French Guiana
+	"MQ": common.CurrencyEUR, // Martinique
+	"YT": common.CurrencyEUR, // Mayotte
+	"PM": common.CurrencyEUR, // Saint Pierre and Miquelon
 }
 
 // priceByCurrencyAndGroup maps (Currency, Group) combinations to base prices

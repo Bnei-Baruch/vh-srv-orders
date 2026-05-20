@@ -2,12 +2,12 @@ package pricing
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/volatiletech/null/v9"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/accounting"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/priority"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
 )
@@ -35,6 +35,8 @@ func GetMonthlyPrice(
 	ctx context.Context,
 	profileService profiles.ProfileService,
 	priorityClient *priority.Client,
+	accountingService accounting.AccountingService,
+	quickbooksCompanyID string,
 	accountID int,
 	keycloakID string,
 	email string,
@@ -57,7 +59,7 @@ func GetMonthlyPrice(
 		res.V1AllPrices = allV1Prices()
 
 	case "v2":
-		v2eval, err := evaluateV2(ctx, profileService, priorityClient, accountID, keycloakID, email, country)
+		v2eval, err := EvaluateV2Price(ctx, profileService, priorityClient, accountingService, quickbooksCompanyID, accountID, keycloakID, email, country)
 		if err != nil {
 			return nil, err
 		}
@@ -68,7 +70,7 @@ func GetMonthlyPrice(
 		// Auto-route using the same eligibility criteria as billing.
 		if V2Eligible(country) {
 			pricingVersion = "v2"
-			v2eval, err := evaluateV2(ctx, profileService, priorityClient, accountID, keycloakID, email, country)
+			v2eval, err := EvaluateV2Price(ctx, profileService, priorityClient, accountingService, quickbooksCompanyID, accountID, keycloakID, email, country)
 			if err != nil {
 				return nil, err
 			}
@@ -100,19 +102,4 @@ func allV1Prices() map[string]float64 {
 		result[strings.ToLower(currency)] = price.Amount
 	}
 	return result
-}
-
-func evaluateV2(
-	ctx context.Context,
-	profileService profiles.ProfileService,
-	priorityClient *priority.Client,
-	accountID int,
-	keycloakID string,
-	email string,
-	country string,
-) (*V2PricingEvaluation, error) {
-	if common.Config.PriorityBaseURL == "" {
-		return nil, fmt.Errorf("v2 pricing requires PRIORITY_BASE_URL to be configured")
-	}
-	return EvaluateV2Price(ctx, profileService, priorityClient, accountID, keycloakID, email, country)
 }

@@ -17,9 +17,25 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/internal/mocks"
 	pelecardmock "gitlab.bbdev.team/vh/pay/orders/internal/mocks/pkg"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/pelecard"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
+
+// failingProfileService returns the configured error for every method.
+type failingProfileService struct{ err error }
+
+func (f *failingProfileService) GetProfileByKeycloakID(context.Context, string) (*profiles.Profile, error) {
+	return nil, f.err
+}
+
+func (f *failingProfileService) LookupProfile(context.Context, string) (*profiles.Profile, error) {
+	return nil, f.err
+}
+
+func (f *failingProfileService) LookupProfileByKeycloakId(context.Context, string) (*profiles.Profile, error) {
+	return nil, f.err
+}
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -29,7 +45,7 @@ func newTestService(t *testing.T) (*BillingService, *mocks.MockOrdersRepository,
 	mockRepo := mocks.NewMockOrdersRepository(t)
 	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
 	mockExecutor := pelecardmock.NewMockChargeExecutor(t)
-	resolver := pricing.NewPriceResolver(nil, nil) // not used in charge phase
+	resolver := pricing.NewPriceResolver(nil, nil, nil, "") // not used in charge phase
 	emitter := &events.NoopEmitter{}
 	service := NewBillingService(mockRepo, mockPelecard, emitter, resolver, mockExecutor)
 	return service, mockRepo, mockExecutor
@@ -75,7 +91,7 @@ func TestPreResolve_AllOrdersResolved(t *testing.T) {
 	ctx := context.Background()
 
 	data := testRenewalData()
-	data.Account.Country = null.StringFrom("US")
+	data.Account.Country = null.StringFrom("GB")
 	data.Order.Currency = null.StringFrom(common.CurrencyUSD)
 
 	mockRepo.EXPECT().LoadRenewalData(ctx, uint(1)).Return(data, nil)
@@ -94,7 +110,7 @@ func TestPreResolve_V1CountryResolvesSuccessfully(t *testing.T) {
 	ctx := context.Background()
 
 	data := testRenewalData()
-	data.Account.Country = null.StringFrom("US") // V1 country
+	data.Account.Country = null.StringFrom("GB") // V1 country (excluded from v2)
 	data.Order.Currency = null.StringFrom(common.CurrencyUSD)
 
 	mockRepo.EXPECT().LoadRenewalData(ctx, uint(1)).Return(data, nil)
@@ -122,16 +138,15 @@ func TestPreResolve_LoadDataError_FlagsPricingError(t *testing.T) {
 }
 
 func TestPreResolve_PricingError_FlagsPricingError(t *testing.T) {
-	// Ensure Priority is not configured so V2 pricing fails cleanly (no nil panic on profileService)
-	origURL := common.Config.PriorityBaseURL
-	common.Config.PriorityBaseURL = ""
-	defer func() { common.Config.PriorityBaseURL = origURL }()
-
 	service, mockRepo, _ := newTestService(t)
+	// Override resolver with one whose profile lookup fails — forces V2 pricing to error.
+	service.resolver = pricing.NewPriceResolver(
+		&failingProfileService{err: errors.New("forced profile error")},
+		nil, nil, "",
+	)
 	ctx := context.Background()
 
-	data := testRenewalData()
-	data.Account.Country = null.StringFrom("IL") // V2 eligible but no Priority configured
+	data := testRenewalData() // already IL + UserKey set
 
 	mockRepo.EXPECT().LoadRenewalData(ctx, uint(1)).Return(data, nil)
 	mockRepo.EXPECT().FlagOrder(ctx, 1, common.OrderFlagPricingError).Return(nil)
@@ -147,7 +162,7 @@ func TestPreResolve_MixedSuccessAndFailure(t *testing.T) {
 	ctx := context.Background()
 
 	goodData := testRenewalData()
-	goodData.Account.Country = null.StringFrom("US")
+	goodData.Account.Country = null.StringFrom("GB")
 	goodData.Order.Currency = null.StringFrom(common.CurrencyUSD)
 
 	mockRepo.EXPECT().LoadRenewalData(ctx, uint(1)).Return(goodData, nil)
@@ -166,7 +181,7 @@ func TestPreResolve_FlagOrderError_ContinuesProcessing(t *testing.T) {
 	ctx := context.Background()
 
 	goodData := testRenewalData()
-	goodData.Account.Country = null.StringFrom("US")
+	goodData.Account.Country = null.StringFrom("GB")
 	goodData.Order.Currency = null.StringFrom(common.CurrencyUSD)
 
 	mockRepo.EXPECT().LoadRenewalData(ctx, uint(1)).Return(nil, errors.New("fail"))
@@ -393,7 +408,7 @@ func (p *panicChargeExecutor) Execute(_ context.Context, _ *pelecard.ChargeReque
 func TestProcessWithRecovery_PanicRecovery(t *testing.T) {
 	mockRepo := mocks.NewMockOrdersRepository(t)
 	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
-	resolver := pricing.NewPriceResolver(nil, nil)
+	resolver := pricing.NewPriceResolver(nil, nil, nil, "")
 	emitter := &events.NoopEmitter{}
 	panicExec := &panicChargeExecutor{}
 	service := NewBillingService(mockRepo, mockPelecard, emitter, resolver, panicExec)
@@ -467,14 +482,14 @@ func TestChargeWithPricing_MultipleOrders_MixedOutcomes(t *testing.T) {
 
 	// Order 1: succeeds on token
 	data1 := testRenewalData()
-	data1.Account.Country = null.StringFrom("US")
+	data1.Account.Country = null.StringFrom("GB")
 	data1.Order.ID = 101
 
 	// Order 2: fails pricing (load data error)
 	// Order 3: declined on both terminals
 
 	data3 := testRenewalData()
-	data3.Account.Country = null.StringFrom("US")
+	data3.Account.Country = null.StringFrom("GB")
 	data3.Order.ID = 103
 
 	mockRepo.EXPECT().GetOrderIDsToRenew(ctx).Return([]uint{101, 102, 103}, nil)

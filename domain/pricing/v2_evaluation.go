@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/accounting"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/priority"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
@@ -22,8 +23,8 @@ const (
 	EURToNIS = 3.6 // 1 EUR = 3.6 NIS
 )
 
-// ErrDonationFetch is returned when a real API error (not "customer not found") occurs
-// while fetching Priority ERP donation data. The price must not be used when this occurs.
+// ErrDonationFetch is returned when a real API error (not "user not found") occurs
+// while fetching donation data from any source. The price must not be used when this occurs.
 var ErrDonationFetch = fmt.Errorf("donation fetch error")
 
 // DiscountType identifies a discount by name.
@@ -102,34 +103,36 @@ func (e *V2PricingEvaluation) Public() *V2PricingEvaluation {
 	return &pub
 }
 
-// donationSums holds aggregated Priority ERP donation data.
+// donationSums holds aggregated donation data across all sources (Priority + accounting).
 // Used only during v2 price calculation — never stored, logged, or returned.
 type donationSums struct {
 	perCurrency   map[string]float64
 	totalNIS      float64
-	successEmails []string // emails that returned data from Priority without error
-	fetchNote     string   // informational (e.g. "customer not found" for some emails)
+	successEmails []string // emails that returned data from at least one source without error
+	fetchNote     string   // informational (per-source "no record for: ..." markers)
 }
 
 // EvaluateV2Price computes the full v2 pricing evaluation for a member account.
 //
-// Donation amounts fetched from Priority ERP exist only in local variables
+// Donation amounts fetched from any source exist only in local variables
 // within this function. They must never be stored, logged, or returned.
 func EvaluateV2Price(
 	ctx context.Context,
 	profileService profiles.ProfileService,
 	priorityClient *priority.Client,
+	accountingService accounting.AccountingService,
+	quickbooksCompanyID string,
 	primaryAccountID int,
 	primaryKeycloakID string,
 	primaryEmail string,
 	country string,
 ) (*V2PricingEvaluation, error) {
-	log := utils.LogFor(ctx)
-	log.Info("EvaluateV2Price: start",
+	ctx = context.WithValue(ctx, common.CtxLogger, utils.LogFor(ctx).With(
 		slog.Int("account_id", primaryAccountID),
 		slog.String("keycloak_id", primaryKeycloakID),
-		slog.String("country", country),
-	)
+	))
+	log := utils.LogFor(ctx)
+	log.Info("EvaluateV2Price: start", slog.String("country", country))
 
 	base := GetCountryBasePrice(country)
 	inputs := &V2PricingEvaluation{
@@ -179,7 +182,7 @@ func EvaluateV2Price(
 	// Amounts stay in local variable only — never persisted or returned.
 	emails := deduplicateEmails(primaryEmails, spouseEmails)
 	log.Info("EvaluateV2Price: fetching donations", slog.Int("email_count", len(emails)))
-	sums, err := fetchDonationSums(ctx, priorityClient, emails, USDToNIS, EURToNIS)
+	sums, err := fetchDonationSums(ctx, priorityClient, accountingService, quickbooksCompanyID, emails, USDToNIS, EURToNIS)
 	if err != nil {
 		return nil, fmt.Errorf("fetchDonationSums: %w", err)
 	}
@@ -306,40 +309,117 @@ func collectProfileEmails(profile *profiles.Profile, fallbackEmail string) []str
 	return emails
 }
 
-// fetchDonationSums queries Priority ERP for each email and aggregates results.
-// "Customer not found" responses are treated as zero donations (not an error).
-// Any other API error is returned immediately — the price must not be used.
-// Donation amounts in the returned struct must never be stored, logged, or returned.
-func fetchDonationSums(ctx context.Context, client *priority.Client, emails []string, usdRate, eurRate float64) (donationSums, error) {
-	result := donationSums{
-		perCurrency: make(map[string]float64),
+// fetchDonationSums aggregates donations across all configured sources (Priority ERP and
+// vh-srv-accounting / QuickBooks) for the given emails. "User not found" responses from
+// either source are treated as zero donations. Any real API error from any source is
+// returned immediately — the price must not be used. Donation amounts in the returned
+// struct must never be stored, logged, or returned.
+//
+// Sources are queried in sequence so each block can be removed cleanly when its source
+// is decommissioned (Priority will eventually migrate behind vh-srv-accounting).
+func fetchDonationSums(
+	ctx context.Context,
+	priorityClient *priority.Client,
+	accountingService accounting.AccountingService,
+	quickbooksCompanyID string,
+	emails []string,
+	usdRate, eurRate float64,
+) (donationSums, error) {
+	result := donationSums{perCurrency: make(map[string]float64)}
+	successSet := make(map[string]struct{})
+	var notes []string
+
+	// Source: Priority ERP. (TODO: remove when Priority migrates into vh-srv-accounting.)
+	priorityNotFound, err := addPriorityContributions(ctx, priorityClient, emails, result.perCurrency, successSet)
+	if err != nil {
+		return donationSums{}, err
+	}
+	if len(priorityNotFound) > 0 {
+		notes = append(notes, fmt.Sprintf("no Priority record for: %s", strings.Join(priorityNotFound, ", ")))
 	}
 
-	var notFoundNotes []string
+	// Source: vh-srv-accounting (QuickBooks).
+	accountingNotFound, err := addAccountingContributions(ctx, accountingService, quickbooksCompanyID, emails, result.perCurrency, successSet)
+	if err != nil {
+		return donationSums{}, err
+	}
+	if len(accountingNotFound) > 0 {
+		notes = append(notes, fmt.Sprintf("no QuickBooks record for: %s", strings.Join(accountingNotFound, ", ")))
+	}
+
+	// Preserve input order in successEmails.
 	for _, email := range emails {
-		contributions, err := client.GetLastContributions(ctx, email)
-		if err != nil {
-			if errors.Is(err, priority.ErrNoActiveCustomers) {
-				notFoundNotes = append(notFoundNotes, email)
-				continue // no Priority account for this email — treat as zero donations
-			}
-			return donationSums{}, fmt.Errorf("client.GetLastContributions %w: %s: %v", ErrDonationFetch, email, err)
-		}
-		result.successEmails = append(result.successEmails, email)
-		for currency, amount := range contributions {
-			result.perCurrency[currency] += amount
+		if _, ok := successSet[email]; ok {
+			result.successEmails = append(result.successEmails, email)
 		}
 	}
-
-	if len(notFoundNotes) > 0 {
-		result.fetchNote = fmt.Sprintf("no Priority account for emails: %s", strings.Join(notFoundNotes, ", "))
-	}
+	result.fetchNote = strings.Join(notes, "; ")
 
 	for currency, amount := range result.perCurrency {
 		result.totalNIS += toNIS(amount, currency, usdRate, eurRate)
 	}
 
 	return result, nil
+}
+
+// addPriorityContributions queries Priority for each email and accumulates currency sums.
+// Returns the list of emails with no Priority record (ErrNoActiveCustomers).
+func addPriorityContributions(
+	ctx context.Context,
+	client *priority.Client,
+	emails []string,
+	perCurrency map[string]float64,
+	successSet map[string]struct{},
+) ([]string, error) {
+	var notFound []string
+	for _, email := range emails {
+		contributions, err := client.GetLastContributions(ctx, email)
+		if err != nil {
+			if errors.Is(err, priority.ErrNoActiveCustomers) {
+				notFound = append(notFound, email)
+				continue
+			}
+			return nil, fmt.Errorf("priorityClient.GetLastContributions %w: %s: %v", ErrDonationFetch, email, err)
+		}
+		successSet[email] = struct{}{}
+		for currency, amount := range contributions {
+			perCurrency[currency] += amount
+		}
+	}
+	return notFound, nil
+}
+
+// addAccountingContributions queries vh-srv-accounting for each email and accumulates
+// currency sums. Returns the list of emails not found in the configured QB company.
+func addAccountingContributions(
+	ctx context.Context,
+	client accounting.AccountingService,
+	companyID string,
+	emails []string,
+	perCurrency map[string]float64,
+	successSet map[string]struct{},
+) ([]string, error) {
+	var companyIDPtr *string
+	if companyID != "" {
+		companyIDPtr = &companyID
+	}
+
+	var notFound []string
+	for _, email := range emails {
+		res, err := client.GetLastContributions(ctx, email, companyIDPtr)
+		if err != nil {
+			return nil, fmt.Errorf("accountingService.GetLastContributions %w: %s: %v", ErrDonationFetch, email, err)
+		}
+		if !res.Found {
+			notFound = append(notFound, email)
+			continue
+		}
+		successSet[email] = struct{}{}
+		for currency, amount := range res.Total {
+			perCurrency[currency] += amount
+		}
+	}
+	return notFound, nil
 }
 
 // toNIS converts an amount in the given currency to NIS using the provided rates.

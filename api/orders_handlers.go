@@ -151,7 +151,6 @@ func (o *OrdersAPI) handleOrderGetByID(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": order, "success": true})
 }
 
-
 func (o *OrdersAPI) handleOrdersUpdateToken(c *gin.Context) {
 	var (
 		req repo.RequestUpdateToken

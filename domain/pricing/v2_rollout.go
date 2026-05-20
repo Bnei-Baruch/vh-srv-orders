@@ -15,40 +15,40 @@ var v2Excluded = map[string]bool{
 // Latin America and the Caribbean.
 var v2ExcludedMajorMarkets = map[string]bool{
 	// United States
-	"US": true,
+	// "US": true,
 
 	// United Kingdom
 	"GB": true,
 
 	// Canada
-	"CA": true,
+	// "CA": true,
 
 	// Latin America and the Caribbean
-	"AR": true, // Argentina
-	"BO": true, // Bolivia
-	"BR": true, // Brazil
-	"BZ": true, // Belize
-	"CL": true, // Chile
-	"CO": true, // Colombia
-	"CR": true, // Costa Rica
-	"CU": true, // Cuba
-	"DO": true, // Dominican Republic
-	"EC": true, // Ecuador
-	"GT": true, // Guatemala
-	"GY": true, // Guyana
-	"HN": true, // Honduras
-	"HT": true, // Haiti
-	"JM": true, // Jamaica
-	"MX": true, // Mexico
-	"NI": true, // Nicaragua
-	"PA": true, // Panama
-	"PE": true, // Peru
-	"PY": true, // Paraguay
-	"SR": true, // Suriname
-	"SV": true, // El Salvador
-	"TT": true, // Trinidad and Tobago
-	"UY": true, // Uruguay
-	"VE": true, // Venezuela
+	// "AR": true, // Argentina
+	// "BO": true, // Bolivia
+	// "BR": true, // Brazil
+	// "BZ": true, // Belize
+	// "CL": true, // Chile
+	// "CO": true, // Colombia
+	// "CR": true, // Costa Rica
+	// "CU": true, // Cuba
+	// "DO": true, // Dominican Republic
+	// "EC": true, // Ecuador
+	// "GT": true, // Guatemala
+	// "GY": true, // Guyana
+	// "HN": true, // Honduras
+	// "HT": true, // Haiti
+	// "JM": true, // Jamaica
+	// "MX": true, // Mexico
+	// "NI": true, // Nicaragua
+	// "PA": true, // Panama
+	// "PE": true, // Peru
+	// "PY": true, // Paraguay
+	// "SR": true, // Suriname
+	// "SV": true, // El Salvador
+	// "TT": true, // Trinidad and Tobago
+	// "UY": true, // Uruguay
+	// "VE": true, // Venezuela
 
 	// EU-27 member states
 	"AT": true, // Austria

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"gitlab.bbdev.team/vh/pay/orders/pkg/accounting"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/priority"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
 	"gitlab.bbdev.team/vh/pay/orders/repo"
@@ -20,18 +21,24 @@ type ChargePrice struct {
 // PriceResolver resolves charge prices for billing. It routes between v1 and v2 based on
 // the account's country.
 type PriceResolver struct {
-	profileService profiles.ProfileService
-	priorityClient *priority.Client
+	profileService      profiles.ProfileService
+	priorityClient      *priority.Client
+	accountingService   accounting.AccountingService
+	quickbooksCompanyID string
 }
 
 // NewPriceResolver creates a resolver for billing use.
 func NewPriceResolver(
 	profileService profiles.ProfileService,
 	priorityClient *priority.Client,
+	accountingService accounting.AccountingService,
+	quickbooksCompanyID string,
 ) *PriceResolver {
 	return &PriceResolver{
-		profileService: profileService,
-		priorityClient: priorityClient,
+		profileService:      profileService,
+		priorityClient:      priorityClient,
+		accountingService:   accountingService,
+		quickbooksCompanyID: quickbooksCompanyID,
 	}
 }
 
@@ -41,12 +48,12 @@ func NewPriceResolver(
 func (r *PriceResolver) Resolve(ctx context.Context, account *repo.Account, v1OrderCurrency string) (*ChargePrice, error) {
 	var result *ChargePrice
 	if V2Eligible(account.Country.String) {
-		eval, err := evaluateV2(
-			ctx, r.profileService, r.priorityClient,
+		eval, err := EvaluateV2Price(
+			ctx, r.profileService, r.priorityClient, r.accountingService, r.quickbooksCompanyID,
 			account.ID, account.UserKey.String, account.Email.String, account.Country.String,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("evaluateV2: %w", err)
+			return nil, fmt.Errorf("EvaluateV2Price: %w", err)
 		}
 		result = &ChargePrice{
 			Amount:         eval.FinalPrice.Amount,

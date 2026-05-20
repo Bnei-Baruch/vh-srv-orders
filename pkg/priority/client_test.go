@@ -146,6 +146,83 @@ func TestGetCustomersByEmail_RequestError(t *testing.T) {
 	assert.Contains(t, err.Error(), "priority client request failed")
 }
 
+func TestGetCustomerByID_Success(t *testing.T) {
+	customer := Customer{
+		CustName: "CUST001",
+		CustDes:  "Test Customer",
+		Email:    "test@example.com",
+		StatDes:  "פעיל",
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/CUSTOMERS('CUST001')", r.URL.Path)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(customer)
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	result, err := client.GetCustomerByID(context.Background(), "CUST001")
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "CUST001", result.CustName)
+	assert.Equal(t, "Test Customer", result.CustDes)
+	assert.Equal(t, "test@example.com", result.Email)
+}
+
+func TestGetCustomerByID_NotFound_ReturnsNil(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	result, err := client.GetCustomerByID(context.Background(), "NOTFOUND")
+
+	require.NoError(t, err)
+	assert.Nil(t, result)
+}
+
+func TestGetCustomerByID_EmptyBodyReturnsNil(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	result, err := client.GetCustomerByID(context.Background(), "CUST001")
+
+	require.NoError(t, err)
+	assert.Nil(t, result)
+}
+
+func TestGetCustomerByID_APIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"error": "internal server error"}`))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	result, err := client.GetCustomerByID(context.Background(), "CUST001")
+
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "priority API error [500]")
+}
+
+func TestGetCustomerByID_RequestError(t *testing.T) {
+	client := newTestClient("http://localhost:1") // port 1 is typically closed
+	result, err := client.GetCustomerByID(context.Background(), "CUST001")
+
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "priority client request failed")
+}
+
 func TestGetActiveCustomersByEmail_FiltersInactiveFlag(t *testing.T) {
 	inactive := "Y"
 	response := CustomerODataResponse{

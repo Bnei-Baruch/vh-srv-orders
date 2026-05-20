@@ -8,11 +8,14 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/volatiletech/null/v9"
 
 	"gitlab.bbdev.team/vh/pay/orders/api/middleware"
 	"gitlab.bbdev.team/vh/pay/orders/common"
+	accountingmocks "gitlab.bbdev.team/vh/pay/orders/internal/mocks/pkg"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/accounting"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/priority"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
 	"gitlab.bbdev.team/vh/pay/orders/repo"
@@ -71,7 +74,7 @@ func TestHandleMonthlyPriceByKCID_T1_NonILUsesV1(t *testing.T) {
 
 	POST(t, a, "/v2/account/", repo.Account{
 		UserKey: null.StringFrom(USER_KEY),
-		Country: null.StringFrom("US"),
+		Country: null.StringFrom("GB"),
 	}, http.StatusCreated)
 
 	got := GET(t, a, fmt.Sprintf("/v2/pricing/monthly/%s?pricing_version=t1&currency=USD", USER_KEY), http.StatusOK)
@@ -115,15 +118,27 @@ func TestHandleMonthlyPriceByKCID_DonationFetchError_ReturnsDegradedResponse(t *
 	}))
 	defer priorityServer.Close()
 
-	origURL := common.Config.PriorityBaseURL
+	origPriorityURL := common.Config.PriorityBaseURL
+	origAccountingURL := common.Config.AccountingServiceUrl
 	common.Config.PriorityBaseURL = priorityServer.URL
-	defer func() { common.Config.PriorityBaseURL = origURL }()
+	common.Config.AccountingServiceUrl = "http://accounting.test"
+	defer func() {
+		common.Config.PriorityBaseURL = origPriorityURL
+		common.Config.AccountingServiceUrl = origAccountingURL
+	}()
 
 	a := NewTestApp(t)
 	defer CloseTestApp(a)
 
 	a.ordersAPI.SetPriorityClient(priority.NewClient())
 	a.ordersAPI.SetProfileService(&notFoundProfileService{})
+
+	// Accounting is queried after Priority; Priority fails first, so this mock won't be called.
+	mockAcc := accountingmocks.NewMockAccountingService(t)
+	mockAcc.EXPECT().GetLastContributions(mock.Anything, mock.Anything, mock.Anything).
+		Return(&accounting.ContributionsResult{Found: false}, nil).Maybe()
+	a.ordersAPI.SetAccountingService(mockAcc)
+	a.ordersAPI.SetQuickbooksCompanyID("test-company")
 
 	POST_ROOT(t, a, "/v2/account/", repo.Account{
 		UserKey: null.StringFrom(USER_KEY),

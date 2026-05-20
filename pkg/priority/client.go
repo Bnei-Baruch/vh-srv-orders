@@ -65,6 +65,7 @@ type Client struct {
 func NewClient() *Client {
 	client := resty.New()
 	client.SetBaseURL(common.Config.PriorityBaseURL)
+	client.SetTimeout(30 * time.Second)
 	client.SetHeaders(map[string]string{
 		"Accept":       "application/json",
 		"Content-Type": "application/json",
@@ -116,6 +117,36 @@ func (c *Client) GetCustomersByEmail(ctx context.Context, email string) ([]Custo
 	}
 
 	return result.Value, nil
+}
+
+// GetCustomerByID fetches a single customer from Priority ERP by CUSTNAME (customer code).
+// Returns (nil, nil) on 404.
+func (c *Client) GetCustomerByID(ctx context.Context, customerID string) (*Customer, error) {
+	path := fmt.Sprintf("CUSTOMERS('%s')", customerID)
+
+	req := c.client.NewRequest()
+	req.SetContext(ctx)
+
+	resp, err := req.
+		SetResult(&Customer{}).
+		Get(path)
+
+	if err != nil {
+		return nil, fmt.Errorf("priority client request failed: %w", err)
+	}
+
+	if resp.IsError() {
+		if resp.StatusCode() == http.StatusNotFound {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("priority API error [%d]: %s", resp.StatusCode(), resp.String())
+	}
+
+	customer, _ := resp.Result().(*Customer)
+	if customer == nil || customer.CustName == "" {
+		return nil, nil
+	}
+	return customer, nil
 }
 
 // GetActiveCustomersByEmail returns only active customers for the given email.

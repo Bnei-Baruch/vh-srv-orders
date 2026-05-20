@@ -1,8 +1,13 @@
 package cmd
 
 import (
+	"log/slog"
+
 	"github.com/spf13/cobra"
+
 	"gitlab.bbdev.team/vh/pay/orders/api"
+	"gitlab.bbdev.team/vh/pay/orders/domain/pricing"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 )
 
 func init() {
@@ -16,6 +21,10 @@ var serverCmd = &cobra.Command{
 }
 
 func serverFn(cmd *cobra.Command, args []string) {
+	if err := pricing.ValidateConfig(); err != nil {
+		utils.LogFatal("pricing.ValidateConfig", slog.Any("err", err))
+	}
+
 	app := api.NewApp()
 	app.Initialize()
 	defer app.Shutdown()

@@ -30,6 +30,8 @@ type envConfig struct {
 	KeycloakClientSecret string `envconfig:"KEYCLOAK_CLIENT_SECRET"`
 
 	ProfileServiceUrl    string `envconfig:"PROFILE_SERVICE_URL"`
+	AccountingServiceUrl string `envconfig:"ACCOUNTING_SERVICE_URL"`
+	QuickbooksCompanyID  string `envconfig:"QUICKBOOKS_COMPANY_ID"`
 	GoogleAppCredentials string `envconfig:"GOOGLE_APPLICATION_CREDENTIALS"`
 
 	NatsUrl                     string `envconfig:"NATS_URL"`

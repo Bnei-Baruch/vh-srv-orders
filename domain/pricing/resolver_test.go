@@ -13,10 +13,10 @@ import (
 )
 
 func TestResolve_V1ForExcludedCountry(t *testing.T) {
-	r := NewPriceResolver(nil, nil)
+	r := NewPriceResolver(nil, nil, nil, "")
 	account := &repo.Account{
 		ID:      1,
-		Country: null.StringFrom("US"),
+		Country: null.StringFrom("GB"),
 		UserKey: null.StringFrom("kc1"),
 		Email:   null.StringFrom("user@example.com"),
 	}
@@ -29,7 +29,7 @@ func TestResolve_V1ForExcludedCountry(t *testing.T) {
 }
 
 func TestResolve_V1FallsBackToUSDForUnknownCurrency(t *testing.T) {
-	r := NewPriceResolver(nil, nil)
+	r := NewPriceResolver(nil, nil, nil, "")
 	account := &repo.Account{
 		ID:      1,
 		Country: null.StringFrom("GB"),
@@ -42,7 +42,7 @@ func TestResolve_V1FallsBackToUSDForUnknownCurrency(t *testing.T) {
 }
 
 func TestResolve_V1NIS(t *testing.T) {
-	r := NewPriceResolver(nil, nil)
+	r := NewPriceResolver(nil, nil, nil, "")
 	account := &repo.Account{
 		ID:      1,
 		Country: null.StringFrom("DE"), // EU excluded
@@ -52,17 +52,4 @@ func TestResolve_V1NIS(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 80.0, result.Amount)
 	assert.Equal(t, common.CurrencyNIS, result.Currency)
-}
-
-func TestResolve_V2ErrorWhenPriorityNotConfigured(t *testing.T) {
-	r := NewPriceResolver(nil, nil)
-	account := &repo.Account{
-		ID:      1,
-		Country: null.StringFrom("IL"), // v2 eligible
-		UserKey: null.StringFrom("kc1"),
-		Email:   null.StringFrom("user@example.com"),
-	}
-	_, err := r.Resolve(context.Background(), account, common.CurrencyNIS)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "PRIORITY_BASE_URL")
 }

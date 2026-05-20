@@ -15,6 +15,7 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/domain/billing"
 	"gitlab.bbdev.team/vh/pay/orders/domain/pricing"
 	"gitlab.bbdev.team/vh/pay/orders/events"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/accounting"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/keycloak"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/pelecard"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/priority"
@@ -243,6 +244,10 @@ func initBillingInfra() (events.EventEmitter, *repo.OrdersDB, func(), error) {
 // buildChargeableBillingService wires a BillingService with charge executor and pricing resolver.
 // Used by commands that perform charging (start, retry-pricing-errors).
 func buildChargeableBillingService(ordersDB *repo.OrdersDB, eventEmitter events.EventEmitter, dryRun bool) *billing.BillingService {
+	if err := pricing.ValidateConfig(); err != nil {
+		utils.LogFatal("pricing.ValidateConfig", slog.Any("err", err))
+	}
+
 	pelecardClient := pelecard.NewClient()
 	var chargeExecutor pelecard.ChargeExecutor
 	if dryRun {
@@ -253,7 +258,9 @@ func buildChargeableBillingService(ordersDB *repo.OrdersDB, eventEmitter events.
 	profileService := profiles.NewProfileServiceAPI(keycloak.NewClient())
 	priorityClient := priority.NewClient()
 	priorityClient.SetCacheEnabled(true)
-	resolver := pricing.NewPriceResolver(profileService, priorityClient)
+	accountingClient := accounting.NewAccountingServiceAPI(keycloak.NewClient())
+	accountingClient.SetCacheEnabled(true)
+	resolver := pricing.NewPriceResolver(profileService, priorityClient, accountingClient, common.Config.QuickbooksCompanyID)
 	return billing.NewBillingService(ordersDB, pelecardClient, eventEmitter, resolver, chargeExecutor)
 }
 

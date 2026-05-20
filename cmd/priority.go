@@ -35,6 +35,22 @@ var accountReceivablesCmd = &cobra.Command{
 	Run:   accountReceivablesFn,
 }
 
+var getCustomerByIDCmd = &cobra.Command{
+	Use:   "get-customer-by-id [customerID]",
+	Short: "Get customer details by Priority customer ID (CUSTNAME)",
+	Long:  "Fetch a single customer from Priority ERP by CUSTNAME (customer code)",
+	Args:  cobra.ExactArgs(1),
+	Run:   getCustomerByIDFn,
+}
+
+var accountReceivablesByIDCmd = &cobra.Command{
+	Use:   "account-receivables-by-id [customerID]",
+	Short: "Fetch account receivables by Priority customer ID (CUSTNAME)",
+	Long:  "Fetch all account receivables for the given Priority customer ID (CUSTNAME) directly, without an email lookup",
+	Args:  cobra.ExactArgs(1),
+	Run:   accountReceivablesByIDFn,
+}
+
 var lastContributionsCmd = &cobra.Command{
 	Use:   "last-contributions [email]",
 	Short: "Get last contributions by email",
@@ -50,6 +66,8 @@ func init() {
 	priorityCmd.AddCommand(getCustomerCmd)
 
 	priorityCmd.AddCommand(accountReceivablesCmd)
+	priorityCmd.AddCommand(getCustomerByIDCmd)
+	priorityCmd.AddCommand(accountReceivablesByIDCmd)
 	priorityCmd.AddCommand(lastContributionsCmd)
 }
 
@@ -176,6 +194,93 @@ func getCustomerFn(cmd *cobra.Command, args []string) {
 		fmt.Println(string(customerJSON))
 	}
 
+	fmt.Println("\n" + strings.Repeat("=", 82))
+}
+
+func getCustomerByIDFn(cmd *cobra.Command, args []string) {
+	customerID := args[0]
+
+	if common.Config.PriorityBaseURL == "" {
+		slog.Error("PRIORITY_BASE_URL environment variable is required")
+		os.Exit(1)
+	}
+	if common.Config.PriorityUsername == "" {
+		slog.Error("PRIORITY_USERNAME environment variable is required")
+		os.Exit(1)
+	}
+	if common.Config.PriorityPassword == "" {
+		slog.Error("PRIORITY_PASSWORD environment variable is required")
+		os.Exit(1)
+	}
+
+	client := priority.NewClient()
+	ctx := context.Background()
+
+	slog.Info("Fetching customer from Priority ERP", slog.String("customerID", customerID))
+
+	customer, err := client.GetCustomerByID(ctx, customerID)
+	if err != nil {
+		slog.Error("Failed to fetch customer", slog.Any("error", err))
+		os.Exit(1)
+	}
+	if customer == nil {
+		fmt.Printf("\nNo customer found for ID: %s\n", customerID)
+		return
+	}
+
+	fmt.Printf("\nCustomer %s (Status: %s):\n", customer.CustName, customer.StatDes)
+	fmt.Println(strings.Repeat("=", 82))
+	customerJSON, err := json.MarshalIndent(customer, "  ", "  ")
+	if err != nil {
+		slog.Error("Failed to format customer", slog.Any("error", err))
+		os.Exit(1)
+	}
+	fmt.Println(string(customerJSON))
+	fmt.Println("\n" + strings.Repeat("=", 82))
+}
+
+func accountReceivablesByIDFn(cmd *cobra.Command, args []string) {
+	customerID := args[0]
+
+	if common.Config.PriorityBaseURL == "" {
+		slog.Error("PRIORITY_BASE_URL environment variable is required")
+		os.Exit(1)
+	}
+	if common.Config.PriorityUsername == "" {
+		slog.Error("PRIORITY_USERNAME environment variable is required")
+		os.Exit(1)
+	}
+	if common.Config.PriorityPassword == "" {
+		slog.Error("PRIORITY_PASSWORD environment variable is required")
+		os.Exit(1)
+	}
+
+	client := priority.NewClient()
+	ctx := context.Background()
+
+	slog.Info("Fetching account receivables from Priority ERP", slog.String("customerID", customerID))
+
+	items, err := client.GetAccountReceivables(ctx, customerID)
+	if err != nil {
+		slog.Error("Failed to fetch account receivables", slog.Any("error", err))
+		os.Exit(1)
+	}
+	if len(items) == 0 {
+		fmt.Printf("\nNo account receivables found for customer ID: %s\n", customerID)
+		return
+	}
+
+	fmt.Printf("\nFound %d account receivable item(s) for customer ID: %s\n\n", len(items), customerID)
+	fmt.Println(strings.Repeat("=", 82))
+	for i, item := range items {
+		fmt.Printf("\nAccount Receivable Item #%d:\n", i+1)
+		itemJSON, err := json.MarshalIndent(item, "  ", "  ")
+		if err != nil {
+			fmt.Printf("  Error formatting account receivable item: %v\n", err)
+			continue
+		}
+		fmt.Println(string(itemJSON))
+	}
 	fmt.Println("\n" + strings.Repeat("=", 82))
 }
 

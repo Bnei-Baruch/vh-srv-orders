@@ -12,11 +12,11 @@ import (
 // It owns the "degraded" concept (donation fetch error) — the pricing package
 // always returns errors; this layer decides what to present to the client.
 type monthlyPriceResponse struct {
-	Amount         float64             `json:"amount"`
-	Currency       string              `json:"currency"`
-	PricingVersion string              `json:"pricing_version"`
-	V2Details      *v2DetailsResponse  `json:"v2_details,omitempty"`
-	V1AllPrices    map[string]float64  `json:"v1_all_prices,omitempty"`
+	Amount         float64            `json:"amount"`
+	Currency       string             `json:"currency"`
+	PricingVersion string             `json:"pricing_version"`
+	V2Details      *v2DetailsResponse `json:"v2_details,omitempty"`
+	V1AllPrices    map[string]float64 `json:"v1_all_prices,omitempty"`
 }
 
 type v2DetailsResponse struct {

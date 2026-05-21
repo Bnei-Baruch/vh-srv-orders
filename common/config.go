@@ -1,6 +1,11 @@
 package common
 
-import "github.com/kelseyhightower/envconfig"
+import (
+	"log/slog"
+	"os"
+
+	"github.com/kelseyhightower/envconfig"
+)
 
 type envConfig struct {
 	Mode string `envconfig:"APP_MODE"`
@@ -50,5 +55,8 @@ type envConfig struct {
 var Config = new(envConfig)
 
 func LoadConfig() {
-	envconfig.Process("LIST", Config)
+	if err := envconfig.Process("LIST", Config); err != nil {
+		slog.Error("envconfig.Process", slog.Any("err", err))
+		os.Exit(1)
+	}
 }

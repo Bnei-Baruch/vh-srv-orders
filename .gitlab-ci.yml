@@ -111,9 +111,6 @@ deploy_staging:
     ACCOUNTING_SERVICE_URL: ${DYN_STAGING_ACCOUNTING_SERVICE_URL}
     SENDGRID_API_KEY: ${SENDGRID_API_KEY}
     SENTRY_DSN: ${STAGING_ORDERS_SENTRY_DSN}
-    PRIORITY_BASE_URL: "http://priority.staging"
-    PRIORITY_USERNAME: "staging"
-    PRIORITY_PASSWORD: "staging"
     QUICKBOOKS_COMPANY_ID: ${DYN_STAGING_QUICKBOOKS_COMPANY_ID}
   image: gitlab.bbdev.team:5050/vh/buildutils/buildutil:0.8.0
   stage: deploy

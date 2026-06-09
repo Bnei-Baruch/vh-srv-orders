@@ -11,23 +11,7 @@ import (
 	"github.com/volatiletech/null/v9"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
-	"gitlab.bbdev.team/vh/pay/orders/events"
-	"gitlab.bbdev.team/vh/pay/orders/events/eventstest"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/testutil"
 )
-
-// setupFlagTestDB creates a test database and returns the OrdersDB and a context with event builder.
-func setupFlagTestDB(t *testing.T) (*OrdersDB, context.Context) {
-	t.Helper()
-	dbURL, err := testutil.NewTestOrdersDB(t, context.Background())
-	require.NoError(t, err)
-	db, err := NewOrdersDBUrl(context.Background(), dbURL, new(events.NoopEmitter))
-	require.NoError(t, err)
-	t.Cleanup(func() { db.Close() })
-
-	ctx := eventstest.WithTestEventBuilder(t, context.Background())
-	return db, ctx
-}
 
 // createTestAccount creates an account and returns its ID.
 func createTestAccount(t *testing.T, db *OrdersDB, ctx context.Context, email string) int {
@@ -80,7 +64,7 @@ func getOrderFlag(t *testing.T, db *OrdersDB, ctx context.Context, orderID int) 
 // ---------------------------------------------------------------------------
 
 func TestFlagOrdersToRenew_NoEligibleOrders(t *testing.T) {
-	db, ctx := setupFlagTestDB(t)
+	db, ctx := newTestDB(t)
 
 	count, err := db.FlagOrdersToRenew(ctx, 6, 2024)
 
@@ -89,7 +73,7 @@ func TestFlagOrdersToRenew_NoEligibleOrders(t *testing.T) {
 }
 
 func TestFlagOrdersToRenew_SingleUserSingleOrder(t *testing.T) {
-	db, ctx := setupFlagTestDB(t)
+	db, ctx := newTestDB(t)
 	accountID := createTestAccount(t, db, ctx, "user1@test.com")
 
 	// Order with payment date in May, billing for June -> eligible
@@ -105,7 +89,7 @@ func TestFlagOrdersToRenew_SingleUserSingleOrder(t *testing.T) {
 }
 
 func TestFlagOrdersToRenew_PaymentDateInBillingMonth_NotFlagged(t *testing.T) {
-	db, ctx := setupFlagTestDB(t)
+	db, ctx := newTestDB(t)
 	accountID := createTestAccount(t, db, ctx, "user1@test.com")
 
 	// Payment date is June 1 (first of billing month) -> NOT before billing date -> skip
@@ -120,7 +104,7 @@ func TestFlagOrdersToRenew_PaymentDateInBillingMonth_NotFlagged(t *testing.T) {
 }
 
 func TestFlagOrdersToRenew_PaymentDateAfterBillingMonth_NotFlagged(t *testing.T) {
-	db, ctx := setupFlagTestDB(t)
+	db, ctx := newTestDB(t)
 	accountID := createTestAccount(t, db, ctx, "user1@test.com")
 
 	// Payment date in July, billing for June -> future payment -> skip
@@ -135,7 +119,7 @@ func TestFlagOrdersToRenew_PaymentDateAfterBillingMonth_NotFlagged(t *testing.T)
 }
 
 func TestFlagOrdersToRenew_NoSuccessStatusEligible(t *testing.T) {
-	db, ctx := setupFlagTestDB(t)
+	db, ctx := newTestDB(t)
 	accountID := createTestAccount(t, db, ctx, "user1@test.com")
 
 	orderID := insertOrder(t, db, ctx,
@@ -150,7 +134,7 @@ func TestFlagOrdersToRenew_NoSuccessStatusEligible(t *testing.T) {
 }
 
 func TestFlagOrdersToRenew_CancelledStatusNotEligible(t *testing.T) {
-	db, ctx := setupFlagTestDB(t)
+	db, ctx := newTestDB(t)
 	accountID := createTestAccount(t, db, ctx, "user1@test.com")
 
 	insertOrder(t, db, ctx, Order{
@@ -169,7 +153,7 @@ func TestFlagOrdersToRenew_CancelledStatusNotEligible(t *testing.T) {
 }
 
 func TestFlagOrdersToRenew_RegularTypeNotEligible(t *testing.T) {
-	db, ctx := setupFlagTestDB(t)
+	db, ctx := newTestDB(t)
 	accountID := createTestAccount(t, db, ctx, "user1@test.com")
 
 	insertOrder(t, db, ctx, Order{
@@ -188,7 +172,7 @@ func TestFlagOrdersToRenew_RegularTypeNotEligible(t *testing.T) {
 }
 
 func TestFlagOrdersToRenew_DonationProductNotEligible(t *testing.T) {
-	db, ctx := setupFlagTestDB(t)
+	db, ctx := newTestDB(t)
 	accountID := createTestAccount(t, db, ctx, "user1@test.com")
 
 	insertOrder(t, db, ctx, Order{
@@ -207,7 +191,7 @@ func TestFlagOrdersToRenew_DonationProductNotEligible(t *testing.T) {
 }
 
 func TestFlagOrdersToRenew_MultipleUsers(t *testing.T) {
-	db, ctx := setupFlagTestDB(t)
+	db, ctx := newTestDB(t)
 	acc1 := createTestAccount(t, db, ctx, "user1@test.com")
 	acc2 := createTestAccount(t, db, ctx, "user2@test.com")
 	acc3 := createTestAccount(t, db, ctx, "user3@test.com")
@@ -232,7 +216,7 @@ func TestFlagOrdersToRenew_MultipleUsers(t *testing.T) {
 }
 
 func TestFlagOrdersToRenew_MultipleOrdersSameUser_OnlyMostRecent(t *testing.T) {
-	db, ctx := setupFlagTestDB(t)
+	db, ctx := newTestDB(t)
 	accountID := createTestAccount(t, db, ctx, "user1@test.com")
 
 	// Older order (January)
@@ -254,7 +238,7 @@ func TestFlagOrdersToRenew_MultipleOrdersSameUser_OnlyMostRecent(t *testing.T) {
 }
 
 func TestFlagOrdersToRenew_MultipleOrdersSameUser_MostRecentInBillingMonth_NothingFlagged(t *testing.T) {
-	db, ctx := setupFlagTestDB(t)
+	db, ctx := newTestDB(t)
 	accountID := createTestAccount(t, db, ctx, "user1@test.com")
 
 	// Older order eligible by date
@@ -273,7 +257,7 @@ func TestFlagOrdersToRenew_MultipleOrdersSameUser_MostRecentInBillingMonth_Nothi
 }
 
 func TestFlagOrdersToRenew_PaymentDateLastDayBeforeBillingMonth(t *testing.T) {
-	db, ctx := setupFlagTestDB(t)
+	db, ctx := newTestDB(t)
 	accountID := createTestAccount(t, db, ctx, "user1@test.com")
 
 	// May 31, 23:59:59 - just before June 1 -> should be flagged
@@ -289,7 +273,7 @@ func TestFlagOrdersToRenew_PaymentDateLastDayBeforeBillingMonth(t *testing.T) {
 }
 
 func TestFlagOrdersToRenew_MixOfEligibleAndIneligible(t *testing.T) {
-	db, ctx := setupFlagTestDB(t)
+	db, ctx := newTestDB(t)
 	acc1 := createTestAccount(t, db, ctx, "user1@test.com")
 	acc2 := createTestAccount(t, db, ctx, "user2@test.com")
 	acc3 := createTestAccount(t, db, ctx, "user3@test.com")
@@ -333,7 +317,7 @@ func TestFlagOrdersToRenew_MixOfEligibleAndIneligible(t *testing.T) {
 }
 
 func TestFlagOrdersToRenew_JanuaryBilling(t *testing.T) {
-	db, ctx := setupFlagTestDB(t)
+	db, ctx := newTestDB(t)
 	accountID := createTestAccount(t, db, ctx, "user1@test.com")
 
 	// Payment date in December, billing for January -> eligible
@@ -353,13 +337,7 @@ func TestFlagOrdersToRenew_JanuaryBilling(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestGetFlaggedOrders(t *testing.T) {
-	dbURL, err := testutil.NewTestOrdersDB(t, context.Background())
-	require.NoError(t, err)
-	db, err := NewOrdersDBUrl(context.Background(), dbURL, new(events.NoopEmitter))
-	require.NoError(t, err)
-	defer db.Close()
-
-	ctx := eventstest.WithTestEventBuilder(t, context.Background())
+	db, ctx := newTestDB(t)
 
 	// Create an account
 	accountID, err := db.CreateAccount(ctx, Account{
@@ -419,7 +397,7 @@ func TestGetFlaggedOrders(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestGetOrderIDsWithPricingError_Empty(t *testing.T) {
-	db, ctx := setupFlagTestDB(t)
+	db, ctx := newTestDB(t)
 	accountID := createTestAccount(t, db, ctx, "test@example.com")
 	// Order with torenew flag — should NOT appear
 	insertOrder(t, db, ctx, Order{
@@ -436,7 +414,7 @@ func TestGetOrderIDsWithPricingError_Empty(t *testing.T) {
 }
 
 func TestGetOrderIDsWithPricingError_ReturnsFlaggedOrders(t *testing.T) {
-	db, ctx := setupFlagTestDB(t)
+	db, ctx := newTestDB(t)
 	acc1 := createTestAccount(t, db, ctx, "a1@example.com")
 	acc2 := createTestAccount(t, db, ctx, "a2@example.com")
 	acc3 := createTestAccount(t, db, ctx, "a3@example.com")
@@ -476,7 +454,7 @@ func TestGetOrderIDsWithPricingError_ReturnsFlaggedOrders(t *testing.T) {
 }
 
 func TestGetOrderIDsWithPricingError_IgnoresNonRecurring(t *testing.T) {
-	db, ctx := setupFlagTestDB(t)
+	db, ctx := newTestDB(t)
 	acc := createTestAccount(t, db, ctx, "test@example.com")
 
 	// Non-recurring order with pricing_error — should be excluded
@@ -498,7 +476,7 @@ func TestGetOrderIDsWithPricingError_IgnoresNonRecurring(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestMarkResolvedForRenew_EmptyInputIsNoOp(t *testing.T) {
-	db, ctx := setupFlagTestDB(t)
+	db, ctx := newTestDB(t)
 
 	err := db.MarkResolvedForRenew(ctx, nil)
 	require.NoError(t, err)
@@ -508,7 +486,7 @@ func TestMarkResolvedForRenew_EmptyInputIsNoOp(t *testing.T) {
 }
 
 func TestMarkResolvedForRenew_TransitionsPricingErrorToToRenew(t *testing.T) {
-	db, ctx := setupFlagTestDB(t)
+	db, ctx := newTestDB(t)
 	acc := createTestAccount(t, db, ctx, "test@example.com")
 
 	id1 := insertOrder(t, db, ctx, Order{
@@ -534,7 +512,7 @@ func TestMarkResolvedForRenew_TransitionsPricingErrorToToRenew(t *testing.T) {
 }
 
 func TestMarkResolvedForRenew_LeavesNonPricingErrorFlagsIntact(t *testing.T) {
-	db, ctx := setupFlagTestDB(t)
+	db, ctx := newTestDB(t)
 	acc := createTestAccount(t, db, ctx, "test@example.com")
 
 	// Order with torenew flag — should NOT be changed even if its ID is passed.
@@ -571,7 +549,7 @@ func TestMarkResolvedForRenew_LeavesNonPricingErrorFlagsIntact(t *testing.T) {
 }
 
 func TestMarkResolvedForRenew_Idempotent(t *testing.T) {
-	db, ctx := setupFlagTestDB(t)
+	db, ctx := newTestDB(t)
 	acc := createTestAccount(t, db, ctx, "test@example.com")
 	id := insertOrder(t, db, ctx, Order{
 		AccountID: null.IntFrom(acc),
@@ -588,7 +566,7 @@ func TestMarkResolvedForRenew_Idempotent(t *testing.T) {
 }
 
 func TestMarkResolvedForRenew_HandlesBatchBoundary(t *testing.T) {
-	db, ctx := setupFlagTestDB(t)
+	db, ctx := newTestDB(t)
 	acc := createTestAccount(t, db, ctx, "test@example.com")
 
 	// 1200 orders spans 3 batches of 500 (500+500+200).
@@ -616,13 +594,7 @@ func TestMarkResolvedForRenew_HandlesBatchBoundary(t *testing.T) {
 }
 
 func TestFlagOrder(t *testing.T) {
-	dbURL, err := testutil.NewTestOrdersDB(t, context.Background())
-	require.NoError(t, err)
-	db, err := NewOrdersDBUrl(context.Background(), dbURL, new(events.NoopEmitter))
-	require.NoError(t, err)
-	defer db.Close()
-
-	ctx := eventstest.WithTestEventBuilder(t, context.Background())
+	db, ctx := newTestDB(t)
 
 	// Create an account
 	accountID, err := db.CreateAccount(ctx, Account{

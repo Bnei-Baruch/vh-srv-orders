@@ -10,6 +10,7 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/pkg/accounting"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/priority"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
+	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
 // MonthlyPriceRes is the response for a monthly price query.
@@ -31,6 +32,8 @@ var v1Pricing = map[string]Price{
 // GetMonthlyPrice resolves the monthly price for a member account.
 // Pass pricingVersion "v1" or "v2" to force a specific version.
 // Any other value (including empty) auto-routes via V2Eligible — the same logic billing uses.
+// discountProvider is used to fetch and apply a manual discount after v2 evaluation.
+// Pass nil to skip manual discount lookup.
 func GetMonthlyPrice(
 	ctx context.Context,
 	profileService profiles.ProfileService,
@@ -43,6 +46,7 @@ func GetMonthlyPrice(
 	country string,
 	preferredCurrency string,
 	pricingVersion string,
+	discountProvider repo.ManualDiscountProvider,
 ) (*MonthlyPriceRes, error) {
 	if preferredCurrency == "" {
 		preferredCurrency = common.CurrencyUSD
@@ -55,11 +59,12 @@ func GetMonthlyPrice(
 
 	switch pricingVersion {
 	case "v1":
+		// v1 pricing is static; manual discounts are not applied by design.
 		price = selectV1Price(preferredCurrency)
 		res.V1AllPrices = allV1Prices()
 
 	case "v2":
-		v2eval, err := EvaluateV2Price(ctx, profileService, priorityClient, accountingService, quickbooksCompanyID, accountID, keycloakID, email, country)
+		v2eval, err := EvaluateV2Price(ctx, profileService, priorityClient, accountingService, quickbooksCompanyID, accountID, keycloakID, email, country, discountProvider)
 		if err != nil {
 			return nil, err
 		}
@@ -70,13 +75,14 @@ func GetMonthlyPrice(
 		// Auto-route using the same eligibility criteria as billing.
 		if V2Eligible(country) {
 			pricingVersion = "v2"
-			v2eval, err := EvaluateV2Price(ctx, profileService, priorityClient, accountingService, quickbooksCompanyID, accountID, keycloakID, email, country)
+			v2eval, err := EvaluateV2Price(ctx, profileService, priorityClient, accountingService, quickbooksCompanyID, accountID, keycloakID, email, country, discountProvider)
 			if err != nil {
 				return nil, err
 			}
 			price = v2eval.FinalPrice
 			res.V2Details = v2eval
 		} else {
+			// v1 pricing is static; manual discounts are not applied by design.
 			pricingVersion = "v1"
 			price = selectV1Price(preferredCurrency)
 			res.V1AllPrices = allV1Prices()

@@ -261,6 +261,7 @@ func buildChargeableBillingService(ordersDB *repo.OrdersDB, eventEmitter events.
 	accountingClient := accounting.NewAccountingServiceAPI(keycloak.NewClient())
 	accountingClient.SetCacheEnabled(true)
 	resolver := pricing.NewPriceResolver(profileService, priorityClient, accountingClient, common.Config.QuickbooksCompanyID)
+	resolver.SetManualDiscountProvider(ordersDB)
 	return billing.NewBillingService(ordersDB, pelecardClient, eventEmitter, resolver, chargeExecutor)
 }
 

@@ -15,6 +15,7 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/pkg/priority"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
+	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
 // Currency conversion ratios to NIS (hardcoded — update when rates change significantly).
@@ -40,6 +41,7 @@ type Discount struct {
 	Type       DiscountType    `json:"type"`
 	AmountPct  float64         `json:"amount_pct"` // percent off (e.g. 55.0 means pay 45%)
 	Eligible   bool            `json:"eligible"`
+	Error      bool            `json:"error,omitempty"` // true when the discount's data source failed
 	Properties json.RawMessage `json:"properties,omitempty"`
 }
 
@@ -60,9 +62,6 @@ type DonationsDiscountProperties struct {
 	SpouseKeycloakID   string `json:"spouse_keycloak_id,omitempty"`
 	SpouseGetsDiscount bool   `json:"spouse_gets_discount,omitempty"`
 
-	// Priority fetch metadata — DonationsFetchError and DonationsFetched removed:
-	// any real API error now surfaces as a pricing error before reaching this point,
-	// so donations are always successfully queried when this struct is populated.
 	DonationsFetchedEmails []string `json:"donations_fetched_emails,omitempty"`
 	DonationsFetchNote     string   `json:"donations_fetch_note,omitempty"`
 
@@ -87,6 +86,17 @@ type V2PricingEvaluation struct {
 	Explain []string `json:"explain"`
 }
 
+// HasDiscountErrors returns true if any discount's data source failed during evaluation.
+// When true, the FinalPrice cannot be trusted for billing or display.
+func (e *V2PricingEvaluation) HasDiscountErrors() bool {
+	for _, d := range e.Discounts {
+		if d.Error {
+			return true
+		}
+	}
+	return false
+}
+
 // Public returns a copy of the evaluation with admin-only fields stripped.
 // Removes Explain and each Discount's Properties, retaining only type, amount_pct, and eligible.
 func (e *V2PricingEvaluation) Public() *V2PricingEvaluation {
@@ -98,6 +108,7 @@ func (e *V2PricingEvaluation) Public() *V2PricingEvaluation {
 			Type:      d.Type,
 			AmountPct: d.AmountPct,
 			Eligible:  d.Eligible,
+			Error:     d.Error,
 		}
 	}
 	return &pub
@@ -126,6 +137,7 @@ func EvaluateV2Price(
 	primaryKeycloakID string,
 	primaryEmail string,
 	country string,
+	discountProvider repo.ManualDiscountProvider,
 ) (*V2PricingEvaluation, error) {
 	ctx = context.WithValue(ctx, common.CtxLogger, utils.LogFor(ctx).With(
 		slog.Int("account_id", primaryAccountID),
@@ -182,32 +194,34 @@ func EvaluateV2Price(
 	// Amounts stay in local variable only — never persisted or returned.
 	emails := deduplicateEmails(primaryEmails, spouseEmails)
 	log.Info("EvaluateV2Price: fetching donations", slog.Int("email_count", len(emails)))
-	sums, err := fetchDonationSums(ctx, priorityClient, accountingService, quickbooksCompanyID, emails, USDToNIS, EURToNIS)
-	if err != nil {
-		return nil, fmt.Errorf("fetchDonationSums: %w", err)
-	}
-	log.Info("EvaluateV2Price: fetched donations",
-		slog.Int("success_email_count", len(sums.successEmails)),
-		slog.String("note", sums.fetchNote),
-	)
+	sums, fetchErr := fetchDonationSums(ctx, priorityClient, accountingService, quickbooksCompanyID, emails, USDToNIS, EURToNIS)
 
-	basePriceNIS := toNIS(base.Amount, base.Currency, USDToNIS, EURToNIS)
+	var donationsDiscount Discount
+	var primaryGetsDiscount bool
 
-	discount, primaryGetsDiscount := buildDonationsDiscount(
-		sums, base, basePriceNIS,
-		primaryEmailCount, spouseEmailCount,
-		spouseKeycloakID,
-	)
-	inputs.Discounts = []Discount{discount}
-
-	if primaryGetsDiscount {
-		inputs.FinalPrice = Price{Amount: math.Round(base.Amount*(1-DonationsDiscountAmtPct/100)*100) / 100, Currency: base.Currency}
+	if fetchErr != nil {
+		log.Warn("EvaluateV2Price: donation fetch failed, recording error on discount",
+			slog.Any("err", fetchErr),
+		)
+		donationsDiscount = Discount{
+			Type:      DiscountTypeDonations,
+			AmountPct: DonationsDiscountAmtPct,
+			Eligible:  false,
+			Error:     true,
+		}
 	} else {
-		inputs.FinalPrice = Price{Amount: base.Amount, Currency: base.Currency}
-
+		log.Info("EvaluateV2Price: fetched donations",
+			slog.Int("success_email_count", len(sums.successEmails)),
+			slog.String("note", sums.fetchNote),
+		)
+		basePriceNIS := toNIS(base.Amount, base.Currency, USDToNIS, EURToNIS)
+		donationsDiscount, primaryGetsDiscount = buildDonationsDiscount(
+			sums, base, basePriceNIS,
+			primaryEmailCount, spouseEmailCount,
+			spouseKeycloakID,
+		)
 		// A log marker for edge case where one is better off alone than with a spouse.
-		// TODO: revisit this logic when we have a better way to distinguish attribution.
-		if spouseKeycloakID != "" && sums.totalNIS > 12*basePriceNIS {
+		if spouseKeycloakID != "" && !primaryGetsDiscount && sums.totalNIS > 12*basePriceNIS {
 			log.Warn("EvaluateV2Price: BETTER_OF_ALONE",
 				slog.String("keycloak_id", primaryKeycloakID),
 				slog.String("spouse_keycloak_id", spouseKeycloakID),
@@ -215,7 +229,32 @@ func EvaluateV2Price(
 		}
 	}
 
+	inputs.Discounts = []Discount{donationsDiscount}
+
+	if primaryGetsDiscount {
+		inputs.FinalPrice = Price{Amount: math.Round(base.Amount*(1-DonationsDiscountAmtPct/100)*100) / 100, Currency: base.Currency}
+	} else {
+		inputs.FinalPrice = Price{Amount: base.Amount, Currency: base.Currency}
+	}
+
 	inputs.Explain = buildExplain(inputs)
+
+	if discountProvider != nil && primaryKeycloakID != "" {
+		md, mdErr := discountProvider.GetActiveManualDiscount(ctx, primaryKeycloakID)
+		if mdErr != nil {
+			log.Warn("EvaluateV2Price: manual discount fetch failed, recording error on discount",
+				slog.Any("err", mdErr),
+			)
+			inputs.Discounts = append(inputs.Discounts, Discount{
+				Type:  DiscountTypeManual,
+				Error: true,
+			})
+			inputs.Explain = append(inputs.Explain, "manual_discount: fetch error — not applied")
+		} else {
+			applyManualDiscount(ctx, inputs, md)
+		}
+	}
+
 	return inputs, nil
 }
 
@@ -446,11 +485,22 @@ func buildExplain(inputs *V2PricingEvaluation) []string {
 	annualBase := base.Amount * 12
 	cur := base.Currency
 
+	var donationsDiscount Discount
 	var props DonationsDiscountProperties
 	for _, d := range inputs.Discounts {
 		if d.Type == DiscountTypeDonations {
+			donationsDiscount = d
 			_ = json.Unmarshal(d.Properties, &props)
 			break
+		}
+	}
+
+	if donationsDiscount.Error {
+		return []string{
+			fmt.Sprintf("1. country[%s %q] → tier lookup → %s → base: %.2f %s/mo × 12 = %.2f %s/yr",
+				inputs.CountryCode, GetCountryName(inputs.CountryCode), base.Group,
+				base.Amount, cur, annualBase, cur),
+			"2. donation data unavailable — price not discounted",
 		}
 	}
 

@@ -220,6 +220,13 @@ func (a *App) initRoutes() {
 		special.GET("/", a.ordersAPI.handleSpecialGetAll)
 	}
 
+	manualDiscount := baseV2Path.Group("/manual_discount")
+	{
+		manualDiscount.POST("/", a.ordersAPI.handleCreateOrUpdateManualDiscount)
+		manualDiscount.DELETE("/:keycloak_id", a.ordersAPI.handleCancelManualDiscount)
+		manualDiscount.GET("/", a.ordersAPI.handleGetAllManualDiscounts)
+	}
+
 	operation := baseV2Path.Group("/operation")
 	{
 		operation.POST("/", a.ordersAPI.handleOperationCreate)

@@ -91,6 +91,183 @@ func (_c *MockOrdersRepository_ClearAllFlags_Call) RunAndReturn(run func(ctx con
 	return _c
 }
 
+func (_mock *MockOrdersRepository) CancelManualDiscount(ctx context.Context, keycloakID string) error {
+	ret := _mock.Called(ctx, keycloakID)
+	if len(ret) == 0 {
+		panic("no return value specified for CancelManualDiscount")
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		return returnFunc(ctx, keycloakID)
+	}
+	return ret.Error(0)
+}
+
+type MockOrdersRepository_CancelManualDiscount_Call struct{ *mock.Call }
+
+func (_e *MockOrdersRepository_Expecter) CancelManualDiscount(ctx interface{}, keycloakID interface{}) *MockOrdersRepository_CancelManualDiscount_Call {
+	return &MockOrdersRepository_CancelManualDiscount_Call{Call: _e.mock.On("CancelManualDiscount", ctx, keycloakID)}
+}
+
+func (_c *MockOrdersRepository_CancelManualDiscount_Call) Run(run func(ctx context.Context, keycloakID string)) *MockOrdersRepository_CancelManualDiscount_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockOrdersRepository_CancelManualDiscount_Call) Return(err error) *MockOrdersRepository_CancelManualDiscount_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockOrdersRepository_CancelManualDiscount_Call) RunAndReturn(run func(context.Context, string) error) *MockOrdersRepository_CancelManualDiscount_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+func (_mock *MockOrdersRepository) UpsertManualDiscount(ctx context.Context, req repo.ManualDiscountReq) (*repo.ManualDiscount, error) {
+	ret := _mock.Called(ctx, req)
+	if len(ret) == 0 {
+		panic("no return value specified for UpsertManualDiscount")
+	}
+	var r0 *repo.ManualDiscount
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, repo.ManualDiscountReq) (*repo.ManualDiscount, error)); ok {
+		return returnFunc(ctx, req)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, repo.ManualDiscountReq) *repo.ManualDiscount); ok {
+		r0 = returnFunc(ctx, req)
+	} else if ret.Get(0) != nil {
+		r0 = ret.Get(0).(*repo.ManualDiscount)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, repo.ManualDiscountReq) error); ok {
+		r1 = returnFunc(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+type MockOrdersRepository_UpsertManualDiscount_Call struct{ *mock.Call }
+
+func (_e *MockOrdersRepository_Expecter) UpsertManualDiscount(ctx interface{}, req interface{}) *MockOrdersRepository_UpsertManualDiscount_Call {
+	return &MockOrdersRepository_UpsertManualDiscount_Call{Call: _e.mock.On("UpsertManualDiscount", ctx, req)}
+}
+
+func (_c *MockOrdersRepository_UpsertManualDiscount_Call) Run(run func(ctx context.Context, req repo.ManualDiscountReq)) *MockOrdersRepository_UpsertManualDiscount_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(repo.ManualDiscountReq))
+	})
+	return _c
+}
+
+func (_c *MockOrdersRepository_UpsertManualDiscount_Call) Return(md *repo.ManualDiscount, err error) *MockOrdersRepository_UpsertManualDiscount_Call {
+	_c.Call.Return(md, err)
+	return _c
+}
+
+func (_c *MockOrdersRepository_UpsertManualDiscount_Call) RunAndReturn(run func(context.Context, repo.ManualDiscountReq) (*repo.ManualDiscount, error)) *MockOrdersRepository_UpsertManualDiscount_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+func (_mock *MockOrdersRepository) GetActiveManualDiscount(ctx context.Context, keycloakID string) (*repo.ManualDiscount, error) {
+	ret := _mock.Called(ctx, keycloakID)
+	if len(ret) == 0 {
+		panic("no return value specified for GetActiveManualDiscount")
+	}
+	var r0 *repo.ManualDiscount
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (*repo.ManualDiscount, error)); ok {
+		return returnFunc(ctx, keycloakID)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) *repo.ManualDiscount); ok {
+		r0 = returnFunc(ctx, keycloakID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*repo.ManualDiscount)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, keycloakID)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+type MockOrdersRepository_GetActiveManualDiscount_Call struct{ *mock.Call }
+
+func (_e *MockOrdersRepository_Expecter) GetActiveManualDiscount(ctx interface{}, keycloakID interface{}) *MockOrdersRepository_GetActiveManualDiscount_Call {
+	return &MockOrdersRepository_GetActiveManualDiscount_Call{Call: _e.mock.On("GetActiveManualDiscount", ctx, keycloakID)}
+}
+
+func (_c *MockOrdersRepository_GetActiveManualDiscount_Call) Run(run func(ctx context.Context, keycloakID string)) *MockOrdersRepository_GetActiveManualDiscount_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockOrdersRepository_GetActiveManualDiscount_Call) Return(md *repo.ManualDiscount, err error) *MockOrdersRepository_GetActiveManualDiscount_Call {
+	_c.Call.Return(md, err)
+	return _c
+}
+
+func (_c *MockOrdersRepository_GetActiveManualDiscount_Call) RunAndReturn(run func(context.Context, string) (*repo.ManualDiscount, error)) *MockOrdersRepository_GetActiveManualDiscount_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+func (_mock *MockOrdersRepository) GetAllManualDiscounts(ctx context.Context, search string) ([]*repo.ManualDiscount, error) {
+	ret := _mock.Called(ctx, search)
+	if len(ret) == 0 {
+		panic("no return value specified for GetAllManualDiscounts")
+	}
+	var r0 []*repo.ManualDiscount
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) ([]*repo.ManualDiscount, error)); ok {
+		return returnFunc(ctx, search)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) []*repo.ManualDiscount); ok {
+		r0 = returnFunc(ctx, search)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*repo.ManualDiscount)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, search)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+type MockOrdersRepository_GetAllManualDiscounts_Call struct{ *mock.Call }
+
+func (_e *MockOrdersRepository_Expecter) GetAllManualDiscounts(ctx interface{}, search interface{}) *MockOrdersRepository_GetAllManualDiscounts_Call {
+	return &MockOrdersRepository_GetAllManualDiscounts_Call{Call: _e.mock.On("GetAllManualDiscounts", ctx, search)}
+}
+
+func (_c *MockOrdersRepository_GetAllManualDiscounts_Call) Run(run func(ctx context.Context, search string)) *MockOrdersRepository_GetAllManualDiscounts_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockOrdersRepository_GetAllManualDiscounts_Call) Return(discounts []*repo.ManualDiscount, err error) *MockOrdersRepository_GetAllManualDiscounts_Call {
+	_c.Call.Return(discounts, err)
+	return _c
+}
+
+func (_c *MockOrdersRepository_GetAllManualDiscounts_Call) RunAndReturn(run func(context.Context, string) ([]*repo.ManualDiscount, error)) *MockOrdersRepository_GetAllManualDiscounts_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+
 // Close provides a mock function for the type MockOrdersRepository
 func (_mock *MockOrdersRepository) Close() {
 	_mock.Called()

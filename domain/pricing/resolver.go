@@ -18,13 +18,14 @@ type ChargePrice struct {
 	V2Evaluation   *V2PricingEvaluation `json:"v2_evaluation,omitempty"`
 }
 
-// PriceResolver resolves charge prices for billing. It routes between v1 and v2 based on
+// PriceResolver resolves charge prices for billing. It routes between v1 and v2 pricing based on
 // the account's country.
 type PriceResolver struct {
 	profileService      profiles.ProfileService
 	priorityClient      *priority.Client
 	accountingService   accounting.AccountingService
 	quickbooksCompanyID string
+	discountProvider    repo.ManualDiscountProvider // optional; applies manual discount when set
 }
 
 // NewPriceResolver creates a resolver for billing use.
@@ -42,6 +43,12 @@ func NewPriceResolver(
 	}
 }
 
+// SetManualDiscountProvider wires the manual discount lookup into the resolver.
+// Call this after NewPriceResolver when a DB is available (e.g. billing commands).
+func (r *PriceResolver) SetManualDiscountProvider(p repo.ManualDiscountProvider) {
+	r.discountProvider = p
+}
+
 // Resolve determines the charge price for a renewal.
 // For v2-eligible countries, it evaluates country-based pricing with donation discounts.
 // For other countries, it uses static v1 pricing based on the order's existing currency.
@@ -51,9 +58,13 @@ func (r *PriceResolver) Resolve(ctx context.Context, account *repo.Account, v1Or
 		eval, err := EvaluateV2Price(
 			ctx, r.profileService, r.priorityClient, r.accountingService, r.quickbooksCompanyID,
 			account.ID, account.UserKey.String, account.Email.String, account.Country.String,
+			r.discountProvider,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("EvaluateV2Price: %w", err)
+		}
+		if eval.HasDiscountErrors() {
+			return nil, fmt.Errorf("EvaluateV2Price: %w", ErrDonationFetch)
 		}
 		result = &ChargePrice{
 			Amount:         eval.FinalPrice.Amount,
@@ -62,6 +73,7 @@ func (r *PriceResolver) Resolve(ctx context.Context, account *repo.Account, v1Or
 			V2Evaluation:   eval,
 		}
 	} else {
+		// v1 pricing is static; manual discounts are not applied by design.
 		price := selectV1Price(v1OrderCurrency)
 		result = &ChargePrice{
 			Amount:         price.Amount,

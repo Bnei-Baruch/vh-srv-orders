@@ -106,6 +106,11 @@ type OrdersRepository interface {
 	GetAllSpecials(ctx context.Context) ([]*Special, error)
 	SetKeycloakIdByEmail(ctx context.Context, email string, keycloakID string) error
 
+	UpsertManualDiscount(ctx context.Context, req ManualDiscountReq) (*ManualDiscount, error)
+	CancelManualDiscount(ctx context.Context, keycloakID string) error
+	GetActiveManualDiscount(ctx context.Context, keycloakID string) (*ManualDiscount, error)
+	GetAllManualDiscounts(ctx context.Context, search string) ([]*ManualDiscount, error)
+
 	HasPaidMembership(ctx context.Context, email string) (bool, error)
 	HasTicket(ctx context.Context, email string) (bool, error)
 	HasSpecialMembership(ctx context.Context, email string) (bool, error)

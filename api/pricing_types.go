@@ -5,16 +5,14 @@ import (
 	"time"
 
 	"gitlab.bbdev.team/vh/pay/orders/domain/pricing"
-	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
 // monthlyPriceResponse is the API DTO for the monthly price endpoint.
-// It owns the "degraded" concept (donation fetch error) — the pricing package
-// always returns errors; this layer decides what to present to the client.
 type monthlyPriceResponse struct {
 	Amount         float64            `json:"amount"`
 	Currency       string             `json:"currency"`
 	PricingVersion string             `json:"pricing_version"`
+	HasErrors      bool               `json:"has_errors,omitempty"`
 	V2Details      *v2DetailsResponse `json:"v2_details,omitempty"`
 	V1AllPrices    map[string]float64 `json:"v1_all_prices,omitempty"`
 }
@@ -49,6 +47,7 @@ func toMonthlyPriceResponse(res *pricing.MonthlyPriceRes, isAdmin bool) monthlyP
 	}
 	if res.V2Details != nil {
 		eval := res.V2Details
+		out.HasErrors = eval.HasDiscountErrors()
 		if !isAdmin {
 			eval = eval.Public()
 		}
@@ -64,6 +63,7 @@ func toV2DetailsResponse(eval *pricing.V2PricingEvaluation) *v2DetailsResponse {
 			Type:       d.Type,
 			AmountPct:  d.AmountPct,
 			Eligible:   d.Eligible,
+			Error:      d.Error,
 			Properties: d.Properties,
 		}
 	}
@@ -75,30 +75,5 @@ func toV2DetailsResponse(eval *pricing.V2PricingEvaluation) *v2DetailsResponse {
 		Discounts:   discounts,
 		FinalPrice:  eval.FinalPrice,
 		Explain:     eval.Explain,
-	}
-}
-
-// buildDegradedMonthlyPriceResponse builds a response for when the Priority donation
-// API is unreachable. Returns base price with Error=true on the donations discount so
-// the client can show an appropriate message without blocking the user.
-func buildDegradedMonthlyPriceResponse(account *repo.Account) monthlyPriceResponse {
-	base := pricing.GetCountryBasePrice(account.Country.String)
-	return monthlyPriceResponse{
-		Amount:         base.Amount,
-		Currency:       base.Currency,
-		PricingVersion: "v2",
-		V2Details: &v2DetailsResponse{
-			EvaluatedAt: time.Now().UTC(),
-			AccountID:   account.ID,
-			CountryCode: account.Country.String,
-			CountryBase: base,
-			FinalPrice:  pricing.Price{Amount: base.Amount, Currency: base.Currency},
-			Discounts: []discountResponse{{
-				Type:      pricing.DiscountTypeDonations,
-				AmountPct: pricing.DonationsDiscountAmtPct,
-				Eligible:  false,
-				Error:     true,
-			}},
-		},
 	}
 }

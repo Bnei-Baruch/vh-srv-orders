@@ -45,7 +45,7 @@ type Discount struct {
 
 // DonationsDiscountProperties holds all data specific to the donations discount type.
 //
-// Donation amounts fetched from Priority ERP are deliberately excluded — they are
+// Donation amounts fetched from any source are deliberately excluded — they are
 // used only during calculation and must never be persisted, logged, or returned.
 //
 // NOTE: Emails are deduplicated across primary and spouse before fetching, but if two
@@ -103,7 +103,8 @@ func (e *V2PricingEvaluation) Public() *V2PricingEvaluation {
 	return &pub
 }
 
-// donationSums holds aggregated donation data across all sources (Priority + accounting).
+// donationSums holds aggregated donation data across all sources (Priority,
+// QuickBooks, and European donations via vh-srv-accounting).
 // Used only during v2 price calculation — never stored, logged, or returned.
 type donationSums struct {
 	perCurrency   map[string]float64
@@ -309,9 +310,9 @@ func collectProfileEmails(profile *profiles.Profile, fallbackEmail string) []str
 	return emails
 }
 
-// fetchDonationSums aggregates donations across all configured sources (Priority ERP and
-// vh-srv-accounting / QuickBooks) for the given emails. "User not found" responses from
-// either source are treated as zero donations. Any real API error from any source is
+// fetchDonationSums aggregates donations across all configured sources (Priority ERP
+// and vh-srv-accounting: QuickBooks and European donations) for the given emails.
+// "User not found" responses from any source are treated as zero donations. Any real API error from any source is
 // returned immediately — the price must not be used. Donation amounts in the returned
 // struct must never be stored, logged, or returned.
 //
@@ -345,6 +346,15 @@ func fetchDonationSums(
 	}
 	if len(accountingNotFound) > 0 {
 		notes = append(notes, fmt.Sprintf("no QuickBooks record for: %s", strings.Join(accountingNotFound, ", ")))
+	}
+
+	// Source: vh-srv-accounting (European donations, batch).
+	europeNotFound, err := addEuropeContributions(ctx, accountingService, emails, result.perCurrency, successSet)
+	if err != nil {
+		return donationSums{}, err
+	}
+	if len(europeNotFound) > 0 {
+		notes = append(notes, fmt.Sprintf("no Europe record for: %s", strings.Join(europeNotFound, ", ")))
 	}
 
 	// Preserve input order in successEmails.
@@ -422,6 +432,51 @@ func addAccountingContributions(
 	return notFound, nil
 }
 
+// addEuropeContributions queries the European donations system with a single
+// batch call and accumulates currency sums. Returns the emails with no Europe
+// record. Amounts may be negative (refunds subtracted upstream).
+//
+// NOTE: a donor present in more than one source under the same email is summed
+// across sources — same known limitation as shared emails between users.
+func addEuropeContributions(
+	ctx context.Context,
+	client accounting.AccountingService,
+	emails []string,
+	perCurrency map[string]float64,
+	successSet map[string]struct{},
+) ([]string, error) {
+	if len(emails) == 0 {
+		return nil, nil
+	}
+
+	res, err := client.GetEuropeContributions(ctx, emails)
+	if err != nil {
+		return nil, fmt.Errorf("accountingService.GetEuropeContributions %w: %v", ErrDonationFetch, err)
+	}
+
+	entryByEmail := make(map[string]accounting.EuropeContributionEntry, len(res.Results))
+	for _, entry := range res.Results {
+		entryByEmail[strings.ToLower(entry.Identifier)] = entry
+	}
+
+	// Match entries back to the request emails case-insensitively so successSet
+	// stays keyed on the original-cased input, like the other sources. A missing
+	// entry is treated as not found rather than an error.
+	var notFound []string
+	for _, email := range emails {
+		entry, ok := entryByEmail[strings.ToLower(email)]
+		if !ok || !entry.Found {
+			notFound = append(notFound, email)
+			continue
+		}
+		successSet[email] = struct{}{}
+		for currency, amount := range entry.Contributions {
+			perCurrency[currency] += amount
+		}
+	}
+	return notFound, nil
+}
+
 // toNIS converts an amount in the given currency to NIS using the provided rates.
 // Unknown currencies are treated as USD (conservative fallback).
 func toNIS(amount float64, currency string, usdRate, eurRate float64) float64 {
@@ -469,10 +524,10 @@ func buildExplain(inputs *V2PricingEvaluation) []string {
 	hasSpouse := props.SpouseKeycloakID != ""
 	if hasSpouse {
 		total := props.PrimaryEmailCount + props.SpouseEmailCount
-		lines[1] = fmt.Sprintf("2. collect emails: primary(%d) + spouse(%d) = %d unique → fetch from Priority ERP (SKU=40001, last 12mo) → %s",
+		lines[1] = fmt.Sprintf("2. collect emails: primary(%d) + spouse(%d) = %d unique → fetch donations from all sources (Priority, QuickBooks, Europe; last 12mo) → %s",
 			props.PrimaryEmailCount, props.SpouseEmailCount, total, fetchStatus)
 	} else {
-		lines[1] = fmt.Sprintf("2. collect emails: primary(%d) → fetch from Priority ERP (SKU=40001, last 12mo) → %s",
+		lines[1] = fmt.Sprintf("2. collect emails: primary(%d) → fetch donations from all sources (Priority, QuickBooks, Europe; last 12mo) → %s",
 			props.PrimaryEmailCount, fetchStatus)
 	}
 

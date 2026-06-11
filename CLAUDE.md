@@ -377,8 +377,8 @@ Monthly billing uses a two-phase architecture:
 | Component | Location | Purpose |
 |-----------|----------|---------|
 | `PriceResolver` | `domain/pricing/resolver.go` | Routes v1/v2 by country, caches per account ID |
-| `EvaluateV2Price` | `domain/pricing/v2_evaluation.go` | Profiles + Priority donations → discount calculation |
-| `V2Eligible` | `domain/pricing/v2_rollout.go` | Country exclusion list (US, GB, EU-27, TR, RU, UA) |
+| `EvaluateV2Price` | `domain/pricing/v2_evaluation.go` | Profiles + Priority/QuickBooks/Europe donations → discount calculation |
+| `V2Eligible` | `domain/pricing/v2_rollout.go` | Country exclusion list (RU only) |
 | `processOrder` | `domain/billing/renewal.go` | Single order: create payment → charge → finalize |
 | `BuildChargeRequest` | `domain/billing/renewal.go` | Maps renewal data + price → pelecard request |
 | `LoadRenewalData` | `repo/renewal.go` | DB-only: loads order + account + payment + card |

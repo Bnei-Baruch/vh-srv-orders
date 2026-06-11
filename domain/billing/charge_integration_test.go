@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -56,18 +57,23 @@ func newIntegrationDB(t *testing.T) (*repo.OrdersDB, context.Context) {
 	return db, ctx
 }
 
+// setupOrderSeq makes each setupOrder account unique, so multiple orders in one
+// test never collide on email or user key even with the same country.
+var setupOrderSeq atomic.Int64
+
 // setupOrder creates an account + recurring order + successful payment, returns order ID.
 func setupOrder(t *testing.T, db *repo.OrdersDB, ctx context.Context, country string) uint {
 	t.Helper()
 
+	seq := setupOrderSeq.Add(1)
 	accountID, err := db.CreateAccount(ctx, repo.Account{
-		Email:     null.StringFrom(fmt.Sprintf("user-%s@example.com", country)),
+		Email:     null.StringFrom(fmt.Sprintf("user-%s-%d@example.com", country, seq)),
 		FirstName: null.StringFrom("Test"),
 		LastName:  null.StringFrom("User"),
 		Street:    null.StringFrom("Main St"),
 		City:      null.StringFrom("City"),
 		Country:   null.StringFrom(country),
-		UserKey:   null.StringFrom(fmt.Sprintf("kc-%s", country)),
+		UserKey:   null.StringFrom(fmt.Sprintf("kc-%s-%d", country, seq)),
 	})
 	require.NoError(t, err)
 
@@ -275,7 +281,7 @@ func TestProcessOrderIntegration_ResolvedPriceOverridesOrderAmount(t *testing.T)
 
 func TestChargeWithPricingIntegration_SingleOrder(t *testing.T) {
 	db, ctx := newIntegrationDB(t)
-	orderID := setupOrder(t, db, ctx, "GB") // GB = v1 (excluded from v2), no external deps needed
+	orderID := setupOrder(t, db, ctx, "RU") // RU = v1 (excluded from v2), no external deps needed
 
 	resolver := pricing.NewPriceResolver(nil, nil, nil, "")
 	executor := successExecutor()
@@ -292,7 +298,7 @@ func TestChargeWithPricingIntegration_SingleOrder(t *testing.T) {
 
 func TestChargeWithPricingIntegration_TokenDeclined_EMVSucceeds(t *testing.T) {
 	db, ctx := newIntegrationDB(t)
-	orderID := setupOrder(t, db, ctx, "GB")
+	orderID := setupOrder(t, db, ctx, "RU")
 
 	resolver := pricing.NewPriceResolver(nil, nil, nil, "")
 
@@ -332,8 +338,8 @@ func (e *terminalSwitchExecutor) Execute(ctx context.Context, req *pelecard.Char
 
 func TestChargeWithPricingIntegration_MultipleOrders(t *testing.T) {
 	db, ctx := newIntegrationDB(t)
-	order1 := setupOrder(t, db, ctx, "FR") // FR = v1 (EU-27, excluded from v2)
-	order2 := setupOrder(t, db, ctx, "GB") // GB = v1 (excluded from v2)
+	order1 := setupOrder(t, db, ctx, "RU") // RU = v1 (excluded from v2)
+	order2 := setupOrder(t, db, ctx, "RU") // RU = v1 (excluded from v2)
 
 	resolver := pricing.NewPriceResolver(nil, nil, nil, "")
 	executor := successExecutor()
@@ -354,7 +360,7 @@ func TestChargeWithPricingIntegration_MultipleOrders(t *testing.T) {
 
 func TestChargeWithPricingIntegration_BothDeclined(t *testing.T) {
 	db, ctx := newIntegrationDB(t)
-	orderID := setupOrder(t, db, ctx, "GB")
+	orderID := setupOrder(t, db, ctx, "RU")
 
 	resolver := pricing.NewPriceResolver(nil, nil, nil, "")
 	executor := declinedExecutor()
@@ -395,7 +401,7 @@ func TestRetryPricingErrorsIntegration_NoPricingErrors(t *testing.T) {
 
 func TestRetryPricingErrorsIntegration_SuccessfulRetry(t *testing.T) {
 	db, ctx := newIntegrationDB(t)
-	orderID := setupOrder(t, db, ctx, "GB") // GB = v1 (excluded from v2), always resolves
+	orderID := setupOrder(t, db, ctx, "RU") // RU = v1 (excluded from v2), always resolves
 
 	// Simulate a previous pricing failure by flagging the order
 	flagOrderAsPricingError(t, db, ctx, orderID)
@@ -439,7 +445,7 @@ func TestRetryPricingErrorsIntegration_DeclinedOrderIsUnflagged(t *testing.T) {
 	// After the fix, pricing_error → torenew happens right after resolution, so a
 	// subsequent decline leaves the order with torenew, not pricing_error.
 	db, ctx := newIntegrationDB(t)
-	orderID := setupOrder(t, db, ctx, "GB") // GB = v1 (excluded from v2), resolves deterministically
+	orderID := setupOrder(t, db, ctx, "RU") // RU = v1 (excluded from v2), resolves deterministically
 	flagOrderAsPricingError(t, db, ctx, orderID)
 
 	resolver := pricing.NewPriceResolver(nil, nil, nil, "")
@@ -457,12 +463,12 @@ func TestRetryPricingErrorsIntegration_DeclinedOrderIsUnflagged(t *testing.T) {
 func TestRetryPricingErrorsIntegration_MixedOrders(t *testing.T) {
 	db, ctx := newIntegrationDB(t)
 
-	// Order 1: pricing_error, GB → will resolve (v1) and succeed
-	order1 := setupOrder(t, db, ctx, "GB")
+	// Order 1: pricing_error, RU → will resolve (v1) and succeed
+	order1 := setupOrder(t, db, ctx, "RU")
 	flagOrderAsPricingError(t, db, ctx, order1)
 
 	// Order 2: torenew (normal flow) → NOT picked up by retry
-	order2 := setupOrder(t, db, ctx, "FR") // different country to avoid email collision
+	order2 := setupOrder(t, db, ctx, "RU")
 
 	resolver := pricing.NewPriceResolver(nil, nil, nil, "")
 	service := NewBillingService(db, nil, &events.NoopEmitter{}, resolver, successExecutor())

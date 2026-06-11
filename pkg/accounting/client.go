@@ -1,6 +1,7 @@
 // Package accounting provides a client for the vh-srv-accounting service.
-// Currently exposes contributions aggregated from QuickBooks. Priority is expected
-// to migrate behind this service in the future.
+// Exposes contributions aggregated from QuickBooks and from the European
+// donations system. Priority is expected to migrate behind this service in
+// the future.
 package accounting
 
 import (
@@ -8,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -22,12 +24,14 @@ const contributionCacheTTL = 30 * time.Minute
 
 type AccountingService interface {
 	GetLastContributions(ctx context.Context, email string, companyID *string) (*ContributionsResult, error)
+	GetEuropeContributions(ctx context.Context, emails []string) (*EuropeContributionsResult, error)
 }
 
 type AccountingServiceAPI struct {
-	client            *resty.Client
-	tokenSource       keycloak.TokenSource
-	contributionCache *utils.TTLCache[string, ContributionsResult]
+	client                  *resty.Client
+	tokenSource             keycloak.TokenSource
+	contributionCache       *utils.TTLCache[string, ContributionsResult]
+	europeContributionCache *utils.TTLCache[string, EuropeContributionsResult]
 }
 
 // NewAccountingServiceAPI creates a new client. Contribution cache is disabled
@@ -48,20 +52,18 @@ func NewAccountingServiceAPI(tokenSource keycloak.TokenSource) *AccountingServic
 	}
 }
 
-// SetCacheEnabled enables or disables the contribution cache.
-// Disabling clears any cached data; enabling creates a fresh empty cache.
+// SetCacheEnabled enables or disables the contribution caches.
+// Disabling clears any cached data; enabling creates fresh empty caches.
 func (a *AccountingServiceAPI) SetCacheEnabled(enabled bool) {
 	if enabled {
 		a.contributionCache = utils.NewTTLCache[string, ContributionsResult](contributionCacheTTL)
+		a.europeContributionCache = utils.NewTTLCache[string, EuropeContributionsResult](contributionCacheTTL)
 	} else {
 		a.contributionCache = nil
+		a.europeContributionCache = nil
 	}
 }
 
-// GetLastContributions returns the contributions breakdown for the given email
-// over the last 12 months. A nil companyID aggregates across all enabled QuickBooks
-// companies; a non-nil value scopes the query to that single company.
-// Result.Found is false when the email did not match any customer.
 // GetLastContributions returns the contributions breakdown for the given email
 // over the last 12 months. A nil companyID aggregates across all enabled QuickBooks
 // companies; a non-nil value scopes the query to that single company.
@@ -107,6 +109,56 @@ func contributionCacheKey(email string, companyID *string) string {
 		key += *companyID
 	}
 	return key
+}
+
+// GetEuropeContributions returns per-email contribution sums from the European
+// donations system over the last 12 months, in a single batch call.
+// Per-entry Found is false when an email matched no customer; amounts have
+// refunds subtracted upstream and may be negative.
+func (a *AccountingServiceAPI) GetEuropeContributions(ctx context.Context, emails []string) (*EuropeContributionsResult, error) {
+	if len(emails) == 0 {
+		return &EuropeContributionsResult{}, nil
+	}
+
+	cacheKey := europeContributionsCacheKey(emails)
+	if a.europeContributionCache != nil {
+		if cached, ok := a.europeContributionCache.Get(cacheKey); ok {
+			result := cached
+			return &result, nil
+		}
+	}
+
+	resp, err := a.executeWithRetry(ctx, func(req *resty.Request) (*resty.Response, error) {
+		req.SetBody(europeContributionsRequest{Emails: emails}).SetResult(&europeContributionsResponse{})
+		return req.Post("/v1/europe/contributions/batch")
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.IsError() {
+		return nil, respError(resp)
+	}
+
+	result := resp.Result().(*europeContributionsResponse)
+	if result == nil || result.Data == nil {
+		return nil, fmt.Errorf("malformed response: missing data")
+	}
+
+	if a.europeContributionCache != nil {
+		a.europeContributionCache.Put(cacheKey, *result.Data)
+	}
+	return result.Data, nil
+}
+
+// europeContributionsCacheKey derives a key from the sorted, lowercased email set.
+func europeContributionsCacheKey(emails []string) string {
+	keys := make([]string, len(emails))
+	for i, email := range emails {
+		keys[i] = strings.ToLower(email)
+	}
+	sort.Strings(keys)
+	return strings.Join(keys, "|")
 }
 
 func (a *AccountingServiceAPI) baseRequest(ctx context.Context) (*resty.Request, error) {

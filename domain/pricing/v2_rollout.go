@@ -11,84 +11,11 @@ var v2Excluded = map[string]bool{
 // v2ExcludedMajorMarkets lists major markets whose donation data is not yet available in any
 // connected accounting system. Remove countries as integrations expand.
 //
-// Current exclusions: US, UK, EU-27, Turkey, Russia, Canada,
-// Latin America and the Caribbean.
+// Current exclusions: Russia.
+// Europe (EU-27, UK, Norway, Switzerland, Western Balkans) and Turkey were opened
+// when the European donations source was integrated.
 var v2ExcludedMajorMarkets = map[string]bool{
-	// United States
-	// "US": true,
-
-	// United Kingdom
-	"GB": true,
-
-	// Canada
-	// "CA": true,
-
-	// Latin America and the Caribbean
-	// "AR": true, // Argentina
-	// "BO": true, // Bolivia
-	// "BR": true, // Brazil
-	// "BZ": true, // Belize
-	// "CL": true, // Chile
-	// "CO": true, // Colombia
-	// "CR": true, // Costa Rica
-	// "CU": true, // Cuba
-	// "DO": true, // Dominican Republic
-	// "EC": true, // Ecuador
-	// "GT": true, // Guatemala
-	// "GY": true, // Guyana
-	// "HN": true, // Honduras
-	// "HT": true, // Haiti
-	// "JM": true, // Jamaica
-	// "MX": true, // Mexico
-	// "NI": true, // Nicaragua
-	// "PA": true, // Panama
-	// "PE": true, // Peru
-	// "PY": true, // Paraguay
-	// "SR": true, // Suriname
-	// "SV": true, // El Salvador
-	// "TT": true, // Trinidad and Tobago
-	// "UY": true, // Uruguay
-	// "VE": true, // Venezuela
-
-	// EU-27 member states
-	"AT": true, // Austria
-	"BE": true, // Belgium
-	"BG": true, // Bulgaria
-	"HR": true, // Croatia
-	"CY": true, // Cyprus
-	"CZ": true, // Czech Republic
-	"DK": true, // Denmark
-	"EE": true, // Estonia
-	"FI": true, // Finland
-	"FR": true, // France
-	"DE": true, // Germany
-	"GR": true, // Greece
-	"HU": true, // Hungary
-	"IE": true, // Ireland
-	"IT": true, // Italy
-	"LV": true, // Latvia
-	"LT": true, // Lithuania
-	"LU": true, // Luxembourg
-	"MT": true, // Malta
-	"NL": true, // Netherlands
-	"PL": true, // Poland
-	"PT": true, // Portugal
-	"RO": true, // Romania
-	"SK": true, // Slovakia
-	"SI": true, // Slovenia
-	"ES": true, // Spain
-	"SE": true, // Sweden
-
-	// Western Balkans
-	"AL": true, // Albania
-	"BA": true, // Bosnia and Herzegovina
-	"RS": true, // Serbia
-
-	// Other major markets
-	"TR": true, // Turkey
 	"RU": true, // Russia
-	"NO": true, // Norway
-	"CH": true, // Switzerland
 }
 
 // V2Eligible returns true if the country should use v2 pricing.

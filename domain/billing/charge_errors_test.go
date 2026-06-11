@@ -91,7 +91,7 @@ func TestPreResolve_AllOrdersResolved(t *testing.T) {
 	ctx := context.Background()
 
 	data := testRenewalData()
-	data.Account.Country = null.StringFrom("GB")
+	data.Account.Country = null.StringFrom("RU")
 	data.Order.Currency = null.StringFrom(common.CurrencyUSD)
 
 	mockRepo.EXPECT().LoadRenewalData(ctx, uint(1)).Return(data, nil)
@@ -110,7 +110,7 @@ func TestPreResolve_V1CountryResolvesSuccessfully(t *testing.T) {
 	ctx := context.Background()
 
 	data := testRenewalData()
-	data.Account.Country = null.StringFrom("GB") // V1 country (excluded from v2)
+	data.Account.Country = null.StringFrom("RU") // V1 country (excluded from v2)
 	data.Order.Currency = null.StringFrom(common.CurrencyUSD)
 
 	mockRepo.EXPECT().LoadRenewalData(ctx, uint(1)).Return(data, nil)
@@ -162,7 +162,7 @@ func TestPreResolve_MixedSuccessAndFailure(t *testing.T) {
 	ctx := context.Background()
 
 	goodData := testRenewalData()
-	goodData.Account.Country = null.StringFrom("GB")
+	goodData.Account.Country = null.StringFrom("RU")
 	goodData.Order.Currency = null.StringFrom(common.CurrencyUSD)
 
 	mockRepo.EXPECT().LoadRenewalData(ctx, uint(1)).Return(goodData, nil)
@@ -181,7 +181,7 @@ func TestPreResolve_FlagOrderError_ContinuesProcessing(t *testing.T) {
 	ctx := context.Background()
 
 	goodData := testRenewalData()
-	goodData.Account.Country = null.StringFrom("GB")
+	goodData.Account.Country = null.StringFrom("RU")
 	goodData.Order.Currency = null.StringFrom(common.CurrencyUSD)
 
 	mockRepo.EXPECT().LoadRenewalData(ctx, uint(1)).Return(nil, errors.New("fail"))
@@ -482,14 +482,14 @@ func TestChargeWithPricing_MultipleOrders_MixedOutcomes(t *testing.T) {
 
 	// Order 1: succeeds on token
 	data1 := testRenewalData()
-	data1.Account.Country = null.StringFrom("GB")
+	data1.Account.Country = null.StringFrom("RU")
 	data1.Order.ID = 101
 
 	// Order 2: fails pricing (load data error)
 	// Order 3: declined on both terminals
 
 	data3 := testRenewalData()
-	data3.Account.Country = null.StringFrom("GB")
+	data3.Account.Country = null.StringFrom("RU")
 	data3.Order.ID = 103
 
 	mockRepo.EXPECT().GetOrderIDsToRenew(ctx).Return([]uint{101, 102, 103}, nil)

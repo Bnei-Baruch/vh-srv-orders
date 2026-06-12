@@ -1,0 +1,76 @@
+name: Pull Request Tests
+
+on:
+  pull_request:
+    branches: [ master ]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:12
+        env:
+          POSTGRES_DB: orders_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.21'
+
+      # GitHub Actions service containers cannot override the container command,
+      # so NATS (which needs -js and auth flags) runs via docker directly.
+      - name: Start NATS (JetStream)
+        run: |
+          docker run -d --name nats -p 4222:4222 nats:2.10-alpine \
+            -js -user testuser -pass testpass
+          for i in $(seq 1 15); do
+            nc -z localhost 4222 && break
+            sleep 2
+          done
+          nc -z localhost 4222
+
+      - name: Run tests
+        env:
+          PGHOST: localhost
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: orders_test
+          PGSSLMODE: disable
+          NATS_URL: nats://testuser:testpass@localhost:4222
+          APP_ENV: test
+          APP_MODE: debug
+          PRIORITY_BASE_URL: http://priority.test
+          PRIORITY_USERNAME: test
+          PRIORITY_PASSWORD: test
+          ACCOUNTING_SERVICE_URL: http://accounting.test
+          QUICKBOOKS_COMPANY_ID: test-company-id
+        run: |
+          go mod download
+          set -o pipefail
+          go test -v -race -coverprofile=coverage.out ./... | tee test.log
+          go tool cover -func=coverage.out
+
+      - name: Upload test log on failure
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-log
+          path: test.log
+          retention-days: 7

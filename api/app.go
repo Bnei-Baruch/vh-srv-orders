@@ -227,6 +227,15 @@ func (a *App) initRoutes() {
 		manualDiscount.GET("/", a.ordersAPI.handleGetAllManualDiscounts)
 	}
 
+	baseV2Path.DELETE("/hh_grant/:keycloak_id", a.ordersAPI.handleCancelHHGrant)
+
+	hhRequest := baseV2Path.Group("/hh_request")
+	{
+		hhRequest.POST("/", a.ordersAPI.handleCreateHHRequest)
+		hhRequest.GET("/", a.ordersAPI.handleGetAllHHRequests)
+		hhRequest.POST("/:id/conclude", a.ordersAPI.handleConcludeHHRequest)
+	}
+
 	operation := baseV2Path.Group("/operation")
 	{
 		operation.POST("/", a.ordersAPI.handleOperationCreate)

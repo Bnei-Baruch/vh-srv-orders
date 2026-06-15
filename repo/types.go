@@ -546,6 +546,63 @@ type ManualDiscountReq struct {
 	Note       null.String `json:"note"`
 }
 
+// HHGrant is a Help Haver discount grant applied in v2 pricing.
+// DiscountPct is percent off the regular price (100 = free).
+// Grants are only created by approving an HHRequest (see ConcludeHHRequest).
+type HHGrant struct {
+	ID          int         `json:"id"`
+	RequestID   int         `json:"request_id"`
+	KeycloakID  string      `json:"keycloak_id"`
+	Type        string      `json:"type"`
+	DiscountPct int         `json:"discount_pct"`
+	StartDate   time.Time   `json:"start_date"`
+	EndDate     time.Time   `json:"end_date"`
+	UpdatedAt   time.Time   `json:"updated_at"`
+	Note        null.String `json:"note"`
+}
+
+// HHRequest is a member's Help Haver application for v2 pricing.
+type HHRequest struct {
+	ID            int         `json:"id"`
+	KeycloakID    string      `json:"keycloak_id"`
+	Type          string      `json:"type"`
+	RequestedPct  int         `json:"requested_pct"`
+	Months        int         `json:"months"`
+	Note          null.String `json:"note"`
+	Status        string      `json:"status"`
+	RejectionNote null.String `json:"rejection_note"`
+	CreatedAt     time.Time   `json:"created_at"`
+	UpdatedAt     time.Time   `json:"updated_at"`
+}
+
+type HHRequestReq struct {
+	KeycloakID   string      `json:"keycloak_id" binding:"required"`
+	Type         string      `json:"type" binding:"required"`
+	RequestedPct int         `json:"requested_pct" binding:"required"`
+	Months       int         `json:"months" binding:"required"`
+	Note         null.String `json:"note"`
+}
+
+// HHRequestConclusion approves (creating a grant with the admin's final values)
+// or denies a request.
+type HHRequestConclusion struct {
+	Approved      bool        `json:"approved"`
+	Type          string      `json:"type"`         // final grant type when approved
+	DiscountPct   int         `json:"discount_pct"` // final grant percent when approved
+	Months        int         `json:"months"`       // grant duration when approved
+	StartDate     null.Time   `json:"start_date"`   // grant start when approved; defaults to now
+	Note          null.String `json:"note"`
+	RejectionNote null.String `json:"rejection_note"`
+}
+
+// HHRequestWithGrant is a request joined with the grant it produced, if any,
+// plus the member's name resolved from the orders account.
+type HHRequestWithGrant struct {
+	HHRequest
+	MemberName string   `json:"member_name"`
+	Grant      *HHGrant `json:"grant,omitempty"`
+}
+
 type OperationReq struct {
 	ID            *int    `json:"id" form:"id"`
 	NewEmail      *string `json:"new_email" form:"new_email" binding:"required"`

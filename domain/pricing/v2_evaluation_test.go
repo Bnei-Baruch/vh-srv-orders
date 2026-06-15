@@ -609,7 +609,7 @@ func TestEvaluateV2Price_NoSpouse_NoDiscount(t *testing.T) {
 		},
 	}
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", nil)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", nil, nil)
 	require.NoError(t, err)
 
 	assert.Equal(t, 10, eval.AccountID)
@@ -632,7 +632,7 @@ func TestEvaluateV2Price_NoSpouse_WithDiscount(t *testing.T) {
 		},
 	}
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", nil)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", nil, nil)
 	require.NoError(t, err)
 
 	assert.True(t, eval.Discounts[0].Eligible)
@@ -647,7 +647,7 @@ func TestEvaluateV2Price_ProfileNotFound_FallsBackToAccountEmail(t *testing.T) {
 	// No profile in stub → ErrNotFound → fallback to account email
 	profileSvc := &stubProfileService{profiles: map[string]*profiles.Profile{}}
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", "fallback@x.com", "IL", nil)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", "fallback@x.com", "IL", nil, nil)
 	require.NoError(t, err)
 	assert.NotNil(t, eval)
 	assert.Equal(t, "IL", eval.CountryCode)
@@ -671,7 +671,7 @@ func TestEvaluateV2Price_WithSpouse_NeitherGetsDiscount(t *testing.T) {
 		},
 	}
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", primaryEmail, "IL", nil)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", primaryEmail, "IL", nil, nil)
 	require.NoError(t, err)
 
 	assert.False(t, eval.Discounts[0].Eligible)
@@ -698,7 +698,7 @@ func TestEvaluateV2Price_WithSpouse_BothGetDiscount(t *testing.T) {
 		},
 	}
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", primaryEmail, "IL", nil)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", primaryEmail, "IL", nil, nil)
 	require.NoError(t, err)
 
 	assert.True(t, eval.Discounts[0].Eligible)
@@ -728,7 +728,7 @@ func TestEvaluateV2Price_FinalPriceRoundedToTwoDecimals(t *testing.T) {
 		},
 	}
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "AU", nil)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "AU", nil, nil)
 	require.NoError(t, err)
 
 	assert.True(t, eval.Discounts[0].Eligible)
@@ -753,7 +753,7 @@ func TestEvaluateV2Price_SpouseDonationsCountedWithoutProfile(t *testing.T) {
 		},
 	}
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", primaryEmail, "IL", nil)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", primaryEmail, "IL", nil, nil)
 	require.NoError(t, err)
 	assert.NotNil(t, eval)
 }
@@ -765,7 +765,7 @@ func TestEvaluateV2Price_ProfileServiceError_ReturnsError(t *testing.T) {
 	client := newPriorityTestClient(server.URL)
 	profileSvc := &errorProfileService{err: fmt.Errorf("connection refused")}
 
-	_, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", "test@x.com", "IL", nil)
+	_, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", "test@x.com", "IL", nil, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "profileService.GetProfileByKeycloakID")
 }
@@ -796,7 +796,7 @@ func TestEvaluateV2Price_SpouseProfileError_ReturnsError(t *testing.T) {
 		spouseErr:      fmt.Errorf("timeout"),
 	}
 
-	_, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", primaryEmail, "IL", nil)
+	_, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", primaryEmail, "IL", nil, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "spouse")
 }
@@ -835,7 +835,7 @@ func TestEvaluateV2Price_DonationFetchError_ReturnsDegradedDiscount(t *testing.T
 		},
 	}
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", nil)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", nil, nil)
 	require.NoError(t, err)
 	require.Len(t, eval.Discounts, 1)
 	assert.Equal(t, DiscountTypeDonations, eval.Discounts[0].Type)
@@ -880,7 +880,7 @@ func TestEvaluateV2Price_PartialDonationFetchError_ReturnsDegradedDiscount(t *te
 		},
 	}
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", good, "IL", nil)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", good, "IL", nil, nil)
 	require.NoError(t, err)
 	require.Len(t, eval.Discounts, 1)
 	assert.True(t, eval.Discounts[0].Error)
@@ -948,7 +948,7 @@ func TestEvaluateV2Price_WithDiscountProvider_Applied(t *testing.T) {
 		return &repo.ManualDiscount{ID: 1, Type: "percent", Properties: null.JSONFrom(props)}, nil
 	})
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, newPriorityTestClient(server.URL), notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", provider)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, newPriorityTestClient(server.URL), notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", provider, nil)
 	require.NoError(t, err)
 
 	require.Len(t, eval.Discounts, 2)
@@ -972,7 +972,7 @@ func TestEvaluateV2Price_WithDiscountProvider_NoActiveDiscount(t *testing.T) {
 		return nil, nil
 	})
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, newPriorityTestClient(server.URL), notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", provider)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, newPriorityTestClient(server.URL), notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", provider, nil)
 	require.NoError(t, err)
 
 	require.Len(t, eval.Discounts, 2)
@@ -1001,7 +1001,7 @@ func TestEvaluateV2Price_WithDiscountProvider_DonationsWins(t *testing.T) {
 		return &repo.ManualDiscount{ID: 1, Type: "percent", Properties: null.JSONFrom(props)}, nil
 	})
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, newPriorityTestClient(server.URL), notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", provider)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, newPriorityTestClient(server.URL), notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", provider, nil)
 	require.NoError(t, err)
 
 	donationsPrice := base.Amount * (1 - DonationsDiscountAmtPct/100)
@@ -1029,7 +1029,7 @@ func TestEvaluateV2Price_WithDiscountProvider_ManualWins(t *testing.T) {
 		return &repo.ManualDiscount{ID: 2, Type: "percent", Properties: null.JSONFrom(props)}, nil
 	})
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, newPriorityTestClient(server.URL), notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", provider)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, newPriorityTestClient(server.URL), notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", provider, nil)
 	require.NoError(t, err)
 
 	manualPrice := math.Round(base.Amount*(1-pct/100)*100) / 100
@@ -1052,7 +1052,7 @@ func TestEvaluateV2Price_WithDiscountProvider_FetchError(t *testing.T) {
 		return nil, fmt.Errorf("DB connection lost")
 	})
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, newPriorityTestClient(server.URL), notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", provider)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, newPriorityTestClient(server.URL), notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", provider, nil)
 	require.NoError(t, err)
 
 	require.Len(t, eval.Discounts, 2)

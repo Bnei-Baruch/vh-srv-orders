@@ -51,7 +51,7 @@ func (o *OrdersAPI) handleMonthlyPriceByKCID(c *gin.Context) {
 		c.Request.Context(),
 		o.profileService, o.priorityClient, o.accountingService, o.quickbooksCompanyID,
 		account.ID, account.UserKey.String, account.Email.String, account.Country.String,
-		preferredCurrency, pricingVersion, o.repo,
+		preferredCurrency, pricingVersion, o.repo, o.repo,
 	)
 	if err != nil {
 		c.Status(http.StatusInternalServerError)

@@ -1,9 +1,13 @@
-version: '2'
+# Project name pinned to "orders" (pre-rename compose project): the running
+# containers and the JetStream volume orders_nats_data belong to it.
+name: orders
 services:
   ordersdb:
     container_name: 'ordersdb'
     image: postgres:9.6
     restart: unless-stopped
+    profiles:
+      - staging
     environment:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_DB: ${DB_DATABASE}
@@ -43,7 +47,7 @@ services:
       PELECARD_PASSWORD: ${PELECARD_PASSWORD}
       PELECARD_NEW_TERMINAL_NUMBER: ${PELECARD_NEW_TERMINAL_NUMBER}
       PELECARD_OLD_TERMINAL_NUMBER: ${PELECARD_OLD_TERMINAL_NUMBER}
-      SUFX: "${DEV_SUFX}"
+      SUFX: "${SUFX}"
       KEYCLOAK_SERVER_URL: ${KEYCLOAK_SERVER_URL}
       KEYCLOAK_REALM: ${KEYCLOAK_REALM}
       KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID}
@@ -64,7 +68,7 @@ services:
       - "8185:8185"
 networks:
   default:
-    external:
-      name: vh
+    name: vh
+    external: true
 volumes:
   nats_data:

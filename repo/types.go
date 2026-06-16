@@ -519,6 +519,33 @@ type SpecialKeycloakIdUpdate struct {
 	Email      string `json:"email"`
 }
 
+type ManualDiscount struct {
+	ID         int         `json:"id"`
+	KeycloakID string      `json:"keycloak_id"`
+	StartDate  time.Time   `json:"start_date"`
+	EndDate    time.Time   `json:"end_date"`
+	UpdatedAt  time.Time   `json:"updated_at"`
+	Type       string      `json:"type"`
+	Properties null.JSON   `json:"properties"`
+	Note       null.String `json:"note"`
+}
+
+type ManualDiscountProperties struct {
+	DiscountPct *float64 `json:"discount_pct,omitempty"`
+	FixedPrice  *float64 `json:"fixed_price,omitempty"`
+	Currency    *string  `json:"currency,omitempty"`
+}
+
+type ManualDiscountReq struct {
+	ID         *int        `json:"id"`
+	KeycloakID string      `json:"keycloak_id" binding:"required"`
+	StartDate  time.Time   `json:"start_date" binding:"required"`
+	EndDate    time.Time   `json:"end_date" binding:"required"`
+	Type       string      `json:"type" binding:"required"`
+	Properties null.JSON   `json:"properties"`
+	Note       null.String `json:"note"`
+}
+
 type OperationReq struct {
 	ID            *int    `json:"id" form:"id"`
 	NewEmail      *string `json:"new_email" form:"new_email" binding:"required"`

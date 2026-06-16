@@ -152,7 +152,7 @@ func (o *OrdersDB) PatchOrCreateAccount(ctx context.Context, a Account) (int, er
 		return accountID, nil
 	}
 
-	if !errors.Is(err, pgx.ErrNoRows) {
+	if !errors.Is(err, common.ErrNoRowsAffected) {
 		return 0, fmt.Errorf("o.GetAccountIDByKeycloakID: %w", err)
 	}
 
@@ -305,6 +305,9 @@ func (o *OrdersDB) GetAccount(ctx context.Context, id int, email string) (*Accou
 func (o *OrdersDB) GetAccountIDByKeycloakID(ctx context.Context, keycloakId string) (int, error) {
 	var accountID int
 	if err := o.QueryRow(ctx, `SELECT id FROM accounts WHERE "UserKey"=$1`, keycloakId).Scan(&accountID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, common.ErrNoRowsAffected
+		}
 		return 0, err
 	}
 	return accountID, nil
@@ -625,7 +628,7 @@ func (o *OrdersDB) GetOrCreateAccountFromProfile(ctx context.Context, keycloakId
 		return accountId, nil
 	}
 
-	if !errors.Is(err, pgx.ErrNoRows) {
+	if !errors.Is(err, common.ErrNoRowsAffected) {
 		return 0, fmt.Errorf("repo.GetAccount: %w", err)
 	}
 

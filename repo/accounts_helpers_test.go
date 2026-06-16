@@ -4,12 +4,12 @@ import (
 	"context"
 	"testing"
 
-	"github.com/jackc/pgx/v4"
 	uuid "github.com/satori/go.uuid"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/volatiletech/null/v9"
 
+	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/events"
 	"gitlab.bbdev.team/vh/pay/orders/events/eventstest"
 	mocks "gitlab.bbdev.team/vh/pay/orders/internal/mocks/pkg"
@@ -39,7 +39,7 @@ func TestGetAccountIDByKeycloakID(t *testing.T) {
 
 	gotID, err = db.GetAccountIDByKeycloakID(ctx, "nonexistent")
 	require.NotNil(t, err)
-	require.ErrorIs(t, err, pgx.ErrNoRows)
+	require.ErrorIs(t, err, common.ErrNoRowsAffected)
 	require.Equal(t, 0, gotID)
 }
 

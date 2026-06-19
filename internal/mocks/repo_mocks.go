@@ -268,6 +268,228 @@ func (_c *MockOrdersRepository_GetAllManualDiscounts_Call) RunAndReturn(run func
 }
 
 
+func (_mock *MockOrdersRepository) CancelHHGrant(ctx context.Context, keycloakID string) error {
+	ret := _mock.Called(ctx, keycloakID)
+	if len(ret) == 0 {
+		panic("no return value specified for CancelHHGrant")
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		return returnFunc(ctx, keycloakID)
+	}
+	return ret.Error(0)
+}
+
+type MockOrdersRepository_CancelHHGrant_Call struct{ *mock.Call }
+
+func (_e *MockOrdersRepository_Expecter) CancelHHGrant(ctx interface{}, keycloakID interface{}) *MockOrdersRepository_CancelHHGrant_Call {
+	return &MockOrdersRepository_CancelHHGrant_Call{Call: _e.mock.On("CancelHHGrant", ctx, keycloakID)}
+}
+
+func (_c *MockOrdersRepository_CancelHHGrant_Call) Run(run func(ctx context.Context, keycloakID string)) *MockOrdersRepository_CancelHHGrant_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockOrdersRepository_CancelHHGrant_Call) Return(err error) *MockOrdersRepository_CancelHHGrant_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockOrdersRepository_CancelHHGrant_Call) RunAndReturn(run func(context.Context, string) error) *MockOrdersRepository_CancelHHGrant_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+func (_mock *MockOrdersRepository) GetActiveHHGrant(ctx context.Context, keycloakID string) (*repo.HHGrant, error) {
+	ret := _mock.Called(ctx, keycloakID)
+	if len(ret) == 0 {
+		panic("no return value specified for GetActiveHHGrant")
+	}
+	var r0 *repo.HHGrant
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (*repo.HHGrant, error)); ok {
+		return returnFunc(ctx, keycloakID)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) *repo.HHGrant); ok {
+		r0 = returnFunc(ctx, keycloakID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*repo.HHGrant)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, keycloakID)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+type MockOrdersRepository_GetActiveHHGrant_Call struct{ *mock.Call }
+
+func (_e *MockOrdersRepository_Expecter) GetActiveHHGrant(ctx interface{}, keycloakID interface{}) *MockOrdersRepository_GetActiveHHGrant_Call {
+	return &MockOrdersRepository_GetActiveHHGrant_Call{Call: _e.mock.On("GetActiveHHGrant", ctx, keycloakID)}
+}
+
+func (_c *MockOrdersRepository_GetActiveHHGrant_Call) Run(run func(ctx context.Context, keycloakID string)) *MockOrdersRepository_GetActiveHHGrant_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockOrdersRepository_GetActiveHHGrant_Call) Return(g *repo.HHGrant, err error) *MockOrdersRepository_GetActiveHHGrant_Call {
+	_c.Call.Return(g, err)
+	return _c
+}
+
+func (_c *MockOrdersRepository_GetActiveHHGrant_Call) RunAndReturn(run func(context.Context, string) (*repo.HHGrant, error)) *MockOrdersRepository_GetActiveHHGrant_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+
+func (_mock *MockOrdersRepository) CreateHHRequest(ctx context.Context, req repo.HHRequestReq) (*repo.HHRequest, error) {
+	ret := _mock.Called(ctx, req)
+	if len(ret) == 0 {
+		panic("no return value specified for CreateHHRequest")
+	}
+	var r0 *repo.HHRequest
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, repo.HHRequestReq) (*repo.HHRequest, error)); ok {
+		return returnFunc(ctx, req)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, repo.HHRequestReq) *repo.HHRequest); ok {
+		r0 = returnFunc(ctx, req)
+	} else if ret.Get(0) != nil {
+		r0 = ret.Get(0).(*repo.HHRequest)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, repo.HHRequestReq) error); ok {
+		r1 = returnFunc(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+type MockOrdersRepository_CreateHHRequest_Call struct{ *mock.Call }
+
+func (_e *MockOrdersRepository_Expecter) CreateHHRequest(ctx interface{}, req interface{}) *MockOrdersRepository_CreateHHRequest_Call {
+	return &MockOrdersRepository_CreateHHRequest_Call{Call: _e.mock.On("CreateHHRequest", ctx, req)}
+}
+
+func (_c *MockOrdersRepository_CreateHHRequest_Call) Run(run func(ctx context.Context, req repo.HHRequestReq)) *MockOrdersRepository_CreateHHRequest_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(repo.HHRequestReq))
+	})
+	return _c
+}
+
+func (_c *MockOrdersRepository_CreateHHRequest_Call) Return(r *repo.HHRequest, err error) *MockOrdersRepository_CreateHHRequest_Call {
+	_c.Call.Return(r, err)
+	return _c
+}
+
+func (_c *MockOrdersRepository_CreateHHRequest_Call) RunAndReturn(run func(context.Context, repo.HHRequestReq) (*repo.HHRequest, error)) *MockOrdersRepository_CreateHHRequest_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+func (_mock *MockOrdersRepository) GetAllHHRequests(ctx context.Context, status string, search string) ([]*repo.HHRequestWithGrant, error) {
+	ret := _mock.Called(ctx, status, search)
+	if len(ret) == 0 {
+		panic("no return value specified for GetAllHHRequests")
+	}
+	var r0 []*repo.HHRequestWithGrant
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) ([]*repo.HHRequestWithGrant, error)); ok {
+		return returnFunc(ctx, status, search)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) []*repo.HHRequestWithGrant); ok {
+		r0 = returnFunc(ctx, status, search)
+	} else if ret.Get(0) != nil {
+		r0 = ret.Get(0).([]*repo.HHRequestWithGrant)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+		r1 = returnFunc(ctx, status, search)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+type MockOrdersRepository_GetAllHHRequests_Call struct{ *mock.Call }
+
+func (_e *MockOrdersRepository_Expecter) GetAllHHRequests(ctx interface{}, status interface{}, search interface{}) *MockOrdersRepository_GetAllHHRequests_Call {
+	return &MockOrdersRepository_GetAllHHRequests_Call{Call: _e.mock.On("GetAllHHRequests", ctx, status, search)}
+}
+
+func (_c *MockOrdersRepository_GetAllHHRequests_Call) Run(run func(ctx context.Context, status string, search string)) *MockOrdersRepository_GetAllHHRequests_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *MockOrdersRepository_GetAllHHRequests_Call) Return(requests []*repo.HHRequestWithGrant, err error) *MockOrdersRepository_GetAllHHRequests_Call {
+	_c.Call.Return(requests, err)
+	return _c
+}
+
+func (_c *MockOrdersRepository_GetAllHHRequests_Call) RunAndReturn(run func(context.Context, string, string) ([]*repo.HHRequestWithGrant, error)) *MockOrdersRepository_GetAllHHRequests_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+func (_mock *MockOrdersRepository) ConcludeHHRequest(ctx context.Context, id int, c repo.HHRequestConclusion) (*repo.HHRequest, error) {
+	ret := _mock.Called(ctx, id, c)
+	if len(ret) == 0 {
+		panic("no return value specified for ConcludeHHRequest")
+	}
+	var r0 *repo.HHRequest
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int, repo.HHRequestConclusion) (*repo.HHRequest, error)); ok {
+		return returnFunc(ctx, id, c)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int, repo.HHRequestConclusion) *repo.HHRequest); ok {
+		r0 = returnFunc(ctx, id, c)
+	} else if ret.Get(0) != nil {
+		r0 = ret.Get(0).(*repo.HHRequest)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, int, repo.HHRequestConclusion) error); ok {
+		r1 = returnFunc(ctx, id, c)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+type MockOrdersRepository_ConcludeHHRequest_Call struct{ *mock.Call }
+
+func (_e *MockOrdersRepository_Expecter) ConcludeHHRequest(ctx interface{}, id interface{}, c interface{}) *MockOrdersRepository_ConcludeHHRequest_Call {
+	return &MockOrdersRepository_ConcludeHHRequest_Call{Call: _e.mock.On("ConcludeHHRequest", ctx, id, c)}
+}
+
+func (_c *MockOrdersRepository_ConcludeHHRequest_Call) Run(run func(ctx context.Context, id int, c repo.HHRequestConclusion)) *MockOrdersRepository_ConcludeHHRequest_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int), args[2].(repo.HHRequestConclusion))
+	})
+	return _c
+}
+
+func (_c *MockOrdersRepository_ConcludeHHRequest_Call) Return(r *repo.HHRequest, err error) *MockOrdersRepository_ConcludeHHRequest_Call {
+	_c.Call.Return(r, err)
+	return _c
+}
+
+func (_c *MockOrdersRepository_ConcludeHHRequest_Call) RunAndReturn(run func(context.Context, int, repo.HHRequestConclusion) (*repo.HHRequest, error)) *MockOrdersRepository_ConcludeHHRequest_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+
 // Close provides a mock function for the type MockOrdersRepository
 func (_mock *MockOrdersRepository) Close() {
 	_mock.Called()

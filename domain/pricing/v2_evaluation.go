@@ -138,6 +138,7 @@ func EvaluateV2Price(
 	primaryEmail string,
 	country string,
 	discountProvider repo.ManualDiscountProvider,
+	hhProvider repo.HHGrantProvider,
 ) (*V2PricingEvaluation, error) {
 	ctx = context.WithValue(ctx, common.CtxLogger, utils.LogFor(ctx).With(
 		slog.Int("account_id", primaryAccountID),
@@ -238,6 +239,22 @@ func EvaluateV2Price(
 	}
 
 	inputs.Explain = buildExplain(inputs)
+
+	if hhProvider != nil && primaryKeycloakID != "" {
+		hh, hhErr := hhProvider.GetActiveHHGrant(ctx, primaryKeycloakID)
+		if hhErr != nil {
+			log.Warn("EvaluateV2Price: HH grant fetch failed, recording error on discount",
+				slog.Any("err", hhErr),
+			)
+			inputs.Discounts = append(inputs.Discounts, Discount{
+				Type:  DiscountTypeHH,
+				Error: true,
+			})
+			inputs.Explain = append(inputs.Explain, "help_haver: fetch error — not applied")
+		} else {
+			applyHHDiscount(ctx, inputs, hh)
+		}
+	}
 
 	if discountProvider != nil && primaryKeycloakID != "" {
 		md, mdErr := discountProvider.GetActiveManualDiscount(ctx, primaryKeycloakID)

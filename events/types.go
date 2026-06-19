@@ -33,6 +33,9 @@ const (
 	TypeDeletePayment     = "delete_payment"
 	TypeDeleteSpecial     = "delete_special"
 	TypeCreateSpecial     = "create_special"
+
+	TypeHHRequestCreated   = "hh_request_created"
+	TypeHHRequestConcluded = "hh_request_concluded"
 )
 
 var entropy io.Reader

@@ -111,6 +111,13 @@ type OrdersRepository interface {
 	GetActiveManualDiscount(ctx context.Context, keycloakID string) (*ManualDiscount, error)
 	GetAllManualDiscounts(ctx context.Context, search string) ([]*ManualDiscount, error)
 
+	CancelHHGrant(ctx context.Context, keycloakID string) error
+	GetActiveHHGrant(ctx context.Context, keycloakID string) (*HHGrant, error)
+
+	CreateHHRequest(ctx context.Context, req HHRequestReq) (*HHRequest, error)
+	GetAllHHRequests(ctx context.Context, status, search string) ([]*HHRequestWithGrant, error)
+	ConcludeHHRequest(ctx context.Context, id int, c HHRequestConclusion) (*HHRequest, error)
+
 	HasPaidMembership(ctx context.Context, email string) (bool, error)
 	HasTicket(ctx context.Context, email string) (bool, error)
 	HasSpecialMembership(ctx context.Context, email string) (bool, error)

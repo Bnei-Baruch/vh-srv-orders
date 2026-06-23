@@ -110,7 +110,7 @@ var countryToGroup = map[string]string{
 	"IQ": "Medium", // Iraq
 	"IR": "Medium", // Iran
 	"IS": "High",   // Iceland
-	"IT": "Medium", // Italy
+	"IT": "High",   // Italy
 	"JM": "Medium", // Jamaica
 	"JO": "Low",    // Jordan
 	"JP": "High",   // Japan
@@ -154,7 +154,7 @@ var countryToGroup = map[string]string{
 	"MV": "Medium", // Maldives
 	"MW": "Low",    // Malawi
 	"MX": "Low",    // Mexico
-	"MY": "High",   // Malaysia
+	"MY": "Medium", // Malaysia
 	"MZ": "Low",    // Mozambique
 	"NA": "Medium", // Namibia
 	"NE": "Low",    // Niger
@@ -331,14 +331,14 @@ var priceByCurrencyAndGroup = map[string]float64{
 	common.CurrencyNIS + "-High":   180.0,
 
 	// EUR prices
-	common.CurrencyEUR + "-Low":    20.0,
-	common.CurrencyEUR + "-Medium": 30.0,
-	common.CurrencyEUR + "-High":   50.0,
+	common.CurrencyEUR + "-Low":    18.0,
+	common.CurrencyEUR + "-Medium": 27.0,
+	common.CurrencyEUR + "-High":   53.0,
 
 	// USD prices
-	common.CurrencyUSD + "-Low":    20.0,
-	common.CurrencyUSD + "-Medium": 35.0,
-	common.CurrencyUSD + "-High":   55.0,
+	common.CurrencyUSD + "-Low":    21.0,
+	common.CurrencyUSD + "-Medium": 31.0,
+	common.CurrencyUSD + "-High":   62.0,
 }
 
 // GetCountryBasePrice returns the base price information for a given country code

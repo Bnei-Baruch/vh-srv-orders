@@ -30,7 +30,6 @@ func applyManualDiscount(ctx context.Context, eval *V2PricingEvaluation, md *rep
 	log := utils.LogFor(ctx)
 
 	if md == nil {
-		log.Info("applyManualDiscount: no active manual discount")
 		eval.Discounts = append(eval.Discounts, Discount{
 			Type:     DiscountTypeManual,
 			Eligible: false,

@@ -1125,7 +1125,7 @@ func TestEvaluateV2Price_EuropeDonationsAloneGrantDiscount(t *testing.T) {
 		}},
 	}, nil).Once()
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, mockAcc, testQuickbooksCompanyID, 10, "kc-1", email, "DE", nil)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, mockAcc, testQuickbooksCompanyID, 10, "kc-1", email, "DE", nil, nil)
 	require.NoError(t, err)
 
 	assert.Equal(t, common.CurrencyEUR, eval.CountryBase.Currency)
@@ -1148,7 +1148,7 @@ func TestEvaluateV2Price_EuropeCountry_NoDonations_FullPrice(t *testing.T) {
 		},
 	}
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "DE", nil)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "DE", nil, nil)
 	require.NoError(t, err)
 
 	assert.False(t, eval.Discounts[0].Eligible)

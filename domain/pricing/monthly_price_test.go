@@ -52,10 +52,10 @@ func TestGetMonthlyPrice_EmptyCurrencyDefaultsToUSD(t *testing.T) {
 }
 
 func TestGetMonthlyPrice_DefaultRouteExcludedCountryGetsV1(t *testing.T) {
-	// GB is excluded from v2 — auto-route should return v1 regardless of input version label.
+	// RU is excluded from v2 — auto-route should return v1 regardless of input version label.
 	for _, version := range []string{"", "t1", "unknown"} {
 		res, err := GetMonthlyPrice(context.Background(), nil, nil, nil, "",
-			1, "kc1", "user@example.com", "GB", common.CurrencyUSD, version, nil, nil)
+			1, "kc1", "user@example.com", "RU", common.CurrencyUSD, version, nil, nil)
 		require.NoError(t, err, "version=%q", version)
 		assert.Equal(t, 20.0, res.Amount.Float64, "version=%q", version)
 		assert.Equal(t, "v1", res.PricingVersion.String, "version=%q", version)

@@ -38,6 +38,74 @@ func (_m *MockAccountingService) EXPECT() *MockAccountingService_Expecter {
 	return &MockAccountingService_Expecter{mock: &_m.Mock}
 }
 
+// GetEuropeContributions provides a mock function for the type MockAccountingService
+func (_mock *MockAccountingService) GetEuropeContributions(ctx context.Context, emails []string) (*accounting.EuropeContributionsResult, error) {
+	ret := _mock.Called(ctx, emails)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetEuropeContributions")
+	}
+
+	var r0 *accounting.EuropeContributionsResult
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, []string) (*accounting.EuropeContributionsResult, error)); ok {
+		return returnFunc(ctx, emails)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, []string) *accounting.EuropeContributionsResult); ok {
+		r0 = returnFunc(ctx, emails)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*accounting.EuropeContributionsResult)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, []string) error); ok {
+		r1 = returnFunc(ctx, emails)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockAccountingService_GetEuropeContributions_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetEuropeContributions'
+type MockAccountingService_GetEuropeContributions_Call struct {
+	*mock.Call
+}
+
+// GetEuropeContributions is a helper method to define mock.On call
+//   - ctx context.Context
+//   - emails []string
+func (_e *MockAccountingService_Expecter) GetEuropeContributions(ctx interface{}, emails interface{}) *MockAccountingService_GetEuropeContributions_Call {
+	return &MockAccountingService_GetEuropeContributions_Call{Call: _e.mock.On("GetEuropeContributions", ctx, emails)}
+}
+
+func (_c *MockAccountingService_GetEuropeContributions_Call) Run(run func(ctx context.Context, emails []string)) *MockAccountingService_GetEuropeContributions_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 []string
+		if args[1] != nil {
+			arg1 = args[1].([]string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockAccountingService_GetEuropeContributions_Call) Return(europeContributionsResult *accounting.EuropeContributionsResult, err error) *MockAccountingService_GetEuropeContributions_Call {
+	_c.Call.Return(europeContributionsResult, err)
+	return _c
+}
+
+func (_c *MockAccountingService_GetEuropeContributions_Call) RunAndReturn(run func(ctx context.Context, emails []string) (*accounting.EuropeContributionsResult, error)) *MockAccountingService_GetEuropeContributions_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetLastContributions provides a mock function for the type MockAccountingService
 func (_mock *MockAccountingService) GetLastContributions(ctx context.Context, email string, companyID *string) (*accounting.ContributionsResult, error) {
 	ret := _mock.Called(ctx, email, companyID)

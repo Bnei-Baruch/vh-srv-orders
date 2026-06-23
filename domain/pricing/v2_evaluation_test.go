@@ -24,13 +24,29 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
-// notFoundAccountingClient returns a mock that responds Found:false for any email,
-// effectively isolating the existing tests to Priority-only behavior.
+// notFoundAccountingClient returns a mock that responds Found:false for any email
+// on both the QuickBooks and Europe endpoints, effectively isolating the existing
+// tests to Priority-only behavior.
 func notFoundAccountingClient(t *testing.T) accounting.AccountingService {
 	m := accountingmocks.NewMockAccountingService(t)
 	m.EXPECT().GetLastContributions(mock.Anything, mock.Anything, mock.Anything).
 		Return(&accounting.ContributionsResult{Found: false}, nil).Maybe()
+	m.EXPECT().GetEuropeContributions(mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, emails []string) (*accounting.EuropeContributionsResult, error) {
+			return europeNotFoundResult(emails), nil
+		}).Maybe()
 	return m
+}
+
+// europeNotFoundResult builds a Europe batch result marking every email not found.
+func europeNotFoundResult(emails []string) *accounting.EuropeContributionsResult {
+	res := &accounting.EuropeContributionsResult{LookbackMonths: 12}
+	for _, email := range emails {
+		res.Results = append(res.Results, accounting.EuropeContributionEntry{
+			IdentifierType: "email", Identifier: email, Found: false,
+		})
+	}
+	return res
 }
 
 const testQuickbooksCompanyID = "test-co"
@@ -330,6 +346,8 @@ func TestFetchDonationSums_AccountingOnly_AggregatesContributions(t *testing.T) 
 		Found: true,
 		Total: map[string]float64{common.CurrencyUSD: 100},
 	}, nil).Once()
+	mockAcc.EXPECT().GetEuropeContributions(mock.Anything, []string{"qb@x.com"}).
+		Return(europeNotFoundResult([]string{"qb@x.com"}), nil).Once()
 
 	result, err := fetchDonationSums(context.Background(), priorityClient, mockAcc, testQuickbooksCompanyID, []string{"qb@x.com"}, 3.1, 3.6)
 
@@ -338,10 +356,12 @@ func TestFetchDonationSums_AccountingOnly_AggregatesContributions(t *testing.T) 
 	assert.Equal(t, []string{"qb@x.com"}, result.successEmails)
 	assert.Contains(t, result.fetchNote, "no Priority record")
 	assert.NotContains(t, result.fetchNote, "no QuickBooks record")
+	assert.Contains(t, result.fetchNote, "no Europe record")
 }
 
-func TestFetchDonationSums_BothSources_SumByCurrency(t *testing.T) {
-	// Priority returns 200 NIS; accounting returns 100 USD → total = 200 + 310 = 510 NIS.
+func TestFetchDonationSums_AllSources_SumByCurrency(t *testing.T) {
+	// Priority returns 200 NIS; QuickBooks returns 100 USD; Europe returns 100 EUR
+	// → total = 200 + 310 + 360 = 870 NIS.
 	validDate := time.Now().AddDate(0, -3, 0).Format(time.RFC3339)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -362,11 +382,18 @@ func TestFetchDonationSums_BothSources_SumByCurrency(t *testing.T) {
 		Found: true,
 		Total: map[string]float64{common.CurrencyUSD: 100},
 	}, nil).Once()
+	mockAcc.EXPECT().GetEuropeContributions(mock.Anything, []string{"user@x.com"}).Return(&accounting.EuropeContributionsResult{
+		LookbackMonths: 12,
+		Results: []accounting.EuropeContributionEntry{{
+			IdentifierType: "email", Identifier: "user@x.com", Found: true,
+			Contributions: map[string]float64{common.CurrencyEUR: 100},
+		}},
+	}, nil).Once()
 
 	result, err := fetchDonationSums(context.Background(), priorityClient, mockAcc, testQuickbooksCompanyID, []string{"user@x.com"}, 3.1, 3.6)
 
 	require.NoError(t, err)
-	assert.InDelta(t, 510.0, result.totalNIS, 0.001)
+	assert.InDelta(t, 870.0, result.totalNIS, 0.001)
 	assert.Equal(t, []string{"user@x.com"}, result.successEmails)
 	assert.Empty(t, result.fetchNote)
 }
@@ -396,6 +423,8 @@ func TestFetchDonationSums_AccountingFoundEmptyContributions_StillCountsAsSucces
 	mockAcc := accountingmocks.NewMockAccountingService(t)
 	mockAcc.EXPECT().GetLastContributions(mock.Anything, "user@x.com", mock.Anything).
 		Return(&accounting.ContributionsResult{Found: true, Total: map[string]float64{}}, nil).Once()
+	mockAcc.EXPECT().GetEuropeContributions(mock.Anything, []string{"user@x.com"}).
+		Return(europeNotFoundResult([]string{"user@x.com"}), nil).Once()
 
 	result, err := fetchDonationSums(context.Background(), priorityClient, mockAcc, testQuickbooksCompanyID, []string{"user@x.com"}, 3.1, 3.6)
 
@@ -418,10 +447,192 @@ func TestFetchDonationSums_PassesConfiguredCompanyIDToAccountingClient(t *testin
 		"user@x.com",
 		mock.MatchedBy(func(p *string) bool { return p != nil && *p == expectedCompany }),
 	).Return(&accounting.ContributionsResult{Found: false}, nil).Once()
+	mockAcc.EXPECT().GetEuropeContributions(mock.Anything, []string{"user@x.com"}).
+		Return(europeNotFoundResult([]string{"user@x.com"}), nil).Once()
 
 	_, err := fetchDonationSums(context.Background(), priorityClient, mockAcc, expectedCompany, []string{"user@x.com"}, 3.1, 3.6)
 
 	require.NoError(t, err)
+}
+
+// --- addEuropeContributions ---
+
+func TestAddEuropeContributions_FoundAccumulates(t *testing.T) {
+	mockAcc := accountingmocks.NewMockAccountingService(t)
+	mockAcc.EXPECT().GetEuropeContributions(mock.Anything, []string{"a@x.com", "b@x.com"}).Return(&accounting.EuropeContributionsResult{
+		Results: []accounting.EuropeContributionEntry{
+			{Identifier: "a@x.com", Found: true, Contributions: map[string]float64{common.CurrencyEUR: 100, common.CurrencyUSD: 50}},
+			{Identifier: "b@x.com", Found: true, Contributions: map[string]float64{common.CurrencyEUR: 25}},
+		},
+	}, nil).Once()
+
+	perCurrency := map[string]float64{}
+	successSet := map[string]struct{}{}
+	notFound, err := addEuropeContributions(context.Background(), mockAcc, []string{"a@x.com", "b@x.com"}, perCurrency, successSet)
+
+	require.NoError(t, err)
+	assert.Empty(t, notFound)
+	assert.Equal(t, map[string]float64{common.CurrencyEUR: 125, common.CurrencyUSD: 50}, perCurrency)
+	assert.Contains(t, successSet, "a@x.com")
+	assert.Contains(t, successSet, "b@x.com")
+}
+
+func TestAddEuropeContributions_NotFoundListed(t *testing.T) {
+	mockAcc := accountingmocks.NewMockAccountingService(t)
+	mockAcc.EXPECT().GetEuropeContributions(mock.Anything, []string{"a@x.com", "b@x.com"}).Return(&accounting.EuropeContributionsResult{
+		Results: []accounting.EuropeContributionEntry{
+			{Identifier: "a@x.com", Found: true, Contributions: map[string]float64{common.CurrencyEUR: 100}},
+			{Identifier: "b@x.com", Found: false},
+		},
+	}, nil).Once()
+
+	perCurrency := map[string]float64{}
+	successSet := map[string]struct{}{}
+	notFound, err := addEuropeContributions(context.Background(), mockAcc, []string{"a@x.com", "b@x.com"}, perCurrency, successSet)
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"b@x.com"}, notFound)
+	assert.NotContains(t, successSet, "b@x.com")
+}
+
+func TestAddEuropeContributions_MissingEntryTreatedAsNotFound(t *testing.T) {
+	// Upstream omits an email from the results — defensive: treat as not found.
+	mockAcc := accountingmocks.NewMockAccountingService(t)
+	mockAcc.EXPECT().GetEuropeContributions(mock.Anything, []string{"a@x.com", "missing@x.com"}).Return(&accounting.EuropeContributionsResult{
+		Results: []accounting.EuropeContributionEntry{
+			{Identifier: "a@x.com", Found: true, Contributions: map[string]float64{common.CurrencyEUR: 100}},
+		},
+	}, nil).Once()
+
+	perCurrency := map[string]float64{}
+	successSet := map[string]struct{}{}
+	notFound, err := addEuropeContributions(context.Background(), mockAcc, []string{"a@x.com", "missing@x.com"}, perCurrency, successSet)
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"missing@x.com"}, notFound)
+}
+
+func TestAddEuropeContributions_CaseInsensitiveIdentifierMatch(t *testing.T) {
+	// Response identifier casing differs from the request email — must still match,
+	// and successSet keeps the original-cased request email.
+	mockAcc := accountingmocks.NewMockAccountingService(t)
+	mockAcc.EXPECT().GetEuropeContributions(mock.Anything, []string{"User@X.com"}).Return(&accounting.EuropeContributionsResult{
+		Results: []accounting.EuropeContributionEntry{
+			{Identifier: "user@x.com", Found: true, Contributions: map[string]float64{common.CurrencyEUR: 100}},
+		},
+	}, nil).Once()
+
+	perCurrency := map[string]float64{}
+	successSet := map[string]struct{}{}
+	notFound, err := addEuropeContributions(context.Background(), mockAcc, []string{"User@X.com"}, perCurrency, successSet)
+
+	require.NoError(t, err)
+	assert.Empty(t, notFound)
+	assert.Contains(t, successSet, "User@X.com")
+	assert.Equal(t, 100.0, perCurrency[common.CurrencyEUR])
+}
+
+func TestAddEuropeContributions_ErrorWrapsErrDonationFetch(t *testing.T) {
+	mockAcc := accountingmocks.NewMockAccountingService(t)
+	mockAcc.EXPECT().GetEuropeContributions(mock.Anything, mock.Anything).
+		Return(nil, fmt.Errorf("europe upstream unreachable")).Once()
+
+	_, err := addEuropeContributions(context.Background(), mockAcc, []string{"a@x.com"}, map[string]float64{}, map[string]struct{}{})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDonationFetch)
+}
+
+func TestAddEuropeContributions_EmptyEmailsNoCall(t *testing.T) {
+	// No expectation set — any call to the mock would fail the test.
+	mockAcc := accountingmocks.NewMockAccountingService(t)
+
+	notFound, err := addEuropeContributions(context.Background(), mockAcc, nil, map[string]float64{}, map[string]struct{}{})
+
+	require.NoError(t, err)
+	assert.Empty(t, notFound)
+}
+
+func TestFetchDonationSums_EuropeNegativeEUR_ReducesTotal(t *testing.T) {
+	// QuickBooks +100 USD, Europe -50 EUR (refunds exceed donations)
+	// → 310 - 180 = 130 NIS.
+	server := noPriorityCustomersServer()
+	defer server.Close()
+	priorityClient := newPriorityTestClient(server.URL)
+
+	mockAcc := accountingmocks.NewMockAccountingService(t)
+	mockAcc.EXPECT().GetLastContributions(mock.Anything, "user@x.com", mock.Anything).Return(&accounting.ContributionsResult{
+		Found: true,
+		Total: map[string]float64{common.CurrencyUSD: 100},
+	}, nil).Once()
+	mockAcc.EXPECT().GetEuropeContributions(mock.Anything, []string{"user@x.com"}).Return(&accounting.EuropeContributionsResult{
+		Results: []accounting.EuropeContributionEntry{{
+			Identifier: "user@x.com", Found: true,
+			Contributions: map[string]float64{common.CurrencyEUR: -50},
+		}},
+	}, nil).Once()
+
+	result, err := fetchDonationSums(context.Background(), priorityClient, mockAcc, testQuickbooksCompanyID, []string{"user@x.com"}, 3.1, 3.6)
+
+	require.NoError(t, err)
+	assert.InDelta(t, 130.0, result.totalNIS, 0.001)
+}
+
+func TestFetchDonationSums_EuropeOnly_AggregatesContributions(t *testing.T) {
+	server := noPriorityCustomersServer()
+	defer server.Close()
+	priorityClient := newPriorityTestClient(server.URL)
+
+	mockAcc := accountingmocks.NewMockAccountingService(t)
+	mockAcc.EXPECT().GetLastContributions(mock.Anything, "eu@x.com", mock.Anything).
+		Return(&accounting.ContributionsResult{Found: false}, nil).Once()
+	mockAcc.EXPECT().GetEuropeContributions(mock.Anything, []string{"eu@x.com"}).Return(&accounting.EuropeContributionsResult{
+		Results: []accounting.EuropeContributionEntry{{
+			Identifier: "eu@x.com", Found: true,
+			Contributions: map[string]float64{common.CurrencyEUR: 100},
+		}},
+	}, nil).Once()
+
+	result, err := fetchDonationSums(context.Background(), priorityClient, mockAcc, testQuickbooksCompanyID, []string{"eu@x.com"}, 3.1, 3.6)
+
+	require.NoError(t, err)
+	assert.InDelta(t, 360.0, result.totalNIS, 0.001) // 100 EUR * 3.6
+	assert.Equal(t, []string{"eu@x.com"}, result.successEmails)
+	assert.Contains(t, result.fetchNote, "no Priority record")
+	assert.Contains(t, result.fetchNote, "no QuickBooks record")
+	assert.NotContains(t, result.fetchNote, "no Europe record")
+}
+
+func TestFetchDonationSums_NoteIncludesAllThreeSources(t *testing.T) {
+	server := noPriorityCustomersServer()
+	defer server.Close()
+	priorityClient := newPriorityTestClient(server.URL)
+
+	result, err := fetchDonationSums(context.Background(), priorityClient, notFoundAccountingClient(t), testQuickbooksCompanyID, []string{"miss@x.com"}, 3.1, 3.6)
+
+	require.NoError(t, err)
+	assert.Equal(t, 0.0, result.totalNIS)
+	assert.Empty(t, result.successEmails)
+	assert.Equal(t,
+		"no Priority record for: miss@x.com; no QuickBooks record for: miss@x.com; no Europe record for: miss@x.com",
+		result.fetchNote)
+}
+
+func TestFetchDonationSums_EuropeError_ReturnsErrDonationFetch(t *testing.T) {
+	server := noPriorityCustomersServer()
+	defer server.Close()
+	priorityClient := newPriorityTestClient(server.URL)
+
+	mockAcc := accountingmocks.NewMockAccountingService(t)
+	mockAcc.EXPECT().GetLastContributions(mock.Anything, "user@x.com", mock.Anything).
+		Return(&accounting.ContributionsResult{Found: false}, nil).Once()
+	mockAcc.EXPECT().GetEuropeContributions(mock.Anything, []string{"user@x.com"}).
+		Return(nil, fmt.Errorf("europe upstream unreachable")).Once()
+
+	_, err := fetchDonationSums(context.Background(), priorityClient, mockAcc, testQuickbooksCompanyID, []string{"user@x.com"}, 3.1, 3.6)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDonationFetch)
 }
 
 // --- buildExplain ---
@@ -464,6 +675,7 @@ func TestBuildFormula_NoSpouseNoDiscount(t *testing.T) {
 	assert.Contains(t, lines[0], "2160.00 NIS/yr")
 	assert.NotContains(t, lines[0], "@ 1")
 	assert.Contains(t, lines[1], "primary(2)")
+	assert.Contains(t, lines[1], "fetch donations from all sources (Priority, QuickBooks, Europe; last 12mo)")
 	assert.Contains(t, lines[1], "ok")
 	assert.Equal(t, "3. sum all donations per currency → convert each to NIS", lines[2])
 	assert.Contains(t, lines[3], "no discount")
@@ -886,6 +1098,61 @@ func TestEvaluateV2Price_PartialDonationFetchError_ReturnsDegradedDiscount(t *te
 	assert.True(t, eval.Discounts[0].Error)
 	assert.False(t, eval.Discounts[0].Eligible)
 	assert.True(t, eval.HasDiscountErrors())
+}
+
+func TestEvaluateV2Price_EuropeDonationsAloneGrantDiscount(t *testing.T) {
+	// EU country (Germany, EUR base). Priority and QuickBooks have no record;
+	// Europe donations alone cross the annual threshold → 55% off.
+	base := GetCountryBasePrice("DE")
+	server := noPriorityCustomersServer()
+	defer server.Close()
+
+	client := newPriorityTestClient(server.URL)
+	email := "primary@x.de"
+	profileSvc := &stubProfileService{
+		profiles: map[string]*profiles.Profile{
+			"kc-1": {PrimaryEmail: &email},
+		},
+	}
+
+	mockAcc := accountingmocks.NewMockAccountingService(t)
+	mockAcc.EXPECT().GetLastContributions(mock.Anything, email, mock.Anything).
+		Return(&accounting.ContributionsResult{Found: false}, nil).Once()
+	mockAcc.EXPECT().GetEuropeContributions(mock.Anything, []string{email}).Return(&accounting.EuropeContributionsResult{
+		Results: []accounting.EuropeContributionEntry{{
+			Identifier: email, Found: true,
+			Contributions: map[string]float64{common.CurrencyEUR: base.Amount*12 + 100},
+		}},
+	}, nil).Once()
+
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, mockAcc, testQuickbooksCompanyID, 10, "kc-1", email, "DE", nil, nil)
+	require.NoError(t, err)
+
+	assert.Equal(t, common.CurrencyEUR, eval.CountryBase.Currency)
+	assert.True(t, eval.Discounts[0].Eligible)
+	assert.Equal(t, base.Amount*(1-DonationsDiscountAmtPct/100), eval.FinalPrice.Amount)
+	props := unmarshalDonationsProps(t, eval.Discounts[0])
+	assert.Equal(t, []string{email}, props.DonationsFetchedEmails)
+}
+
+func TestEvaluateV2Price_EuropeCountry_NoDonations_FullPrice(t *testing.T) {
+	base := GetCountryBasePrice("DE")
+	server := noPriorityCustomersServer()
+	defer server.Close()
+
+	client := newPriorityTestClient(server.URL)
+	email := "primary@x.de"
+	profileSvc := &stubProfileService{
+		profiles: map[string]*profiles.Profile{
+			"kc-1": {PrimaryEmail: &email},
+		},
+	}
+
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "DE", nil, nil)
+	require.NoError(t, err)
+
+	assert.False(t, eval.Discounts[0].Eligible)
+	assert.Equal(t, Price{Amount: base.Amount, Currency: common.CurrencyEUR}, eval.FinalPrice)
 }
 
 // --- Public ---

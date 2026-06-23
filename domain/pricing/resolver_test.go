@@ -19,7 +19,7 @@ func TestResolve_V1ForExcludedCountry(t *testing.T) {
 	r := NewPriceResolver(nil, nil, nil, "")
 	account := &repo.Account{
 		ID:      1,
-		Country: null.StringFrom("GB"),
+		Country: null.StringFrom("RU"),
 		UserKey: null.StringFrom("kc1"),
 		Email:   null.StringFrom("user@example.com"),
 	}
@@ -35,7 +35,7 @@ func TestResolve_V1FallsBackToUSDForUnknownCurrency(t *testing.T) {
 	r := NewPriceResolver(nil, nil, nil, "")
 	account := &repo.Account{
 		ID:      1,
-		Country: null.StringFrom("GB"),
+		Country: null.StringFrom("RU"),
 		Email:   null.StringFrom("user@example.com"),
 	}
 	result, err := r.Resolve(context.Background(), account, "GBP")
@@ -48,7 +48,7 @@ func TestResolve_V1NIS(t *testing.T) {
 	r := NewPriceResolver(nil, nil, nil, "")
 	account := &repo.Account{
 		ID:      1,
-		Country: null.StringFrom("DE"), // EU excluded
+		Country: null.StringFrom("RU"), // excluded from v2
 		Email:   null.StringFrom("user@example.com"),
 	}
 	result, err := r.Resolve(context.Background(), account, common.CurrencyNIS)

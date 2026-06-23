@@ -74,7 +74,7 @@ func TestHandleMonthlyPriceByKCID_T1_NonILUsesV1(t *testing.T) {
 
 	POST(t, a, "/v2/account/", repo.Account{
 		UserKey: null.StringFrom(USER_KEY),
-		Country: null.StringFrom("GB"),
+		Country: null.StringFrom("RU"),
 	}, http.StatusCreated)
 
 	got := GET(t, a, fmt.Sprintf("/v2/pricing/monthly/%s?pricing_version=t1&currency=USD", USER_KEY), http.StatusOK)
@@ -133,10 +133,12 @@ func TestHandleMonthlyPriceByKCID_DonationFetchError_ReturnsDegradedResponse(t *
 	a.ordersAPI.SetPriorityClient(priority.NewClient())
 	a.ordersAPI.SetProfileService(&notFoundProfileService{})
 
-	// Accounting is queried after Priority; Priority fails first, so this mock won't be called.
+	// Accounting is queried after Priority; Priority fails first, so these mocks won't be called.
 	mockAcc := accountingmocks.NewMockAccountingService(t)
 	mockAcc.EXPECT().GetLastContributions(mock.Anything, mock.Anything, mock.Anything).
 		Return(&accounting.ContributionsResult{Found: false}, nil).Maybe()
+	mockAcc.EXPECT().GetEuropeContributions(mock.Anything, mock.Anything).
+		Return(&accounting.EuropeContributionsResult{}, nil).Maybe()
 	a.ordersAPI.SetAccountingService(mockAcc)
 	a.ordersAPI.SetQuickbooksCompanyID("test-company")
 

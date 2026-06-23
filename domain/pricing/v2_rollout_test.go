@@ -21,39 +21,42 @@ func TestV2Eligible_USEligible(t *testing.T) {
 	assert.True(t, V2Eligible("US"))
 }
 
-func TestV2Eligible_UKExcluded(t *testing.T) {
-	assert.False(t, V2Eligible("GB"))
+func TestV2Eligible_UKEligible(t *testing.T) {
+	assert.True(t, V2Eligible("GB"))
 }
 
-func TestV2Eligible_EUCountriesExcluded(t *testing.T) {
+func TestV2Eligible_EUCountriesEligible(t *testing.T) {
 	euCountries := []string{
 		"AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR",
 		"DE", "GR", "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL",
 		"PL", "PT", "RO", "SK", "SI", "ES", "SE",
 	}
 	for _, code := range euCountries {
-		assert.False(t, V2Eligible(code), "EU country %s should be excluded", code)
+		assert.True(t, V2Eligible(code), "EU country %s should be v2 eligible", code)
 	}
 }
 
-func TestV2Eligible_TurkeyRussiaExcluded(t *testing.T) {
-	assert.False(t, V2Eligible("TR"))
+func TestV2Eligible_TurkeyEligible(t *testing.T) {
+	assert.True(t, V2Eligible("TR"))
+}
+
+func TestV2Eligible_RussiaExcluded(t *testing.T) {
 	assert.False(t, V2Eligible("RU"))
 }
 
-func TestV2Eligible_WesternBalkansExcluded(t *testing.T) {
-	assert.False(t, V2Eligible("AL")) // Albania
-	assert.False(t, V2Eligible("BA")) // Bosnia and Herzegovina
-	assert.False(t, V2Eligible("RS")) // Serbia
+func TestV2Eligible_WesternBalkansEligible(t *testing.T) {
+	assert.True(t, V2Eligible("AL")) // Albania
+	assert.True(t, V2Eligible("BA")) // Bosnia and Herzegovina
+	assert.True(t, V2Eligible("RS")) // Serbia
 }
 
 func TestV2Eligible_UkraineIsEligible(t *testing.T) {
 	assert.True(t, V2Eligible("UA"))
 }
 
-func TestV2Eligible_NorwaySwitzerlandExcluded(t *testing.T) {
-	assert.False(t, V2Eligible("NO"))
-	assert.False(t, V2Eligible("CH"))
+func TestV2Eligible_NorwaySwitzerlandEligible(t *testing.T) {
+	assert.True(t, V2Eligible("NO"))
+	assert.True(t, V2Eligible("CH"))
 }
 
 func TestV2Eligible_CanadaEligible(t *testing.T) {
@@ -82,6 +85,7 @@ func TestV2Eligible_UnknownCountryIsEligible(t *testing.T) {
 	assert.True(t, V2Eligible("XX"))
 }
 
-func TestV2Eligible_MissingCountryIsIneligible(t *testing.T) {
-	assert.False(t, V2Eligible(""))
+func TestV2Eligible_MissingCountryIsEligible(t *testing.T) {
+	// Empty/NULL country resolves to the highest USD tier via GetCountryBasePrice.
+	assert.True(t, V2Eligible(""))
 }

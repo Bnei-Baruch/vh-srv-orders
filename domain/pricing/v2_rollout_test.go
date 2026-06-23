@@ -85,6 +85,7 @@ func TestV2Eligible_UnknownCountryIsEligible(t *testing.T) {
 	assert.True(t, V2Eligible("XX"))
 }
 
-func TestV2Eligible_MissingCountryIsIneligible(t *testing.T) {
-	assert.False(t, V2Eligible(""))
+func TestV2Eligible_MissingCountryIsEligible(t *testing.T) {
+	// Empty/NULL country resolves to the highest USD tier via GetCountryBasePrice.
+	assert.True(t, V2Eligible(""))
 }

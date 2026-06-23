@@ -19,12 +19,10 @@ var v2ExcludedMajorMarkets = map[string]bool{
 }
 
 // V2Eligible returns true if the country should use v2 pricing.
-// A country is eligible when it is known, not in the excluded major markets list,
-// and not temporarily excluded via v2Excluded.
+// A country is eligible unless it is in the excluded major markets list or
+// temporarily excluded via v2Excluded. Unknown or missing (empty/NULL) country
+// codes are eligible and resolve to the highest USD tier via GetCountryBasePrice.
 func V2Eligible(country string) bool {
-	if country == "" {
-		return false
-	}
 	code := strings.ToUpper(country)
 	if v2Excluded[code] {
 		return false

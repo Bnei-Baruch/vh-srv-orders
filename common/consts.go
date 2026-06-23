@@ -72,7 +72,17 @@ const (
 	OrderFlagPaused         = "paused"
 	OrderFlagSkip          = "skip"
 	OrderFlagPricingError  = "pricing_error"
+
+	HHGrantTypeHayal  = "hh-hayal"
+	HHGrantTypeGimlaj = "hh-gimlaj"
+	HHGrantTypeOther  = "hh-other"
+
+	HHRequestStatusRequested = "REQUESTED"
+	HHRequestStatusApproved  = "APPROVED"
+	HHRequestStatusDenied    = "DENIED"
 )
+
+var HHGrantTypes = []string{HHGrantTypeHayal, HHGrantTypeGimlaj, HHGrantTypeOther}
 
 var RoleAnyAdmin = []string{RoleRoot, RoleAdmin, RoleHelpHaverAdmin}
 

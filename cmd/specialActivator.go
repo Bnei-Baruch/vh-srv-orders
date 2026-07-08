@@ -132,14 +132,12 @@ func (w *Worker) DoTask() error {
 }
 
 func isBeginsToday(special *repo.Special) bool {
-	if special.StartDate.Valid {
-		startDate := special.StartDate.Time
-		actualDate := time.Now()
-		if startDate.Year() == actualDate.Year() && startDate.Month() == actualDate.Month() && actualDate.Day() == actualDate.Day() {
-			return true
-		}
+	if !special.StartDate.Valid {
+		return false
 	}
-	return false
+	startYear, startMonth, startDay := special.StartDate.Time.Local().Date()
+	nowYear, nowMonth, nowDay := time.Now().Date()
+	return startYear == nowYear && startMonth == nowMonth && startDay == nowDay
 }
 
 func (w *Worker) BuildEvent(eventType string, payload map[string]interface{}) events.Event {

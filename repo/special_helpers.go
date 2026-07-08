@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -38,10 +39,35 @@ func (o *OrdersDB) SetKeycloakIdByEmail(ctx context.Context, email string, keycl
 	}
 	return nil
 }
+// DeleteSpecialsByKeycloakId revokes the user's currently-active special(s) via
+// DeleteSpecialById — the single primitive that ends a row and emits delete_special.
+// Past spans keep their history and future spans stay scheduled.
 func (o *OrdersDB) DeleteSpecialsByKeycloakId(ctx context.Context, keycloakID string) error {
-	_, err := o.Exec(ctx, `UPDATE specials SET end_date = now(),  updated_at = now() WHERE keycloak_id=$1`, keycloakID)
+	rows, err := o.Query(ctx,
+		`SELECT id FROM specials WHERE keycloak_id=$1 AND start_date <= now() AND end_date > now()`,
+		keycloakID)
 	if err != nil {
-		return fmt.Errorf("DeleteSpecialsByKeycloakId: %w", err)
+		return fmt.Errorf("o.Query: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []int
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			return fmt.Errorf("rows.Scan: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("rows.Err: %w", err)
+	}
+
+	for _, id := range ids {
+		// ErrNoRowsAffected here means a concurrent revoke already ended the row.
+		if err := o.DeleteSpecialById(ctx, id); err != nil && !errors.Is(err, common.ErrNoRowsAffected) {
+			return fmt.Errorf("o.DeleteSpecialById [%d]: %w", id, err)
+		}
 	}
 	return nil
 }

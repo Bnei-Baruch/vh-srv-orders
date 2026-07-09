@@ -21,7 +21,7 @@ func (o *OrdersDB) DeleteSpecialById(ctx context.Context, id int) error {
 	}
 	res, errUpdate := o.Exec(ctx, `UPDATE  specials SET end_date = now(), updated_at = now() WHERE  id = $1`, id)
 	if errUpdate != nil {
-		return err
+		return fmt.Errorf("o.Exec: %w", errUpdate)
 	}
 
 	if res.RowsAffected() == 0 {

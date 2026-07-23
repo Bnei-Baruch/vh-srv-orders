@@ -136,6 +136,24 @@ func TestBuildChargeRequest_AccountFields(t *testing.T) {
 	assert.Equal(t, "he", req.Language)
 }
 
+func TestBuildChargeRequest_StripsNonBMPFromAccountFields(t *testing.T) {
+	// Non-BMP characters (e.g. emoji) in account free-text fail the downstream
+	// gateway store (non-utf8mb4 column), so they must be stripped before charge.
+	data := testRenewalData()
+	data.Account.FirstName = null.StringFrom("Ruth🦋")
+	data.Account.LastName = null.StringFrom("Cohen😀")
+	data.Account.Street = null.StringFrom("Herzl 5 🏠")
+	data.Account.City = null.StringFrom("TLV🌟")
+	price := testV1Price()
+	payment := testPendingPayment()
+
+	req := BuildChargeRequest(data, price, payment)
+
+	assert.Equal(t, "Ruth Cohen", req.Name)
+	assert.Equal(t, "Herzl 5 ", req.Street)
+	assert.Equal(t, "TLV", req.City)
+}
+
 func TestBuildChargeRequest_PaymentFields(t *testing.T) {
 	data := testRenewalData()
 	price := testV1Price()

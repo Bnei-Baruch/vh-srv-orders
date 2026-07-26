@@ -116,6 +116,10 @@ type RequestOrder struct {
 	AmountItem    null.Float64 `json:"AmountItem"`
 	TerminalId    null.String  `json:"TerminalId"`
 
+	// Server-resolved pricing — set by the checkout handler, never bound from the client.
+	PricingVersion    null.String `json:"-"`
+	PricingEvaluation null.JSON   `json:"-"`
+
 	//Transaction data
 	SuccessURL null.String `json:"SuccessURL"`
 	ErrorURL   null.String `json:"ErrorURL"`

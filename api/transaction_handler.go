@@ -66,6 +66,11 @@ func (o *OrdersAPI) handleTransactionOrderAndPay(c *gin.Context) {
 	if !o.isEmailOwnerOrHasAnyRole(c, req.Email.String, common.RoleRoot, common.RoleAdmin) {
 		return
 	}
+	// Offline/helphaver payments bypass price enforcement, so creating them is staff-only.
+	if (req.PaymentType.String == common.PaymentTypeOffline || req.PaymentType.String == common.PaymentTypeHelpHaver) &&
+		!o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
+		return
+	}
 
 	ord, err := o.repo.CreateOrderViaTransaction(c.Request.Context(), req)
 	if err != nil {
@@ -79,6 +84,11 @@ func (o *OrdersAPI) handleTransactionOrderAndPay(c *gin.Context) {
 	}
 
 	req.PaymentStatus = null.StringFrom(common.PaymentStatusPending) // don't let anybody fool us
+
+	if checkoutPriceEnforced(&req) && !o.enforceCheckoutPrice(c, &req, ord.AccountID.Int) {
+		return
+	}
+
 	p, err := o.repo.CreatePayment(c.Request.Context(), req, ord.ID)
 	if err != nil {
 		c.Status(http.StatusInternalServerError)

@@ -263,6 +263,7 @@ func buildChargeableBillingService(ordersDB *repo.OrdersDB, eventEmitter events.
 	resolver := pricing.NewPriceResolver(profileService, priorityClient, accountingClient, common.Config.QuickbooksCompanyID)
 	resolver.SetManualDiscountProvider(ordersDB)
 	resolver.SetHHGrantProvider(ordersDB)
+	resolver.SetCouponProvider(ordersDB)
 	return billing.NewBillingService(ordersDB, pelecardClient, eventEmitter, resolver, chargeExecutor)
 }
 

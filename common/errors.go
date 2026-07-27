@@ -15,4 +15,14 @@ var (
 	// (DB updates after successful/failed payment). Money may have moved.
 	// MUST NOT retry on another terminal to avoid double-charging.
 	ErrPostPayment = fmt.Errorf("post-payment error")
+
+	// Coupon redemption outcomes. ErrCouponInvalid is the uniform response for
+	// unknown/disabled/out-of-window codes (details stay in logs); the rest are
+	// specific because a legitimate member's clarity outweighs the disclosure.
+	ErrCouponInvalid         = fmt.Errorf("invalid or expired code")
+	ErrCouponAlreadyRedeemed = fmt.Errorf("coupon already redeemed")
+	ErrCouponExhausted       = fmt.Errorf("coupon no longer available")
+	ErrCouponCountryMismatch = fmt.Errorf("coupon not available in your country")
+	ErrCouponCountryRequired = fmt.Errorf("set your country first")
+	ErrCouponCodeConflict    = fmt.Errorf("coupon code already exists")
 )

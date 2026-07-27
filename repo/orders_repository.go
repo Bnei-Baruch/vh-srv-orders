@@ -118,6 +118,17 @@ type OrdersRepository interface {
 	GetAllHHRequests(ctx context.Context, status, search string) ([]*HHRequestWithGrant, error)
 	ConcludeHHRequest(ctx context.Context, id int, c HHRequestConclusion) (*HHRequest, error)
 
+	CreateCoupon(ctx context.Context, c Coupon) (*Coupon, error)
+	GetCouponByID(ctx context.Context, id int) (*Coupon, error)
+	ListCoupons(ctx context.Context) ([]CouponListItem, error)
+	UpdateCoupon(ctx context.Context, c Coupon) (*Coupon, error)
+	CountCouponRedemptions(ctx context.Context, couponID int) (int, error)
+	ListCouponRedemptions(ctx context.Context, couponID int) ([]CouponRedemptionDetail, error)
+	RevokeRedemption(ctx context.Context, couponID, redemptionID int) error
+	GetMyCoupons(ctx context.Context, keycloakID string) ([]MyCoupon, error)
+	GetActiveCouponRedemptions(ctx context.Context, keycloakID string) ([]ActiveCouponRedemption, error)
+	RedeemCoupon(ctx context.Context, keycloakID, code, country string) (*CouponRedemption, error)
+
 	HasPaidMembership(ctx context.Context, email string) (bool, error)
 	HasTicket(ctx context.Context, email string) (bool, error)
 	HasSpecialMembership(ctx context.Context, email string) (bool, error)

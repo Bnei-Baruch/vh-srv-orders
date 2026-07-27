@@ -607,6 +607,75 @@ type HHRequestWithGrant struct {
 	Grant      *HHGrant `json:"grant,omitempty"`
 }
 
+// Coupon is a redeemable discount code (design §1). Countries is NULL/empty for
+// unrestricted percent coupons; required for fixed_price coupons.
+type Coupon struct {
+	ID             int         `json:"id"`
+	Code           string      `json:"code"`
+	Description    null.String `json:"description"`
+	Type           string      `json:"type"` // percent | fixed_price
+	Properties     null.JSON   `json:"properties"`
+	Enabled        bool        `json:"enabled"`
+	RedeemFrom     time.Time   `json:"redeem_from"`
+	RedeemUntil    time.Time   `json:"redeem_until"`
+	BenefitStart   null.Time   `json:"benefit_start"`
+	BenefitEnd     null.Time   `json:"benefit_end"`
+	BenefitMonths  null.Int    `json:"benefit_months"`
+	Countries      []string    `json:"countries"`
+	MaxRedemptions int         `json:"max_redemptions"`
+	CreatedAt      time.Time   `json:"created_at"`
+	UpdatedAt      time.Time   `json:"updated_at"`
+}
+
+// CouponProperties is the type-specific payload stored in coupons.properties.
+type CouponProperties struct {
+	DiscountPct *float64 `json:"discount_pct,omitempty"`
+	FixedPrice  *float64 `json:"fixed_price,omitempty"`
+	Currency    *string  `json:"currency,omitempty"`
+}
+
+// CouponListItem augments a coupon with aggregates for the admin list.
+type CouponListItem struct {
+	Coupon
+	RedemptionsCount int       `json:"redemptions_count"` // all rows, revoked included
+	BenefitsUntil    null.Time `json:"benefits_until"`    // MAX(benefit_end) over non-revoked
+}
+
+type CouponRedemption struct {
+	ID           int       `json:"id"`
+	CouponID     int       `json:"coupon_id"`
+	KeycloakID   string    `json:"keycloak_id"`
+	RedeemedAt   time.Time `json:"redeemed_at"`
+	BenefitStart time.Time `json:"benefit_start"`
+	BenefitEnd   time.Time `json:"benefit_end"`
+	RevokedAt    null.Time `json:"revoked_at"`
+}
+
+// CouponRedemptionDetail is a redemption joined with the member's email (admin view).
+type CouponRedemptionDetail struct {
+	CouponRedemption
+	Email string `json:"email"`
+}
+
+// MyCoupon is a caller's active/upcoming redemption for the /mine endpoint.
+type MyCoupon struct {
+	Code         string    `json:"code"`
+	Description  string    `json:"description"`
+	BenefitStart time.Time `json:"benefit_start"`
+	BenefitEnd   time.Time `json:"benefit_end"`
+}
+
+// ActiveCouponRedemption is what the pricing evaluation needs for a redemption
+// that is currently in its benefit window on an enabled coupon.
+type ActiveCouponRedemption struct {
+	RedemptionID int
+	CouponID     int
+	Code         string
+	Type         string
+	Properties   null.JSON
+	BenefitEnd   time.Time
+}
+
 type OperationReq struct {
 	ID            *int    `json:"id" form:"id"`
 	NewEmail      *string `json:"new_email" form:"new_email" binding:"required"`

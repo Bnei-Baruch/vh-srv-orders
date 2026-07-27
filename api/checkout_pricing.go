@@ -50,7 +50,7 @@ func (o *OrdersAPI) enforceCheckoutPrice(c *gin.Context, req *repo.RequestOrder,
 		ctx,
 		o.profileService, o.priorityClient, o.accountingService, o.quickbooksCompanyID,
 		account.ID, account.UserKey.String, account.Email.String, account.Country.String,
-		strings.ToUpper(req.Currency.String), "v2", o.repo, o.repo,
+		strings.ToUpper(req.Currency.String), "v2", o.repo, o.repo, o.repo,
 	)
 	if err != nil {
 		c.Status(http.StatusInternalServerError)

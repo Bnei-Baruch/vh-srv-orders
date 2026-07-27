@@ -74,7 +74,7 @@ type MockProfileService_GetProfileByKeycloakID_Call struct {
 // GetProfileByKeycloakID is a helper method to define mock.On call
 //   - ctx context.Context
 //   - keycloakId string
-func (_e *MockProfileService_Expecter) GetProfileByKeycloakID(ctx interface{}, keycloakId interface{}) *MockProfileService_GetProfileByKeycloakID_Call {
+func (_e *MockProfileService_Expecter) GetProfileByKeycloakID(ctx any, keycloakId any) *MockProfileService_GetProfileByKeycloakID_Call {
 	return &MockProfileService_GetProfileByKeycloakID_Call{Call: _e.mock.On("GetProfileByKeycloakID", ctx, keycloakId)}
 }
 
@@ -142,7 +142,7 @@ type MockProfileService_LookupProfile_Call struct {
 // LookupProfile is a helper method to define mock.On call
 //   - ctx context.Context
 //   - email string
-func (_e *MockProfileService_Expecter) LookupProfile(ctx interface{}, email interface{}) *MockProfileService_LookupProfile_Call {
+func (_e *MockProfileService_Expecter) LookupProfile(ctx any, email any) *MockProfileService_LookupProfile_Call {
 	return &MockProfileService_LookupProfile_Call{Call: _e.mock.On("LookupProfile", ctx, email)}
 }
 
@@ -210,7 +210,7 @@ type MockProfileService_LookupProfileByKeycloakId_Call struct {
 // LookupProfileByKeycloakId is a helper method to define mock.On call
 //   - ctx context.Context
 //   - keycloakId string
-func (_e *MockProfileService_Expecter) LookupProfileByKeycloakId(ctx interface{}, keycloakId interface{}) *MockProfileService_LookupProfileByKeycloakId_Call {
+func (_e *MockProfileService_Expecter) LookupProfileByKeycloakId(ctx any, keycloakId any) *MockProfileService_LookupProfileByKeycloakId_Call {
 	return &MockProfileService_LookupProfileByKeycloakId_Call{Call: _e.mock.On("LookupProfileByKeycloakId", ctx, keycloakId)}
 }
 

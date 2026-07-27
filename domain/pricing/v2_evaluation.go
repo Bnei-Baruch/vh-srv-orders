@@ -140,6 +140,7 @@ func EvaluateV2Price(
 	country string,
 	discountProvider repo.ManualDiscountProvider,
 	hhProvider repo.HHGrantProvider,
+	couponProvider repo.CouponProvider,
 ) (*V2PricingEvaluation, error) {
 	ctx = context.WithValue(ctx, common.CtxLogger, utils.LogFor(ctx).With(
 		slog.Int("account_id", primaryAccountID),
@@ -270,6 +271,22 @@ func EvaluateV2Price(
 			inputs.Explain = append(inputs.Explain, "manual_discount: fetch error — not applied")
 		} else {
 			applyManualDiscount(ctx, inputs, md)
+		}
+	}
+
+	if couponProvider != nil && primaryKeycloakID != "" {
+		redemptions, cErr := couponProvider.GetActiveCouponRedemptions(ctx, primaryKeycloakID)
+		if cErr != nil {
+			log.Warn("EvaluateV2Price: coupon fetch failed, recording error on discount",
+				slog.Any("err", cErr),
+			)
+			inputs.Discounts = append(inputs.Discounts, Discount{
+				Type:  DiscountTypeCoupon,
+				Error: true,
+			})
+			inputs.Explain = append(inputs.Explain, "coupon: fetch error — not applied")
+		} else {
+			applyCouponDiscounts(ctx, inputs, redemptions)
 		}
 	}
 

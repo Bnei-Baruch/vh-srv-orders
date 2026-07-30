@@ -4,28 +4,9 @@ Go 1.21 service for managing orders, payments, and billing. Module: `gitlab.bbde
 
 ## Project Structure
 
-```
-cmd/            Cobra CLI commands (server, billing, worker, migrate, importer)
-api/            Gin HTTP handlers, middleware, route definitions
-  middleware/   Auth, logging, recovery, sentry, events
-common/         Shared config (global singleton), constants, sentinel errors
-domain/         Business logic orchestration
-  billing/      Billing workflow (flag, skip, muhlafim, charge, reconcile)
-  pricing/      Pricing resolution (v1 static, v2 country-based with donations)
-repo/           Data access layer (pgx, raw SQL)
-events/         Event system (NATS JetStream emitter + handlers)
-pkg/            Reusable packages
-  keycloak/     Keycloak client, token source
-  pelecard/     Pelecard payment gateway client
-  profiles/     Profile service API client + NATS listener
-  testutil/     Test database setup (pgtestdb)
-  utils/        Logging helpers, HTTP utils, S3, sync primitives
-importers/      Data import utilities
-internal/mocks/ Auto-generated mockery mocks
-db/migrations/  SQL migration files (golang-migrate)
-```
-
 Do NOT restructure toward `internal/service/`, `internal/repository/`, etc. The top-level layout (`api/`, `domain/`, `repo/`, `common/`) is intentional.
+
+Non-obvious placements: business logic orchestration lives in `domain/` (`billing/`, `pricing/`), data access in `repo/` (pgx, raw SQL), and `internal/mocks/` is generated — never hand-edit it.
 
 ## Best Practices
 
@@ -326,43 +307,18 @@ When adding tests, follow the existing pattern in the file. Don't convert existi
 
 Uses [go-task](https://taskfile.dev) (`Taskfile.yml`). Run `task --list` to see all tasks.
 
-```sh
-task dev                                # init .env, ensure DB, run server (shared mode)
-task dev:standalone                     # init .env, start docker infra, run server
-task build                              # go build
-task run                                # go run ./... server
-task test                               # go test -v ./...
-task test RACE=true                     # go test -race -v ./...
-task test COVERAGE=true                 # go test with coverage report
-task dev:migrate                        # ensure DB + run migrations
-task db:shell                           # psql into shared dev DB
-task db:drop                            # drop the service DB
-mockery                                 # regenerate mocks (not a task, run directly)
-```
-
-Docker: `task docker:build` builds the image. Production entrypoint is `./orders server` (port 8185).
-
-Build injects git SHA: `-ldflags "-X gitlab.bbdev.team/vh/pay/orders/common.GitSHA=${GIT_SHA}"`
+Things `task --list` won't tell you:
+- `task dev` uses the shared dev DB; `task dev:standalone` starts its own docker infra.
+- `task test` accepts `RACE=true` and `COVERAGE=true`.
+- `mockery` is **not** a task — run it directly to regenerate mocks.
+- Production entrypoint is `./orders server` (port 8185).
+- Build injects the git SHA: `-ldflags "-X gitlab.bbdev.team/vh/pay/orders/common.GitSHA=${GIT_SHA}"`
 
 ## Tech Stack
 
-| Component      | Library                                |
-|----------------|----------------------------------------|
-| HTTP framework | gin-gonic/gin                          |
-| Database       | jackc/pgx/v4 (raw SQL, no ORM)        |
-| Migrations     | golang-migrate/v4                      |
-| Messaging      | nats-io/nats.go (JetStream)           |
-| HTTP client    | go-resty/resty/v2                      |
-| Auth           | coreos/go-oidc/v3 + Keycloak          |
-| Mocking        | vektra/mockery                         |
-| Testing        | stretchr/testify                       |
-| Test DB        | peterldowns/pgtestdb                   |
-| Sentry         | getsentry/sentry-go                    |
-| Config         | kelseyhightower/envconfig              |
-| CLI            | spf13/cobra                            |
-| Nullable types | volatiletech/null/v9                   |
+See `go.mod` for the dependency list.
 
-No gRPC. No ORM. No wire/fx/dig. No zap/logrus.
+Constraints that aren't visible there: **No gRPC. No ORM. No wire/fx/dig. No zap/logrus.** Raw SQL via pgx, stdlib `log/slog`, config via envconfig singleton, no DI framework.
 
 ## Billing Charge Flow
 

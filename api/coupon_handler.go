@@ -457,7 +457,12 @@ func (o *OrdersAPI) handleRedeemCoupon(c *gin.Context) {
 		return
 	}
 
-	country := o.accountCountry(c, keycloakID)
+	country, err := o.accountCountry(c, keycloakID)
+	if err != nil {
+		c.Status(http.StatusInternalServerError)
+		_ = c.Error(fmt.Errorf("accountCountry: %w", err))
+		return
+	}
 
 	redemption, err := o.repo.RedeemCoupon(c.Request.Context(), keycloakID, body.Code, country)
 	if err != nil {
@@ -481,18 +486,18 @@ func (o *OrdersAPI) handleRedeemCoupon(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"message": "Redeemed!", "data": redemption, "success": true})
 }
 
-// accountCountry resolves the caller's account country, or "" if there is no
-// account yet (a country-scoped coupon then surfaces "set your country first").
-func (o *OrdersAPI) accountCountry(c *gin.Context, keycloakID string) string {
+// accountCountry resolves the caller's account country, or "" if the country
+// field is not set. Real DB failures are returned as errors.
+func (o *OrdersAPI) accountCountry(c *gin.Context, keycloakID string) (string, error) {
 	accID, err := o.repo.GetAccountIDByKeycloakID(c.Request.Context(), keycloakID)
 	if err != nil {
-		return ""
+		return "", err
 	}
 	acc, err := o.repo.GetAccount(c.Request.Context(), accID, "")
 	if err != nil {
-		return ""
+		return "", err
 	}
-	return acc.Country.String
+	return acc.Country.String, nil
 }
 
 // validateCoupon runs the pure domain validation (design §1) on a repo coupon.

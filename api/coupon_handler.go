@@ -235,12 +235,15 @@ func (o *OrdersAPI) handleListCoupons(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": resp, "success": true})
 }
 
-// couponRedemptionResponse renders redemption dates as inclusive Jerusalem days.
+// couponRedemptionResponse renders all dates as Jerusalem calendar days for
+// the admin UI. revoked_at is overridden to match the rest (embedded null.Time
+// would otherwise serialise as RFC3339).
 type couponRedemptionResponse struct {
 	repo.CouponRedemptionDetail
 	RedeemedAt   string `json:"redeemed_at"`
 	BenefitStart string `json:"benefit_start"`
 	BenefitEnd   string `json:"benefit_end"`
+	RevokedAt    string `json:"revoked_at"`
 }
 
 func (o *OrdersAPI) handleGetCouponRedemptions(c *gin.Context) {
@@ -265,6 +268,7 @@ func (o *OrdersAPI) handleGetCouponRedemptions(c *gin.Context) {
 			RedeemedAt:             couponTimeToDay(d.RedeemedAt, false),
 			BenefitStart:           couponTimeToDay(d.BenefitStart, false),
 			BenefitEnd:             couponTimeToDay(d.BenefitEnd, true),
+			RevokedAt:              couponNullTimeToDay(d.RevokedAt, false),
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": resp, "success": true})

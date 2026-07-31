@@ -68,6 +68,7 @@ func (o *OrdersDB) GetCouponByID(ctx context.Context, id int) (*Coupon, error) {
 
 // ListCoupons returns every coupon with its redemption count (all rows, revoked
 // included) and benefits_until (MAX non-revoked benefit_end), newest first.
+// No pagination: coupon counts are expected to stay small.
 func (o *OrdersDB) ListCoupons(ctx context.Context) ([]CouponListItem, error) {
 	rows, err := o.Query(ctx,
 		`SELECT `+couponColumnsC+`,

@@ -7,6 +7,7 @@ package coupon
 import (
 	"crypto/rand"
 	"fmt"
+	"math/big"
 	"strings"
 	"time"
 )
@@ -96,13 +97,14 @@ func GenerateCode(prefix string) (string, error) {
 			return "", fmt.Errorf("prefix may contain only English letters, digits and hyphens")
 		}
 	}
-	buf := make([]byte, codeSuffixLen)
-	if _, err := rand.Read(buf); err != nil {
-		return "", fmt.Errorf("rand.Read: %w", err)
-	}
+	alphabetLen := big.NewInt(int64(len(codeAlphabet)))
 	suffix := make([]byte, codeSuffixLen)
-	for i, b := range buf {
-		suffix[i] = codeAlphabet[int(b)%len(codeAlphabet)]
+	for i := range suffix {
+		n, err := rand.Int(rand.Reader, alphabetLen)
+		if err != nil {
+			return "", fmt.Errorf("rand.Int: %w", err)
+		}
+		suffix[i] = codeAlphabet[n.Int64()]
 	}
 	return prefix + "-" + string(suffix), nil
 }

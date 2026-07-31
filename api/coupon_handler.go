@@ -462,13 +462,16 @@ func (o *OrdersAPI) handleRedeemCoupon(c *gin.Context) {
 	redemption, err := o.repo.RedeemCoupon(c.Request.Context(), keycloakID, body.Code, country)
 	if err != nil {
 		switch {
-		case errors.Is(err, common.ErrCouponInvalid),
-			errors.Is(err, common.ErrCouponCountryMismatch),
-			errors.Is(err, common.ErrCouponCountryRequired):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		case errors.Is(err, common.ErrCouponAlreadyRedeemed),
-			errors.Is(err, common.ErrCouponExhausted):
-			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		case errors.Is(err, common.ErrCouponInvalid):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "code": common.CodeCouponInvalid})
+		case errors.Is(err, common.ErrCouponCountryMismatch):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "code": common.CodeCouponCountryMismatch})
+		case errors.Is(err, common.ErrCouponCountryRequired):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "code": common.CodeCouponCountryRequired})
+		case errors.Is(err, common.ErrCouponAlreadyRedeemed):
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error(), "code": common.CodeCouponAlreadyRedeemed})
+		case errors.Is(err, common.ErrCouponExhausted):
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error(), "code": common.CodeCouponExhausted})
 		default:
 			c.Status(http.StatusInternalServerError)
 			_ = c.Error(fmt.Errorf("repo.RedeemCoupon: %w", err))

@@ -26,3 +26,13 @@ var (
 	ErrCouponCountryRequired = fmt.Errorf("set your country first")
 	ErrCouponCodeConflict    = fmt.Errorf("coupon code already exists")
 )
+
+// Stable machine-readable codes for coupon redemption errors.
+// Clients map these to localised strings; the error field is the English fallback.
+const (
+	CodeCouponInvalid         = "coupon_invalid"
+	CodeCouponAlreadyRedeemed = "coupon_already_redeemed"
+	CodeCouponExhausted       = "coupon_exhausted"
+	CodeCouponCountryMismatch = "coupon_country_mismatch"
+	CodeCouponCountryRequired = "coupon_country_required"
+)

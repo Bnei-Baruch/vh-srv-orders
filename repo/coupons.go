@@ -46,6 +46,10 @@ func (o *OrdersDB) CreateCoupon(ctx context.Context, c Coupon) (*Coupon, error) 
 		&c.RedeemFrom, &c.RedeemUntil, &c.BenefitStart, &c.BenefitEnd, &c.BenefitMonths,
 		&c.Countries, &c.MaxRedemptions, &c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return nil, common.ErrCouponCodeConflict
+		}
 		return nil, fmt.Errorf("o.QueryRow.Scan: %w", err)
 	}
 	return &c, nil

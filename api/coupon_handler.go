@@ -153,11 +153,25 @@ func (o *OrdersAPI) handleCreateCoupon(c *gin.Context) {
 	}
 	newCoupon.Code = code
 
-	created, err := o.repo.CreateCoupon(c.Request.Context(), newCoupon)
-	if err != nil {
-		c.Status(http.StatusInternalServerError)
-		_ = c.Error(fmt.Errorf("repo.CreateCoupon: %w", err))
-		return
+	var created *repo.Coupon
+	for i := 0; i < 3; i++ {
+		var createErr error
+		created, createErr = o.repo.CreateCoupon(c.Request.Context(), newCoupon)
+		if createErr == nil {
+			break
+		}
+		if !errors.Is(createErr, common.ErrCouponCodeConflict) || i == 2 {
+			c.Status(http.StatusInternalServerError)
+			_ = c.Error(fmt.Errorf("repo.CreateCoupon: %w", createErr))
+			return
+		}
+		newCode, genErr := coupon.GenerateCode(req.Prefix)
+		if genErr != nil {
+			c.Status(http.StatusInternalServerError)
+			_ = c.Error(fmt.Errorf("coupon.GenerateCode: %w", genErr))
+			return
+		}
+		newCoupon.Code = newCode
 	}
 	c.JSON(http.StatusCreated, gin.H{"message": "Created!", "data": created, "success": true})
 }

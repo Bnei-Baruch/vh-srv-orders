@@ -76,6 +76,7 @@ func applyCouponDiscounts(ctx context.Context, eval *V2PricingEvaluation, redemp
 			Type:       DiscountTypeCoupon,
 			AmountPct:  cands[i].pct,
 			Eligible:   eligible,
+			Error:      !cands[i].ok,
 			Properties: auditJSON,
 		})
 	}
@@ -90,8 +91,7 @@ func applyCouponDiscounts(ctx context.Context, eval *V2PricingEvaluation, redemp
 }
 
 // couponCandidatePrice resolves the price a redemption would yield. ok is false
-// (with a skip reason) when a fixed_price coupon's currency does not match the
-// member's current pricing currency.
+// when coupon properties are malformed or the type is unrecognised.
 func couponCandidatePrice(base CountryBasePrice, r repo.ActiveCouponRedemption) (Price, float64, bool, string) {
 	var props repo.CouponProperties
 	if r.Properties.Valid && len(r.Properties.JSON) > 0 {

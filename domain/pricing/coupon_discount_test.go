@@ -151,6 +151,29 @@ func TestEvaluateV2Price_Coupon_FetchError_RecordsErrorDiscount(t *testing.T) {
 	assert.Equal(t, 180.0, eval.FinalPrice.Amount)
 }
 
+func TestEvaluateV2Price_Coupon_MalformedProperties_RecordsErrorDiscount(t *testing.T) {
+	server := noPriorityCustomersServer()
+	defer server.Close()
+	profileSvc, email := couponTestSetup(t)
+
+	provider := couponProviderFunc(func(_ context.Context, _ string) ([]repo.ActiveCouponRedemption, error) {
+		return []repo.ActiveCouponRedemption{
+			{CouponID: 1, RedemptionID: 1, Code: "BAD", Type: coupon.TypePercent,
+				Properties: null.JSONFrom([]byte(`{}`)), // missing discount_pct
+				BenefitEnd: time.Now().Add(720 * time.Hour)},
+		}, nil
+	})
+
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, newPriorityTestClient(server.URL), notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", nil, nil, provider)
+	require.NoError(t, err)
+
+	couponDiscount := eval.Discounts[len(eval.Discounts)-1]
+	assert.True(t, couponDiscount.Error, "malformed coupon properties should set Error=true")
+	assert.False(t, couponDiscount.Eligible)
+	assert.True(t, eval.HasDiscountErrors(), "malformed coupon blocks the charge (decision #11)")
+	assert.Equal(t, 180.0, eval.FinalPrice.Amount, "price must not change on a malformed coupon")
+}
+
 func TestEvaluateV2Price_Coupon_LookupUsesPrimaryKeycloakOnly(t *testing.T) {
 	// A spouse's redemptions must never leak into the primary's evaluation:
 	// the coupon lookup is keyed strictly on the redeemer's keycloak (§2).

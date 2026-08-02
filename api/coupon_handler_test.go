@@ -15,8 +15,22 @@ import (
 
 	"gitlab.bbdev.team/vh/pay/orders/api/middleware"
 	"gitlab.bbdev.team/vh/pay/orders/common"
+	"gitlab.bbdev.team/vh/pay/orders/events/eventstest"
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
+
+// ensureUserAccount creates a minimal account row for USER_KEY so that
+// accountCountry can resolve it. The profile event normally does this on
+// registration; tests must do it explicitly.
+func ensureUserAccount(t *testing.T, a *App) {
+	t.Helper()
+	ctx := eventstest.WithTestEventBuilder(t, context.Background())
+	_, err := a.repo.GetOrCreateAccount(ctx, repo.Account{
+		UserKey:     null.StringFrom(USER_KEY),
+		AccountType: null.StringFrom(common.AccountTypePersonal),
+	})
+	require.NoError(t, err)
+}
 
 func percentCreateReq(prefix string, pct float64, months, max int) couponCreateReq {
 	props, _ := json.Marshal(repo.CouponProperties{DiscountPct: &pct})
@@ -84,6 +98,7 @@ func TestCoupon_List_StatusLabels(t *testing.T) {
 func TestCoupon_RedeemThenMine(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)
+	ensureUserAccount(t, a)
 	_, code := createCoupon(t, a, percentCreateReq("REDEEM", 50, 3, 25))
 
 	// Member (non-admin) redeems using their own token; unrestricted coupon needs no country.
@@ -102,6 +117,7 @@ func TestCoupon_RedeemThenMine(t *testing.T) {
 func TestCoupon_Redeem_UnknownCode_Invalid(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)
+	ensureUserAccount(t, a)
 
 	got := POST(t, a, "/v2/coupon/redeem", map[string]string{"code": "NOPE-XXXXX"}, http.StatusBadRequest)
 	assert.Equal(t, common.ErrCouponInvalid.Error(), got["error"])
@@ -110,11 +126,12 @@ func TestCoupon_Redeem_UnknownCode_Invalid(t *testing.T) {
 func TestCoupon_Redeem_CountryScoped_NoCountry_SetCountryFirst(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)
+	ensureUserAccount(t, a) // account exists but country is empty
 	req := percentCreateReq("GEO", 50, 3, 25)
 	req.Countries = []string{"IL"}
 	_, code := createCoupon(t, a, req)
 
-	// USER_KEY has no account → no country → country-scoped coupon asks to set it first.
+	// USER_KEY has an account with no country set → country-scoped coupon asks to set it first.
 	got := POST(t, a, "/v2/coupon/redeem", map[string]string{"code": code}, http.StatusBadRequest)
 	assert.Equal(t, common.ErrCouponCountryRequired.Error(), got["error"])
 }
@@ -122,6 +139,7 @@ func TestCoupon_Redeem_CountryScoped_NoCountry_SetCountryFirst(t *testing.T) {
 func TestCoupon_UpdateDiscount_AfterRedemption_Rejected(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)
+	ensureUserAccount(t, a)
 	id, code := createCoupon(t, a, percentCreateReq("LOCK", 50, 3, 25))
 
 	POST(t, a, "/v2/coupon/redeem", map[string]string{"code": code}, http.StatusCreated)
@@ -178,6 +196,7 @@ func TestCoupon_ModeADates_RoundTripInclusive(t *testing.T) {
 func TestCoupon_Redeem_TrimsWhitespace(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)
+	ensureUserAccount(t, a)
 	_, code := createCoupon(t, a, percentCreateReq("TRIM", 50, 3, 25))
 
 	POST(t, a, "/v2/coupon/redeem", map[string]string{"code": "  " + code + "  "}, http.StatusCreated)

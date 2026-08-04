@@ -1,27 +1,7 @@
-# Project name pinned to "orders" (pre-rename compose project): the running
-# containers and the JetStream volume orders_nats_data belong to it.
+# Project name pinned to "orders" (pre-rename compose project) so the running
+# containers keep their identity.
 name: orders
 services:
-  ordersdb:
-    container_name: 'ordersdb'
-    image: postgres:9.6
-    restart: unless-stopped
-    profiles:
-      - staging
-    environment:
-      POSTGRES_USER: ${DB_USER}
-      POSTGRES_DB: ${DB_DATABASE}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-  nats:
-    container_name: 'nats'
-    image: nats:2.10
-    restart: unless-stopped
-    volumes:
-      - nats_data:/storage
-    ports:
-      - "4222:4222"
-      - "8222:8222"
-    command: ["--jetstream", "--store_dir", "/storage", "--user", "${NATS_USER}", "--pass", "${NATS_PASSWORD}", "--http_port", "8222"]
   vh-srv-orders:
     image: "${IMAGE_NAME}"
     container_name: 'vh-srv-orders'
@@ -65,10 +45,12 @@ services:
       QUICKBOOKS_COMPANY_ID: ${QUICKBOOKS_COMPANY_ID}
     mem_limit: 250M
     ports:
-      - "8185:8185"
+      # Bound to loopback: host nginx is the only thing that talks to this, and
+      # firewalld is disabled on the Rocky 9 hosts, so a 0.0.0.0 mapping would
+      # publish the service straight onto the VM's public IP, bypassing the
+      # edge LB and nginx entirely.
+      - "127.0.0.1:8185:8185"
 networks:
   default:
     name: vh
     external: true
-volumes:
-  nats_data:

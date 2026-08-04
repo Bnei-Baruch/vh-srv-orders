@@ -432,6 +432,14 @@ func (o *OrdersAPI) handleRevokeRedemption(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Revoked!", "success": true})
 }
 
+// redeemCouponResponse renders the redemption benefit dates as inclusive Jerusalem
+// days, consistent with /mine and the admin redemptions endpoint.
+type redeemCouponResponse struct {
+	repo.CouponRedemption
+	BenefitStart string `json:"benefit_start"`
+	BenefitEnd   string `json:"benefit_end"` // inclusive last covered day
+}
+
 // myCouponResponse renders a member's coupon dates as inclusive Jerusalem days
 // so vh-dash displays them without any timezone math.
 type myCouponResponse struct {
@@ -501,7 +509,12 @@ func (o *OrdersAPI) handleRedeemCoupon(c *gin.Context) {
 		}
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"message": "Redeemed!", "data": redemption, "success": true})
+	resp := redeemCouponResponse{
+		CouponRedemption: *redemption,
+		BenefitStart:     couponTimeToDay(redemption.BenefitStart, false),
+		BenefitEnd:       couponTimeToDay(redemption.BenefitEnd, true),
+	}
+	c.JSON(http.StatusCreated, gin.H{"message": "Redeemed!", "data": resp, "success": true})
 }
 
 // accountCountry resolves the caller's account country, or "" if the account

@@ -504,10 +504,13 @@ func (o *OrdersAPI) handleRedeemCoupon(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"message": "Redeemed!", "data": redemption, "success": true})
 }
 
-// accountCountry resolves the caller's account country, or "" if the country
-// field is not set. Real DB failures are returned as errors.
+// accountCountry resolves the caller's account country, or "" if the account
+// doesn't exist yet or the country field is not set. Real DB failures are returned as errors.
 func (o *OrdersAPI) accountCountry(c *gin.Context, keycloakID string) (string, error) {
 	accID, err := o.repo.GetAccountIDByKeycloakID(c.Request.Context(), keycloakID)
+	if errors.Is(err, common.ErrNoRowsAffected) {
+		return "", nil // no account yet → no country
+	}
 	if err != nil {
 		return "", err
 	}

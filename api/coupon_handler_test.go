@@ -126,12 +126,11 @@ func TestCoupon_Redeem_UnknownCode_Invalid(t *testing.T) {
 func TestCoupon_Redeem_CountryScoped_NoCountry_SetCountryFirst(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)
-	ensureUserAccount(t, a) // account exists but country is empty
 	req := percentCreateReq("GEO", 50, 3, 25)
 	req.Countries = []string{"IL"}
 	_, code := createCoupon(t, a, req)
 
-	// USER_KEY has an account with no country set → country-scoped coupon asks to set it first.
+	// USER_KEY has no account → no country → country-scoped coupon asks to set it first.
 	got := POST(t, a, "/v2/coupon/redeem", map[string]string{"code": code}, http.StatusBadRequest)
 	assert.Equal(t, common.ErrCouponCountryRequired.Error(), got["error"])
 }

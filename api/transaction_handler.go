@@ -63,7 +63,20 @@ func (o *OrdersAPI) handleTransactionOrderAndPay(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	isAuthUser, isAdmin, keycloakID := o.isAuthUserOrHasAnyRole(c, common.RoleRoot, common.RoleAdmin)
+	if !isAuthUser {
+		return
+	}
 	if !o.isEmailOwnerOrHasAnyRole(c, req.Email.String, common.RoleRoot, common.RoleAdmin) {
+		return
+	}
+	// Non-admin callers must be priced against their own account, not one supplied via the body.
+	if !isAdmin {
+		req.UserKey = null.StringFrom(keycloakID)
+	}
+	// Offline/helphaver payments bypass price enforcement, so creating them is staff-only.
+	if (req.PaymentType.String == common.PaymentTypeOffline || req.PaymentType.String == common.PaymentTypeHelpHaver) &&
+		!o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
 		return
 	}
 
@@ -79,6 +92,11 @@ func (o *OrdersAPI) handleTransactionOrderAndPay(c *gin.Context) {
 	}
 
 	req.PaymentStatus = null.StringFrom(common.PaymentStatusPending) // don't let anybody fool us
+
+	if checkoutPriceEnforced(&req) && !o.enforceCheckoutPrice(c, &req, ord.AccountID.Int) {
+		return
+	}
+
 	p, err := o.repo.CreatePayment(c.Request.Context(), req, ord.ID)
 	if err != nil {
 		c.Status(http.StatusInternalServerError)

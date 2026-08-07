@@ -110,7 +110,7 @@ func TestEvaluateV2Price_WithHHProvider_Applied(t *testing.T) {
 		return hhGrant(1, 80), nil
 	})
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, newPriorityTestClient(server.URL), notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", nil, provider)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, newPriorityTestClient(server.URL), notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", nil, provider, nil)
 	require.NoError(t, err)
 
 	require.Len(t, eval.Discounts, 2)
@@ -134,7 +134,7 @@ func TestEvaluateV2Price_WithHHProvider_NoActiveGrant(t *testing.T) {
 		return nil, nil
 	})
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, newPriorityTestClient(server.URL), notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", nil, provider)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, newPriorityTestClient(server.URL), notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", nil, provider, nil)
 	require.NoError(t, err)
 
 	require.Len(t, eval.Discounts, 2)
@@ -155,7 +155,7 @@ func TestEvaluateV2Price_WithHHProvider_FetchError_RecordsErrorDiscount(t *testi
 		return nil, assert.AnError
 	})
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, newPriorityTestClient(server.URL), notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", nil, provider)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, newPriorityTestClient(server.URL), notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", nil, provider, nil)
 	require.NoError(t, err)
 
 	require.Len(t, eval.Discounts, 2)
@@ -181,7 +181,7 @@ func TestEvaluateV2Price_HHAndManual_LowerPriceWins(t *testing.T) {
 		return pctDiscount(2, 80), nil
 	})
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, newPriorityTestClient(server.URL), notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", mdProvider, hhProvider)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, newPriorityTestClient(server.URL), notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", mdProvider, hhProvider, nil)
 	require.NoError(t, err)
 
 	require.Len(t, eval.Discounts, 3)
@@ -208,7 +208,7 @@ func TestEvaluateV2Price_HHBetterThanManual_HHWins(t *testing.T) {
 		return pctDiscount(2, 50), nil
 	})
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, newPriorityTestClient(server.URL), notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", mdProvider, hhProvider)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, newPriorityTestClient(server.URL), notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", mdProvider, hhProvider, nil)
 	require.NoError(t, err)
 
 	require.Len(t, eval.Discounts, 3)

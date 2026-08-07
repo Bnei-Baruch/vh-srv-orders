@@ -247,6 +247,17 @@ func (a *App) initRoutes() {
 		pricing.GET("/monthly/:keycloak_id", a.ordersAPI.handleMonthlyPriceByKCID)
 	}
 
+	couponGroup := baseV2Path.Group("/coupon")
+	{
+		couponGroup.POST("/", a.ordersAPI.handleCreateCoupon)
+		couponGroup.GET("/", a.ordersAPI.handleListCoupons)
+		couponGroup.GET("/mine", a.ordersAPI.handleGetMyCoupons)
+		couponGroup.POST("/redeem", a.ordersAPI.handleRedeemCoupon)
+		couponGroup.GET("/:id/redemptions", a.ordersAPI.handleGetCouponRedemptions)
+		couponGroup.PATCH("/:id", a.ordersAPI.handleUpdateCoupon)
+		couponGroup.DELETE("/:id/redemption/:rid", a.ordersAPI.handleRevokeRedemption)
+	}
+
 	a.gEngine.GET("/status/:email", a.ordersAPI.status)
 }
 

@@ -21,8 +21,6 @@ const (
 	codeSuffixLen     = 5
 	DefaultRedeemDays = 30
 
-	// JerusalemTZ is the billing timezone for calendar-month coloring.
-	JerusalemTZ = "Asia/Jerusalem"
 )
 
 // Fields is the plain-value view of a coupon that Validate checks. Callers map
@@ -119,11 +117,8 @@ func BenefitWindow(months *int, start, end *time.Time, now time.Time) (time.Time
 	if months == nil || *months <= 0 {
 		return time.Time{}, time.Time{}, fmt.Errorf("no benefit mode set")
 	}
-	loc, err := time.LoadLocation(JerusalemTZ)
-	if err != nil {
-		return time.Time{}, time.Time{}, fmt.Errorf("time.LoadLocation: %w", err)
-	}
-	n := now.In(loc)
-	monthStart := time.Date(n.Year(), n.Month(), 1, 0, 0, 0, 0, loc)
+	n := now.UTC()
+	monthStart := time.Date(n.Year(), n.Month(), 1, 0, 0, 0, 0, time.UTC)
 	return monthStart, monthStart.AddDate(0, *months, 0), nil
 }
+

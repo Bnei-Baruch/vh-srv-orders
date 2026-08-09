@@ -17,19 +17,11 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
-// Coupon dates cross the API as inclusive "YYYY-MM-DD" calendar days in the
-// billing timezone (Asia/Jerusalem). The backend owns all timezone conversion
-// so the BO never does date math — it just passes the admin's raw dates.
-
-// couponDayToTime parses an admin date in Asia/Jerusalem. inclusiveEnd shifts an
+// couponDayToTime parses an admin date in UTC. inclusiveEnd shifts an
 // inclusive last-covered day to the exclusive next-day-midnight boundary the
 // pricing/redemption checks compare against (now < benefit_end, now <= redeem_until).
 func couponDayToTime(s string, inclusiveEnd bool) (time.Time, error) {
-	loc, err := time.LoadLocation(coupon.JerusalemTZ)
-	if err != nil {
-		return time.Time{}, err
-	}
-	d, err := time.ParseInLocation("2006-01-02", s, loc)
+	d, err := time.ParseInLocation("2006-01-02", s, time.UTC)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("invalid date %q (want YYYY-MM-DD)", s)
 	}
@@ -39,14 +31,10 @@ func couponDayToTime(s string, inclusiveEnd bool) (time.Time, error) {
 	return d, nil
 }
 
-// couponTimeToDay renders a stored timestamp back as its inclusive Jerusalem
-// calendar day for the admin UI. inclusiveEnd undoes the +1 applied on save.
+// couponTimeToDay renders a stored timestamp back as its inclusive UTC calendar
+// day for the admin UI. inclusiveEnd undoes the +1 applied on save.
 func couponTimeToDay(t time.Time, inclusiveEnd bool) string {
-	loc, err := time.LoadLocation(coupon.JerusalemTZ)
-	if err != nil {
-		return ""
-	}
-	d := t.In(loc)
+	d := t.UTC()
 	if inclusiveEnd {
 		d = d.AddDate(0, 0, -1)
 	}

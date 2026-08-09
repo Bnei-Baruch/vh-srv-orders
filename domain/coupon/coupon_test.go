@@ -106,17 +106,14 @@ func TestGenerateCode(t *testing.T) {
 }
 
 func TestBenefitWindow_OffsetColorsWholeCalendarMonths(t *testing.T) {
-	loc, err := time.LoadLocation(JerusalemTZ)
-	require.NoError(t, err)
-
 	// Redeeming a 5-month coupon on Jan 7 colors all of Jan through all of May:
 	// [Jan 1, Jun 1) (design §4 example).
-	now := time.Date(2026, 1, 7, 15, 30, 0, 0, loc)
+	now := time.Date(2026, 1, 7, 15, 30, 0, 0, time.UTC)
 	months := 5
 	start, end, err := BenefitWindow(&months, nil, nil, now)
 	require.NoError(t, err)
-	assert.Equal(t, time.Date(2026, 1, 1, 0, 0, 0, 0, loc), start)
-	assert.Equal(t, time.Date(2026, 6, 1, 0, 0, 0, 0, loc), end)
+	assert.Equal(t, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), start)
+	assert.Equal(t, time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC), end)
 }
 
 func TestBenefitWindow_FixedCopiesDates(t *testing.T) {

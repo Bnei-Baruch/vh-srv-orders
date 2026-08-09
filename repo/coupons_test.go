@@ -96,11 +96,9 @@ func TestRedeemCoupon_HappyPath_ComputesOffsetWindow(t *testing.T) {
 	assert.Equal(t, c.ID, r.CouponID)
 	assert.Equal(t, "kc-redeemer", r.KeycloakID)
 
-	// Offset window colors whole calendar months in the billing timezone: both
-	// ends are midnight-Jerusalem first-of-month, exactly 3 months apart.
-	loc, err := time.LoadLocation("Asia/Jerusalem")
-	require.NoError(t, err)
-	bs, be := r.BenefitStart.In(loc), r.BenefitEnd.In(loc)
+	// Offset window colors whole calendar months in UTC: both
+	// ends are midnight UTC first-of-month, exactly 3 months apart.
+	bs, be := r.BenefitStart.UTC(), r.BenefitEnd.UTC()
 	assert.Equal(t, 1, bs.Day())
 	assert.Equal(t, 0, bs.Hour())
 	assert.Equal(t, 1, be.Day())

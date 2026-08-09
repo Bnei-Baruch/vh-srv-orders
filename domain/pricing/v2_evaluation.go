@@ -197,7 +197,7 @@ func EvaluateV2Price(
 	// Amounts stay in local variable only — never persisted or returned.
 	emails := deduplicateEmails(primaryEmails, spouseEmails)
 	log.Info("EvaluateV2Price: fetching donations", slog.Int("email_count", len(emails)))
-	sums, fetchErr := fetchDonationSums(ctx, priorityClient, accountingService, quickbooksCompanyID, emails, USDToNIS, EURToNIS)
+	sums, fetchErr := fetchDonationSumsBatch(ctx, priorityClient, accountingService, quickbooksCompanyID, emails, USDToNIS, EURToNIS)
 
 	var donationsDiscount Discount
 	var primaryGetsDiscount bool
@@ -469,6 +469,102 @@ func addPriorityContributions(
 			perCurrency[currency] += amount
 		}
 	}
+	return notFound, nil
+}
+
+// fetchDonationSumsBatch behaves exactly like fetchDonationSums, except Priority
+// contributions are fetched via GetLastContributionsBatch (one request across all emails,
+// regardless of how many) instead of one request per email. This is the version wired into
+// EvaluateV2Price; fetchDonationSums/addPriorityContributions are kept side by side, unused
+// in production, for direct comparison (see pkg/priority for the fetch strategies themselves
+// and cmd/billing's compare-contributions for a live correctness check between the two).
+func fetchDonationSumsBatch(
+	ctx context.Context,
+	priorityClient *priority.Client,
+	accountingService accounting.AccountingService,
+	quickbooksCompanyID string,
+	emails []string,
+	usdRate, eurRate float64,
+) (donationSums, error) {
+	result := donationSums{perCurrency: make(map[string]float64)}
+	successSet := make(map[string]struct{})
+	var notes []string
+
+	// Source: Priority ERP. (TODO: remove when Priority migrates into vh-srv-accounting.)
+	priorityNotFound, err := addPriorityContributionsBatch(ctx, priorityClient, emails, result.perCurrency, successSet)
+	if err != nil {
+		return donationSums{}, err
+	}
+	if len(priorityNotFound) > 0 {
+		notes = append(notes, fmt.Sprintf("no Priority record for: %s", strings.Join(priorityNotFound, ", ")))
+	}
+
+	// Source: vh-srv-accounting (QuickBooks).
+	accountingNotFound, err := addAccountingContributions(ctx, accountingService, quickbooksCompanyID, emails, result.perCurrency, successSet)
+	if err != nil {
+		return donationSums{}, err
+	}
+	if len(accountingNotFound) > 0 {
+		notes = append(notes, fmt.Sprintf("no QuickBooks record for: %s", strings.Join(accountingNotFound, ", ")))
+	}
+
+	// Source: vh-srv-accounting (European donations, batch).
+	europeNotFound, err := addEuropeContributions(ctx, accountingService, emails, result.perCurrency, successSet)
+	if err != nil {
+		return donationSums{}, err
+	}
+	if len(europeNotFound) > 0 {
+		notes = append(notes, fmt.Sprintf("no Europe record for: %s", strings.Join(europeNotFound, ", ")))
+	}
+
+	// Preserve input order in successEmails.
+	for _, email := range emails {
+		if _, ok := successSet[email]; ok {
+			result.successEmails = append(result.successEmails, email)
+		}
+	}
+	result.fetchNote = strings.Join(notes, "; ")
+
+	for currency, amount := range result.perCurrency {
+		result.totalNIS += toNIS(amount, currency, usdRate, eurRate)
+	}
+
+	return result, nil
+}
+
+// addPriorityContributionsBatch queries Priority for all emails in a single batched fetch
+// (GetLastContributionsBatch) and accumulates currency sums via SumGroup, which counts a
+// customer matched by more than one of the given emails (e.g. spouse aliases) only once.
+// Returns the list of emails with no active Priority customer.
+func addPriorityContributionsBatch(
+	ctx context.Context,
+	client *priority.Client,
+	emails []string,
+	perCurrency map[string]float64,
+	successSet map[string]struct{},
+) ([]string, error) {
+	if len(emails) == 0 {
+		return nil, nil
+	}
+
+	result, err := client.GetLastContributionsBatch(ctx, emails)
+	if err != nil {
+		return nil, fmt.Errorf("priorityClient.GetLastContributionsBatch %w: %v", ErrDonationFetch, err)
+	}
+
+	var notFound []string
+	for _, email := range emails {
+		if len(result.CustNamesByEmail[strings.ToLower(email)]) == 0 {
+			notFound = append(notFound, email)
+			continue
+		}
+		successSet[email] = struct{}{}
+	}
+
+	for currency, amount := range result.SumGroup(emails) {
+		perCurrency[currency] += amount
+	}
+
 	return notFound, nil
 }
 

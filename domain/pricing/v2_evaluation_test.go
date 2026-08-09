@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -326,6 +327,96 @@ func TestFetchDonationSums_AggregatesAcrossEmails(t *testing.T) {
 	assert.NotContains(t, result.fetchNote, "Priority")
 	assert.Contains(t, result.fetchNote, "no QuickBooks record")
 	assert.InDelta(t, 510.0, result.totalNIS, 0.001)
+}
+
+// --- fetchDonationSumsBatch / addPriorityContributionsBatch ---
+// Direct tests for the batch-fetch versions wired into EvaluateV2Price. fetchDonationSums/
+// addPriorityContributions above are kept, untouched, for comparison -- see their own tests.
+
+func TestFetchDonationSumsBatch_NoAccount_TreatedAsZero(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(priority.CustomerODataResponse{Value: []priority.Customer{}})
+	}))
+	defer server.Close()
+
+	client := newPriorityTestClient(server.URL)
+	result, err := fetchDonationSumsBatch(context.Background(), client, notFoundAccountingClient(t), testQuickbooksCompanyID, []string{"unknown@x.com"}, 3.1, 3.6)
+
+	require.NoError(t, err)
+	assert.Contains(t, result.fetchNote, "unknown@x.com")
+	assert.Equal(t, 0.0, result.totalNIS)
+}
+
+func TestFetchDonationSumsBatch_APIError_ReturnsError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprint(w, "internal error")
+	}))
+	defer server.Close()
+
+	client := newPriorityTestClient(server.URL)
+	_, err := fetchDonationSumsBatch(context.Background(), client, notFoundAccountingClient(t), testQuickbooksCompanyID, []string{"bad@x.com"}, 3.1, 3.6)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDonationFetch)
+}
+
+func TestFetchDonationSumsBatch_AggregatesAcrossEmails(t *testing.T) {
+	// Two emails resolving to two distinct customers, different currencies each.
+	server := priorityServerWithContributions(100) // reuses the shared fixture: N emails -> N*amount
+	defer server.Close()
+
+	client := newPriorityTestClient(server.URL)
+	// usdRate=3.1: each email contributes 100 NIS (fixture always uses common.CurrencyNIS) -> 200 NIS total
+	result, err := fetchDonationSumsBatch(context.Background(), client, notFoundAccountingClient(t), testQuickbooksCompanyID, []string{"a@x.com", "b@x.com"}, 3.1, 3.6)
+
+	require.NoError(t, err)
+	assert.NotContains(t, result.fetchNote, "no Priority record")
+	assert.InDelta(t, 200.0, result.totalNIS, 0.001)
+}
+
+func TestAddPriorityContributionsBatch_DedupsSharedCustomer(t *testing.T) {
+	// Both emails resolve to the SAME Priority customer (e.g. spouse aliases) -- must be
+	// counted once, not once per email.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "CUSTOMERS") {
+			emails := extractFilterValues(r.URL.Query().Get("$filter"), "EMAIL")
+			customers := make([]priority.Customer, len(emails))
+			for i, email := range emails {
+				customers[i] = priority.Customer{CustName: "CUST_SHARED", Email: email}
+			}
+			json.NewEncoder(w).Encode(priority.CustomerODataResponse{Value: customers})
+			return
+		}
+		json.NewEncoder(w).Encode(fakeExpandResponse{
+			Value: []fakeExpandItem{{
+				ACCNAME: "CUST_SHARED",
+				Items: []priority.AccountReceivableItem{
+					{ACCNAME: "40001", DEBIT: 500, CODE: common.CurrencyNIS, FNCDATE: time.Now().AddDate(0, -3, 0).Format(time.RFC3339)},
+				},
+			}},
+		})
+	}))
+	defer server.Close()
+
+	client := newPriorityTestClient(server.URL)
+	perCurrency := map[string]float64{}
+	successSet := map[string]struct{}{}
+	notFound, err := addPriorityContributionsBatch(context.Background(), client, []string{"a@x.com", "b@x.com"}, perCurrency, successSet)
+
+	require.NoError(t, err)
+	assert.Empty(t, notFound)
+	assert.Equal(t, map[string]float64{common.CurrencyNIS: 500}, perCurrency)
+	assert.Len(t, successSet, 2)
+}
+
+func TestAddPriorityContributionsBatch_EmptyEmails_NoOp(t *testing.T) {
+	notFound, err := addPriorityContributionsBatch(context.Background(), newPriorityTestClient("http://unused"), nil, map[string]float64{}, map[string]struct{}{})
+
+	require.NoError(t, err)
+	assert.Empty(t, notFound)
 }
 
 // noPriorityCustomersServer returns a Priority test server where no customers exist for any email.
@@ -775,37 +866,79 @@ func (s *stubProfileService) LookupProfileByKeycloakId(context.Context, string) 
 	return nil, profiles.ErrNotFound
 }
 
+// extractFilterValues pulls every quoted value out of "{field} eq '...'" clauses in an
+// OData $filter string, in order. Used by the fixtures below to echo back whatever
+// GetLastContributionsBatch actually asked for instead of a single fixed canned value.
+func extractFilterValues(filter, field string) []string {
+	re := regexp.MustCompile(field + ` eq '([^']+)'`)
+	matches := re.FindAllStringSubmatch(filter, -1)
+	values := make([]string, len(matches))
+	for i, m := range matches {
+		values[i] = m[1]
+	}
+	return values
+}
+
+// fakeExpandItem/fakeExpandResponse mirror the (unexported) wire shape
+// GetLastContributionsBatch's $expand ACCOUNTS_RECEIVABLE request expects: each customer
+// keyed by ACCNAME with its matching contribution items nested under ACCFNCITEMS2_SUBFORM.
+type fakeExpandItem struct {
+	ACCNAME string                           `json:"ACCNAME"`
+	Items   []priority.AccountReceivableItem `json:"ACCFNCITEMS2_SUBFORM"`
+}
+type fakeExpandResponse struct {
+	Value []fakeExpandItem `json:"value"`
+}
+
+// customersForFilter builds a CUSTOMERS response with one distinct customer per email
+// actually present in the request's $filter, so GetLastContributionsBatch's CUSTNAME
+// resolution (keyed by the returned EMAIL) succeeds regardless of which/how many emails
+// a given test uses.
+func customersForFilter(filter string) priority.CustomerODataResponse {
+	emails := extractFilterValues(filter, "EMAIL")
+	customers := make([]priority.Customer, len(emails))
+	for i, email := range emails {
+		customers[i] = priority.Customer{CustName: fmt.Sprintf("CUST%d", i+1), Email: email}
+	}
+	return priority.CustomerODataResponse{Value: customers}
+}
+
 // priorityServerNoContributions returns a test server where all emails have active customers but zero qualifying contributions.
 func priorityServerNoContributions() *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if strings.Contains(r.URL.Path, "CUSTOMERS") {
-			json.NewEncoder(w).Encode(priority.CustomerODataResponse{
-				Value: []priority.Customer{{CustName: "CUST001", Email: "test@example.com"}},
-			})
+			json.NewEncoder(w).Encode(customersForFilter(r.URL.Query().Get("$filter")))
 		} else {
-			// No qualifying receivables
-			json.NewEncoder(w).Encode(priority.AccountReceivableODataResponse{Value: []priority.AccountReceivableItem{}})
+			// No qualifying receivables for any customer.
+			json.NewEncoder(w).Encode(fakeExpandResponse{})
 		}
 	}))
 }
 
-// priorityServerWithContributions returns a test server where all emails have large NIS contributions (above annual threshold).
+// priorityServerWithContributions returns a test server where each requested email resolves
+// to its own distinct Priority customer, each with a contribution of amount -- so N emails
+// combine to N*amount when summed, matching how the old per-email fetch independently
+// counted every email's own contribution.
 func priorityServerWithContributions(amount float64) *httptest.Server {
 	validDate := time.Now().AddDate(0, -3, 0).Format(time.RFC3339)
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if strings.Contains(r.URL.Path, "CUSTOMERS") {
-			json.NewEncoder(w).Encode(priority.CustomerODataResponse{
-				Value: []priority.Customer{{CustName: "CUST001"}},
-			})
-		} else {
-			json.NewEncoder(w).Encode(priority.AccountReceivableODataResponse{
-				Value: []priority.AccountReceivableItem{
+			json.NewEncoder(w).Encode(customersForFilter(r.URL.Query().Get("$filter")))
+			return
+		}
+		custNames := extractFilterValues(r.URL.Query().Get("$filter"), "ACCNAME")
+		items := make([]fakeExpandItem, len(custNames))
+		for i, custName := range custNames {
+			items[i] = fakeExpandItem{
+				ACCNAME: custName,
+				Items: []priority.AccountReceivableItem{
 					{ACCNAME: "40001", DEBIT: amount, CODE: common.CurrencyNIS, FNCDATE: validDate},
 				},
-			})
+			}
 		}
+		json.NewEncoder(w).Encode(fakeExpandResponse{Value: items})
 	}))
 }
 

@@ -370,6 +370,9 @@ func buildOrFilter(field string, values []string) string {
 
 // chunkStrings splits values into slices of at most size elements.
 func chunkStrings(values []string, size int) [][]string {
+	if len(values) == 0 {
+		return nil
+	}
 	if size <= 0 || len(values) <= size {
 		return [][]string{values}
 	}
@@ -422,6 +425,9 @@ func (c *Client) GetLastContributionsBatch(ctx context.Context, emails []string)
 	uniqueEmails := make([]string, 0, len(emails))
 	seen := make(map[string]bool, len(emails))
 	for _, email := range emails {
+		if email == "" {
+			continue
+		}
 		key := strings.ToLower(email)
 		if !seen[key] {
 			seen[key] = true
@@ -464,7 +470,14 @@ func (c *Client) resolveActiveCustNames(ctx context.Context, emails []string, st
 	custNamesByEmail := make(map[string][]string)
 
 	for _, chunk := range chunkStrings(emails, batchEmailChunkSize) {
-		filter := buildOrFilter("EMAIL", chunk)
+		// Parens matter: "and" binds tighter than "or" in OData, so without them this would
+		// apply these checks only to the last ORed email clause.
+		// Mirrors IsActive() server-side. STATDES was confirmed (by sampling real data) to
+		// only ever be exactly "פעיל" or "לא פעיל" -- a clean enum, not free text -- so a
+		// plain "ne" works here instead of needing an unconfirmed contains() function.
+		// IsActive() stays as a client-side check below regardless, as a safety net.
+		filter := fmt.Sprintf(`(%s) and INACTIVEFLAG ne 'Y' and STATDES ne 'לא פעיל'`,
+			buildOrFilter("EMAIL", chunk))
 
 		path := "CUSTOMERS"
 		useQueryParams := true
@@ -494,7 +507,10 @@ func (c *Client) resolveActiveCustNames(ctx context.Context, emails []string, st
 				break
 			}
 			for _, cust := range cr.Value {
-				if cust.CustName == "" || cust.Email == "" || !cust.IsActive() {
+				// CUSTNAME is the CUSTOMERS entity key (never empty) and EMAIL can't come
+				// back empty since we only ever filter for exact non-empty values (see the
+				// empty-string guard on uniqueEmails above) -- IsActive() is the only real check.
+				if !cust.IsActive() {
 					continue
 				}
 				key := strings.ToLower(cust.Email)

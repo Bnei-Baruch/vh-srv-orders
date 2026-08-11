@@ -421,8 +421,8 @@ func sortedKeys(m map[string]struct{}) []string {
 // to the fields needed for active-status filtering) resolves emails to CUSTNAMEs.
 // Phase 2: one ACCOUNTS_RECEIVABLE request per chunk of the resulting deduped CUSTNAMEs
 // (OR-filtered on ACCNAME, $select=ACCNAME, $expand=ACCFNCITEMS2_SUBFORM($select=...;
-// $filter=last 12mo + contribution categories + DEBIT>0)) fetches only the relevant rows for
-// all those customers at once.
+// $filter=last 12mo + contribution categories)) fetches only the relevant rows for all
+// those customers at once. No DEBIT filter -- see the comment on itemFilter below for why.
 func (c *Client) GetLastContributionsBatch(ctx context.Context, emails []string) (*ContributionsBatchResult, error) {
 	start := time.Now()
 	var stats RequestStats

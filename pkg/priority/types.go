@@ -220,9 +220,16 @@ type AccountReceivableODataResponse struct {
 // accountsReceivableExpandItem is a minimal ACCOUNTS_RECEIVABLE record, selected down to just
 // the customer key (ACCNAME) with its filtered/selected ACCFNCITEMS2_SUBFORM items expanded inline.
 // Used by GetLastContributionsBatch so many customers can be fetched in one request.
+//
+// ItemsODataNextLink captures the expanded child collection's own "@odata.nextLink" (OData v4
+// convention: "<propertyName>@odata.nextLink" alongside the property itself). GetAccountReceivables
+// proves Priority pages this exact collection on its own single-customer path -- a customer with
+// more qualifying rows than one expand page holds would otherwise be silently under-summed here,
+// indistinguishable from having donated less.
 type accountsReceivableExpandItem struct {
-	ACCNAME string                  `json:"ACCNAME"` // customer code (=CUSTNAME)
-	Items   []AccountReceivableItem `json:"ACCFNCITEMS2_SUBFORM"`
+	ACCNAME            string                  `json:"ACCNAME"` // customer code (=CUSTNAME)
+	Items              []AccountReceivableItem `json:"ACCFNCITEMS2_SUBFORM"`
+	ItemsODataNextLink string                  `json:"ACCFNCITEMS2_SUBFORM@odata.nextLink,omitempty"`
 }
 
 // accountsReceivableExpandResponse is the OData response for a $select+$expand ACCOUNTS_RECEIVABLE query.

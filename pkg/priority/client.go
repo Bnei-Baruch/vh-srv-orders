@@ -359,6 +359,13 @@ func (c *Client) fetchLastContributions(ctx context.Context, email string, stats
 	return sums, *stats, nil
 }
 
+// normalizeEmail trims and lower-cases an email for matching purposes only (not for use as a
+// map key elsewhere -- callers that store by email use strings.ToLower without trimming, to
+// stay consistent with the existing convention).
+func normalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
+}
+
 // buildOrFilter builds an OData `field eq 'v1' or field eq 'v2' ...` clause.
 func buildOrFilter(field string, values []string) string {
 	parts := make([]string, len(values))
@@ -470,14 +477,24 @@ func (c *Client) resolveActiveCustNames(ctx context.Context, emails []string, st
 	custNamesByEmail := make(map[string][]string)
 
 	for _, chunk := range chunkStrings(emails, batchEmailChunkSize) {
-		// Parens matter: "and" binds tighter than "or" in OData, so without them this would
-		// apply these checks only to the last ORed email clause.
-		// Mirrors IsActive() server-side. STATDES was confirmed (by sampling real data) to
-		// only ever be exactly "פעיל" or "לא פעיל" -- a clean enum, not free text -- so a
-		// plain "ne" works here instead of needing an unconfirmed contains() function.
-		// IsActive() stays as a client-side check below regardless, as a safety net.
-		filter := fmt.Sprintf(`(%s) and INACTIVEFLAG ne 'Y' and STATDES ne 'לא פעיל'`,
-			buildOrFilter("EMAIL", chunk))
+		// Deliberately NOT pushing INACTIVEFLAG/STATDES into $filter: Priority's OData is
+		// SQL-backed, and SQL's three-valued logic means "INACTIVEFLAG ne 'Y'" evaluates
+		// UNKNOWN (excluded) when the column is NULL -- which is the *normal* state for an
+		// active customer (the flag only gets stamped on deactivation). A naive server-side
+		// pushdown would exclude exactly the customers it's meant to include. IsActive()
+		// below is the only correctness check; $select is where the real byte win is.
+		filter := buildOrFilter("EMAIL", chunk)
+
+		// Requested-email lookup, normalized (trim + lower). A returned row must be keyed by
+		// the email WE asked for, not the raw value Priority echoes back: SQL char/varchar
+		// comparison ignores trailing blanks, so a stored value with trailing padding still
+		// matches our exact filter and comes back unmodified. Keying by that raw value would
+		// silently split the customer's data under a different (padded) key than what
+		// SumGroup/addPriorityContributionsBatch look up.
+		requestedByNormalizedEmail := make(map[string]string, len(chunk))
+		for _, email := range chunk {
+			requestedByNormalizedEmail[normalizeEmail(email)] = email
+		}
 
 		path := "CUSTOMERS"
 		useQueryParams := true
@@ -496,9 +513,13 @@ func (c *Client) resolveActiveCustNames(ctx context.Context, emails []string, st
 			stats.Bytes += len(resp.Body())
 
 			if resp.IsError() {
-				if resp.StatusCode() == http.StatusNotFound {
-					break
-				}
+				// Unlike GetCustomerByID/GetCustomersByEmail (single-entity-by-key lookups,
+				// where a 404 genuinely means "no such entity"), this is a filtered
+				// entity-SET query covering a whole chunk. A 404 here could be a proxy
+				// hiccup, a maintenance window, or a query-string-length limit -- not "zero
+				// customers". A real "no rows" result is a 200 with an empty value array, not
+				// a 404. Treat 404 like any other error instead of silently skipping the
+				// chunk, so a real failure surfaces as pricing_error and gets retried.
 				return nil, fmt.Errorf("priority API error [%d]: %s", resp.StatusCode(), resp.String())
 			}
 
@@ -513,7 +534,13 @@ func (c *Client) resolveActiveCustNames(ctx context.Context, emails []string, st
 				if !cust.IsActive() {
 					continue
 				}
-				key := strings.ToLower(cust.Email)
+				requested, ok := requestedByNormalizedEmail[normalizeEmail(cust.Email)]
+				if !ok {
+					utils.LogFor(ctx).Warn("priority customer's EMAIL didn't match any email in this request chunk, skipping",
+						slog.String("cust_name", cust.CustName))
+					continue
+				}
+				key := strings.ToLower(requested)
 				custNamesByEmail[key] = append(custNamesByEmail[key], cust.CustName)
 			}
 
@@ -569,9 +596,11 @@ func (c *Client) fetchContributionsByCustomer(ctx context.Context, custNames []s
 			stats.Bytes += len(resp.Body())
 
 			if resp.IsError() {
-				if resp.StatusCode() == http.StatusNotFound {
-					break
-				}
+				// Same reasoning as the CUSTOMERS chunk query above: this is a filtered
+				// entity-SET query covering a whole chunk of customers, not a single-entity
+				// lookup, so a 404 isn't a reliable "no rows" signal. Treat it as a real
+				// error so it surfaces as pricing_error and gets retried, instead of every
+				// customer in the chunk silently reporting zero contributions.
 				return fmt.Errorf("priority API error [%d]: %s", resp.StatusCode(), resp.String())
 			}
 
@@ -585,7 +614,22 @@ func (c *Client) fetchContributionsByCustomer(ctx context.Context, custNames []s
 					custSums = make(map[string]float64)
 					byCustomer[acc.ACCNAME] = custSums
 				}
-				for _, item := range acc.Items {
+
+				items, err := c.fetchAllExpandedItems(ctx, acc, stats)
+				if err != nil {
+					return fmt.Errorf("c.fetchAllExpandedItems: %w", err)
+				}
+
+				for _, item := range items {
+					// Re-applied client-side, symmetric with the date-cutoff check above,
+					// even though the server-side $expand($filter=...) already scopes both:
+					// the outer ACCOUNTS_RECEIVABLE entity has its own unrelated ACCNAME
+					// field, so there's a real scope-binding hazard if Priority ever mis-binds
+					// the nested filter. Without this, every receivable line -- invoices,
+					// course fees, anything -- would get summed as a donation.
+					if _, ok := contributionACCNAMEs[item.ACCNAME]; !ok {
+						continue
+					}
 					fncDate, err := time.Parse(time.RFC3339, item.FNCDATE)
 					if err != nil {
 						continue
@@ -595,6 +639,10 @@ func (c *Client) fetchContributionsByCustomer(ctx context.Context, custNames []s
 					}
 					iso, ok := currencyCodeMap[item.CODE]
 					if !ok {
+						utils.LogFor(ctx).Warn("unknown priority currency code, treating as NIS",
+							slog.String("code", item.CODE),
+							slog.String("cust_name", acc.ACCNAME),
+							slog.String("fnc_num", item.FNCNUM))
 						iso = common.CurrencyNIS
 					}
 					custSums[iso] += item.DEBIT
@@ -610,4 +658,38 @@ func (c *Client) fetchContributionsByCustomer(ctx context.Context, custNames []s
 	}
 
 	return nil
+}
+
+// fetchAllExpandedItems returns acc.Items plus any further pages of its nested
+// ACCFNCITEMS2_SUBFORM collection, following ACCFNCITEMS2_SUBFORM@odata.nextLink until
+// exhausted. Each continuation page comes back in the sub-collection's own plain response
+// shape (not re-wrapped in accountsReceivableExpandItem), same as GetAccountReceivables's
+// own pagination of this identical entity.
+func (c *Client) fetchAllExpandedItems(ctx context.Context, acc accountsReceivableExpandItem, stats *RequestStats) ([]AccountReceivableItem, error) {
+	items := acc.Items
+	nextLink := acc.ItemsODataNextLink
+
+	for nextLink != "" {
+		req := c.client.NewRequest()
+		req.SetContext(ctx)
+		resp, err := req.SetResult(&AccountReceivableODataResponse{}).Get(nextLink)
+		if err != nil {
+			return nil, fmt.Errorf("priority client request failed: %w", err)
+		}
+		stats.Requests++
+		stats.Bytes += len(resp.Body())
+
+		if resp.IsError() {
+			return nil, fmt.Errorf("priority API error [%d]: %s", resp.StatusCode(), resp.String())
+		}
+
+		page, _ := resp.Result().(*AccountReceivableODataResponse)
+		if page == nil {
+			break
+		}
+		items = append(items, page.Value...)
+		nextLink = page.ODataNextLink
+	}
+
+	return items, nil
 }

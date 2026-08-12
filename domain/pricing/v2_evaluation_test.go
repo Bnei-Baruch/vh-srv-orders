@@ -329,9 +329,11 @@ func TestFetchDonationSums_AggregatesAcrossEmails(t *testing.T) {
 	assert.InDelta(t, 510.0, result.totalNIS, 0.001)
 }
 
-// --- fetchDonationSumsBatch / addPriorityContributionsBatch ---
-// Direct tests for the batch-fetch versions wired into EvaluateV2Price. fetchDonationSums/
-// addPriorityContributions above are kept, untouched, for comparison -- see their own tests.
+// --- fetchDonationSums(..., addPriorityContributionsBatch) / addPriorityContributionsBatch ---
+// Direct tests for the batch-fetch strategy wired into EvaluateV2Price, exercised through the
+// same fetchDonationSums the tests above use, just with the batch Priority-fetch function
+// passed explicitly. fetchDonationSums's default (legacy addPriorityContributions) and its own
+// tests above are untouched -- see their own tests.
 
 func TestFetchDonationSumsBatch_NoAccount_TreatedAsZero(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -341,7 +343,7 @@ func TestFetchDonationSumsBatch_NoAccount_TreatedAsZero(t *testing.T) {
 	defer server.Close()
 
 	client := newPriorityTestClient(server.URL)
-	result, err := fetchDonationSumsBatch(context.Background(), client, notFoundAccountingClient(t), testQuickbooksCompanyID, []string{"unknown@x.com"}, 3.1, 3.6)
+	result, err := fetchDonationSums(context.Background(), client, notFoundAccountingClient(t), testQuickbooksCompanyID, []string{"unknown@x.com"}, 3.1, 3.6, addPriorityContributionsBatch)
 
 	require.NoError(t, err)
 	assert.Contains(t, result.fetchNote, "unknown@x.com")
@@ -356,7 +358,7 @@ func TestFetchDonationSumsBatch_APIError_ReturnsError(t *testing.T) {
 	defer server.Close()
 
 	client := newPriorityTestClient(server.URL)
-	_, err := fetchDonationSumsBatch(context.Background(), client, notFoundAccountingClient(t), testQuickbooksCompanyID, []string{"bad@x.com"}, 3.1, 3.6)
+	_, err := fetchDonationSums(context.Background(), client, notFoundAccountingClient(t), testQuickbooksCompanyID, []string{"bad@x.com"}, 3.1, 3.6, addPriorityContributionsBatch)
 
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrDonationFetch)
@@ -369,7 +371,7 @@ func TestFetchDonationSumsBatch_AggregatesAcrossEmails(t *testing.T) {
 
 	client := newPriorityTestClient(server.URL)
 	// usdRate=3.1: each email contributes 100 NIS (fixture always uses common.CurrencyNIS) -> 200 NIS total
-	result, err := fetchDonationSumsBatch(context.Background(), client, notFoundAccountingClient(t), testQuickbooksCompanyID, []string{"a@x.com", "b@x.com"}, 3.1, 3.6)
+	result, err := fetchDonationSums(context.Background(), client, notFoundAccountingClient(t), testQuickbooksCompanyID, []string{"a@x.com", "b@x.com"}, 3.1, 3.6, addPriorityContributionsBatch)
 
 	require.NoError(t, err)
 	assert.NotContains(t, result.fetchNote, "no Priority record")
@@ -417,6 +419,25 @@ func TestAddPriorityContributionsBatch_EmptyEmails_NoOp(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Empty(t, notFound)
+}
+
+func TestAddPriorityContributionsBatch_PaddedMixedCaseEmail_StillMatchesNormalizedKey(t *testing.T) {
+	// Regression: this function's own notFound/successSet lookup must use the same
+	// normalization (trim+lower) as GetLastContributionsBatch's CustNamesByEmail storage key,
+	// or a padded/mixed-case input email is wrongly filed as "no Priority record" even though
+	// the batch result actually has it.
+	server := priorityServerWithContributions(100)
+	defer server.Close()
+
+	client := newPriorityTestClient(server.URL)
+	perCurrency := map[string]float64{}
+	successSet := map[string]struct{}{}
+	notFound, err := addPriorityContributionsBatch(context.Background(), client, []string{" A@X.CoM "}, perCurrency, successSet)
+
+	require.NoError(t, err)
+	assert.Empty(t, notFound)
+	assert.Len(t, successSet, 1)
+	assert.Equal(t, map[string]float64{common.CurrencyNIS: 100}, perCurrency)
 }
 
 // noPriorityCustomersServer returns a Priority test server where no customers exist for any email.

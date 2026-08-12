@@ -109,7 +109,11 @@ func recordStats(stats []*RequestStats, resp *resty.Response) {
 }
 
 // GetCustomersByEmail fetches all customers matching the given email from Priority ERP.
-// Returns an empty slice (no error) on 404 or empty result.
+// Returns an empty slice (no error) when the filter matches nothing -- confirmed empirically
+// against Priority that a zero-match CUSTOMERS filter query returns 200 + an empty value
+// array, not 404. A 404 here is a real error (proxy hiccup, maintenance window, etc.), not
+// "no such customer" -- unlike GetCustomerByID, which looks up a single entity by key, where
+// 404 genuinely does mean "no such entity".
 // An optional *RequestStats can be passed to accumulate request-count/byte diagnostics.
 func (c *Client) GetCustomersByEmail(ctx context.Context, email string, stats ...*RequestStats) ([]Customer, error) {
 	filter := fmt.Sprintf("EMAIL eq '%s'", email)
@@ -128,9 +132,6 @@ func (c *Client) GetCustomersByEmail(ctx context.Context, email string, stats ..
 	recordStats(stats, resp)
 
 	if resp.IsError() {
-		if resp.StatusCode() == http.StatusNotFound {
-			return []Customer{}, nil
-		}
 		return nil, fmt.Errorf("priority API error [%d]: %s", resp.StatusCode(), resp.String())
 	}
 
@@ -359,9 +360,20 @@ func (c *Client) fetchLastContributions(ctx context.Context, email string, stats
 	return sums, *stats, nil
 }
 
-// normalizeEmail trims and lower-cases an email for matching purposes only (not for use as a
-// map key elsewhere -- callers that store by email use strings.ToLower without trimming, to
-// stay consistent with the existing convention).
+// isJSONResponse reports whether resp's Content-Type indicates a JSON body. resty only
+// unmarshals into the SetResult target when this is true; a gateway serving something else
+// as 200 (an HTML maintenance page, a redirect) would otherwise leave the result struct
+// silently zero-valued -- indistinguishable from a genuine empty/zero-row response -- so this
+// must be checked before the decoded result is trusted at all.
+func isJSONResponse(resp *resty.Response) bool {
+	return strings.Contains(resp.Header().Get("Content-Type"), "application/json")
+}
+
+// normalizeEmail trims and lower-cases an email. This is the single normalization used for
+// every email-keyed map in the GetLastContributionsBatch chain -- the uniqueEmails dedup, the
+// CustNamesByEmail storage key, and SumGroup's lookup -- so a padded-vs-unpadded alias pair
+// can't collapse ambiguously or split across keys. addPriorityContributionsBatch (a different
+// package) mirrors this exact logic for its own CustNamesByEmail lookup.
 func normalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
 }
@@ -412,6 +424,13 @@ func sortedKeys(m map[string]struct{}) []string {
 // via $filter/$select/$expand, so both the request count and the bytes transferred stay flat
 // as the batch grows.
 //
+// Deliberately uncached, unlike GetLastContributions's contributionCache: EvaluateV2Price
+// calls this once per household, and PriceResolver already caches per account ID above it, so
+// there's nothing left for a second cache to buy here. contributionCache/contributionCacheTTL/
+// SetCacheEnabled (and cmd/billing.go's SetCacheEnabled(true) call) exist only for
+// GetLastContributions -- when that function is eventually removed, remove them with it; don't
+// leave them behind as dead code nobody remembers is now unused.
+//
 // The whole batch is fetched exactly once and returned keyed by customer (ContributionsBatchResult).
 // Callers group the requested emails into whatever logical units they need (e.g. one group per
 // person, who may have several email aliases) and call result.SumGroup(group) per group --
@@ -435,7 +454,7 @@ func (c *Client) GetLastContributionsBatch(ctx context.Context, emails []string)
 		if email == "" {
 			continue
 		}
-		key := strings.ToLower(email)
+		key := normalizeEmail(email)
 		if !seen[key] {
 			seen[key] = true
 			uniqueEmails = append(uniqueEmails, email)
@@ -522,25 +541,46 @@ func (c *Client) resolveActiveCustNames(ctx context.Context, emails []string, st
 				// chunk, so a real failure surfaces as pricing_error and gets retried.
 				return nil, fmt.Errorf("priority API error [%d]: %s", resp.StatusCode(), resp.String())
 			}
-
-			cr, _ := resp.Result().(*CustomerODataResponse)
-			if cr == nil {
-				break
+			if !isJSONResponse(resp) {
+				// A 200 with a non-JSON body (maintenance page, redirect target) would
+				// otherwise leave cr zero-valued -- indistinguishable from "0 customers" --
+				// and this chunk would silently report every one of its emails as having no
+				// active Priority customer.
+				return nil, fmt.Errorf("priority returned non-JSON response (content-type=%q, status=%d)",
+					resp.Header().Get("Content-Type"), resp.StatusCode())
 			}
+
+			cr := resp.Result().(*CustomerODataResponse)
 			for _, cust := range cr.Value {
-				// CUSTNAME is the CUSTOMERS entity key (never empty) and EMAIL can't come
-				// back empty since we only ever filter for exact non-empty values (see the
-				// empty-string guard on uniqueEmails above) -- IsActive() is the only real check.
+				// CUSTNAME is the CUSTOMERS entity key and shouldn't come back blank, but
+				// it's tagged omitempty and the legacy path guards it explicitly
+				// (fetchLastContributions filters to "usable" customers before using any of
+				// them) -- so a blank one (partially-honoured $select, a stub record) isn't
+				// impossible, just unexpected. Without this, a blank CustName still gets
+				// appended below, custNamesByEmail[key] becomes non-empty, and
+				// addPriorityContributionsBatch reads that as "matched a Priority customer,
+				// contributed nothing" instead of "no Priority record" -- silently pointing
+				// any later investigation the wrong way.
+				if cust.CustName == "" {
+					continue
+				}
 				if !cust.IsActive() {
 					continue
 				}
 				requested, ok := requestedByNormalizedEmail[normalizeEmail(cust.Email)]
 				if !ok {
+					// This is the one place a customer's contributions get silently dropped,
+					// so the returned EMAIL (the value that failed to match, e.g. a
+					// non-breaking space or other difference normalizeEmail doesn't cover)
+					// and the chunk's requested emails are logged, not just the customer
+					// code, so it's actually actionable.
 					utils.LogFor(ctx).Warn("priority customer's EMAIL didn't match any email in this request chunk, skipping",
-						slog.String("cust_name", cust.CustName))
+						slog.String("cust_name", cust.CustName),
+						slog.String("returned_email", cust.Email),
+						slog.Any("requested_emails", chunk))
 					continue
 				}
-				key := strings.ToLower(requested)
+				key := normalizeEmail(requested)
 				custNamesByEmail[key] = append(custNamesByEmail[key], cust.CustName)
 			}
 
@@ -573,10 +613,24 @@ func (c *Client) fetchContributionsByCustomer(ctx context.Context, custNames []s
 	cutoff := time.Now().AddDate(0, -12, 0)
 	serverCutoff := cutoff.AddDate(0, 0, -1).UTC().Format("2006-01-02T15:04:05Z")
 	itemFilter := fmt.Sprintf("FNCDATE ge %s and %s", serverCutoff, contributionACCNAMEFilter)
-	expand := fmt.Sprintf("ACCFNCITEMS2_SUBFORM($select=ACCNAME,CODE,DEBIT,FNCDATE;$filter=%s)", itemFilter)
+	// FNCNUM is included so the unknown-currency-code warning below can name the actual
+	// transaction -- without it an operator has no way to find the offending row in Priority.
+	expand := fmt.Sprintf("ACCFNCITEMS2_SUBFORM($select=ACCNAME,CODE,DEBIT,FNCDATE,FNCNUM;$filter=%s)", itemFilter)
 
 	for _, chunk := range chunkStrings(custNames, batchCustNameChunkSize) {
 		outerFilter := buildOrFilter("ACCNAME", chunk)
+
+		// Requested-CUSTNAME lookup, trimmed. Same mechanism as the EMAIL join in
+		// resolveActiveCustNames: SQL's trailing-blank-insensitive comparison means a
+		// stored ACCNAME with trailing padding still matches our exact filter and comes
+		// back unmodified. Keying byCustomer by that raw value would silently split a
+		// customer's contributions under a different (padded) key than the clean CUSTNAME
+		// CustNamesByEmail/SumGroup look up. Unlike email, no case-folding here -- CUSTNAME
+		// casing isn't normalized anywhere else in this code.
+		requestedByTrimmedCustName := make(map[string]string, len(chunk))
+		for _, custName := range chunk {
+			requestedByTrimmedCustName[strings.TrimSpace(custName)] = custName
+		}
 
 		path := "ACCOUNTS_RECEIVABLE"
 		useQueryParams := true
@@ -603,16 +657,24 @@ func (c *Client) fetchContributionsByCustomer(ctx context.Context, custNames []s
 				// customer in the chunk silently reporting zero contributions.
 				return fmt.Errorf("priority API error [%d]: %s", resp.StatusCode(), resp.String())
 			}
-
-			ar, _ := resp.Result().(*accountsReceivableExpandResponse)
-			if ar == nil {
-				break
+			if !isJSONResponse(resp) {
+				return fmt.Errorf("priority returned non-JSON response (content-type=%q, status=%d)",
+					resp.Header().Get("Content-Type"), resp.StatusCode())
 			}
+
+			ar := resp.Result().(*accountsReceivableExpandResponse)
 			for _, acc := range ar.Value {
-				custSums := byCustomer[acc.ACCNAME]
+				custName, matched := requestedByTrimmedCustName[strings.TrimSpace(acc.ACCNAME)]
+				if !matched {
+					utils.LogFor(ctx).Warn("priority customer's ACCNAME didn't match any customer in this request chunk, skipping",
+						slog.String("returned_accname", acc.ACCNAME))
+					continue
+				}
+
+				custSums := byCustomer[custName]
 				if custSums == nil {
 					custSums = make(map[string]float64)
-					byCustomer[acc.ACCNAME] = custSums
+					byCustomer[custName] = custSums
 				}
 
 				items, err := c.fetchAllExpandedItems(ctx, acc, stats)
@@ -641,7 +703,7 @@ func (c *Client) fetchContributionsByCustomer(ctx context.Context, custNames []s
 					if !ok {
 						utils.LogFor(ctx).Warn("unknown priority currency code, treating as NIS",
 							slog.String("code", item.CODE),
-							slog.String("cust_name", acc.ACCNAME),
+							slog.String("cust_name", custName),
 							slog.String("fnc_num", item.FNCNUM))
 						iso = common.CurrencyNIS
 					}
@@ -682,11 +744,12 @@ func (c *Client) fetchAllExpandedItems(ctx context.Context, acc accountsReceivab
 		if resp.IsError() {
 			return nil, fmt.Errorf("priority API error [%d]: %s", resp.StatusCode(), resp.String())
 		}
-
-		page, _ := resp.Result().(*AccountReceivableODataResponse)
-		if page == nil {
-			break
+		if !isJSONResponse(resp) {
+			return nil, fmt.Errorf("priority returned non-JSON response (content-type=%q, status=%d)",
+				resp.Header().Get("Content-Type"), resp.StatusCode())
 		}
+
+		page := resp.Result().(*AccountReceivableODataResponse)
 		items = append(items, page.Value...)
 		nextLink = page.ODataNextLink
 	}

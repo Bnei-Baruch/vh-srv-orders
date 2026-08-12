@@ -197,7 +197,7 @@ func EvaluateV2Price(
 	// Amounts stay in local variable only — never persisted or returned.
 	emails := deduplicateEmails(primaryEmails, spouseEmails)
 	log.Info("EvaluateV2Price: fetching donations", slog.Int("email_count", len(emails)))
-	sums, fetchErr := fetchDonationSumsBatch(ctx, priorityClient, accountingService, quickbooksCompanyID, emails, USDToNIS, EURToNIS)
+	sums, fetchErr := fetchDonationSums(ctx, priorityClient, accountingService, quickbooksCompanyID, emails, USDToNIS, EURToNIS, addPriorityContributionsBatch)
 
 	var donationsDiscount Discount
 	var primaryGetsDiscount bool
@@ -383,6 +383,20 @@ func collectProfileEmails(profile *profiles.Profile, fallbackEmail string) []str
 	return emails
 }
 
+// addPriorityContributionsFunc is the shape shared by addPriorityContributions and
+// addPriorityContributionsBatch, so fetchDonationSums can be parameterized over which
+// Priority-fetch strategy to use instead of duplicating the QuickBooks/Europe/notes/NIS-
+// conversion logic around it (that duplication is the real risk in a package CLAUDE.md
+// singles out as money-critical: a change to one copy silently drifts from the other, and
+// compare-contributions can't catch it since it only exercises the Priority step).
+type addPriorityContributionsFunc func(
+	ctx context.Context,
+	client *priority.Client,
+	emails []string,
+	perCurrency map[string]float64,
+	successSet map[string]struct{},
+) ([]string, error)
+
 // fetchDonationSums aggregates donations across all configured sources (Priority ERP
 // and vh-srv-accounting: QuickBooks and European donations) for the given emails.
 // "User not found" responses from any source are treated as zero donations. Any real API error from any source is
@@ -391,6 +405,11 @@ func collectProfileEmails(profile *profiles.Profile, fallbackEmail string) []str
 //
 // Sources are queried in sequence so each block can be removed cleanly when its source
 // is decommissioned (Priority will eventually migrate behind vh-srv-accounting).
+//
+// addPriority selects the Priority-fetch strategy; it's variadic purely so every existing
+// call site (in particular every direct test) keeps compiling unchanged and keeps exercising
+// the legacy addPriorityContributions by default. EvaluateV2Price is the one caller that
+// passes addPriorityContributionsBatch explicitly, to use the batched fetch in production.
 func fetchDonationSums(
 	ctx context.Context,
 	priorityClient *priority.Client,
@@ -398,13 +417,19 @@ func fetchDonationSums(
 	quickbooksCompanyID string,
 	emails []string,
 	usdRate, eurRate float64,
+	addPriority ...addPriorityContributionsFunc,
 ) (donationSums, error) {
+	fetchPriority := addPriorityContributionsFunc(addPriorityContributions)
+	if len(addPriority) > 0 && addPriority[0] != nil {
+		fetchPriority = addPriority[0]
+	}
+
 	result := donationSums{perCurrency: make(map[string]float64)}
 	successSet := make(map[string]struct{})
 	var notes []string
 
 	// Source: Priority ERP. (TODO: remove when Priority migrates into vh-srv-accounting.)
-	priorityNotFound, err := addPriorityContributions(ctx, priorityClient, emails, result.perCurrency, successSet)
+	priorityNotFound, err := fetchPriority(ctx, priorityClient, emails, result.perCurrency, successSet)
 	if err != nil {
 		return donationSums{}, err
 	}
@@ -472,64 +497,11 @@ func addPriorityContributions(
 	return notFound, nil
 }
 
-// fetchDonationSumsBatch behaves exactly like fetchDonationSums, except Priority
-// contributions are fetched via GetLastContributionsBatch (one request across all emails,
-// regardless of how many) instead of one request per email. This is the version wired into
-// EvaluateV2Price; fetchDonationSums/addPriorityContributions are kept side by side, unused
-// in production, for direct comparison (see pkg/priority for the fetch strategies themselves
-// and cmd/billing's compare-contributions for a live correctness check between the two).
-func fetchDonationSumsBatch(
-	ctx context.Context,
-	priorityClient *priority.Client,
-	accountingService accounting.AccountingService,
-	quickbooksCompanyID string,
-	emails []string,
-	usdRate, eurRate float64,
-) (donationSums, error) {
-	result := donationSums{perCurrency: make(map[string]float64)}
-	successSet := make(map[string]struct{})
-	var notes []string
-
-	// Source: Priority ERP. (TODO: remove when Priority migrates into vh-srv-accounting.)
-	priorityNotFound, err := addPriorityContributionsBatch(ctx, priorityClient, emails, result.perCurrency, successSet)
-	if err != nil {
-		return donationSums{}, err
-	}
-	if len(priorityNotFound) > 0 {
-		notes = append(notes, fmt.Sprintf("no Priority record for: %s", strings.Join(priorityNotFound, ", ")))
-	}
-
-	// Source: vh-srv-accounting (QuickBooks).
-	accountingNotFound, err := addAccountingContributions(ctx, accountingService, quickbooksCompanyID, emails, result.perCurrency, successSet)
-	if err != nil {
-		return donationSums{}, err
-	}
-	if len(accountingNotFound) > 0 {
-		notes = append(notes, fmt.Sprintf("no QuickBooks record for: %s", strings.Join(accountingNotFound, ", ")))
-	}
-
-	// Source: vh-srv-accounting (European donations, batch).
-	europeNotFound, err := addEuropeContributions(ctx, accountingService, emails, result.perCurrency, successSet)
-	if err != nil {
-		return donationSums{}, err
-	}
-	if len(europeNotFound) > 0 {
-		notes = append(notes, fmt.Sprintf("no Europe record for: %s", strings.Join(europeNotFound, ", ")))
-	}
-
-	// Preserve input order in successEmails.
-	for _, email := range emails {
-		if _, ok := successSet[email]; ok {
-			result.successEmails = append(result.successEmails, email)
-		}
-	}
-	result.fetchNote = strings.Join(notes, "; ")
-
-	for currency, amount := range result.perCurrency {
-		result.totalNIS += toNIS(amount, currency, usdRate, eurRate)
-	}
-
-	return result, nil
+// normalizeEmail trims and lower-cases an email. Mirrors pkg/priority's own normalizeEmail
+// exactly -- ContributionsBatchResult.CustNamesByEmail is keyed by that normalization, and
+// this lookup has to agree with it or a padded-vs-unpadded alias splits across keys.
+func normalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
 }
 
 // addPriorityContributionsBatch queries Priority for all emails in a single batched fetch
@@ -554,7 +526,7 @@ func addPriorityContributionsBatch(
 
 	var notFound []string
 	for _, email := range emails {
-		if len(result.CustNamesByEmail[strings.ToLower(email)]) == 0 {
+		if len(result.CustNamesByEmail[normalizeEmail(email)]) == 0 {
 			notFound = append(notFound, email)
 			continue
 		}

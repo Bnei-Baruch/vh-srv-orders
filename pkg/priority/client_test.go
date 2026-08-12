@@ -79,17 +79,19 @@ func TestGetCustomersByEmail_MultipleCustomers(t *testing.T) {
 	assert.Equal(t, "CUST002", result[1].CustName)
 }
 
-func TestGetCustomersByEmail_NotFound_Returns404(t *testing.T) {
+func TestGetCustomersByEmail_404_ReturnsError(t *testing.T) {
+	// Confirmed empirically against Priority: a zero-match CUSTOMERS filter query returns
+	// 200 + empty value array, not 404. A 404 is a real error (proxy hiccup, maintenance
+	// window, etc.), not "no such customer".
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	result, err := client.GetCustomersByEmail(context.Background(), "notfound@example.com")
+	_, err := client.GetCustomersByEmail(context.Background(), "notfound@example.com")
 
-	require.NoError(t, err)
-	assert.Empty(t, result)
+	require.Error(t, err)
 }
 
 func TestGetCustomersByEmail_EmptyResult(t *testing.T) {
@@ -1167,6 +1169,33 @@ func TestGetLastContributionsBatch_UnknownCurrencyCode_TreatedAsNIS(t *testing.T
 	assert.NotContains(t, sums, "GBP")
 }
 
+func TestGetLastContributionsBatch_ExpandSelectIncludesFNCNUM(t *testing.T) {
+	// Regression: FNCNUM must be in the nested $select, or the unknown-currency-code
+	// warning's fnc_num field is always empty and an operator has no way to find the
+	// offending transaction in Priority. A hand-built response fixture can't catch this --
+	// it has to inspect the actual outgoing $expand query.
+	var capturedExpand string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/CUSTOMERS" {
+			json.NewEncoder(w).Encode(CustomerODataResponse{
+				Value: []Customer{{CustName: "CUST001", Email: "test@example.com"}},
+			})
+			return
+		}
+		capturedExpand = r.URL.Query().Get("$expand")
+		json.NewEncoder(w).Encode(accountsReceivableExpandResponse{})
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	_, err := client.GetLastContributionsBatch(context.Background(), []string{"test@example.com"})
+
+	require.NoError(t, err)
+	assert.Contains(t, capturedExpand, "FNCNUM")
+}
+
 func TestGetLastContributionsBatch_BoundaryDateExactly12MonthsAgo(t *testing.T) {
 	// Mirrors TestGetLastContributions_BoundaryDateExactly12MonthsAgo exactly: batch must
 	// apply the same precise-instant cutoff as the legacy fetch, not a day-rounded one.
@@ -1428,6 +1457,76 @@ func TestGetLastContributionsBatch_AccountsReceivable404_PropagatesAsError(t *te
 	require.Error(t, err)
 }
 
+func TestGetLastContributionsBatch_CustomersNonJSONResponse_ReturnsError(t *testing.T) {
+	// Regression: a 200 with a non-JSON body (maintenance page, redirect target served
+	// through a proxy) must not be silently treated as "0 customers" -- it must error, not
+	// leave every email in the chunk reporting no active Priority customer.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "<html><body>Maintenance</body></html>")
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	_, err := client.GetLastContributionsBatch(context.Background(), []string{"test@example.com"})
+
+	require.Error(t, err)
+}
+
+func TestGetLastContributionsBatch_AccountsReceivableNonJSONResponse_ReturnsError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/CUSTOMERS" {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(CustomerODataResponse{
+				Value: []Customer{{CustName: "CUST001", Email: "test@example.com"}},
+			})
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "<html><body>Maintenance</body></html>")
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	_, err := client.GetLastContributionsBatch(context.Background(), []string{"test@example.com"})
+
+	require.Error(t, err)
+}
+
+func TestGetLastContributionsBatch_NestedExpandNonJSONResponse_ReturnsError(t *testing.T) {
+	var serverURL string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/CUSTOMERS":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(CustomerODataResponse{
+				Value: []Customer{{CustName: "CUST001", Email: "test@example.com"}},
+			})
+		case "/ACCOUNTS_RECEIVABLE":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(accountsReceivableExpandResponse{
+				Value: []accountsReceivableExpandItem{
+					{ACCNAME: "CUST001", ItemsODataNextLink: serverURL + "/nextpage"},
+				},
+			})
+		default:
+			w.Header().Set("Content-Type", "text/html")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, "<html><body>Maintenance</body></html>")
+		}
+	}))
+	defer server.Close()
+	serverURL = server.URL
+
+	client := newTestClient(server.URL)
+	_, err := client.GetLastContributionsBatch(context.Background(), []string{"test@example.com"})
+
+	require.Error(t, err)
+}
+
 func TestGetLastContributionsBatch_InactiveCustomerExcluded(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1442,6 +1541,28 @@ func TestGetLastContributionsBatch_InactiveCustomerExcluded(t *testing.T) {
 	result, err := client.GetLastContributionsBatch(context.Background(), []string{"test@example.com"})
 
 	require.NoError(t, err)
+	assert.Empty(t, result.SumGroup([]string{"test@example.com"}))
+}
+
+func TestGetLastContributionsBatch_BlankCustNameExcluded(t *testing.T) {
+	// Regression: a customer record with a blank CUSTNAME (partially-honoured $select, a
+	// stub record -- CUSTNAME is tagged omitempty) must be skipped, not appended into
+	// custNamesByEmail. Otherwise the email reads as "matched a Priority customer,
+	// contributed nothing" instead of "no Priority record", and an empty "" ends up in the
+	// ACCOUNTS_RECEIVABLE filter as ACCNAME eq ''.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(CustomerODataResponse{
+			Value: []Customer{{CustName: "", Email: "test@example.com"}},
+		})
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	result, err := client.GetLastContributionsBatch(context.Background(), []string{"test@example.com"})
+
+	require.NoError(t, err)
+	assert.Empty(t, result.CustNamesByEmail["test@example.com"])
 	assert.Empty(t, result.SumGroup([]string{"test@example.com"}))
 }
 
@@ -1495,6 +1616,109 @@ func TestGetLastContributionsBatch_UnmatchedReturnedEmail_SkippedWithWarning(t *
 
 	require.NoError(t, err)
 	assert.Empty(t, result.CustNamesByEmail["test@example.com"])
+}
+
+func TestGetLastContributionsBatch_PaddedReturnedACCNAME_StillMatchesRequestedCustName(t *testing.T) {
+	// Regression: same mechanism as the padded-EMAIL test, on the other join. Priority's
+	// SQL-backed ACCNAME comparison ignores trailing blanks, so a customer stored with
+	// trailing padding still matches our exact ACCNAME filter and is returned unmodified.
+	// byCustomer must be keyed by the CUSTNAME we asked for, not the raw (padded) value
+	// echoed back -- otherwise SumGroup's lookup (keyed by the clean CUSTNAME CUSTOMERS
+	// returned) silently misses it even though the contributions were fetched correctly.
+	validDate := time.Now().AddDate(0, -3, 0).Format(time.RFC3339)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/CUSTOMERS" {
+			json.NewEncoder(w).Encode(CustomerODataResponse{
+				Value: []Customer{{CustName: "CUST001", Email: "test@example.com"}},
+			})
+			return
+		}
+		json.NewEncoder(w).Encode(accountsReceivableExpandResponse{
+			Value: []accountsReceivableExpandItem{
+				{ACCNAME: "CUST001  ", Items: []AccountReceivableItem{ // trailing padding
+					{ACCNAME: "40001", DEBIT: 100.0, CODE: "NIS", FNCDATE: validDate},
+				}},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	result, err := client.GetLastContributionsBatch(context.Background(), []string{"test@example.com"})
+
+	require.NoError(t, err)
+	assert.Equal(t, map[string]float64{"NIS": 100.0}, result.SumGroup([]string{"test@example.com"}))
+}
+
+func TestGetLastContributionsBatch_UnmatchedReturnedACCNAME_SkippedWithWarning(t *testing.T) {
+	// If Priority ever returns a customer record whose ACCNAME doesn't correspond to any
+	// customer requested in this chunk (shouldn't happen given the filter, but must not
+	// crash or silently misattribute), the row is skipped rather than bucketed under a
+	// bogus key.
+	validDate := time.Now().AddDate(0, -3, 0).Format(time.RFC3339)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/CUSTOMERS" {
+			json.NewEncoder(w).Encode(CustomerODataResponse{
+				Value: []Customer{{CustName: "CUST001", Email: "test@example.com"}},
+			})
+			return
+		}
+		json.NewEncoder(w).Encode(accountsReceivableExpandResponse{
+			Value: []accountsReceivableExpandItem{
+				{ACCNAME: "CUST999", Items: []AccountReceivableItem{ // unexpected, not requested
+					{ACCNAME: "40001", DEBIT: 100.0, CODE: "NIS", FNCDATE: validDate},
+				}},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	result, err := client.GetLastContributionsBatch(context.Background(), []string{"test@example.com"})
+
+	require.NoError(t, err)
+	assert.Empty(t, result.SumGroup([]string{"test@example.com"}))
+}
+
+func TestGetLastContributionsBatch_PaddedAliasInInput_CollapsesConsistently(t *testing.T) {
+	// Regression: normalizeEmail (trim+lower) must be used consistently for the uniqueEmails
+	// dedup, the CustNamesByEmail storage key, and SumGroup's lookup. A profile's primary +
+	// alternate email fields lower-case but never trim (collectProfileEmails,
+	// deduplicateEmails), so a padded-vs-unpadded alias pair can genuinely arrive together in
+	// one call's input. Both forms must resolve to the same result.
+	requests := 0
+	validDate := time.Now().AddDate(0, -3, 0).Format(time.RFC3339)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/CUSTOMERS" {
+			requests++
+			json.NewEncoder(w).Encode(CustomerODataResponse{
+				Value: []Customer{{CustName: "CUST001", Email: "bob@x.com"}},
+			})
+			return
+		}
+		json.NewEncoder(w).Encode(accountsReceivableExpandResponse{
+			Value: []accountsReceivableExpandItem{
+				{ACCNAME: "CUST001", Items: []AccountReceivableItem{
+					{ACCNAME: "40001", DEBIT: 100.0, CODE: "NIS", FNCDATE: validDate},
+				}},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	result, err := client.GetLastContributionsBatch(context.Background(), []string{"bob@x.com", "bob@x.com "})
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, requests, "the padded alias should dedupe into the same CUSTOMERS request, not a second one")
+	assert.Equal(t, map[string]float64{"NIS": 100.0}, result.SumGroup([]string{"bob@x.com"}))
+	assert.Equal(t, map[string]float64{"NIS": 100.0}, result.SumGroup([]string{"bob@x.com "}))
 }
 
 func TestGetLastContributionsBatch_EmptyEmails_NoRequests(t *testing.T) {

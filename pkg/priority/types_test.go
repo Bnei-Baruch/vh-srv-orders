@@ -66,6 +66,17 @@ func TestSumGroup_LookupIsCaseInsensitive(t *testing.T) {
 	assert.Equal(t, map[string]float64{"NIS": 100}, result.SumGroup([]string{"A@X.com"}))
 }
 
+func TestSumGroup_LookupTrimsWhitespace(t *testing.T) {
+	result := &ContributionsBatchResult{
+		ByCustomer: map[string]map[string]float64{"CUST001": {"NIS": 100}},
+		CustNamesByEmail: map[string][]string{
+			"a@x.com": {"CUST001"}, // stored normalizeEmail'd (trim+lower), as GetLastContributionsBatch does
+		},
+	}
+
+	assert.Equal(t, map[string]float64{"NIS": 100}, result.SumGroup([]string{" A@X.com "}))
+}
+
 func TestSumGroup_MultipleCurrenciesPerCustomer(t *testing.T) {
 	result := &ContributionsBatchResult{
 		ByCustomer: map[string]map[string]float64{

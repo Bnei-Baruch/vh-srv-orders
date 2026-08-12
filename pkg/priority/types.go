@@ -254,8 +254,9 @@ type ContributionsBatchResult struct {
 	// ByCustomer holds last-12-months DEBIT contribution sums per ISO currency, keyed by
 	// Priority CUSTNAME.
 	ByCustomer map[string]map[string]float64
-	// CustNamesByEmail maps each requested email (lower-cased) to the active Priority
-	// CUSTNAMEs it resolved to. Emails with no active customer are simply absent.
+	// CustNamesByEmail maps each requested email (normalizeEmail'd: trimmed + lower-cased)
+	// to the active Priority CUSTNAMEs it resolved to. Emails with no active customer are
+	// simply absent.
 	CustNamesByEmail map[string][]string
 	Stats            RequestStats
 }
@@ -268,7 +269,7 @@ func (r *ContributionsBatchResult) SumGroup(emails []string) map[string]float64 
 	seen := make(map[string]struct{})
 	sums := make(map[string]float64)
 	for _, email := range emails {
-		for _, custName := range r.CustNamesByEmail[strings.ToLower(email)] {
+		for _, custName := range r.CustNamesByEmail[normalizeEmail(email)] {
 			if _, ok := seen[custName]; ok {
 				continue
 			}

@@ -11,11 +11,10 @@ var v2Excluded = map[string]bool{
 // v2ExcludedMajorMarkets lists major markets whose donation data is not yet available in any
 // connected accounting system. Remove countries as integrations expand.
 //
-// Current exclusions: Russia.
-// Europe (EU-27, UK, Norway, Switzerland, Western Balkans) and Turkey were opened
-// when the European donations source was integrated.
+// No exclusions remain — all major markets are on v2 (Russia was the last, now on v2;
+// Russian offline payments continue via Robokasa, which bypasses pricing entirely).
 var v2ExcludedMajorMarkets = map[string]bool{
-	"RU": true, // Russia
+	// No exclusions remain.
 }
 
 // V2Eligible returns true if the country should use v2 pricing.

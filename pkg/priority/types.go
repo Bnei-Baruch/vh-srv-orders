@@ -1,6 +1,9 @@
 package priority
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
 
 // IsActive returns true if the customer is considered active.
 // Checks InactiveFlag first; falls back to StatDes Hebrew text.
@@ -212,4 +215,69 @@ type AccountReceivableODataResponse struct {
 	ODataContext  string `json:"@odata.context,omitempty"`
 	ODataCount    int    `json:"@odata.count,omitempty"`
 	ODataNextLink string `json:"@odata.nextLink,omitempty"`
+}
+
+// accountsReceivableExpandItem is a minimal ACCOUNTS_RECEIVABLE record, selected down to just
+// the customer key (ACCNAME) with its filtered/selected ACCFNCITEMS2_SUBFORM items expanded inline.
+// Used by GetLastContributionsBatch so many customers can be fetched in one request.
+//
+// ItemsODataNextLink captures the expanded child collection's own "@odata.nextLink" (OData v4
+// convention: "<propertyName>@odata.nextLink" alongside the property itself). GetAccountReceivables
+// proves Priority pages this exact collection on its own single-customer path -- a customer with
+// more qualifying rows than one expand page holds would otherwise be silently under-summed here,
+// indistinguishable from having donated less.
+type accountsReceivableExpandItem struct {
+	ACCNAME            string                  `json:"ACCNAME"` // customer code (=CUSTNAME)
+	Items              []AccountReceivableItem `json:"ACCFNCITEMS2_SUBFORM"`
+	ItemsODataNextLink string                  `json:"ACCFNCITEMS2_SUBFORM@odata.nextLink,omitempty"`
+}
+
+// accountsReceivableExpandResponse is the OData response for a $select+$expand ACCOUNTS_RECEIVABLE query.
+type accountsReceivableExpandResponse struct {
+	Value         []accountsReceivableExpandItem `json:"value"`
+	ODataNextLink string                         `json:"@odata.nextLink,omitempty"`
+}
+
+// RequestStats captures diagnostic metrics (PoC instrumentation) for the OData requests
+// issued by a single GetLastContributionsBatch call.
+type RequestStats struct {
+	Requests int           // number of HTTP requests made to Priority (incl. pagination)
+	Bytes    int           // total response body bytes received
+	Duration time.Duration // wall-clock time for the whole batch call
+}
+
+// ContributionsBatchResult is the output of GetLastContributionsBatch: the whole batch is
+// fetched once, keyed granularly by Priority customer, so callers can slice it into however
+// many logical groups (e.g. one group per person, where a person may have several email
+// aliases) they need afterwards with zero extra Priority calls. Use SumGroup per group.
+type ContributionsBatchResult struct {
+	// ByCustomer holds last-12-months DEBIT contribution sums per ISO currency, keyed by
+	// Priority CUSTNAME.
+	ByCustomer map[string]map[string]float64
+	// CustNamesByEmail maps each requested email (normalizeEmail'd: trimmed + lower-cased)
+	// to the active Priority CUSTNAMEs it resolved to. Emails with no active customer are
+	// simply absent.
+	CustNamesByEmail map[string][]string
+	Stats            RequestStats
+}
+
+// SumGroup sums ByCustomer's currency totals across the unique set of Priority customers that
+// the given emails resolve to. Each customer is counted once even if more than one of the
+// given emails (e.g. aliases of the same person) resolves to it. Call once per logical group
+// after a single GetLastContributionsBatch fetch -- this does not issue any Priority calls.
+func (r *ContributionsBatchResult) SumGroup(emails []string) map[string]float64 {
+	seen := make(map[string]struct{})
+	sums := make(map[string]float64)
+	for _, email := range emails {
+		for _, custName := range r.CustNamesByEmail[normalizeEmail(email)] {
+			if _, ok := seen[custName]; ok {
+				continue
+			}
+			seen[custName] = struct{}{}
+			for currency, amount := range r.ByCustomer[custName] {
+				sums[currency] += amount
+			}
+		}
+	}
+	return sums
 }

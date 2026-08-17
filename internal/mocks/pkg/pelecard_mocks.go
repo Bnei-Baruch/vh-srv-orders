@@ -75,7 +75,7 @@ type MockPelecardAPI_ChargeByToken_Call struct {
 //   - ctx context.Context
 //   - request *pelecard.ChargeRequest
 //   - terminal pelecard.Terminal
-func (_e *MockPelecardAPI_Expecter) ChargeByToken(ctx interface{}, request interface{}, terminal interface{}) *MockPelecardAPI_ChargeByToken_Call {
+func (_e *MockPelecardAPI_Expecter) ChargeByToken(ctx any, request any, terminal any) *MockPelecardAPI_ChargeByToken_Call {
 	return &MockPelecardAPI_ChargeByToken_Call{Call: _e.mock.On("ChargeByToken", ctx, request, terminal)}
 }
 
@@ -149,7 +149,7 @@ type MockPelecardAPI_FetchMuhlafim_Call struct {
 //   - ctx context.Context
 //   - startDate string
 //   - endDate string
-func (_e *MockPelecardAPI_Expecter) FetchMuhlafim(ctx interface{}, startDate interface{}, endDate interface{}) *MockPelecardAPI_FetchMuhlafim_Call {
+func (_e *MockPelecardAPI_Expecter) FetchMuhlafim(ctx any, startDate any, endDate any) *MockPelecardAPI_FetchMuhlafim_Call {
 	return &MockPelecardAPI_FetchMuhlafim_Call{Call: _e.mock.On("FetchMuhlafim", ctx, startDate, endDate)}
 }
 
@@ -251,7 +251,7 @@ type MockChargeExecutor_Execute_Call struct {
 //   - request *pelecard.ChargeRequest
 //   - terminal pelecard.Terminal
 //   - orderID uint
-func (_e *MockChargeExecutor_Expecter) Execute(ctx interface{}, request interface{}, terminal interface{}, orderID interface{}) *MockChargeExecutor_Execute_Call {
+func (_e *MockChargeExecutor_Expecter) Execute(ctx any, request any, terminal any, orderID any) *MockChargeExecutor_Execute_Call {
 	return &MockChargeExecutor_Execute_Call{Call: _e.mock.On("Execute", ctx, request, terminal, orderID)}
 }
 

@@ -156,7 +156,7 @@ func TestHandleMonthlyPriceByKCID_DonationFetchError_ReturnsDegradedResponse(t *
 	assert.Equal(t, "v2", data["pricing_version"])
 	v2Details := data["v2_details"].(map[string]interface{})
 	discounts := v2Details["discounts"].([]interface{})
-	require.Len(t, discounts, 3)
+	require.Len(t, discounts, 4)
 	donations := discounts[0].(map[string]interface{})
 	assert.Equal(t, true, donations["error"])
 	assert.Equal(t, false, donations["eligible"])
@@ -166,6 +166,10 @@ func TestHandleMonthlyPriceByKCID_DonationFetchError_ReturnsDegradedResponse(t *
 	manual := discounts[2].(map[string]interface{})
 	assert.Equal(t, false, manual["eligible"])
 	assert.Nil(t, manual["error"])
+	// Coupon row is always present (ineligible here — no active redemption).
+	coupon := discounts[3].(map[string]interface{})
+	assert.Equal(t, "coupon", coupon["type"])
+	assert.Equal(t, false, coupon["eligible"])
 }
 
 // notFoundProfileService is a test stub that returns profiles.ErrNotFound for all calls.

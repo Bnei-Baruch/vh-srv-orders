@@ -226,11 +226,13 @@ func (o *OrdersDB) CreatePayment(ctx context.Context, req RequestOrder, orderID 
 	}
 
 	p := Payment{
-		Amount:        req.Amount,
-		Currency:      req.Currency,
-		PaymentType:   null.NewString(paymentType, true),
-		OrderID:       null.NewInt(orderID, true),
-		PaymentStatus: null.NewString(paymentStatus, true),
+		Amount:            req.Amount,
+		Currency:          req.Currency,
+		PaymentType:       null.NewString(paymentType, true),
+		OrderID:           null.NewInt(orderID, true),
+		PaymentStatus:     null.NewString(paymentStatus, true),
+		PricingVersion:    req.PricingVersion,
+		PricingEvaluation: req.PricingEvaluation,
 	}
 
 	createString, numString, createQueryArgs := preparePaymentCreateQuery(p)
@@ -1439,6 +1441,16 @@ func preparePaymentCreateQuery(req Payment) (string, string, []interface{}) {
 		createStrings = append(createStrings, `"Ordkey"`)
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.Ordkey.String)
+	}
+	if req.PricingVersion.Valid {
+		createStrings = append(createStrings, "pricing_version")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.PricingVersion.String)
+	}
+	if req.PricingEvaluation.Valid {
+		createStrings = append(createStrings, "pricing_evaluation")
+		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
+		args = append(args, req.PricingEvaluation.JSON)
 	}
 	if len(args) != 0 {
 		createStrings = append(createStrings, "created_at")

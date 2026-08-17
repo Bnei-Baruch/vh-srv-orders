@@ -48,6 +48,7 @@ func GetMonthlyPrice(
 	pricingVersion string,
 	discountProvider repo.ManualDiscountProvider,
 	hhProvider repo.HHGrantProvider,
+	couponProvider repo.CouponProvider,
 ) (*MonthlyPriceRes, error) {
 	if preferredCurrency == "" {
 		preferredCurrency = common.CurrencyUSD
@@ -65,7 +66,7 @@ func GetMonthlyPrice(
 		res.V1AllPrices = allV1Prices()
 
 	case "v2":
-		v2eval, err := EvaluateV2Price(ctx, profileService, priorityClient, accountingService, quickbooksCompanyID, accountID, keycloakID, email, country, discountProvider, hhProvider)
+		v2eval, err := EvaluateV2Price(ctx, profileService, priorityClient, accountingService, quickbooksCompanyID, accountID, keycloakID, email, country, discountProvider, hhProvider, couponProvider)
 		if err != nil {
 			return nil, err
 		}
@@ -76,7 +77,7 @@ func GetMonthlyPrice(
 		// Auto-route using the same eligibility criteria as billing.
 		if V2Eligible(country) {
 			pricingVersion = "v2"
-			v2eval, err := EvaluateV2Price(ctx, profileService, priorityClient, accountingService, quickbooksCompanyID, accountID, keycloakID, email, country, discountProvider, hhProvider)
+			v2eval, err := EvaluateV2Price(ctx, profileService, priorityClient, accountingService, quickbooksCompanyID, accountID, keycloakID, email, country, discountProvider, hhProvider, couponProvider)
 			if err != nil {
 				return nil, err
 			}

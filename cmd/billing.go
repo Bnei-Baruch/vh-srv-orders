@@ -2,10 +2,14 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"os"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/getsentry/sentry-go"
@@ -56,11 +60,29 @@ Examples:
 	Run: runBillingReconcile,
 }
 
+var billingCompareContributionsCmd = &cobra.Command{
+	Use:   "compare-contributions",
+	Short: "Verify batched Priority contribution fetching against the legacy per-email fetch",
+	Long: `Read-only correctness check, not part of the real billing/charging flow.
+
+For every account in this month's renewal cohort, fetches last-12-months Priority DEBIT
+contributions once via the batch endpoint (GetLastContributionsBatch), seeding a per-email
+sum map from it. Then fetches the same data the legacy way (one request per email) and
+removes each email from the map once its legacy sum matches the batch sum. Whatever is left
+over at the end is a mismatch.
+
+Never logs or prints actual donation amounts or emails -- only match/mismatch counts and
+account IDs, per the no-log policy on Priority donation data. Does not resolve pricing,
+flag orders, or charge anything.`,
+	Run: runBillingCompareContributions,
+}
+
 func init() {
 	rootCmd.AddCommand(billingCmd)
 	billingCmd.AddCommand(billingStartCmd)
 	billingCmd.AddCommand(billingRetryPricingErrorsCmd)
 	billingCmd.AddCommand(billingReconcileCmd)
+	billingCmd.AddCommand(billingCompareContributionsCmd)
 
 	// Shared flags inherited by all billing subcommands
 	billingCmd.PersistentFlags().Bool("dry-run", false, "Simulate payment gateway calls (no live charges); all DB operations are real")
@@ -189,6 +211,183 @@ func runBillingReconcile(cmd *cobra.Command, args []string) {
 	}
 }
 
+// pendingContribution is a batch-computed per-email contribution sum awaiting confirmation
+// against the legacy per-email fetch. Removed from the pending map once confirmed equal.
+type pendingContribution struct {
+	accountID int
+	sums      map[string]float64
+}
+
+func runBillingCompareContributions(cmd *cobra.Command, args []string) {
+	slog.Info("Comparing legacy vs batch Priority contribution fetching", slog.String("command", "billing compare-contributions"))
+
+	if common.Config.PriorityBaseURL == "" || common.Config.PriorityUsername == "" || common.Config.PriorityPassword == "" {
+		utils.LogFatal("PRIORITY_BASE_URL, PRIORITY_USERNAME and PRIORITY_PASSWORD are required")
+	}
+
+	_, maxWorkers, err := parseSharedBillingFlags(cmd)
+	if err != nil {
+		utils.LogFatal("Failed to parse flags", slog.Any("error", err))
+	}
+
+	eventEmitter, ordersDB, cleanup, err := initBillingInfra()
+	if err != nil {
+		utils.LogFatal("Failed to initialize billing infrastructure", slog.Any("error", err))
+	}
+	defer cleanup()
+	ctx := context.WithValue(context.Background(), common.CtxEventBuilder, new(BillingWorkflowEventBuilder))
+	_ = eventEmitter
+
+	orderIDs, err := ordersDB.GetOrderIDsToRenew(ctx)
+	if err != nil {
+		utils.LogFatal("GetOrderIDsToRenew", slog.Any("error", err))
+	}
+	if len(orderIDs) == 0 {
+		fmt.Println("No orders to renew")
+		return
+	}
+
+	// Resolve one email per account (deduped by account ID) from the renewal cohort.
+	// Only Priority is involved here -- no profile-service spouse emails, no accounting/QuickBooks.
+	emailByAccountID := make(map[int]string)
+	for _, orderID := range orderIDs {
+		data, err := ordersDB.LoadRenewalData(ctx, orderID)
+		if err != nil {
+			slog.Warn("LoadRenewalData failed, skipping order", slog.Uint64("order_id", uint64(orderID)), slog.Any("error", err))
+			continue
+		}
+		if data.Account == nil || data.Account.Email.String == "" {
+			continue
+		}
+		emailByAccountID[data.Account.ID] = data.Account.Email.String
+	}
+	slog.Info("Resolved accounts for comparison", slog.Int("accounts", len(emailByAccountID)))
+
+	client := priority.NewClient()
+
+	emails := make([]string, 0, len(emailByAccountID))
+	accountIDByEmail := make(map[string]int, len(emailByAccountID))
+	for accountID, email := range emailByAccountID {
+		emails = append(emails, email)
+		accountIDByEmail[email] = accountID
+	}
+
+	// 1. Batch fetch once, seed the pending map with one entry per email.
+	batchResult, err := client.GetLastContributionsBatch(ctx, emails)
+	if err != nil {
+		utils.LogFatal("GetLastContributionsBatch", slog.Any("error", err))
+	}
+
+	var mu sync.Mutex
+	pending := make(map[string]pendingContribution, len(emails))
+	for _, email := range emails {
+		pending[email] = pendingContribution{
+			accountID: accountIDByEmail[email],
+			sums:      batchResult.SumGroup([]string{email}),
+		}
+	}
+
+	// 2. Legacy fetch, concurrently. Remove an email from pending once its legacy sum
+	// matches the batch-computed sum already sitting there; leave mismatches in place.
+	legacyStart := time.Now()
+	var legacyStats priority.RequestStats
+	emailChan := make(chan string, maxWorkers)
+	var wg sync.WaitGroup
+	for i := 0; i < maxWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for email := range emailChan {
+				legacySums, stats, err := client.GetLastContributionsWithStats(ctx, email)
+				if err != nil && !errors.Is(err, priority.ErrNoActiveCustomers) {
+					slog.Error("legacy fetch failed", slog.Int("account_id", accountIDByEmail[email]), slog.Any("error", err))
+					continue
+				}
+
+				mu.Lock()
+				legacyStats.Requests += stats.Requests
+				legacyStats.Bytes += stats.Bytes
+				if sumsMatch(legacySums, pending[email].sums) {
+					delete(pending, email)
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+	go func() {
+		for _, email := range emails {
+			emailChan <- email
+		}
+		close(emailChan)
+	}()
+	wg.Wait()
+	legacyDuration := time.Since(legacyStart)
+
+	mismatchedAccountIDs := make([]int, 0, len(pending))
+	for _, p := range pending {
+		mismatchedAccountIDs = append(mismatchedAccountIDs, p.accountID)
+	}
+
+	fmt.Printf("\nContribution strategy comparison: %d accounts, %d matched, %d mismatched\n",
+		len(emails), len(emails)-len(mismatchedAccountIDs), len(mismatchedAccountIDs))
+	if len(mismatchedAccountIDs) > 0 {
+		fmt.Printf("Mismatched account IDs: %v\n", mismatchedAccountIDs)
+	}
+	fmt.Printf("\nLegacy: requests=%d bytes=%d duration=%s\n", legacyStats.Requests, legacyStats.Bytes, legacyDuration)
+	fmt.Printf("Batch:  requests=%d bytes=%d duration=%s\n",
+		batchResult.Stats.Requests, batchResult.Stats.Bytes, batchResult.Stats.Duration)
+
+	// Diagnostic-only, local debug DB: unlike the real pricing/billing code paths, printing
+	// actual amounts and resolved customer codes here (not just counts) is deliberate --
+	// this is the only way to see *why* the two strategies disagree. Never do this against
+	// production logs.
+	if len(pending) > 0 {
+		fmt.Println("\nDiagnostic detail for mismatched accounts:")
+		for email, p := range pending {
+			legacyCustomers, err := client.GetActiveCustomersByEmail(ctx, email)
+			if err != nil {
+				fmt.Printf("\naccount_id=%d email=%s: legacy re-fetch failed: %v\n", p.accountID, email, err)
+				continue
+			}
+			legacyCustNames := make([]string, 0, len(legacyCustomers))
+			for _, cust := range legacyCustomers {
+				if cust.CustName != "" {
+					legacyCustNames = append(legacyCustNames, cust.CustName)
+				}
+			}
+			legacySums, _, err := client.GetLastContributionsWithStats(ctx, email)
+			if err != nil && !errors.Is(err, priority.ErrNoActiveCustomers) {
+				fmt.Printf("\naccount_id=%d email=%s: legacy sums re-fetch failed: %v\n", p.accountID, email, err)
+				continue
+			}
+			batchCustNames := batchResult.CustNamesByEmail[strings.ToLower(email)]
+			fmt.Printf("\naccount_id=%d email=%s\n  legacy custnames=%v sums=%v\n  batch  custnames=%v sums=%v\n",
+				p.accountID, email, legacyCustNames, legacySums, batchCustNames, p.sums)
+		}
+	}
+}
+
+// sumsMatch reports whether two currency->amount maps agree within a small float epsilon.
+func sumsMatch(a, b map[string]float64) bool {
+	const epsilon = 0.01
+	checked := make(map[string]bool, len(a))
+	for currency, amount := range a {
+		checked[currency] = true
+		if math.Abs(amount-b[currency]) > epsilon {
+			return false
+		}
+	}
+	for currency, amount := range b {
+		if checked[currency] {
+			continue
+		}
+		if math.Abs(amount) > epsilon {
+			return false
+		}
+	}
+	return true
+}
+
 // BillingWorkflowEventBuilder builds events tagged with the billing workflow component and system actor.
 type BillingWorkflowEventBuilder struct{}
 
@@ -263,6 +462,7 @@ func buildChargeableBillingService(ordersDB *repo.OrdersDB, eventEmitter events.
 	resolver := pricing.NewPriceResolver(profileService, priorityClient, accountingClient, common.Config.QuickbooksCompanyID)
 	resolver.SetManualDiscountProvider(ordersDB)
 	resolver.SetHHGrantProvider(ordersDB)
+	resolver.SetCouponProvider(ordersDB)
 	return billing.NewBillingService(ordersDB, pelecardClient, eventEmitter, resolver, chargeExecutor)
 }
 

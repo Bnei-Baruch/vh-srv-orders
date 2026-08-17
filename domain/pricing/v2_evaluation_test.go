@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -326,6 +327,117 @@ func TestFetchDonationSums_AggregatesAcrossEmails(t *testing.T) {
 	assert.NotContains(t, result.fetchNote, "Priority")
 	assert.Contains(t, result.fetchNote, "no QuickBooks record")
 	assert.InDelta(t, 510.0, result.totalNIS, 0.001)
+}
+
+// --- fetchDonationSums(..., addPriorityContributionsBatch) / addPriorityContributionsBatch ---
+// Direct tests for the batch-fetch strategy wired into EvaluateV2Price, exercised through the
+// same fetchDonationSums the tests above use, just with the batch Priority-fetch function
+// passed explicitly. fetchDonationSums's default (legacy addPriorityContributions) and its own
+// tests above are untouched -- see their own tests.
+
+func TestFetchDonationSumsBatch_NoAccount_TreatedAsZero(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(priority.CustomerODataResponse{Value: []priority.Customer{}})
+	}))
+	defer server.Close()
+
+	client := newPriorityTestClient(server.URL)
+	result, err := fetchDonationSums(context.Background(), client, notFoundAccountingClient(t), testQuickbooksCompanyID, []string{"unknown@x.com"}, 3.1, 3.6, addPriorityContributionsBatch)
+
+	require.NoError(t, err)
+	assert.Contains(t, result.fetchNote, "unknown@x.com")
+	assert.Equal(t, 0.0, result.totalNIS)
+}
+
+func TestFetchDonationSumsBatch_APIError_ReturnsError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprint(w, "internal error")
+	}))
+	defer server.Close()
+
+	client := newPriorityTestClient(server.URL)
+	_, err := fetchDonationSums(context.Background(), client, notFoundAccountingClient(t), testQuickbooksCompanyID, []string{"bad@x.com"}, 3.1, 3.6, addPriorityContributionsBatch)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDonationFetch)
+}
+
+func TestFetchDonationSumsBatch_AggregatesAcrossEmails(t *testing.T) {
+	// Two emails resolving to two distinct customers, different currencies each.
+	server := priorityServerWithContributions(100) // reuses the shared fixture: N emails -> N*amount
+	defer server.Close()
+
+	client := newPriorityTestClient(server.URL)
+	// usdRate=3.1: each email contributes 100 NIS (fixture always uses common.CurrencyNIS) -> 200 NIS total
+	result, err := fetchDonationSums(context.Background(), client, notFoundAccountingClient(t), testQuickbooksCompanyID, []string{"a@x.com", "b@x.com"}, 3.1, 3.6, addPriorityContributionsBatch)
+
+	require.NoError(t, err)
+	assert.NotContains(t, result.fetchNote, "no Priority record")
+	assert.InDelta(t, 200.0, result.totalNIS, 0.001)
+}
+
+func TestAddPriorityContributionsBatch_DedupsSharedCustomer(t *testing.T) {
+	// Both emails resolve to the SAME Priority customer (e.g. spouse aliases) -- must be
+	// counted once, not once per email.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "CUSTOMERS") {
+			emails := extractFilterValues(r.URL.Query().Get("$filter"), "EMAIL")
+			customers := make([]priority.Customer, len(emails))
+			for i, email := range emails {
+				customers[i] = priority.Customer{CustName: "CUST_SHARED", Email: email}
+			}
+			json.NewEncoder(w).Encode(priority.CustomerODataResponse{Value: customers})
+			return
+		}
+		json.NewEncoder(w).Encode(fakeExpandResponse{
+			Value: []fakeExpandItem{{
+				ACCNAME: "CUST_SHARED",
+				Items: []priority.AccountReceivableItem{
+					{ACCNAME: "40001", DEBIT: 500, CODE: common.CurrencyNIS, FNCDATE: time.Now().AddDate(0, -3, 0).Format(time.RFC3339)},
+				},
+			}},
+		})
+	}))
+	defer server.Close()
+
+	client := newPriorityTestClient(server.URL)
+	perCurrency := map[string]float64{}
+	successSet := map[string]struct{}{}
+	notFound, err := addPriorityContributionsBatch(context.Background(), client, []string{"a@x.com", "b@x.com"}, perCurrency, successSet)
+
+	require.NoError(t, err)
+	assert.Empty(t, notFound)
+	assert.Equal(t, map[string]float64{common.CurrencyNIS: 500}, perCurrency)
+	assert.Len(t, successSet, 2)
+}
+
+func TestAddPriorityContributionsBatch_EmptyEmails_NoOp(t *testing.T) {
+	notFound, err := addPriorityContributionsBatch(context.Background(), newPriorityTestClient("http://unused"), nil, map[string]float64{}, map[string]struct{}{})
+
+	require.NoError(t, err)
+	assert.Empty(t, notFound)
+}
+
+func TestAddPriorityContributionsBatch_PaddedMixedCaseEmail_StillMatchesNormalizedKey(t *testing.T) {
+	// Regression: this function's own notFound/successSet lookup must use the same
+	// normalization (trim+lower) as GetLastContributionsBatch's CustNamesByEmail storage key,
+	// or a padded/mixed-case input email is wrongly filed as "no Priority record" even though
+	// the batch result actually has it.
+	server := priorityServerWithContributions(100)
+	defer server.Close()
+
+	client := newPriorityTestClient(server.URL)
+	perCurrency := map[string]float64{}
+	successSet := map[string]struct{}{}
+	notFound, err := addPriorityContributionsBatch(context.Background(), client, []string{" A@X.CoM "}, perCurrency, successSet)
+
+	require.NoError(t, err)
+	assert.Empty(t, notFound)
+	assert.Len(t, successSet, 1)
+	assert.Equal(t, map[string]float64{common.CurrencyNIS: 100}, perCurrency)
 }
 
 // noPriorityCustomersServer returns a Priority test server where no customers exist for any email.
@@ -775,37 +887,79 @@ func (s *stubProfileService) LookupProfileByKeycloakId(context.Context, string) 
 	return nil, profiles.ErrNotFound
 }
 
+// extractFilterValues pulls every quoted value out of "{field} eq '...'" clauses in an
+// OData $filter string, in order. Used by the fixtures below to echo back whatever
+// GetLastContributionsBatch actually asked for instead of a single fixed canned value.
+func extractFilterValues(filter, field string) []string {
+	re := regexp.MustCompile(field + ` eq '([^']+)'`)
+	matches := re.FindAllStringSubmatch(filter, -1)
+	values := make([]string, len(matches))
+	for i, m := range matches {
+		values[i] = m[1]
+	}
+	return values
+}
+
+// fakeExpandItem/fakeExpandResponse mirror the (unexported) wire shape
+// GetLastContributionsBatch's $expand ACCOUNTS_RECEIVABLE request expects: each customer
+// keyed by ACCNAME with its matching contribution items nested under ACCFNCITEMS2_SUBFORM.
+type fakeExpandItem struct {
+	ACCNAME string                           `json:"ACCNAME"`
+	Items   []priority.AccountReceivableItem `json:"ACCFNCITEMS2_SUBFORM"`
+}
+type fakeExpandResponse struct {
+	Value []fakeExpandItem `json:"value"`
+}
+
+// customersForFilter builds a CUSTOMERS response with one distinct customer per email
+// actually present in the request's $filter, so GetLastContributionsBatch's CUSTNAME
+// resolution (keyed by the returned EMAIL) succeeds regardless of which/how many emails
+// a given test uses.
+func customersForFilter(filter string) priority.CustomerODataResponse {
+	emails := extractFilterValues(filter, "EMAIL")
+	customers := make([]priority.Customer, len(emails))
+	for i, email := range emails {
+		customers[i] = priority.Customer{CustName: fmt.Sprintf("CUST%d", i+1), Email: email}
+	}
+	return priority.CustomerODataResponse{Value: customers}
+}
+
 // priorityServerNoContributions returns a test server where all emails have active customers but zero qualifying contributions.
 func priorityServerNoContributions() *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if strings.Contains(r.URL.Path, "CUSTOMERS") {
-			json.NewEncoder(w).Encode(priority.CustomerODataResponse{
-				Value: []priority.Customer{{CustName: "CUST001", Email: "test@example.com"}},
-			})
+			json.NewEncoder(w).Encode(customersForFilter(r.URL.Query().Get("$filter")))
 		} else {
-			// No qualifying receivables
-			json.NewEncoder(w).Encode(priority.AccountReceivableODataResponse{Value: []priority.AccountReceivableItem{}})
+			// No qualifying receivables for any customer.
+			json.NewEncoder(w).Encode(fakeExpandResponse{})
 		}
 	}))
 }
 
-// priorityServerWithContributions returns a test server where all emails have large NIS contributions (above annual threshold).
+// priorityServerWithContributions returns a test server where each requested email resolves
+// to its own distinct Priority customer, each with a contribution of amount -- so N emails
+// combine to N*amount when summed, matching how the old per-email fetch independently
+// counted every email's own contribution.
 func priorityServerWithContributions(amount float64) *httptest.Server {
 	validDate := time.Now().AddDate(0, -3, 0).Format(time.RFC3339)
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if strings.Contains(r.URL.Path, "CUSTOMERS") {
-			json.NewEncoder(w).Encode(priority.CustomerODataResponse{
-				Value: []priority.Customer{{CustName: "CUST001"}},
-			})
-		} else {
-			json.NewEncoder(w).Encode(priority.AccountReceivableODataResponse{
-				Value: []priority.AccountReceivableItem{
+			json.NewEncoder(w).Encode(customersForFilter(r.URL.Query().Get("$filter")))
+			return
+		}
+		custNames := extractFilterValues(r.URL.Query().Get("$filter"), "ACCNAME")
+		items := make([]fakeExpandItem, len(custNames))
+		for i, custName := range custNames {
+			items[i] = fakeExpandItem{
+				ACCNAME: custName,
+				Items: []priority.AccountReceivableItem{
 					{ACCNAME: "40001", DEBIT: amount, CODE: common.CurrencyNIS, FNCDATE: validDate},
 				},
-			})
+			}
 		}
+		json.NewEncoder(w).Encode(fakeExpandResponse{Value: items})
 	}))
 }
 
@@ -821,7 +975,7 @@ func TestEvaluateV2Price_NoSpouse_NoDiscount(t *testing.T) {
 		},
 	}
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", nil, nil)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", nil, nil, nil)
 	require.NoError(t, err)
 
 	assert.Equal(t, 10, eval.AccountID)
@@ -844,7 +998,7 @@ func TestEvaluateV2Price_NoSpouse_WithDiscount(t *testing.T) {
 		},
 	}
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", nil, nil)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", nil, nil, nil)
 	require.NoError(t, err)
 
 	assert.True(t, eval.Discounts[0].Eligible)
@@ -859,7 +1013,7 @@ func TestEvaluateV2Price_ProfileNotFound_FallsBackToAccountEmail(t *testing.T) {
 	// No profile in stub → ErrNotFound → fallback to account email
 	profileSvc := &stubProfileService{profiles: map[string]*profiles.Profile{}}
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", "fallback@x.com", "IL", nil, nil)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", "fallback@x.com", "IL", nil, nil, nil)
 	require.NoError(t, err)
 	assert.NotNil(t, eval)
 	assert.Equal(t, "IL", eval.CountryCode)
@@ -883,7 +1037,7 @@ func TestEvaluateV2Price_WithSpouse_NeitherGetsDiscount(t *testing.T) {
 		},
 	}
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", primaryEmail, "IL", nil, nil)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", primaryEmail, "IL", nil, nil, nil)
 	require.NoError(t, err)
 
 	assert.False(t, eval.Discounts[0].Eligible)
@@ -910,7 +1064,7 @@ func TestEvaluateV2Price_WithSpouse_BothGetDiscount(t *testing.T) {
 		},
 	}
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", primaryEmail, "IL", nil, nil)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", primaryEmail, "IL", nil, nil, nil)
 	require.NoError(t, err)
 
 	assert.True(t, eval.Discounts[0].Eligible)
@@ -940,7 +1094,7 @@ func TestEvaluateV2Price_FinalPriceRoundedToTwoDecimals(t *testing.T) {
 		},
 	}
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "AU", nil, nil)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "AU", nil, nil, nil)
 	require.NoError(t, err)
 
 	assert.True(t, eval.Discounts[0].Eligible)
@@ -965,7 +1119,7 @@ func TestEvaluateV2Price_SpouseDonationsCountedWithoutProfile(t *testing.T) {
 		},
 	}
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", primaryEmail, "IL", nil, nil)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", primaryEmail, "IL", nil, nil, nil)
 	require.NoError(t, err)
 	assert.NotNil(t, eval)
 }
@@ -977,7 +1131,7 @@ func TestEvaluateV2Price_ProfileServiceError_ReturnsError(t *testing.T) {
 	client := newPriorityTestClient(server.URL)
 	profileSvc := &errorProfileService{err: fmt.Errorf("connection refused")}
 
-	_, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", "test@x.com", "IL", nil, nil)
+	_, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", "test@x.com", "IL", nil, nil, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "profileService.GetProfileByKeycloakID")
 }
@@ -1008,7 +1162,7 @@ func TestEvaluateV2Price_SpouseProfileError_ReturnsError(t *testing.T) {
 		spouseErr:      fmt.Errorf("timeout"),
 	}
 
-	_, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", primaryEmail, "IL", nil, nil)
+	_, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", primaryEmail, "IL", nil, nil, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "spouse")
 }
@@ -1047,7 +1201,7 @@ func TestEvaluateV2Price_DonationFetchError_ReturnsDegradedDiscount(t *testing.T
 		},
 	}
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", nil, nil)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", nil, nil, nil)
 	require.NoError(t, err)
 	require.Len(t, eval.Discounts, 1)
 	assert.Equal(t, DiscountTypeDonations, eval.Discounts[0].Type)
@@ -1092,7 +1246,7 @@ func TestEvaluateV2Price_PartialDonationFetchError_ReturnsDegradedDiscount(t *te
 		},
 	}
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", good, "IL", nil, nil)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", good, "IL", nil, nil, nil)
 	require.NoError(t, err)
 	require.Len(t, eval.Discounts, 1)
 	assert.True(t, eval.Discounts[0].Error)
@@ -1125,7 +1279,7 @@ func TestEvaluateV2Price_EuropeDonationsAloneGrantDiscount(t *testing.T) {
 		}},
 	}, nil).Once()
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, mockAcc, testQuickbooksCompanyID, 10, "kc-1", email, "DE", nil, nil)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, mockAcc, testQuickbooksCompanyID, 10, "kc-1", email, "DE", nil, nil, nil)
 	require.NoError(t, err)
 
 	assert.Equal(t, common.CurrencyEUR, eval.CountryBase.Currency)
@@ -1148,7 +1302,7 @@ func TestEvaluateV2Price_EuropeCountry_NoDonations_FullPrice(t *testing.T) {
 		},
 	}
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "DE", nil, nil)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, client, notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "DE", nil, nil, nil)
 	require.NoError(t, err)
 
 	assert.False(t, eval.Discounts[0].Eligible)
@@ -1215,7 +1369,7 @@ func TestEvaluateV2Price_WithDiscountProvider_Applied(t *testing.T) {
 		return &repo.ManualDiscount{ID: 1, Type: "percent", Properties: null.JSONFrom(props)}, nil
 	})
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, newPriorityTestClient(server.URL), notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", provider, nil)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, newPriorityTestClient(server.URL), notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", provider, nil, nil)
 	require.NoError(t, err)
 
 	require.Len(t, eval.Discounts, 2)
@@ -1239,7 +1393,7 @@ func TestEvaluateV2Price_WithDiscountProvider_NoActiveDiscount(t *testing.T) {
 		return nil, nil
 	})
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, newPriorityTestClient(server.URL), notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", provider, nil)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, newPriorityTestClient(server.URL), notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", provider, nil, nil)
 	require.NoError(t, err)
 
 	require.Len(t, eval.Discounts, 2)
@@ -1268,7 +1422,7 @@ func TestEvaluateV2Price_WithDiscountProvider_DonationsWins(t *testing.T) {
 		return &repo.ManualDiscount{ID: 1, Type: "percent", Properties: null.JSONFrom(props)}, nil
 	})
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, newPriorityTestClient(server.URL), notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", provider, nil)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, newPriorityTestClient(server.URL), notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", provider, nil, nil)
 	require.NoError(t, err)
 
 	donationsPrice := base.Amount * (1 - DonationsDiscountAmtPct/100)
@@ -1296,7 +1450,7 @@ func TestEvaluateV2Price_WithDiscountProvider_ManualWins(t *testing.T) {
 		return &repo.ManualDiscount{ID: 2, Type: "percent", Properties: null.JSONFrom(props)}, nil
 	})
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, newPriorityTestClient(server.URL), notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", provider, nil)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, newPriorityTestClient(server.URL), notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", provider, nil, nil)
 	require.NoError(t, err)
 
 	manualPrice := math.Round(base.Amount*(1-pct/100)*100) / 100
@@ -1319,7 +1473,7 @@ func TestEvaluateV2Price_WithDiscountProvider_FetchError(t *testing.T) {
 		return nil, fmt.Errorf("DB connection lost")
 	})
 
-	eval, err := EvaluateV2Price(context.Background(), profileSvc, newPriorityTestClient(server.URL), notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", provider, nil)
+	eval, err := EvaluateV2Price(context.Background(), profileSvc, newPriorityTestClient(server.URL), notFoundAccountingClient(t), testQuickbooksCompanyID, 10, "kc-1", email, "IL", provider, nil, nil)
 	require.NoError(t, err)
 
 	require.Len(t, eval.Discounts, 2)

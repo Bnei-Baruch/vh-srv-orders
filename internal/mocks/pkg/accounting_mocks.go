@@ -74,7 +74,7 @@ type MockAccountingService_GetEuropeContributions_Call struct {
 // GetEuropeContributions is a helper method to define mock.On call
 //   - ctx context.Context
 //   - emails []string
-func (_e *MockAccountingService_Expecter) GetEuropeContributions(ctx interface{}, emails interface{}) *MockAccountingService_GetEuropeContributions_Call {
+func (_e *MockAccountingService_Expecter) GetEuropeContributions(ctx any, emails any) *MockAccountingService_GetEuropeContributions_Call {
 	return &MockAccountingService_GetEuropeContributions_Call{Call: _e.mock.On("GetEuropeContributions", ctx, emails)}
 }
 
@@ -143,7 +143,7 @@ type MockAccountingService_GetLastContributions_Call struct {
 //   - ctx context.Context
 //   - email string
 //   - companyID *string
-func (_e *MockAccountingService_Expecter) GetLastContributions(ctx interface{}, email interface{}, companyID interface{}) *MockAccountingService_GetLastContributions_Call {
+func (_e *MockAccountingService_Expecter) GetLastContributions(ctx any, email any, companyID any) *MockAccountingService_GetLastContributions_Call {
 	return &MockAccountingService_GetLastContributions_Call{Call: _e.mock.On("GetLastContributions", ctx, email, companyID)}
 }
 

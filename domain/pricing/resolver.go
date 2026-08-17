@@ -27,6 +27,7 @@ type PriceResolver struct {
 	quickbooksCompanyID string
 	discountProvider    repo.ManualDiscountProvider // optional; applies manual discount when set
 	hhProvider          repo.HHGrantProvider        // optional; applies Help Haver grant when set
+	couponProvider      repo.CouponProvider         // optional; applies redeemed coupons when set
 }
 
 // NewPriceResolver creates a resolver for billing use.
@@ -56,6 +57,12 @@ func (r *PriceResolver) SetHHGrantProvider(p repo.HHGrantProvider) {
 	r.hhProvider = p
 }
 
+// SetCouponProvider wires the coupon-redemption lookup into the resolver.
+// Call this after NewPriceResolver when a DB is available (e.g. billing commands).
+func (r *PriceResolver) SetCouponProvider(p repo.CouponProvider) {
+	r.couponProvider = p
+}
+
 // Resolve determines the charge price for a renewal.
 // For v2-eligible countries, it evaluates country-based pricing with donation discounts.
 // For other countries, it uses static v1 pricing based on the order's existing currency.
@@ -65,7 +72,7 @@ func (r *PriceResolver) Resolve(ctx context.Context, account *repo.Account, v1Or
 		eval, err := EvaluateV2Price(
 			ctx, r.profileService, r.priorityClient, r.accountingService, r.quickbooksCompanyID,
 			account.ID, account.UserKey.String, account.Email.String, account.Country.String,
-			r.discountProvider, r.hhProvider,
+			r.discountProvider, r.hhProvider, r.couponProvider,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("EvaluateV2Price: %w", err)

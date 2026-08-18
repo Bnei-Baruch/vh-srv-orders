@@ -165,16 +165,6 @@ func TestCheckout_V2_CurrencyMismatch_Rejected(t *testing.T) {
 	assert.Equal(t, 0, paymentsCount(t, a))
 }
 
-func TestCheckout_NonV2Country_Bypassed(t *testing.T) {
-	a := newCheckoutTestApp(t, emptyPriority)
-	createCheckoutAccount(t, a, "RU")
-
-	got := POST_ROOT(t, a, "/v2/transaction/", membershipCheckout(5, common.CurrencyUSD), http.StatusOK)
-	p := paymentFromDummyURL(t, a, got)
-	assert.Equal(t, 5.0, p.Amount.Float64)
-	assert.False(t, p.PricingVersion.Valid)
-}
-
 func TestCheckout_NonMembership_Bypassed(t *testing.T) {
 	a := newCheckoutTestApp(t, emptyPriority)
 	createCheckoutAccount(t, a, "IL")

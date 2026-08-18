@@ -40,8 +40,8 @@ func TestV2Eligible_TurkeyEligible(t *testing.T) {
 	assert.True(t, V2Eligible("TR"))
 }
 
-func TestV2Eligible_RussiaExcluded(t *testing.T) {
-	assert.False(t, V2Eligible("RU"))
+func TestV2Eligible_RussiaEligible(t *testing.T) {
+	assert.True(t, V2Eligible("RU"))
 }
 
 func TestV2Eligible_WesternBalkansEligible(t *testing.T) {

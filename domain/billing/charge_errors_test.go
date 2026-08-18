@@ -45,7 +45,7 @@ func newTestService(t *testing.T) (*BillingService, *mocks.MockOrdersRepository,
 	mockRepo := mocks.NewMockOrdersRepository(t)
 	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
 	mockExecutor := pelecardmock.NewMockChargeExecutor(t)
-	resolver := pricing.NewPriceResolver(nil, nil, nil, "") // not used in charge phase
+	resolver := offlineV2Resolver(t) // offline v2 resolver; charge-phase tests never invoke it
 	emitter := &events.NoopEmitter{}
 	service := NewBillingService(mockRepo, mockPelecard, emitter, resolver, mockExecutor)
 	return service, mockRepo, mockExecutor
@@ -100,27 +100,9 @@ func TestPreResolve_AllOrdersResolved(t *testing.T) {
 	resolved, pricingErrors := service.preResolve(ctx, []uint{1, 2}, 1)
 
 	require.Equal(t, 2, len(resolved))
-	assert.Equal(t, "v1", resolved[0].Price.PricingVersion)
-	assert.Equal(t, "v1", resolved[1].Price.PricingVersion)
-	assert.Equal(t, 0, pricingErrors)
-}
-
-func TestPreResolve_V1CountryResolvesSuccessfully(t *testing.T) {
-	service, mockRepo, _ := newTestService(t)
-	ctx := context.Background()
-
-	data := testRenewalData()
-	data.Account.Country = null.StringFrom("RU") // V1 country (excluded from v2)
-	data.Order.Currency = null.StringFrom(common.CurrencyUSD)
-
-	mockRepo.EXPECT().LoadRenewalData(ctx, uint(1)).Return(data, nil)
-
-	resolved, pricingErrors := service.preResolve(ctx, []uint{1}, 1)
-
-	require.Equal(t, 1, len(resolved))
-	assert.Equal(t, uint(1), resolved[0].OrderID)
-	assert.Equal(t, "v1", resolved[0].Price.PricingVersion)
-	assert.Equal(t, 20.0, resolved[0].Price.Amount)
+	assert.Equal(t, "v2", resolved[0].Price.PricingVersion)
+	assert.Equal(t, "v2", resolved[1].Price.PricingVersion)
+	assert.Equal(t, 31.0, resolved[0].Price.Amount, "RU resolves to the v2 USD-Medium base")
 	assert.Equal(t, 0, pricingErrors)
 }
 

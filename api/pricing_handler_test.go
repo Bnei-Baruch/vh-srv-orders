@@ -68,21 +68,6 @@ func TestHandleMonthlyPriceByKCID_V1_FallbackToUSDForUnknownCurrency(t *testing.
 	assert.Equal(t, common.CurrencyUSD, data["currency"])
 }
 
-func TestHandleMonthlyPriceByKCID_T1_NonILUsesV1(t *testing.T) {
-	a := NewTestApp(t)
-	defer CloseTestApp(a)
-
-	POST(t, a, "/v2/account/", repo.Account{
-		UserKey: null.StringFrom(USER_KEY),
-		Country: null.StringFrom("RU"),
-	}, http.StatusCreated)
-
-	got := GET(t, a, fmt.Sprintf("/v2/pricing/monthly/%s?pricing_version=t1&currency=USD", USER_KEY), http.StatusOK)
-	data := got["data"].(map[string]interface{})
-	assert.Equal(t, 20.0, data["amount"])
-	assert.Nil(t, data["v2_details"])
-}
-
 func TestHandleMonthlyPriceByKCID_NonAdminCannotAccessOtherUser(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)

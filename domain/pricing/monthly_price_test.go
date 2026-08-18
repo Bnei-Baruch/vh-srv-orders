@@ -5,9 +5,11 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
+	pkgmocks "gitlab.bbdev.team/vh/pay/orders/internal/mocks/pkg"
 )
 
 func TestGetMonthlyPrice_V1_USD(t *testing.T) {
@@ -51,14 +53,19 @@ func TestGetMonthlyPrice_EmptyCurrencyDefaultsToUSD(t *testing.T) {
 	assert.Equal(t, common.CurrencyUSD, res.Currency.String)
 }
 
-func TestGetMonthlyPrice_DefaultRouteExcludedCountryGetsV1(t *testing.T) {
-	// RU is excluded from v2 — auto-route should return v1 regardless of input version label.
+func TestGetMonthlyPrice_DefaultRouteEligibleCountryGetsV2(t *testing.T) {
+	// RU is now v2-eligible — auto-route should return v2 regardless of input version label.
+	server := noPriorityCustomersServer()
+	defer server.Close()
+
+	profilesMock := pkgmocks.NewMockProfileService(t)
+	profilesMock.EXPECT().GetProfileByKeycloakID(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+
 	for _, version := range []string{"", "t1", "unknown"} {
-		res, err := GetMonthlyPrice(context.Background(), nil, nil, nil, "",
+		res, err := GetMonthlyPrice(context.Background(), profilesMock, newPriorityTestClient(server.URL), notFoundAccountingClient(t), testQuickbooksCompanyID,
 			1, "kc1", "user@example.com", "RU", common.CurrencyUSD, version, nil, nil, nil)
 		require.NoError(t, err, "version=%q", version)
-		assert.Equal(t, 20.0, res.Amount.Float64, "version=%q", version)
-		assert.Equal(t, "v1", res.PricingVersion.String, "version=%q", version)
-		assert.Nil(t, res.V2Details, "version=%q", version)
+		assert.Equal(t, "v2", res.PricingVersion.String, "version=%q", version)
+		assert.NotNil(t, res.V2Details, "version=%q", version)
 	}
 }

@@ -23,6 +23,10 @@ type Client struct {
 	User           string
 	Password       string
 	TerminalNumber string
+
+	// BaseURL is external_payments. Overridable for the same reason
+	// Terminal.ChargeURL is: so tests can point at a stub.
+	BaseURL string
 }
 
 // NewClient creates a new Pelecard client (new terminal)
@@ -42,6 +46,7 @@ func NewClientWithTerminal(terminalNumber string) *Client {
 		User:           common.Config.PelecardUser,
 		Password:       common.Config.PelecardPassword,
 		TerminalNumber: terminalNumber,
+		BaseURL:        EXTERNAL_PAYMENTS_BASE_URL,
 	}
 }
 
@@ -78,6 +83,44 @@ func (c *Client) FetchMuhlafim(ctx context.Context, startDate, endDate string) (
 	}
 
 	return result, nil
+}
+
+// FetchMuhlafimExternal fetches the same data as FetchMuhlafim, but from
+// external_payments rather than from Pelecard directly.
+//
+// It exists alongside FetchMuhlafim on purpose. The two are meant to return the
+// same thing, but only if external_payments queries the same terminal these
+// tokens live on — so both stay callable until a comparison on the same window
+// says they agree. Once it does, FetchMuhlafim goes and this keeps the name.
+//
+// The Authorization header goes on the request rather than the client because
+// the client still posts directly to Pelecard in FetchMuhlafim, and that call
+// must never carry this token. When the direct call goes, so does that
+// constraint.
+func (c *Client) FetchMuhlafimExternal(ctx context.Context, startDate, endDate string) (map[string]MuhlafimEntry, error) {
+	if common.Config.ExternalPaymentsToken == "" {
+		return nil, fmt.Errorf("EXTERNAL_PAYMENTS_TOKEN is not set")
+	}
+
+	resp, err := c.Client.NewRequest().
+		SetContext(ctx).
+		SetBody(&ExternalMuhlafimRequest{StartDate: startDate, EndDate: endDate}).
+		SetHeader("Authorization", "Bearer "+common.Config.ExternalPaymentsToken).
+		Post(c.BaseURL + "/token/muhlafim")
+	if err != nil {
+		return nil, fmt.Errorf("external muhlafim request failed: %w", err)
+	}
+
+	if resp.IsError() {
+		return nil, fmt.Errorf("external muhlafim error [%d]: %s", resp.StatusCode(), resp.String())
+	}
+
+	var entries map[string]MuhlafimEntry
+	if err := json.Unmarshal(resp.Body(), &entries); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal external muhlafim response: %w", err)
+	}
+
+	return entries, nil
 }
 
 // ChargeByToken sends a token-based charge request to the payment gateway.

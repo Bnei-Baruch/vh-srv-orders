@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"sort"
 	"strings"
 
@@ -30,7 +31,7 @@ func init() {
 		"Window as \"DD/MM/YYYY HH:MM..DD/MM/YYYY HH:MM\". Repeat for several windows.")
 	muhlafimCheckCmd.MarkFlagRequired("range")
 	muhlafimCheckCmd.Flags().Bool("show-tokens", false,
-		"Print masked tokens for entries that disagree")
+		"Also list masked tokens present in one source but not the other")
 }
 
 type muhlafimWindow struct {
@@ -54,8 +55,10 @@ func muhlafimCheckFn(cmd *cobra.Command, args []string) {
 
 	fmt.Printf("\n%d window(s) compared, %d disagreed\n", len(windows), disagreed)
 	if disagreed > 0 {
+		// Non-zero: this command is meant to gate removal of the direct call,
+		// and a wrapper that runs it over N windows has to be able to tell.
 		fmt.Println("sources DISAGREE — do not remove the direct call")
-		return
+		os.Exit(1)
 	}
 	fmt.Println("sources agree on every window")
 }
@@ -169,6 +172,13 @@ func differingEntries(direct, external map[string]pelecard.MuhlafimEntry) []stri
 
 func diffFields(direct, external pelecard.MuhlafimEntry) []string {
 	var lines []string
+	// Both sides key the map by entry.Token, so this should be unreachable —
+	// but differingEntries compares the whole struct, and an entry that differs
+	// with no explanation printed under it would be worse than a redundant check.
+	if direct.Token != external.Token {
+		lines = append(lines, fmt.Sprintf("Token: pelecard=%s external=%s",
+			maskToken(direct.Token), maskToken(external.Token)))
+	}
 	if direct.ActionDescription != external.ActionDescription {
 		lines = append(lines, fmt.Sprintf("ActionDescription: pelecard=%q external=%q",
 			direct.ActionDescription, external.ActionDescription))

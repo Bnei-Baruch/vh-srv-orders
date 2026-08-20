@@ -30,7 +30,10 @@ type envConfig struct {
 	PelecardOldTerminalNumber string `envconfig:"PELECARD_OLD_TERMINAL_NUMBER"`
 
 	// Identifies this service to external_payments, which performs Pelecard
-	// access on its behalf. The organization comes from the token, not from us.
+	// access on its behalf. Must be a client key issued with an organization
+	// (ben2, matching what billing charges) — the organization is taken from the
+	// key and is not sent in the request. A shared internal token carries no
+	// organization and is rejected.
 	ExternalPaymentsToken string `envconfig:"EXTERNAL_PAYMENTS_TOKEN"`
 
 	KeycloakServerUrl    string `envconfig:"KEYCLOAK_SERVER_URL"`

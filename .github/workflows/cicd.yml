@@ -10,9 +10,7 @@ on:
         type: choice
         options:
           - staging
-          - staging-new
           - production
-          - production-new
 
 permissions:
   contents: read
@@ -130,9 +128,7 @@ jobs:
           # so a new option would have silently deployed to the wrong VM.
           case "${{ inputs.environment }}" in
             production)     echo "SSH_HOST=${{ secrets.VH_HOST_PRODUCTION }}"     >> $GITHUB_ENV ;;
-            production-new) echo "SSH_HOST=${{ secrets.VH_HOST_PRODUCTION_NEW }}" >> $GITHUB_ENV ;;
             staging)        echo "SSH_HOST=${{ secrets.VH_HOST_STAGING }}"        >> $GITHUB_ENV ;;
-            staging-new)    echo "SSH_HOST=${{ secrets.VH_HOST_STAGING_NEW }}"    >> $GITHUB_ENV ;;
             *) echo "Unknown environment: ${{ inputs.environment }}" >&2; exit 1 ;;
           esac
           echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV

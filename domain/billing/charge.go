@@ -42,18 +42,8 @@ func (s *BillingService) chargeWithPricing(ctx context.Context, maxWorkers int) 
 
 	// Phase 1: Pre-resolve pricing (parallel)
 	resolved, pricingErrors := s.preResolve(ctx, orderIDs, maxWorkers)
-	v1Resolved, v2Resolved := 0, 0
-	for _, ro := range resolved {
-		if ro.Price.PricingVersion == "v2" {
-			v2Resolved++
-		} else {
-			v1Resolved++
-		}
-	}
 	log.Info("Pre-resolution complete",
 		slog.Int("resolved", len(resolved)),
-		slog.Int("v1_resolved", v1Resolved),
-		slog.Int("v2_resolved", v2Resolved),
 		slog.Int("pricing_errors", pricingErrors))
 
 	if len(resolved) == 0 {
@@ -100,7 +90,7 @@ func (s *BillingService) preResolve(ctx context.Context, orderIDs []uint, maxWor
 					continue
 				}
 
-				price, err := s.resolver.Resolve(ctx, data.Account, data.Order.Currency.String)
+				price, err := s.resolver.Resolve(ctx, data.Account)
 				if err != nil {
 					log.Error("Failed to resolve pricing",
 						slog.Uint64("order_id", uint64(orderID)),
@@ -214,19 +204,12 @@ dispatchLoop:
 		slog.Int64("charge_success_db_fail", stats.errorCount.Get("charge_success_db_fail")),
 		slog.Int64("gateway_errors", stats.errorCount.Get("gateway")),
 		slog.Int64("panics", stats.errorCount.Get("panic")),
-		// --- Per pricing version ---
-		slog.Int64("v1_orders", stats.pricingVersionCount.Get("v1")),
+		// --- Per pricing version (v2 only; version-tagging is removed in the DB-cleanup step) ---
 		slog.Int64("v2_orders", stats.pricingVersionCount.Get("v2")),
 		slog.Int64("v2_discounted", stats.v2DiscountCount.Get("eligible")),
-		slog.Float64("v1_success_nis", stats.versionSuccessSum.Get("v1:"+common.CurrencyNIS)),
-		slog.Float64("v1_success_usd", stats.versionSuccessSum.Get("v1:"+common.CurrencyUSD)),
-		slog.Float64("v1_success_eur", stats.versionSuccessSum.Get("v1:"+common.CurrencyEUR)),
 		slog.Float64("v2_success_nis", stats.versionSuccessSum.Get("v2:"+common.CurrencyNIS)),
 		slog.Float64("v2_success_usd", stats.versionSuccessSum.Get("v2:"+common.CurrencyUSD)),
 		slog.Float64("v2_success_eur", stats.versionSuccessSum.Get("v2:"+common.CurrencyEUR)),
-		slog.Float64("v1_failed_nis", stats.versionFailedSum.Get("v1:"+common.CurrencyNIS)),
-		slog.Float64("v1_failed_usd", stats.versionFailedSum.Get("v1:"+common.CurrencyUSD)),
-		slog.Float64("v1_failed_eur", stats.versionFailedSum.Get("v1:"+common.CurrencyEUR)),
 		slog.Float64("v2_failed_nis", stats.versionFailedSum.Get("v2:"+common.CurrencyNIS)),
 		slog.Float64("v2_failed_usd", stats.versionFailedSum.Get("v2:"+common.CurrencyUSD)),
 		slog.Float64("v2_failed_eur", stats.versionFailedSum.Get("v2:"+common.CurrencyEUR)),

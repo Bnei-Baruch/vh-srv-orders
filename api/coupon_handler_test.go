@@ -176,20 +176,25 @@ func TestCoupon_ModeADates_RoundTripInclusive(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)
 
+	// Relative future dates so the redeem window is always valid (redeem_from defaults to now).
+	start := time.Now().AddDate(0, 0, 10).Format("2006-01-02")
+	end := time.Now().AddDate(0, 0, 40).Format("2006-01-02")
+	redeemUntil := time.Now().AddDate(0, 0, 25).Format("2006-01-02") // after now, before benefit_end
+
 	pct := 50.0
 	props, _ := json.Marshal(repo.CouponProperties{DiscountPct: &pct})
 	POST_ROOT(t, a, "/v2/coupon/", couponCreateReq{
 		Prefix: "DATED", Type: "percent", Properties: null.JSONFrom(props),
-		BenefitStart: "2026-08-01", BenefitEnd: "2026-08-31", RedeemUntil: "2026-08-20",
+		BenefitStart: start, BenefitEnd: end, RedeemUntil: redeemUntil,
 		MaxRedemptions: 25,
 	}, http.StatusCreated)
 
 	got := do(t, a, "GET", "/v2/coupon/", nil, http.StatusOK, DoOptions{isRoot: true})
 	row := got["data"].([]interface{})[0].(map[string]interface{})
 	// Dates round-trip as the admin's inclusive Jerusalem calendar days.
-	assert.Equal(t, "2026-08-01", row["benefit_start"])
-	assert.Equal(t, "2026-08-31", row["benefit_end"])
-	assert.Equal(t, "2026-08-20", row["redeem_until"])
+	assert.Equal(t, start, row["benefit_start"])
+	assert.Equal(t, end, row["benefit_end"])
+	assert.Equal(t, redeemUntil, row["redeem_until"])
 }
 
 func TestCoupon_Redeem_TrimsWhitespace(t *testing.T) {

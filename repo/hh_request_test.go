@@ -11,6 +11,36 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/common"
 )
 
+// addMonthsClamped adds months the way Postgres does, which is how the grant's
+// end_date is actually computed:
+//
+//	end_date = start_date::timestamptz + make_interval(months => n)
+//
+// Two differences from time.AddDate, both of which made this test fail on
+// 2026-08-31 while passing on most days:
+//
+// Postgres clamps a day the target month is too short to hold to that month's
+// last day, where AddDate rolls it into the next month — Feb 28 against Mar 3,
+// three days apart.
+//
+// And the arithmetic happens in the session's timezone, UTC here, not in local
+// wall-clock time. Adding six calendar months to 16:25 IDT (+03) and to 13:25
+// UTC lands on instants an hour apart, because the target date is in +02. That
+// half is invisible on a UTC CI runner and shows up locally.
+func addMonthsClamped(t time.Time, months int) time.Time {
+	t = t.UTC()
+	year, month, day := t.Date()
+
+	firstOfTarget := time.Date(year, month+time.Month(months), 1,
+		t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), t.Location())
+	if lastDay := firstOfTarget.AddDate(0, 1, -1).Day(); day > lastDay {
+		day = lastDay
+	}
+
+	return time.Date(firstOfTarget.Year(), firstOfTarget.Month(), day,
+		t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), t.Location())
+}
+
 func hhRequestReq(keycloakID string) HHRequestReq {
 	return HHRequestReq{
 		KeycloakID:   keycloakID,
@@ -70,7 +100,7 @@ func TestConcludeHHRequest_Approve_CreatesGrant(t *testing.T) {
 	assert.Equal(t, r.ID, grant.RequestID, "grant is linked to its request")
 	assert.Equal(t, 75, grant.DiscountPct)
 	assert.Equal(t, common.HHGrantTypeHayal, grant.Type)
-	assert.WithinDuration(t, time.Now().AddDate(0, 6, 0), grant.EndDate, time.Minute)
+	assert.WithinDuration(t, addMonthsClamped(time.Now(), 6), grant.EndDate, time.Minute)
 
 	joined, err := db.GetAllHHRequests(ctx, "", "kc-req-approve")
 	require.NoError(t, err)
@@ -148,4 +178,37 @@ func TestGetAllHHRequests_FiltersByStatusAndKcid(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, byKcid, 1)
 	assert.Equal(t, common.HHRequestStatusDenied, byKcid[0].Status)
+}
+
+// The cases that made the original assertion fail, plus a leap year. Pinned
+// because the failure only appears on a few days a year, which is the worst
+// property a test can have: it looks fine in review and breaks unrelated work
+// months later.
+func TestAddMonthsClamped(t *testing.T) {
+	cases := []struct {
+		name   string
+		from   string
+		months int
+		want   string
+	}{
+		{"31 Aug to a 28-day February", "2026-08-31", 6, "2027-02-28"},
+		{"31 Aug to a 29-day February", "2027-08-31", 6, "2028-02-29"},
+		{"31 Mar to a 30-day September", "2026-03-31", 6, "2026-09-30"},
+		{"31 Jan to a 31-day July", "2026-01-31", 6, "2026-07-31"},
+		{"a day every month can hold", "2026-08-15", 6, "2027-02-15"},
+		{"crossing the year boundary", "2026-11-30", 3, "2027-02-28"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			from, err := time.Parse(time.RFC3339, c.from+"T12:00:00Z")
+			require.NoError(t, err)
+
+			got := addMonthsClamped(from, c.months)
+			if want := c.want + "T12:00:00Z"; got.Format(time.RFC3339) != want {
+				t.Errorf("addMonthsClamped(%s, %d) = %s, want %s",
+					c.from, c.months, got.Format(time.RFC3339), want)
+			}
+		})
+	}
 }

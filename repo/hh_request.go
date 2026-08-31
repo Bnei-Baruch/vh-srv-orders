@@ -174,9 +174,16 @@ func (o *OrdersDB) ConcludeHHRequest(ctx context.Context, id int, c HHRequestCon
 		if c.StartDate.Valid {
 			start = c.StartDate.Time
 		}
+		// The month arithmetic is done in UTC explicitly, not in whatever the
+		// session TimeZone happens to be. Postgres adds calendar months in the
+		// session timezone, so the same start and the same term produced end dates
+		// an hour apart on a UTC server and an Israel one — grant length depending
+		// on server configuration. Tests pin UTC, so nothing would have caught it.
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO hh_grants (request_id, keycloak_id, type, discount_pct, start_date, end_date, note)
-			 VALUES ($1, $2, $3, $4, $5, $5::timestamptz + make_interval(months => $6), $7)`,
+			 VALUES ($1, $2, $3, $4, $5,
+			         (($5::timestamptz AT TIME ZONE 'UTC') + make_interval(months => $6)) AT TIME ZONE 'UTC',
+			         $7)`,
 			request.ID, request.KeycloakID, c.Type, c.DiscountPct, start, c.Months, c.Note); err != nil {
 			return nil, fmt.Errorf("tx.Exec (grant): %w", err)
 		}

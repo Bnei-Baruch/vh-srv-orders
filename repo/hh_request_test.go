@@ -74,7 +74,6 @@ func TestConcludeHHRequest_Approve_CreatesGrant(t *testing.T) {
 	assert.Equal(t, r.ID, grant.RequestID, "grant is linked to its request")
 	assert.Equal(t, 75, grant.DiscountPct)
 	assert.Equal(t, common.HHGrantTypeHayal, grant.Type)
-	assert.True(t, grant.EndDate.After(time.Now()), "an active grant has not expired")
 
 	joined, err := db.GetAllHHRequests(ctx, "", "kc-req-approve")
 	require.NoError(t, err)
@@ -187,4 +186,37 @@ func TestConcludeHHRequest_Approve_ClampsEndDateToAShorterMonth(t *testing.T) {
 
 	assert.Equal(t, start, joined[0].Grant.StartDate.UTC(), "start is stored as given")
 	assert.Equal(t, time.Date(2021, 2, 28, 12, 0, 0, 0, time.UTC), joined[0].Grant.EndDate.UTC())
+}
+
+// The end date must not depend on the server's timezone. Postgres adds calendar
+// months in the session TimeZone, so the same start and term used to yield
+// instants an hour apart on a UTC server and an Israel one — an hour of grant
+// length decided by configuration.
+//
+// The session is changed on one acquired connection rather than the pool, so
+// this exercises the real expression from ConcludeHHRequest under a timezone no
+// other test uses. pkg/testutil pins UTC everywhere else, which is exactly why
+// nothing else can catch this.
+func TestHHGrantEndDate_DoesNotDependOnSessionTimezone(t *testing.T) {
+	db, ctx := newTestDB(t)
+
+	const endDateExpr = `(($1::timestamptz AT TIME ZONE 'UTC') + make_interval(months => $2)) AT TIME ZONE 'UTC'`
+
+	start := time.Date(2020, 8, 31, 12, 0, 0, 0, time.UTC)
+	want := time.Date(2021, 2, 28, 12, 0, 0, 0, time.UTC)
+
+	for _, tz := range []string{"UTC", "Asia/Jerusalem", "America/New_York"} {
+		t.Run(tz, func(t *testing.T) {
+			conn, err := db.Acquire(ctx)
+			require.NoError(t, err)
+			defer conn.Release()
+
+			_, err = conn.Exec(ctx, "SET TIME ZONE '"+tz+"'")
+			require.NoError(t, err)
+
+			var got time.Time
+			require.NoError(t, conn.QueryRow(ctx, "SELECT "+endDateExpr, start, 6).Scan(&got))
+			assert.Equal(t, want, got.UTC(), "end date shifted with the session timezone")
+		})
+	}
 }

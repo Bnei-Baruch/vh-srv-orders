@@ -54,18 +54,16 @@ func TestConcludeHHRequest_Approve_CreatesGrant(t *testing.T) {
 	r, err := db.CreateHHRequest(ctx, hhRequestReq("kc-req-approve"))
 	require.NoError(t, err)
 
-	// The start is pinned so the end date is a fixed value rather than something
-	// derived from an unobservable time.Now() inside ConcludeHHRequest. 31 August
-	// is chosen deliberately: six months later is 31 February, which does not
-	// exist, so this also pins what Postgres does about it.
-	start := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	// No pinned start: this test is about approval producing an *active* grant,
+	// and GetActiveHHGrant filters on end_date > NOW() AND start_date <= NOW().
+	// A fixed historical start would make it return nothing. What the end date is
+	// computed to is asserted separately, where it can be pinned safely.
 	concluded, err := db.ConcludeHHRequest(ctx, r.ID, HHRequestConclusion{
 		Approved:    true,
 		Type:        common.HHGrantTypeHayal, // admin overrides the requested type
 		DiscountPct: 75,
 		Months:      6,
 		Note:        null.StringFrom("approved grant"),
-		StartDate:   null.TimeFrom(start),
 	})
 	require.NoError(t, err)
 	assert.Equal(t, common.HHRequestStatusApproved, concluded.Status)
@@ -76,10 +74,7 @@ func TestConcludeHHRequest_Approve_CreatesGrant(t *testing.T) {
 	assert.Equal(t, r.ID, grant.RequestID, "grant is linked to its request")
 	assert.Equal(t, 75, grant.DiscountPct)
 	assert.Equal(t, common.HHGrantTypeHayal, grant.Type)
-	// make_interval clamps to the last day the month can hold, so 28 February —
-	// not 3 March, which is where adding six months by day arithmetic lands. A
-	// grant approved on the 31st must not outlast one approved on the 30th.
-	assert.Equal(t, time.Date(2027, 2, 28, 12, 0, 0, 0, time.UTC), grant.EndDate.UTC())
+	assert.True(t, grant.EndDate.After(time.Now()), "an active grant has not expired")
 
 	joined, err := db.GetAllHHRequests(ctx, "", "kc-req-approve")
 	require.NoError(t, err)
@@ -157,4 +152,39 @@ func TestGetAllHHRequests_FiltersByStatusAndKcid(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, byKcid, 1)
 	assert.Equal(t, common.HHRequestStatusDenied, byKcid[0].Status)
+}
+
+// The end date is start + months as Postgres computes it, clamped to the last
+// day a short month can hold: six months from 31 August is 28 February, not
+// 3 March where day arithmetic lands. A grant approved on the 31st must not
+// outlast one approved on the 30th.
+//
+// The start is pinned, and deliberately historical, so the assertion does not
+// depend on when the suite runs. That means reading the grant through
+// GetAllHHRequests, which joins hh_grants unconditionally — GetActiveHHGrant
+// filters on end_date > NOW() and would return nothing for a grant that has
+// already expired.
+func TestConcludeHHRequest_Approve_ClampsEndDateToAShorterMonth(t *testing.T) {
+	db, ctx := newTestDB(t)
+
+	r, err := db.CreateHHRequest(ctx, hhRequestReq("kc-req-clamp"))
+	require.NoError(t, err)
+
+	start := time.Date(2020, 8, 31, 12, 0, 0, 0, time.UTC)
+	_, err = db.ConcludeHHRequest(ctx, r.ID, HHRequestConclusion{
+		Approved:    true,
+		Type:        common.HHGrantTypeGimlaj,
+		DiscountPct: 50,
+		Months:      6,
+		StartDate:   null.TimeFrom(start),
+	})
+	require.NoError(t, err)
+
+	joined, err := db.GetAllHHRequests(ctx, "", "kc-req-clamp")
+	require.NoError(t, err)
+	require.Len(t, joined, 1)
+	require.NotNil(t, joined[0].Grant, "approval creates a grant regardless of its dates")
+
+	assert.Equal(t, start, joined[0].Grant.StartDate.UTC(), "start is stored as given")
+	assert.Equal(t, time.Date(2021, 2, 28, 12, 0, 0, 0, time.UTC), joined[0].Grant.EndDate.UTC())
 }

@@ -71,10 +71,9 @@ func NewTestOrdersDB(t *testing.T, ctx context.Context) (string, error) {
 		}
 	}
 
-	// One instance, logged and returned. Calling Custom twice created two
-	// instance databases per test and logged the URL of the one nobody connected
-	// to, so pasting it into psql inspected an empty database.
-	instance := pgtestdb.Custom(t, config, gm)
-	t.Log("testdbconf:", instance.URL())
-	return instance.URL(), nil
+	// Called once. Calling Custom twice created two instance databases per test
+	// and returned the second while logging the first, so pasting the logged URL
+	// into psql inspected a database nothing had touched. Custom logs
+	// "testdbconf: <url>" itself, so there is no t.Log here either.
+	return pgtestdb.Custom(t, config, gm).URL(), nil
 }

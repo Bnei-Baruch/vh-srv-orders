@@ -23,22 +23,25 @@ import (
 // last day, where AddDate rolls it into the next month — Feb 28 against Mar 3,
 // three days apart.
 //
-// And the arithmetic happens in the session's timezone, UTC here, not in local
-// wall-clock time. Adding six calendar months to 16:25 IDT (+03) and to 13:25
-// UTC lands on instants an hour apart, because the target date is in +02. That
-// half is invisible on a UTC CI runner and shows up locally.
-func addMonthsClamped(t time.Time, months int) time.Time {
-	t = t.UTC()
-	year, month, day := t.Date()
+// And the arithmetic happens in the session's timezone, not in local wall-clock
+// time. Adding six calendar months to 16:25 IDT (+03) and to 13:25 UTC lands on
+// instants an hour apart, because the target date is in +02. That half is
+// invisible on a UTC CI runner and shows up locally.
+//
+// The session timezone is UTC because pkg/testutil pins it on the connection
+// URL, which is what makes the from.UTC() here correct rather than lucky.
+func addMonthsClamped(from time.Time, months int) time.Time {
+	from = from.UTC()
+	year, month, day := from.Date()
 
 	firstOfTarget := time.Date(year, month+time.Month(months), 1,
-		t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), t.Location())
+		from.Hour(), from.Minute(), from.Second(), from.Nanosecond(), from.Location())
 	if lastDay := firstOfTarget.AddDate(0, 1, -1).Day(); day > lastDay {
 		day = lastDay
 	}
 
 	return time.Date(firstOfTarget.Year(), firstOfTarget.Month(), day,
-		t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), t.Location())
+		from.Hour(), from.Minute(), from.Second(), from.Nanosecond(), from.Location())
 }
 
 func hhRequestReq(keycloakID string) HHRequestReq {
@@ -84,6 +87,10 @@ func TestConcludeHHRequest_Approve_CreatesGrant(t *testing.T) {
 	r, err := db.CreateHHRequest(ctx, hhRequestReq("kc-req-approve"))
 	require.NoError(t, err)
 
+	// ConcludeHHRequest stamps its own time.Now(), so bracket the call rather
+	// than sampling the clock again afterwards: across a UTC month boundary the
+	// two samples clamp to different days and the expectation moves by 24h.
+	before := time.Now()
 	concluded, err := db.ConcludeHHRequest(ctx, r.ID, HHRequestConclusion{
 		Approved:    true,
 		Type:        common.HHGrantTypeHayal, // admin overrides the requested type
@@ -92,6 +99,7 @@ func TestConcludeHHRequest_Approve_CreatesGrant(t *testing.T) {
 		Note:        null.StringFrom("approved grant"),
 	})
 	require.NoError(t, err)
+	after := time.Now()
 	assert.Equal(t, common.HHRequestStatusApproved, concluded.Status)
 
 	grant, err := db.GetActiveHHGrant(ctx, "kc-req-approve")
@@ -100,7 +108,11 @@ func TestConcludeHHRequest_Approve_CreatesGrant(t *testing.T) {
 	assert.Equal(t, r.ID, grant.RequestID, "grant is linked to its request")
 	assert.Equal(t, 75, grant.DiscountPct)
 	assert.Equal(t, common.HHGrantTypeHayal, grant.Type)
-	assert.WithinDuration(t, addMonthsClamped(time.Now(), 6), grant.EndDate, time.Minute)
+	earliest, latest := addMonthsClamped(before, 6), addMonthsClamped(after, 6)
+	assert.False(t, grant.EndDate.Before(earliest.Add(-time.Minute)),
+		"end date %s is before six months from %s", grant.EndDate, before)
+	assert.False(t, grant.EndDate.After(latest.Add(time.Minute)),
+		"end date %s is after six months from %s", grant.EndDate, after)
 
 	joined, err := db.GetAllHHRequests(ctx, "", "kc-req-approve")
 	require.NoError(t, err)
@@ -180,35 +192,43 @@ func TestGetAllHHRequests_FiltersByStatusAndKcid(t *testing.T) {
 	assert.Equal(t, common.HHRequestStatusDenied, byKcid[0].Status)
 }
 
-// The cases that made the original assertion fail, plus a leap year. Pinned
-// because the failure only appears on a few days a year, which is the worst
-// property a test can have: it looks fine in review and breaks unrelated work
-// months later.
-func TestAddMonthsClamped(t *testing.T) {
-	cases := []struct {
-		name   string
-		from   string
-		months int
-		want   string
-	}{
-		{"31 Aug to a 28-day February", "2026-08-31", 6, "2027-02-28"},
-		{"31 Aug to a 29-day February", "2027-08-31", 6, "2028-02-29"},
-		{"31 Mar to a 30-day September", "2026-03-31", 6, "2026-09-30"},
-		{"31 Jan to a 31-day July", "2026-01-31", 6, "2026-07-31"},
-		{"a day every month can hold", "2026-08-15", 6, "2027-02-15"},
-		{"crossing the year boundary", "2026-11-30", 3, "2027-02-28"},
-	}
+// The clamping rule, on the date that exposed it. A grant approved on 31 August
+// must not outlast one approved on 30 August.
+func TestAddMonthsClamped_ClampsToAShorterMonth(t *testing.T) {
+	from := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	assert.Equal(t, time.Date(2027, 2, 28, 12, 0, 0, 0, time.UTC), addMonthsClamped(from, 6))
 
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			from, err := time.Parse(time.RFC3339, c.from+"T12:00:00Z")
-			require.NoError(t, err)
+	from = time.Date(2026, 3, 31, 12, 0, 0, 0, time.UTC)
+	assert.Equal(t, time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC), addMonthsClamped(from, 6))
+}
 
-			got := addMonthsClamped(from, c.months)
-			if want := c.want + "T12:00:00Z"; got.Format(time.RFC3339) != want {
-				t.Errorf("addMonthsClamped(%s, %d) = %s, want %s",
-					c.from, c.months, got.Format(time.RFC3339), want)
-			}
-		})
-	}
+func TestAddMonthsClamped_LeapYearFebruaryHolds29(t *testing.T) {
+	from := time.Date(2027, 8, 31, 12, 0, 0, 0, time.UTC)
+	assert.Equal(t, time.Date(2028, 2, 29, 12, 0, 0, 0, time.UTC), addMonthsClamped(from, 6))
+}
+
+func TestAddMonthsClamped_KeepsTheDayWhenTheMonthIsLongEnough(t *testing.T) {
+	from := time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC)
+	assert.Equal(t, time.Date(2027, 2, 15, 12, 0, 0, 0, time.UTC), addMonthsClamped(from, 6))
+
+	from = time.Date(2026, 11, 30, 12, 0, 0, 0, time.UTC)
+	assert.Equal(t, time.Date(2027, 2, 28, 12, 0, 0, 0, time.UTC), addMonthsClamped(from, 3))
+}
+
+// The half the first version of this guard missed. Every other case here is
+// already UTC, so they pass whether or not the helper converts — the bug lived
+// exactly in that gap.
+//
+// 01:30 on 31 August in Jerusalem is 22:30 on the 30th in UTC, so the month
+// arithmetic starts from a different day and lands on a different instant than
+// local wall-clock arithmetic would.
+func TestAddMonthsClamped_ConvertsToUTCBeforeCounting(t *testing.T) {
+	jerusalem, err := time.LoadLocation("Asia/Jerusalem")
+	require.NoError(t, err)
+
+	from := time.Date(2026, 8, 31, 1, 30, 0, 0, jerusalem)
+	got := addMonthsClamped(from, 6)
+
+	assert.Equal(t, time.Date(2027, 2, 28, 22, 30, 0, 0, time.UTC), got)
+	assert.Equal(t, time.UTC, got.Location(), "result is expressed in UTC")
 }

@@ -44,7 +44,13 @@ func NewTestOrdersDB(t *testing.T, ctx context.Context) (string, error) {
 		Host:       common.Config.PgHost,
 		Port:       common.Config.PgPort,
 		Database:   url.QueryEscape(common.Config.PgDbName),
-		Options:    "sslmode=disable",
+		// timezone is pinned, not inherited. Postgres does interval arithmetic in
+		// the session TimeZone, so `ts + make_interval(months => n)` lands on a
+		// different instant depending on it — and any test asserting such a value
+		// has to assume one. The CI image happens to default to Etc/UTC; a native
+		// or Homebrew server set to Asia/Jerusalem would silently shift results
+		// and fail tests that look timezone-free.
+		Options: "sslmode=disable&timezone=UTC",
 	}
 
 	gm := golangmigrator.New(migrationsDir())

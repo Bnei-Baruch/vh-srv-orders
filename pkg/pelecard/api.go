@@ -8,7 +8,7 @@ import (
 
 	"github.com/go-resty/resty/v2"
 
-	"gitlab.bbdev.team/vh/pay/orders/common"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/keycloak"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 )
 
@@ -19,93 +19,50 @@ type PelecardAPI interface {
 
 // Client is a client for interacting with Pelecard API
 type Client struct {
-	Client         *resty.Client
-	User           string
-	Password       string
-	TerminalNumber string
-
+	Client *resty.Client
 	// BaseURL is external_payments. Overridable for the same reason
 	// Terminal.ChargeURL is: so tests can point at a stub.
 	BaseURL string
+
+	// Tokens authenticates calls to external_payments.
+	Tokens keycloak.TokenSource
 }
 
-// NewClient creates a new Pelecard client (new terminal)
+// NewClient creates a client for external_payments. It holds no Pelecard
+// credentials and no terminal number: this service no longer talks to Pelecard.
 func NewClient() *Client {
-	return NewClientWithTerminal(common.Config.PelecardNewTerminalNumber)
-}
-
-// NewClientWithTerminal creates a new Pelecard client with a specific terminal number
-func NewClientWithTerminal(terminalNumber string) *Client {
 	client := resty.New()
 	client.SetHeaders(map[string]string{
 		"Content-Type": "application/json",
 	})
 
 	return &Client{
-		Client:         client,
-		User:           common.Config.PelecardUser,
-		Password:       common.Config.PelecardPassword,
-		TerminalNumber: terminalNumber,
-		BaseURL:        EXTERNAL_PAYMENTS_BASE_URL,
+		Client:  client,
+		BaseURL: EXTERNAL_PAYMENTS_BASE_URL,
+		Tokens:  keycloak.NewClient(),
 	}
 }
 
-// FetchMuhlafim fetches muhlafim data from Pelecard API for the given date range
-// Date format should be "DD/MM/YYYY HH:MM" (e.g., "21/08/2025 00:00")
-// Returns a map of token -> MuhlafimEntry, filtering out entries with empty tokens
+// FetchMuhlafim returns Pelecard's card replacements for a date window, keyed by
+// the token being replaced, from external_payments.
+//
+// This service used to query Pelecard directly for it — the only reason it held
+// Pelecard credentials and a terminal number at all. Both sources were kept
+// callable until a comparison over six windows agreed entry by entry and field
+// by field, and the direct call was then removed along with the credentials.
 func (c *Client) FetchMuhlafim(ctx context.Context, startDate, endDate string) (map[string]MuhlafimEntry, error) {
-	req := NewMuhlafimRequest(c.newTerminalRequest(), startDate, endDate)
-
-	resp, err := c.Client.NewRequest().
-		SetContext(ctx).
-		SetBody(req).
-		Post(fmt.Sprintf("%s/services/GetTerminalMuhlafim", PELECARD_API_BASE_URL))
-
+	if c.Tokens == nil {
+		return nil, fmt.Errorf("no token source configured for external_payments")
+	}
+	token, err := c.Tokens.Token()
 	if err != nil {
-		return nil, fmt.Errorf("pelecard muhlafim request failed: %w", err)
-	}
-
-	if resp.IsError() {
-		return nil, fmt.Errorf("pelecard API error [%d]: %s", resp.StatusCode(), resp.String())
-	}
-
-	var response MuhlafimResponse
-	if err := json.Unmarshal(resp.Body(), &response); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal pelecard response: %w", err)
-	}
-
-	// Parse response into map, filtering out entries with empty tokens
-	result := make(map[string]MuhlafimEntry)
-	for _, entry := range response.ResultData {
-		if len(entry.Token) > 0 {
-			result[entry.Token] = entry
-		}
-	}
-
-	return result, nil
-}
-
-// FetchMuhlafimExternal fetches the same data as FetchMuhlafim, but from
-// external_payments rather than from Pelecard directly.
-//
-// It exists alongside FetchMuhlafim on purpose. The two are meant to return the
-// same thing, but only if external_payments queries the same terminal these
-// tokens live on — so both stay callable until a comparison on the same window
-// says they agree. Once it does, FetchMuhlafim goes and this keeps the name.
-//
-// The Authorization header goes on the request rather than the client because
-// the client still posts directly to Pelecard in FetchMuhlafim, and that call
-// must never carry this token. When the direct call goes, so does that
-// constraint.
-func (c *Client) FetchMuhlafimExternal(ctx context.Context, startDate, endDate string) (map[string]MuhlafimEntry, error) {
-	if common.Config.ExternalPaymentsToken == "" {
-		return nil, fmt.Errorf("EXTERNAL_PAYMENTS_TOKEN is not set")
+		return nil, fmt.Errorf("keycloak token for external_payments: %w", err)
 	}
 
 	resp, err := c.Client.NewRequest().
 		SetContext(ctx).
 		SetBody(&ExternalMuhlafimRequest{StartDate: startDate, EndDate: endDate}).
-		SetHeader("Authorization", "Bearer "+common.Config.ExternalPaymentsToken).
+		SetHeader("Authorization", "Bearer "+token).
 		Post(c.BaseURL + "/token/muhlafim")
 	if err != nil {
 		return nil, fmt.Errorf("external muhlafim request failed: %w", err)
@@ -168,14 +125,4 @@ func (c *Client) ChargeByToken(ctx context.Context, request *ChargeRequest, term
 // The orderID parameter is ignored — it exists for dry-run determinism only.
 func (c *Client) Execute(ctx context.Context, request *ChargeRequest, terminal Terminal, _ uint) (map[string]interface{}, error) {
 	return c.ChargeByToken(ctx, request, terminal)
-}
-
-func (c *Client) newTerminalRequest() TerminalRequest {
-	return TerminalRequest{
-		BaseRequest: BaseRequest{
-			User:     c.User,
-			Password: c.Password,
-		},
-		TerminalNumber: c.TerminalNumber,
-	}
 }

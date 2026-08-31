@@ -52,13 +52,14 @@ func NewTestOrdersDB(t *testing.T, ctx context.Context) (string, error) {
 		//
 		// Spelled as an `options` startup parameter, not `timezone=UTC`. The
 		// latter is not a libpq keyword and survives only because lib/pq and pgx
-		// are pure Go and forward unknown parameters — psql rejects the URL this
-		// function logs with `invalid URI query parameter: "timezone"`, which
-		// breaks the copy-paste-into-psql path the log line exists for.
+		// are pure Go and forward unknown parameters — psql rejects it outright
+		// with `invalid URI query parameter: "timezone"`, which would break the
+		// URL pgtestdb.Custom logs for pasting into psql. That URL now contains
+		// an `&`, so quote it: psql "postgres://…".
 		//
-		// Test sessions only. Production connections (repo.GetDBURL) pin nothing,
-		// so a server in a non-UTC timezone computes grant end dates in that
-		// timezone.
+		// Test sessions only, and production does not rely on it: the grant end
+		// date is computed with an explicit AT TIME ZONE 'UTC' in
+		// repo.ConcludeHHRequest rather than depending on the session.
 		Options: "sslmode=disable&options=-c%20timezone%3DUTC",
 	}
 

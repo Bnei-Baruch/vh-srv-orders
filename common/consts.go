@@ -57,8 +57,13 @@ const (
 
 	OfflinePaymentMethodRobokasa       = "robokasa"
 	OfflinePaymentPropertiesRobokasaID = "robokasa_id"
-	GetNewTokenEndpoint                = "https://checkout.kbb1.com/emv/new_token"
-	GetNewTokenNoCVVEndpoint           = "https://checkout.kbb1.com/renew/renew-card"
+	// CheckoutBaseURL is the service that holds the Pelecard credentials.
+	// The endpoints below predate it and still spell it out; they converge on
+	// this constant as each moves over.
+	CheckoutBaseURL = "https://checkout.kbb1.com"
+
+	GetNewTokenEndpoint      = "https://checkout.kbb1.com/emv/new_token"
+	GetNewTokenNoCVVEndpoint = "https://checkout.kbb1.com/renew/renew-card"
 
 	OrderFlagToRenew        = "torenew"
 	OrderFlagDuplicate      = "duplicate"
@@ -70,8 +75,8 @@ const (
 	OrderFlagMuhLotakin     = "muh_lotakin"
 	OrderFlagMuhAher        = "muh_aher"
 	OrderFlagPaused         = "paused"
-	OrderFlagSkip          = "skip"
-	OrderFlagPricingError  = "pricing_error"
+	OrderFlagSkip           = "skip"
+	OrderFlagPricingError   = "pricing_error"
 
 	HHGrantTypeHayal  = "hh-hayal"
 	HHGrantTypeGimlaj = "hh-gimlaj"

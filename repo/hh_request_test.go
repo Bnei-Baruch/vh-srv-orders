@@ -44,6 +44,28 @@ func addMonthsClamped(from time.Time, months int) time.Time {
 		from.Hour(), from.Minute(), from.Second(), from.Nanosecond(), from.Location())
 }
 
+// clampedWindow brackets where an end date computed from an unobservable
+// time.Now() between before and after can land.
+//
+// It orders the pair rather than trusting addMonthsClamped to be monotonic,
+// because clamping makes it not so: 30 August and 31 August both clamp to
+// 28 February, but the time of day carries over, so the later input produces the
+// *earlier* instant. Straddle a UTC midnight into a day that clamps and the
+// naive window inverts —
+//
+//	before 2026-08-30 23:59:59.9Z -> 2027-02-28 23:59:59.9
+//	after  2026-08-31 00:00:00.1Z -> 2027-02-28 00:00:00.1
+//
+// which is a range nothing can satisfy. Microseconds wide, a few nights a year,
+// and exactly the class of latent date bug this file exists to stop.
+func clampedWindow(before, after time.Time, months int) (earliest, latest time.Time) {
+	earliest, latest = addMonthsClamped(before, months), addMonthsClamped(after, months)
+	if latest.Before(earliest) {
+		earliest, latest = latest, earliest
+	}
+	return earliest, latest
+}
+
 func hhRequestReq(keycloakID string) HHRequestReq {
 	return HHRequestReq{
 		KeycloakID:   keycloakID,
@@ -108,7 +130,7 @@ func TestConcludeHHRequest_Approve_CreatesGrant(t *testing.T) {
 	assert.Equal(t, r.ID, grant.RequestID, "grant is linked to its request")
 	assert.Equal(t, 75, grant.DiscountPct)
 	assert.Equal(t, common.HHGrantTypeHayal, grant.Type)
-	earliest, latest := addMonthsClamped(before, 6), addMonthsClamped(after, 6)
+	earliest, latest := clampedWindow(before, after, 6)
 	assert.False(t, grant.EndDate.Before(earliest.Add(-time.Minute)),
 		"end date %s is before six months from %s", grant.EndDate, before)
 	assert.False(t, grant.EndDate.After(latest.Add(time.Minute)),
@@ -231,4 +253,36 @@ func TestAddMonthsClamped_ConvertsToUTCBeforeCounting(t *testing.T) {
 
 	assert.Equal(t, time.Date(2027, 2, 28, 22, 30, 0, 0, time.UTC), got)
 	assert.Equal(t, time.UTC, got.Location(), "result is expressed in UTC")
+}
+
+// The window has to hold whatever production computed from a clock reading
+// between the two samples. Clamping is not monotonic, so the pair can arrive
+// out of order — with the exact values from review below, the naive version
+// produced a range nothing could satisfy.
+func TestClampedWindow_SurvivesANonMonotonicBoundary(t *testing.T) {
+	before := time.Date(2026, 8, 30, 23, 59, 59, 900_000_000, time.UTC)
+	after := time.Date(2026, 8, 31, 0, 0, 0, 100_000_000, time.UTC)
+
+	earliest, latest := clampedWindow(before, after, 6)
+
+	require.False(t, latest.Before(earliest),
+		"window is inverted: [%s .. %s]", earliest, latest)
+
+	// Both instants production could have stamped fall inside it.
+	for _, stamped := range []time.Time{before, after} {
+		got := addMonthsClamped(stamped, 6)
+		assert.False(t, got.Before(earliest), "%s excluded below the window", got)
+		assert.False(t, got.After(latest), "%s excluded above the window", got)
+	}
+}
+
+// The ordinary case is unaffected: no crossing, no swap.
+func TestClampedWindow_KeepsOrderWhenNothingClamps(t *testing.T) {
+	before := time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC)
+	after := before.Add(time.Second)
+
+	earliest, latest := clampedWindow(before, after, 6)
+
+	assert.Equal(t, time.Date(2027, 2, 15, 12, 0, 0, 0, time.UTC), earliest)
+	assert.Equal(t, time.Date(2027, 2, 15, 12, 0, 1, 0, time.UTC), latest)
 }

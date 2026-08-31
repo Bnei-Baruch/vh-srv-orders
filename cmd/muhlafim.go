@@ -92,14 +92,13 @@ func parseFlags(cmd *cobra.Command) (string, string) {
 }
 
 func validateConfig() {
-	if common.Config.PelecardNewTerminalNumber == "" {
-		utils.LogFatal("PELECARD_NEW_TERMINAL_NUMBER environment variable is required")
+	// Muhlafim comes from external_payments now, so what this needs is a
+	// Keycloak identity rather than Pelecard credentials.
+	if common.Config.KeycloakServerUrl == "" || common.Config.KeycloakRealm == "" {
+		utils.LogFatal("KEYCLOAK_SERVER_URL and KEYCLOAK_REALM are required")
 	}
-	if common.Config.PelecardUser == "" {
-		utils.LogFatal("PELECARD_USER environment variable is required")
-	}
-	if common.Config.PelecardPassword == "" {
-		utils.LogFatal("PELECARD_PASSWORD environment variable is required")
+	if common.Config.KeycloakClientID == "" || common.Config.KeycloakClientSecret == "" {
+		utils.LogFatal("KEYCLOAK_CLIENT_ID and KEYCLOAK_CLIENT_SECRET are required")
 	}
 }
 

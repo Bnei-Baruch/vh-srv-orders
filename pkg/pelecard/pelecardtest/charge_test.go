@@ -23,10 +23,7 @@ func newChargeClient(t *testing.T) *pelecard.Client {
 		"Content-Type": "application/json",
 	})
 	return &pelecard.Client{
-		Client:         restyClient,
-		User:           "user",
-		Password:       "pass",
-		TerminalNumber: "123",
+		Client: restyClient,
 	}
 }
 

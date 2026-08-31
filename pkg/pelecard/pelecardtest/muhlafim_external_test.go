@@ -7,33 +7,39 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"errors"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/pelecard"
 )
 
-// withExternalPayments starts a stub external_payments, sets the token, and
-// returns a client pointed at the stub. Everything is restored afterwards.
+// stubTokens stands in for Keycloak. A fixed token when it should succeed, an
+// error when the point of the test is that the call never leaves the process.
+type stubTokens struct {
+	token string
+	err   error
+}
+
+func (s stubTokens) Token() (string, error) { return s.token, s.err }
+func (s stubTokens) Invalidate()            {}
+
+// withExternalPayments starts a stub external_payments and returns a client
+// pointed at it, authenticating with the given token. Everything is restored
+// afterwards.
 func withExternalPayments(t *testing.T, token string, handler http.HandlerFunc) *pelecard.Client {
 	t.Helper()
 	server := httptest.NewServer(handler)
-
-	originalToken := common.Config.ExternalPaymentsToken
-	common.Config.ExternalPaymentsToken = token
-
-	t.Cleanup(func() {
-		common.Config.ExternalPaymentsToken = originalToken
-		server.Close()
-	})
+	t.Cleanup(server.Close)
 
 	client := newChargeClient(t)
 	client.BaseURL = server.URL
+	client.Tokens = stubTokens{token: token}
 	return client
 }
 
-func TestFetchMuhlafimExternal_SendsTokenAndParsesEntries(t *testing.T) {
+func TestFetchMuhlafim_SendsTokenAndParsesEntries(t *testing.T) {
 	var authHeader, path string
 	var body pelecard.ExternalMuhlafimRequest
 
@@ -49,7 +55,7 @@ func TestFetchMuhlafimExternal_SendsTokenAndParsesEntries(t *testing.T) {
 		}`))
 	})
 
-	entries, err := client.FetchMuhlafimExternal(context.Background(), "21/08/2025 00:00", "24/09/2025 00:00")
+	entries, err := client.FetchMuhlafim(context.Background(), "21/08/2025 00:00", "24/09/2025 00:00")
 	require.NoError(t, err)
 
 	assert.Equal(t, "Bearer tok_secret", authHeader)
@@ -65,7 +71,7 @@ func TestFetchMuhlafimExternal_SendsTokenAndParsesEntries(t *testing.T) {
 
 // The request carries no terminal and no credentials — that is the whole point
 // of external_payments owning the call.
-func TestFetchMuhlafimExternal_SendsNoCredentials(t *testing.T) {
+func TestFetchMuhlafim_SendsNoCredentials(t *testing.T) {
 	var raw map[string]any
 
 	client := withExternalPayments(t, "tok_secret", func(w http.ResponseWriter, r *http.Request) {
@@ -73,7 +79,7 @@ func TestFetchMuhlafimExternal_SendsNoCredentials(t *testing.T) {
 		w.Write([]byte(`{}`))
 	})
 
-	_, err := client.FetchMuhlafimExternal(context.Background(), "21/08/2025 00:00", "24/09/2025 00:00")
+	_, err := client.FetchMuhlafim(context.Background(), "21/08/2025 00:00", "24/09/2025 00:00")
 	require.NoError(t, err)
 
 	for _, forbidden := range []string{"user", "password", "terminalNumber", "TerminalNumber"} {
@@ -83,53 +89,71 @@ func TestFetchMuhlafimExternal_SendsNoCredentials(t *testing.T) {
 
 // The shared client also posts directly to Pelecard while FetchMuhlafim still
 // exists. Setting the header on the client would send our token to them.
-func TestFetchMuhlafimExternal_TokenNotSetOnSharedClient(t *testing.T) {
+func TestFetchMuhlafim_TokenNotSetOnSharedClient(t *testing.T) {
 	client := withExternalPayments(t, "tok_secret", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{}`))
 	})
 
-	_, err := client.FetchMuhlafimExternal(context.Background(), "21/08/2025 00:00", "24/09/2025 00:00")
+	_, err := client.FetchMuhlafim(context.Background(), "21/08/2025 00:00", "24/09/2025 00:00")
 	require.NoError(t, err)
 
 	assert.Empty(t, client.Client.Header.Get("Authorization"))
 }
 
-func TestFetchMuhlafimExternal_EmptyWindow(t *testing.T) {
+func TestFetchMuhlafim_EmptyWindow(t *testing.T) {
 	client := withExternalPayments(t, "tok_secret", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{}`))
 	})
 
-	entries, err := client.FetchMuhlafimExternal(context.Background(), "21/08/2025 00:00", "24/09/2025 00:00")
+	entries, err := client.FetchMuhlafim(context.Background(), "21/08/2025 00:00", "24/09/2025 00:00")
 
 	require.NoError(t, err)
 	assert.Empty(t, entries)
 }
 
-func TestFetchMuhlafimExternal_Unauthorized(t *testing.T) {
+func TestFetchMuhlafim_Unauthorized(t *testing.T) {
 	client := withExternalPayments(t, "tok_wrong", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		w.Write([]byte(`{"error":"unauthorized"}`))
 	})
 
-	entries, err := client.FetchMuhlafimExternal(context.Background(), "21/08/2025 00:00", "24/09/2025 00:00")
+	entries, err := client.FetchMuhlafim(context.Background(), "21/08/2025 00:00", "24/09/2025 00:00")
 
 	require.Error(t, err)
 	assert.Nil(t, entries)
 	assert.Contains(t, err.Error(), "401")
 }
 
-// Failing before the request makes a missing token obvious, rather than
+// Failing before the request makes a Keycloak problem obvious, rather than
 // surfacing as a 401 from somewhere else.
-func TestFetchMuhlafimExternal_NoTokenConfigured(t *testing.T) {
+func TestFetchMuhlafim_TokenUnavailable(t *testing.T) {
 	var called bool
-	client := withExternalPayments(t, "", func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
 		w.Write([]byte(`{}`))
-	})
+	}))
+	t.Cleanup(server.Close)
 
-	_, err := client.FetchMuhlafimExternal(context.Background(), "21/08/2025 00:00", "24/09/2025 00:00")
+	client := newChargeClient(t)
+	client.BaseURL = server.URL
+	client.Tokens = stubTokens{err: errors.New("keycloak unreachable")}
+
+	_, err := client.FetchMuhlafim(context.Background(), "21/08/2025 00:00", "24/09/2025 00:00")
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "EXTERNAL_PAYMENTS_TOKEN")
+	assert.Contains(t, err.Error(), "keycloak unreachable")
 	assert.False(t, called, "should not reach the server without a token")
+}
+
+// A client built without a token source must refuse rather than send an
+// unauthenticated request that external_payments would reject anyway.
+func TestFetchMuhlafim_NoTokenSource(t *testing.T) {
+	client := newChargeClient(t)
+	client.BaseURL = "http://127.0.0.1:1"
+	client.Tokens = nil
+
+	_, err := client.FetchMuhlafim(context.Background(), "21/08/2025 00:00", "24/09/2025 00:00")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no token source")
 }

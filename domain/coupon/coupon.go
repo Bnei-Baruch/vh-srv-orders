@@ -20,7 +20,6 @@ const (
 	codeAlphabet      = "ACDEFGHJKLMNPQRTUVWXYZ234679"
 	codeSuffixLen     = 5
 	DefaultRedeemDays = 30
-
 )
 
 // Fields is the plain-value view of a coupon that Validate checks. Callers map
@@ -121,4 +120,3 @@ func BenefitWindow(months *int, start, end *time.Time, now time.Time) (time.Time
 	monthStart := time.Date(n.Year(), n.Month(), 1, 0, 0, 0, 0, time.UTC)
 	return monthStart, monthStart.AddDate(0, *months, 0), nil
 }
-

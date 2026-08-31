@@ -65,7 +65,6 @@ func (o *OrdersDB) UpsertManualDiscount(ctx context.Context, req ManualDiscountR
 	return &md, tx.Commit(ctx)
 }
 
-
 // CancelManualDiscount sets end_date to yesterday for the user's active discount.
 // Returns ErrNoRowsAffected if there is no active discount.
 func (o *OrdersDB) CancelManualDiscount(ctx context.Context, keycloakID string) error {

@@ -125,9 +125,9 @@ func TestProcessMuhlafim_WithFlagUpdate(t *testing.T) {
 
 func TestProcessMuhlafim_AllActionTypes(t *testing.T) {
 	testCases := []struct {
-		name            string
-		actionDesc      string
-		expectedFlag    string
+		name         string
+		actionDesc   string
+		expectedFlag string
 	}{
 		{"MUH_HIYUV_NIKLAT", pelecard.MUH_HIYUV_NIKLAT, common.OrderFlagMuhHiyuvNiklat},
 		{"MUH_NIDHA", pelecard.MUH_NIDHA, common.OrderFlagMuhNidha},
@@ -207,7 +207,7 @@ func TestProcessMuhlafim_MultipleOrders(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, 2, result.Processed) // Only token1 and token2 are processed
 	assert.Equal(t, 1, result.Updated)   // Only token1 gets flag updated
-	assert.Equal(t, 1, result.NewCards) // token2 has new card
+	assert.Equal(t, 1, result.NewCards)  // token2 has new card
 }
 
 func TestProcessMuhlafim_ErrorFetchingFlaggedOrders(t *testing.T) {

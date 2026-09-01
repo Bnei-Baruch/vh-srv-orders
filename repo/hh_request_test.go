@@ -84,14 +84,19 @@ func TestConcludeHHRequest_Approve_CreatesGrant(t *testing.T) {
 	// reached it yet — polled rather than asserted once, since the grant becomes
 	// active as soon as the database clock passes the start. A database far
 	// enough behind to exhaust this is broken, and the message says so.
+	//
+	// Polling rather than backdating the start, because covering the time.Now()
+	// default is the point of this test — a backdated start would test something
+	// else. The sibling test can backdate, and does.
 	var active *HHGrant
+	var lastErr error
 	require.Eventually(t, func() bool {
-		var err error
-		active, err = db.GetActiveHHGrant(ctx, "kc-req-approve")
-		return err == nil && active != nil
+		active, lastErr = db.GetActiveHHGrant(ctx, "kc-req-approve")
+		return lastErr == nil && active != nil
 	}, 3*time.Second, 50*time.Millisecond,
-		"a grant starting now never became active; check the database clock against %s",
-		time.Now().UTC())
+		"a grant starting now never became active (last error %v); if there is no "+
+			"error, compare the database clock against %s",
+		lastErr, time.Now().UTC())
 	assert.Equal(t, grant.ID, active.ID, "both read paths return the same grant")
 
 	assert.Equal(t, r.ID, grant.RequestID, "grant is linked to its request")
@@ -118,6 +123,8 @@ func TestConcludeHHRequest_Approve_ReplacesActiveGrant(t *testing.T) {
 	require.NoError(t, err)
 	// Start a minute back: GetActiveHHGrant compares start_date against the
 	// database clock, and a start of "now" from the Go clock flakes on skew.
+	// Cheaper than polling, and available here because this test does not care
+	// where the start comes from — unlike the default-start test, which polls.
 	_, err = db.ConcludeHHRequest(ctx, r.ID, HHRequestConclusion{
 		Approved: true, Type: common.HHGrantTypeGimlaj, DiscountPct: 50, Months: 3,
 		StartDate: null.TimeFrom(time.Now().Add(-time.Minute)),
@@ -228,16 +235,15 @@ func TestConcludeHHRequest_Approve_ClampsEndDateToAShorterMonth(t *testing.T) {
 	assert.Equal(t, time.Date(2020, 11, 30, 12, 0, 0, 0, time.UTC), joined[0].Grant.EndDate.UTC())
 }
 
-// Characterises what issue #20 defers: ConcludeHHRequest computes the end date
-// in the session timezone, so the same start and term give different instants on
-// different servers. Every other test here runs under the UTC pin in
-// pkg/testutil, where that is invisible.
+// CHARACTERIZATION: pins the buggy end-date behaviour from issue #20 (the
+// AT TIME ZONE 'UTC' fix was reverted in 3f0167f). Drives ConcludeHHRequest
+// rather than copying its SQL, so it fails if the query stops being
+// timezone-dependent. Going red is the intended signal that #20 is fixed —
+// delete this test then. Reviewed and kept deliberately; not a defect.
 //
-// Drives ConcludeHHRequest over a pool with a non-UTC session, and asserts
-// today's behaviour rather than the desired one: three months from
-// 2020-08-31 12:00Z is 13:00Z under +02, where UTC gives 12:00Z. Fixing #20
-// makes this fail, which is the point — that expression should not change
-// unnoticed.
+// Three months from 2020-08-31 12:00Z is 13:00Z under a +02 session, where UTC
+// gives 12:00Z. Every other test here runs under the UTC pin in pkg/testutil,
+// which is why this one opens its own pool.
 func TestConcludeHHRequest_EndDateDependsOnSessionTimezone(t *testing.T) {
 	dbURL, err := testutil.NewTestOrdersDB(t, context.Background())
 	require.NoError(t, err)
@@ -274,5 +280,6 @@ func TestConcludeHHRequest_EndDateDependsOnSessionTimezone(t *testing.T) {
 
 	assert.Equal(t, time.Date(2020, 11, 30, 13, 0, 0, 0, time.UTC),
 		joined[0].Grant.EndDate.UTC(),
-		"end date shifts with the session timezone — see issue #20")
+		"end date no longer shifts with the session timezone — if you fixed issue "+
+			"#20, delete this test")
 }

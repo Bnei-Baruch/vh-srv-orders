@@ -54,8 +54,9 @@ func TestConcludeHHRequest_Approve_CreatesGrant(t *testing.T) {
 	r, err := db.CreateHHRequest(ctx, hhRequestReq("kc-req-approve"))
 	require.NoError(t, err)
 
-	// No pinned start: GetActiveHHGrant filters on start_date <= NOW() AND
-	// end_date > NOW(), so a historical start would return nothing here.
+	// No pinned start. A historical one would satisfy start_date <= NOW() but
+	// derive an end_date in the past, and GetActiveHHGrant requires
+	// end_date > NOW() — so it would find nothing here.
 	concluded, err := db.ConcludeHHRequest(ctx, r.ID, HHRequestConclusion{
 		Approved:    true,
 		Type:        common.HHGrantTypeHayal, // admin overrides the requested type
@@ -77,6 +78,15 @@ func TestConcludeHHRequest_Approve_CreatesGrant(t *testing.T) {
 	// parameter, so this compares Go's clock against Go's own value and would
 	// pass just as well if a column default supplied it.
 	assert.WithinDuration(t, time.Now(), grant.StartDate, time.Minute)
+	// Coarse on purpose: the exact clamping semantics are pinned by the test
+	// below, and repeating them here would mean reimplementing Postgres month
+	// arithmetic in Go, which is the bug this file started with. Six months is
+	// somewhere between five and seven, which is enough to catch Months being
+	// ignored on the default-start path.
+	assert.True(t, grant.EndDate.After(grant.StartDate.AddDate(0, 5, 0)),
+		"end %s is less than five months after start %s", grant.EndDate, grant.StartDate)
+	assert.True(t, grant.EndDate.Before(grant.StartDate.AddDate(0, 7, 0)),
+		"end %s is more than seven months after start %s", grant.EndDate, grant.StartDate)
 
 	joined, err := db.GetAllHHRequests(ctx, "", "kc-req-approve")
 	require.NoError(t, err)
@@ -156,22 +166,25 @@ func TestGetAllHHRequests_FiltersByStatusAndKcid(t *testing.T) {
 	assert.Equal(t, common.HHRequestStatusDenied, byKcid[0].Status)
 }
 
-// Six months from 31 August is 28 February: Postgres clamps to the last day the
-// month can hold. The start is pinned and historical so the assertion never
+// Three months from 31 August is 30 November: Postgres clamps to the last day
+// the month can hold. The start is pinned and historical so the assertion never
 // depends on the run date, which means reading through GetAllHHRequests —
-// GetActiveHHGrant filters on end_date > NOW() and would find nothing.
+// a grant that has already ended fails GetActiveHHGrant's end_date > NOW().
 func TestConcludeHHRequest_Approve_ClampsEndDateToAShorterMonth(t *testing.T) {
 	db, ctx := newTestDB(t)
 
 	r, err := db.CreateHHRequest(ctx, hhRequestReq("kc-req-clamp"))
 	require.NoError(t, err)
 
+	// Three, where the request asked for six: the approved term is the admin's,
+	// and an implementation reading request.Months would pass with both the same.
+	// 31 August plus three months is 31 November, which does not exist.
 	start := time.Date(2020, 8, 31, 12, 0, 0, 0, time.UTC)
 	_, err = db.ConcludeHHRequest(ctx, r.ID, HHRequestConclusion{
 		Approved:    true,
 		Type:        common.HHGrantTypeGimlaj,
 		DiscountPct: 50,
-		Months:      6,
+		Months:      3,
 		StartDate:   null.TimeFrom(start),
 	})
 	require.NoError(t, err)
@@ -181,10 +194,11 @@ func TestConcludeHHRequest_Approve_ClampsEndDateToAShorterMonth(t *testing.T) {
 	require.Len(t, joined, 1)
 	require.NotNil(t, joined[0].Grant, "approval creates a grant regardless of its dates")
 
-	// Exact instants, which holds because pkg/testutil pins the test session to
-	// UTC. Postgres adds months in the session timezone, so without that pin
-	// these would drift with the developer's server — the connection string is
-	// where to look if this ever fails by a whole-hour offset.
+	// Exact instants because pkg/testutil pins the session to UTC. That makes
+	// this reproducible, not right: the production expression adds months in
+	// whatever the session timezone is, and the pin is what stops these tests
+	// seeing it. A whole-hour offset here means the connection string, not the
+	// grant code.
 	assert.Equal(t, start, joined[0].Grant.StartDate.UTC(), "start is stored as given")
-	assert.Equal(t, time.Date(2021, 2, 28, 12, 0, 0, 0, time.UTC), joined[0].Grant.EndDate.UTC())
+	assert.Equal(t, time.Date(2020, 11, 30, 12, 0, 0, 0, time.UTC), joined[0].Grant.EndDate.UTC())
 }

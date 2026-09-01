@@ -75,16 +75,18 @@ func TestConcludeHHRequest_Approve_CreatesGrant(t *testing.T) {
 
 	// The default start must also produce a grant GetActiveHHGrant will find.
 	// That query compares start_date against the database clock while the start
-	// came from the Go clock, so a database running behind the host fails here —
-	// hence the clocks in the message, to say so instead of implicating the
-	// grant code.
-	active, err := db.GetActiveHHGrant(ctx, "kc-req-approve")
-	require.NoError(t, err)
-	var dbNow time.Time
-	require.NoError(t, db.QueryRow(ctx, "SELECT NOW()").Scan(&dbNow))
-	require.NotNil(t, active,
-		"a grant starting now should be active (go clock %s, database clock %s)",
-		time.Now().UTC(), dbNow.UTC())
+	// came from the Go clock, so a database a little behind the host has not
+	// reached it yet — polled rather than asserted once, since the grant becomes
+	// active as soon as the database clock passes the start. A database far
+	// enough behind to exhaust this is broken, and the message says so.
+	var active *HHGrant
+	require.Eventually(t, func() bool {
+		var err error
+		active, err = db.GetActiveHHGrant(ctx, "kc-req-approve")
+		return err == nil && active != nil
+	}, 3*time.Second, 50*time.Millisecond,
+		"a grant starting now never became active; check the database clock against %s",
+		time.Now().UTC())
 	assert.Equal(t, grant.ID, active.ID, "both read paths return the same grant")
 
 	assert.Equal(t, r.ID, grant.RequestID, "grant is linked to its request")
@@ -219,4 +221,37 @@ func TestConcludeHHRequest_Approve_ClampsEndDateToAShorterMonth(t *testing.T) {
 	// offset here means the connection string, not the grant code.
 	assert.Equal(t, start, joined[0].Grant.StartDate.UTC(), "start is stored as given")
 	assert.Equal(t, time.Date(2020, 11, 30, 12, 0, 0, 0, time.UTC), joined[0].Grant.EndDate.UTC())
+}
+
+// Characterises what issue #20 defers: the grant end date is computed in the
+// session timezone, so it is not a fixed instant. Every other test here runs
+// under the UTC pin in pkg/testutil, where the dependence is invisible.
+//
+// Asserting the current behaviour, not the desired one — three months from
+// 2020-08-31 12:00Z lands on 13:00Z under a +02 session and 12:00Z under UTC.
+// When #20 is fixed this test fails, which is the point: it should not be
+// possible to change that expression without noticing this.
+func TestHHGrantEndDate_DependsOnSessionTimezone(t *testing.T) {
+	db, ctx := newTestDB(t)
+
+	conn, err := db.Acquire(ctx)
+	require.NoError(t, err)
+	// Release does not reset session state, so the connection would return to the
+	// pool carrying this timezone. Ordered before Release: defers run LIFO.
+	defer conn.Release()
+	defer func() {
+		_, resetErr := conn.Exec(ctx, "RESET TIME ZONE")
+		assert.NoError(t, resetErr, "session timezone left set on a pooled connection")
+	}()
+
+	_, err = conn.Exec(ctx, "SET TIME ZONE 'Asia/Jerusalem'")
+	require.NoError(t, err)
+
+	start := time.Date(2020, 8, 31, 12, 0, 0, 0, time.UTC)
+	var got time.Time
+	require.NoError(t, conn.QueryRow(ctx,
+		`SELECT $1::timestamptz + make_interval(months => $2)`, start, 3).Scan(&got))
+
+	assert.Equal(t, time.Date(2020, 11, 30, 13, 0, 0, 0, time.UTC), got.UTC(),
+		"end date shifts with the session timezone — see issue #20")
 }

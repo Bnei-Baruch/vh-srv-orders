@@ -49,6 +49,9 @@ func NewTestOrdersDB(t *testing.T, ctx context.Context) (string, error) {
 		// `options` startup parameter, because `timezone=` is not a libpq keyword.
 		// Quote the URL pgtestdb logs before pasting it into a shell — unquoted it
 		// splits at the ampersand and the timezone is silently dropped.
+		//
+		// The pin also hides the session-timezone dependence it compensates for,
+		// so no test in CI can observe it: issue #20.
 		Options: "sslmode=disable&options=-c%20timezone%3DUTC",
 	}
 

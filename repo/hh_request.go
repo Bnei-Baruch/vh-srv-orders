@@ -174,20 +174,10 @@ func (o *OrdersDB) ConcludeHHRequest(ctx context.Context, id int, c HHRequestCon
 		if c.StartDate.Valid {
 			start = c.StartDate.Time
 		}
-		// The arithmetic is pinned to UTC rather than left to the session TimeZone.
-		// Postgres adds calendar months in the session timezone, so the same start and
-		// term gave different end dates depending on the server: usually the UTC offset,
-		// but a whole day near a month boundary — a one-month grant started
-		// 2020-01-31 01:30 in Jerusalem ends 29 February one way and 1 March the other.
-		//
-		// Deterministic rather than server-dependent is the improvement. Whether a term
-		// should be counted in UTC or in the member's local calendar is a policy question
-		// for whoever owns grant length; this makes the answer explicit and one line to
-		// change.
-		//
-		// Written out rather than built by a helper: the helper existed so a test
-		// could share the string, and the test now goes through this INSERT
-		// instead. Nothing here interpolates into SQL.
+		// Months are added in UTC, not in the session TimeZone: otherwise a grant's
+		// length depends on how the server is configured. Whether a term should
+		// follow UTC or the member's local calendar is a policy choice, made here
+		// rather than inherited.
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO hh_grants (request_id, keycloak_id, type, discount_pct, start_date, end_date, note)
 			 VALUES ($1, $2, $3, $4, $5,

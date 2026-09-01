@@ -44,22 +44,10 @@ func NewTestOrdersDB(t *testing.T, ctx context.Context) (string, error) {
 		Host:       common.Config.PgHost,
 		Port:       common.Config.PgPort,
 		Database:   url.QueryEscape(common.Config.PgDbName),
-		// The session timezone is pinned rather than inherited: Postgres does
-		// interval arithmetic in the session TimeZone, so
-		// `ts + make_interval(months => n)` lands on a different instant depending
-		// on it. The CI image defaults to Etc/UTC; a native or Homebrew server set
-		// to Asia/Jerusalem would shift results in tests that look timezone-free.
-		//
-		// Spelled as an `options` startup parameter, not `timezone=UTC`. The
-		// latter is not a libpq keyword and survives only because lib/pq and pgx
-		// are pure Go and forward unknown parameters — psql rejects it outright
-		// with `invalid URI query parameter: "timezone"`, which would break the
-		// URL pgtestdb.Custom logs for pasting into psql. That URL now contains
-		// an `&`, so quote it: psql "postgres://…".
-		//
-		// Test sessions only, and production does not rely on it: the grant end
-		// date is computed with an explicit AT TIME ZONE 'UTC' in
-		// repo.ConcludeHHRequest rather than depending on the session.
+		// Timezone pinned so results do not depend on the developer's Postgres:
+		// interval arithmetic happens in the session TimeZone. Spelled as an
+		// `options` startup parameter because `timezone=` is not a libpq keyword
+		// and psql rejects the URL this config produces.
 		Options: "sslmode=disable&options=-c%20timezone%3DUTC",
 	}
 

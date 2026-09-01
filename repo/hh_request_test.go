@@ -74,6 +74,10 @@ func TestConcludeHHRequest_Approve_CreatesGrant(t *testing.T) {
 	assert.Equal(t, r.ID, grant.RequestID, "grant is linked to its request")
 	assert.Equal(t, 75, grant.DiscountPct)
 	assert.Equal(t, common.HHGrantTypeHayal, grant.Type)
+	// The only coverage of the default start at repo/hh_request.go: the clamping
+	// test always passes an explicit one, and GetActiveHHGrant's start_date <=
+	// NOW() would accept a default a month in the past.
+	assert.WithinDuration(t, time.Now(), grant.StartDate, time.Minute)
 
 	joined, err := db.GetAllHHRequests(ctx, "", "kc-req-approve")
 	require.NoError(t, err)
@@ -200,7 +204,9 @@ func TestConcludeHHRequest_Approve_ClampsEndDateToAShorterMonth(t *testing.T) {
 func TestHHGrantEndDate_DoesNotDependOnSessionTimezone(t *testing.T) {
 	db, ctx := newTestDB(t)
 
-	const endDateExpr = `(($1::timestamptz AT TIME ZONE 'UTC') + make_interval(months => $2)) AT TIME ZONE 'UTC'`
+	// The expression under test comes from the production code. A hand-copied
+	// duplicate here passed while ConcludeHHRequest was broken.
+	endDateExpr := HHGrantEndDate("$1", "$2")
 
 	start := time.Date(2020, 8, 31, 12, 0, 0, 0, time.UTC)
 	want := time.Date(2021, 2, 28, 12, 0, 0, 0, time.UTC)
@@ -209,7 +215,14 @@ func TestHHGrantEndDate_DoesNotDependOnSessionTimezone(t *testing.T) {
 		t.Run(tz, func(t *testing.T) {
 			conn, err := db.Acquire(ctx)
 			require.NoError(t, err)
+			// Release does not reset session state, and pgx v4 has no AfterRelease
+			// hook configured here, so the connection would go back to the pool
+			// carrying this timezone. Ordered before Release: defers run LIFO.
 			defer conn.Release()
+			defer func() {
+				_, resetErr := conn.Exec(ctx, "RESET TIME ZONE")
+				assert.NoError(t, resetErr, "session timezone left set on a pooled connection")
+			}()
 
 			_, err = conn.Exec(ctx, "SET TIME ZONE '"+tz+"'")
 			require.NoError(t, err)

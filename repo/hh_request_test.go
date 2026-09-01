@@ -73,6 +73,20 @@ func TestConcludeHHRequest_Approve_CreatesGrant(t *testing.T) {
 	grant := joined[0].Grant
 	require.NotNil(t, grant, "approval creates a grant")
 
+	// The default start must also produce a grant GetActiveHHGrant will find.
+	// That query compares start_date against the database clock while the start
+	// came from the Go clock, so a database running behind the host fails here —
+	// hence the clocks in the message, to say so instead of implicating the
+	// grant code.
+	active, err := db.GetActiveHHGrant(ctx, "kc-req-approve")
+	require.NoError(t, err)
+	var dbNow time.Time
+	require.NoError(t, db.QueryRow(ctx, "SELECT NOW()").Scan(&dbNow))
+	require.NotNil(t, active,
+		"a grant starting now should be active (go clock %s, database clock %s)",
+		time.Now().UTC(), dbNow.UTC())
+	assert.Equal(t, grant.ID, active.ID, "both read paths return the same grant")
+
 	assert.Equal(t, r.ID, grant.RequestID, "grant is linked to its request")
 	assert.Equal(t, 75, grant.DiscountPct)
 	assert.Equal(t, common.HHGrantTypeHayal, grant.Type)
@@ -103,10 +117,18 @@ func TestConcludeHHRequest_Approve_ReplacesActiveGrant(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	// GetActiveHHGrant orders by id DESC LIMIT 1, so it returns the new grant
+	// whether or not the old one was ended — this has to be asked directly.
+	// Compared against the database's own NOW(), so no clock skew enters.
+	var oldEnded bool
+	require.NoError(t, db.QueryRow(ctx,
+		`SELECT end_date < NOW() FROM hh_grants WHERE id = $1`, oldID).Scan(&oldEnded))
+	assert.True(t, oldEnded, "the previous grant should have been ended")
+
 	active, err := db.GetActiveHHGrant(ctx, "kc-req-regrant")
 	require.NoError(t, err)
 	require.NotNil(t, active)
-	assert.NotEqual(t, oldID, active.ID, "previous grant ended, new one active")
+	assert.NotEqual(t, oldID, active.ID, "the new grant is the active one")
 	assert.Equal(t, 50, active.DiscountPct)
 }
 

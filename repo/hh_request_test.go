@@ -1,6 +1,8 @@
 package repo
 
 import (
+	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -9,6 +11,9 @@ import (
 	"github.com/volatiletech/null/v9"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
+	"gitlab.bbdev.team/vh/pay/orders/events"
+	"gitlab.bbdev.team/vh/pay/orders/events/eventstest"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/testutil"
 )
 
 func hhRequestReq(keycloakID string) HHRequestReq {
@@ -223,35 +228,51 @@ func TestConcludeHHRequest_Approve_ClampsEndDateToAShorterMonth(t *testing.T) {
 	assert.Equal(t, time.Date(2020, 11, 30, 12, 0, 0, 0, time.UTC), joined[0].Grant.EndDate.UTC())
 }
 
-// Characterises what issue #20 defers: the grant end date is computed in the
-// session timezone, so it is not a fixed instant. Every other test here runs
-// under the UTC pin in pkg/testutil, where the dependence is invisible.
+// Characterises what issue #20 defers: ConcludeHHRequest computes the end date
+// in the session timezone, so the same start and term give different instants on
+// different servers. Every other test here runs under the UTC pin in
+// pkg/testutil, where that is invisible.
 //
-// Asserting the current behaviour, not the desired one — three months from
-// 2020-08-31 12:00Z lands on 13:00Z under a +02 session and 12:00Z under UTC.
-// When #20 is fixed this test fails, which is the point: it should not be
-// possible to change that expression without noticing this.
-func TestHHGrantEndDate_DependsOnSessionTimezone(t *testing.T) {
-	db, ctx := newTestDB(t)
-
-	conn, err := db.Acquire(ctx)
+// Drives ConcludeHHRequest over a pool with a non-UTC session, and asserts
+// today's behaviour rather than the desired one: three months from
+// 2020-08-31 12:00Z is 13:00Z under +02, where UTC gives 12:00Z. Fixing #20
+// makes this fail, which is the point — that expression should not change
+// unnoticed.
+func TestConcludeHHRequest_EndDateDependsOnSessionTimezone(t *testing.T) {
+	dbURL, err := testutil.NewTestOrdersDB(t, context.Background())
 	require.NoError(t, err)
-	// Release does not reset session state, so the connection would return to the
-	// pool carrying this timezone. Ordered before Release: defers run LIFO.
-	defer conn.Release()
-	defer func() {
-		_, resetErr := conn.Exec(ctx, "RESET TIME ZONE")
-		assert.NoError(t, resetErr, "session timezone left set on a pooled connection")
-	}()
+	ctx := eventstest.WithTestEventBuilder(t, context.Background())
 
-	_, err = conn.Exec(ctx, "SET TIME ZONE 'Asia/Jerusalem'")
+	jerusalemURL := strings.Replace(dbURL, "timezone%3DUTC", "timezone%3DAsia%2FJerusalem", 1)
+	require.NotEqual(t, dbURL, jerusalemURL, "test URL should carry the pinned timezone")
+
+	jerusalem, err := NewOrdersDBUrl(ctx, jerusalemURL, new(events.NoopEmitter))
+	require.NoError(t, err)
+	t.Cleanup(jerusalem.Close)
+
+	var tz string
+	require.NoError(t, jerusalem.QueryRow(ctx, "SHOW TimeZone").Scan(&tz))
+	require.Equal(t, "Asia/Jerusalem", tz, "second pool did not take the timezone")
+
+	r, err := jerusalem.CreateHHRequest(ctx, hhRequestReq("kc-req-tz"))
 	require.NoError(t, err)
 
 	start := time.Date(2020, 8, 31, 12, 0, 0, 0, time.UTC)
-	var got time.Time
-	require.NoError(t, conn.QueryRow(ctx,
-		`SELECT $1::timestamptz + make_interval(months => $2)`, start, 3).Scan(&got))
+	_, err = jerusalem.ConcludeHHRequest(ctx, r.ID, HHRequestConclusion{
+		Approved:    true,
+		Type:        common.HHGrantTypeGimlaj,
+		DiscountPct: 50,
+		Months:      3,
+		StartDate:   null.TimeFrom(start),
+	})
+	require.NoError(t, err)
 
-	assert.Equal(t, time.Date(2020, 11, 30, 13, 0, 0, 0, time.UTC), got.UTC(),
+	joined, err := jerusalem.GetAllHHRequests(ctx, "", "kc-req-tz")
+	require.NoError(t, err)
+	require.Len(t, joined, 1)
+	require.NotNil(t, joined[0].Grant)
+
+	assert.Equal(t, time.Date(2020, 11, 30, 13, 0, 0, 0, time.UTC),
+		joined[0].Grant.EndDate.UTC(),
 		"end date shifts with the session timezone — see issue #20")
 }

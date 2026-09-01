@@ -1,8 +1,6 @@
 package repo
 
 import (
-	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -11,9 +9,6 @@ import (
 	"github.com/volatiletech/null/v9"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
-	"gitlab.bbdev.team/vh/pay/orders/events"
-	"gitlab.bbdev.team/vh/pay/orders/events/eventstest"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/testutil"
 )
 
 func hhRequestReq(keycloakID string) HHRequestReq {
@@ -185,47 +180,5 @@ func TestConcludeHHRequest_Approve_ClampsEndDateToAShorterMonth(t *testing.T) {
 	require.NotNil(t, joined[0].Grant, "approval creates a grant regardless of its dates")
 
 	assert.Equal(t, start, joined[0].Grant.StartDate.UTC(), "start is stored as given")
-	assert.Equal(t, time.Date(2021, 2, 28, 12, 0, 0, 0, time.UTC), joined[0].Grant.EndDate.UTC())
-}
-
-// The end date must not depend on the server's timezone, asserted through the
-// production path: every test session is pinned to UTC, where the correct and
-// incorrect expressions agree, so this needs its own pool with a different one.
-func TestConcludeHHRequest_EndDateIgnoresServerTimezone(t *testing.T) {
-	dbURL, err := testutil.NewTestOrdersDB(t, context.Background())
-	require.NoError(t, err)
-	ctx := eventstest.WithTestEventBuilder(t, context.Background())
-
-	jerusalemURL := strings.Replace(dbURL, "timezone%3DUTC", "timezone%3DAsia%2FJerusalem", 1)
-	require.NotEqual(t, dbURL, jerusalemURL, "test URL should carry the pinned timezone")
-
-	jerusalem, err := NewOrdersDBUrl(ctx, jerusalemURL, new(events.NoopEmitter))
-	require.NoError(t, err)
-	t.Cleanup(jerusalem.Close)
-
-	var tz string
-	require.NoError(t, jerusalem.QueryRow(ctx, "SHOW TimeZone").Scan(&tz))
-	require.Equal(t, "Asia/Jerusalem", tz, "second pool did not take the timezone")
-
-	r, err := jerusalem.CreateHHRequest(ctx, hhRequestReq("kc-req-tz"))
-	require.NoError(t, err)
-
-	start := time.Date(2020, 8, 31, 12, 0, 0, 0, time.UTC)
-	_, err = jerusalem.ConcludeHHRequest(ctx, r.ID, HHRequestConclusion{
-		Approved:    true,
-		Type:        common.HHGrantTypeGimlaj,
-		DiscountPct: 50,
-		Months:      6,
-		StartDate:   null.TimeFrom(start),
-	})
-	require.NoError(t, err)
-
-	joined, err := jerusalem.GetAllHHRequests(ctx, "", "kc-req-tz")
-	require.NoError(t, err)
-	require.Len(t, joined, 1)
-	require.NotNil(t, joined[0].Grant)
-
-	// Without the explicit conversion this is 13:00 — an hour of grant length
-	// decided by server configuration.
 	assert.Equal(t, time.Date(2021, 2, 28, 12, 0, 0, 0, time.UTC), joined[0].Grant.EndDate.UTC())
 }

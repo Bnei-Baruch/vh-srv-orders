@@ -46,8 +46,12 @@ func NewTestOrdersDB(t *testing.T, ctx context.Context) (string, error) {
 		Database:   url.QueryEscape(common.Config.PgDbName),
 		// Timezone pinned so results do not depend on the developer's Postgres:
 		// interval arithmetic happens in the session TimeZone. Spelled as an
-		// `options` startup parameter because `timezone=` is not a libpq keyword
-		// and psql rejects the URL this config produces.
+		// `options` startup parameter because `timezone=` is not a libpq keyword.
+		//
+		// Quote the URL pgtestdb logs when pasting it into a shell. Unquoted, it
+		// splits at the ampersand: psql goes to the background with sslmode alone
+		// and the timezone is swallowed as a shell assignment, so you inspect a
+		// session in the server's timezone while believing it is the test's.
 		Options: "sslmode=disable&options=-c%20timezone%3DUTC",
 	}
 

@@ -1,6 +1,8 @@
 package repo
 
 import (
+	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -9,6 +11,9 @@ import (
 	"github.com/volatiletech/null/v9"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
+	"gitlab.bbdev.team/vh/pay/orders/events"
+	"gitlab.bbdev.team/vh/pay/orders/events/eventstest"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/testutil"
 )
 
 func hhRequestReq(keycloakID string) HHRequestReq {
@@ -192,44 +197,49 @@ func TestConcludeHHRequest_Approve_ClampsEndDateToAShorterMonth(t *testing.T) {
 	assert.Equal(t, time.Date(2021, 2, 28, 12, 0, 0, 0, time.UTC), joined[0].Grant.EndDate.UTC())
 }
 
-// The end date must not depend on the server's timezone. Postgres adds calendar
-// months in the session TimeZone, so the same start and term used to yield
-// instants an hour apart on a UTC server and an Israel one — an hour of grant
-// length decided by configuration.
+// The end date must not depend on the server's timezone, asserted through
+// ConcludeHHRequest rather than against the SQL expression on its own.
 //
-// The session is changed on one acquired connection rather than the pool, so
-// this exercises the real expression from ConcludeHHRequest under a timezone no
-// other test uses. pkg/testutil pins UTC everywhere else, which is exactly why
-// nothing else can catch this.
-func TestHHGrantEndDate_DoesNotDependOnSessionTimezone(t *testing.T) {
-	db, ctx := newTestDB(t)
+// This is the only test that can catch the regression. pkg/testutil pins every
+// session to UTC, where the fixed and unfixed expressions agree, so the clamping
+// test above passes either way — and an assertion against the expression string
+// passes even if the INSERT stops using it. So: a second pool onto the same
+// instance database with a non-UTC session, and the production path run over it.
+func TestConcludeHHRequest_EndDateIgnoresServerTimezone(t *testing.T) {
+	dbURL, err := testutil.NewTestOrdersDB(t, context.Background())
+	require.NoError(t, err)
+	ctx := eventstest.WithTestEventBuilder(t, context.Background())
 
-	// The expression under test comes from the production code. A hand-copied
-	// duplicate here passed while ConcludeHHRequest was broken.
-	endDateExpr := HHGrantEndDate("$1", "$2")
+	jerusalemURL := strings.Replace(dbURL, "timezone%3DUTC", "timezone%3DAsia%2FJerusalem", 1)
+	require.NotEqual(t, dbURL, jerusalemURL, "test URL should carry the pinned timezone")
+
+	jerusalem, err := NewOrdersDBUrl(ctx, jerusalemURL, new(events.NoopEmitter))
+	require.NoError(t, err)
+	t.Cleanup(jerusalem.Close)
+
+	var tz string
+	require.NoError(t, jerusalem.QueryRow(ctx, "SHOW TimeZone").Scan(&tz))
+	require.Equal(t, "Asia/Jerusalem", tz, "second pool did not take the timezone")
+
+	r, err := jerusalem.CreateHHRequest(ctx, hhRequestReq("kc-req-tz"))
+	require.NoError(t, err)
 
 	start := time.Date(2020, 8, 31, 12, 0, 0, 0, time.UTC)
-	want := time.Date(2021, 2, 28, 12, 0, 0, 0, time.UTC)
+	_, err = jerusalem.ConcludeHHRequest(ctx, r.ID, HHRequestConclusion{
+		Approved:    true,
+		Type:        common.HHGrantTypeGimlaj,
+		DiscountPct: 50,
+		Months:      6,
+		StartDate:   null.TimeFrom(start),
+	})
+	require.NoError(t, err)
 
-	for _, tz := range []string{"UTC", "Asia/Jerusalem", "America/New_York"} {
-		t.Run(tz, func(t *testing.T) {
-			conn, err := db.Acquire(ctx)
-			require.NoError(t, err)
-			// Release does not reset session state, and pgx v4 has no AfterRelease
-			// hook configured here, so the connection would go back to the pool
-			// carrying this timezone. Ordered before Release: defers run LIFO.
-			defer conn.Release()
-			defer func() {
-				_, resetErr := conn.Exec(ctx, "RESET TIME ZONE")
-				assert.NoError(t, resetErr, "session timezone left set on a pooled connection")
-			}()
+	joined, err := jerusalem.GetAllHHRequests(ctx, "", "kc-req-tz")
+	require.NoError(t, err)
+	require.Len(t, joined, 1)
+	require.NotNil(t, joined[0].Grant)
 
-			_, err = conn.Exec(ctx, "SET TIME ZONE '"+tz+"'")
-			require.NoError(t, err)
-
-			var got time.Time
-			require.NoError(t, conn.QueryRow(ctx, "SELECT "+endDateExpr, start, 6).Scan(&got))
-			assert.Equal(t, want, got.UTC(), "end date shifted with the session timezone")
-		})
-	}
+	// Same instant a UTC server produces. Without the explicit conversion this is
+	// 13:00 UTC, an hour of grant length decided by server configuration.
+	assert.Equal(t, time.Date(2021, 2, 28, 12, 0, 0, 0, time.UTC), joined[0].Grant.EndDate.UTC())
 }

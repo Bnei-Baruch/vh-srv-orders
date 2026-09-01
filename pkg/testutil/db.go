@@ -48,10 +48,12 @@ func NewTestOrdersDB(t *testing.T, ctx context.Context) (string, error) {
 		// interval arithmetic happens in the session TimeZone. Spelled as an
 		// `options` startup parameter because `timezone=` is not a libpq keyword.
 		//
-		// It buys reproducibility, not correctness, and costs something: the one
-		// expression that depends on the session timezone — the grant end date in
-		// repo.ConcludeHHRequest — can no longer be observed from a test. Testing
-		// that needs its own pool with a different timezone.
+		// It buys reproducibility, not correctness, and costs something: SQL that
+		// resolves a calendar unit in the session timezone can no longer be
+		// observed from a test. That is the grant end date in
+		// repo.ConcludeHHRequest, and also every NOW() - INTERVAL '1 day' —
+		// a day is 23 or 25 hours across a DST change. Testing any of it needs its
+		// own pool with a different timezone.
 		//
 		// Quote the URL pgtestdb logs when pasting it into a shell. Unquoted, it
 		// splits at the ampersand: psql goes to the background with sslmode alone

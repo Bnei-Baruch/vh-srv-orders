@@ -72,8 +72,10 @@ func TestConcludeHHRequest_Approve_CreatesGrant(t *testing.T) {
 	assert.Equal(t, r.ID, grant.RequestID, "grant is linked to its request")
 	assert.Equal(t, 75, grant.DiscountPct)
 	assert.Equal(t, common.HHGrantTypeHayal, grant.Type)
-	// The only coverage of the default start: the clamping test always passes an
-	// explicit one.
+	// Catches start and end being written to the wrong columns. It cannot show
+	// that the Go default was used — start is computed here and passed as a
+	// parameter, so this compares Go's clock against Go's own value and would
+	// pass just as well if a column default supplied it.
 	assert.WithinDuration(t, time.Now(), grant.StartDate, time.Minute)
 
 	joined, err := db.GetAllHHRequests(ctx, "", "kc-req-approve")
@@ -179,6 +181,10 @@ func TestConcludeHHRequest_Approve_ClampsEndDateToAShorterMonth(t *testing.T) {
 	require.Len(t, joined, 1)
 	require.NotNil(t, joined[0].Grant, "approval creates a grant regardless of its dates")
 
+	// Exact instants, which holds because pkg/testutil pins the test session to
+	// UTC. Postgres adds months in the session timezone, so without that pin
+	// these would drift with the developer's server — the connection string is
+	// where to look if this ever fails by a whole-hour offset.
 	assert.Equal(t, start, joined[0].Grant.StartDate.UTC(), "start is stored as given")
 	assert.Equal(t, time.Date(2021, 2, 28, 12, 0, 0, 0, time.UTC), joined[0].Grant.EndDate.UTC())
 }

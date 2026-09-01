@@ -2,7 +2,7 @@ package repo
 
 import (
 	"context"
-	"strings"
+	"net/url"
 	"testing"
 	"time"
 
@@ -88,15 +88,24 @@ func TestConcludeHHRequest_Approve_CreatesGrant(t *testing.T) {
 	// Polling rather than backdating the start, because covering the time.Now()
 	// default is the point of this test — a backdated start would test something
 	// else. The sibling test can backdate, and does.
+	// Hand-rolled rather than require.Eventually: its failure message takes
+	// eagerly-evaluated arguments, so a message built from lastErr and the clock
+	// would report their values from before the first poll — always a nil error.
 	var active *HHGrant
 	var lastErr error
-	require.Eventually(t, func() bool {
+	deadline := time.Now().Add(3 * time.Second)
+	for {
 		active, lastErr = db.GetActiveHHGrant(ctx, "kc-req-approve")
-		return lastErr == nil && active != nil
-	}, 3*time.Second, 50*time.Millisecond,
-		"a grant starting now never became active (last error %v); if there is no "+
-			"error, compare the database clock against %s",
-		lastErr, time.Now().UTC())
+		if lastErr == nil && active != nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			require.FailNowf(t, "a grant starting now never became active",
+				"last error %v; if there is no error, compare the database clock against %s",
+				lastErr, time.Now().UTC())
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 	assert.Equal(t, grant.ID, active.ID, "both read paths return the same grant")
 
 	assert.Equal(t, r.ID, grant.RequestID, "grant is linked to its request")
@@ -133,7 +142,10 @@ func TestConcludeHHRequest_Approve_ReplacesActiveGrant(t *testing.T) {
 
 	// GetActiveHHGrant orders by id DESC LIMIT 1, so it returns the new grant
 	// whether or not the old one was ended — this has to be asked directly.
-	// Compared against the database's own NOW(), so no clock skew enters.
+	// The comparison runs on the database's own NOW(), but the row is only ended
+	// if ConcludeHHRequest's UPDATE matched it, and that WHERE tests
+	// start_date <= NOW() against a start_date insertHHGrant took from the Go
+	// clock. So skew still enters, with the hour of backdating as its slack.
 	var oldEnded bool
 	require.NoError(t, db.QueryRow(ctx,
 		`SELECT end_date < NOW() FROM hh_grants WHERE id = $1`, oldID).Scan(&oldEnded))
@@ -235,6 +247,22 @@ func TestConcludeHHRequest_Approve_ClampsEndDateToAShorterMonth(t *testing.T) {
 	assert.Equal(t, time.Date(2020, 11, 30, 12, 0, 0, 0, time.UTC), joined[0].Grant.EndDate.UTC())
 }
 
+// withSessionTimezone repoints the `options` startup parameter of a pgtestdb URL
+// at another timezone. Parsed rather than string-replaced: the percent-encoding
+// of the pin is pkg/testutil's business, and a change there would turn a
+// replace into a silent no-op the guard below could only misreport.
+func withSessionTimezone(t *testing.T, dbURL, timezone string) string {
+	t.Helper()
+	u, err := url.Parse(dbURL)
+	require.NoError(t, err)
+	query := u.Query()
+	require.Contains(t, query.Get("options"), "timezone=",
+		"test URL should carry the pinned timezone")
+	query.Set("options", "-c timezone="+timezone)
+	u.RawQuery = query.Encode()
+	return u.String()
+}
+
 // CHARACTERIZATION: pins the buggy end-date behaviour from issue #20 (the
 // AT TIME ZONE 'UTC' fix was reverted in 3f0167f). Drives ConcludeHHRequest
 // rather than copying its SQL, so it fails if the query stops being
@@ -249,8 +277,7 @@ func TestConcludeHHRequest_EndDateDependsOnSessionTimezone(t *testing.T) {
 	require.NoError(t, err)
 	ctx := eventstest.WithTestEventBuilder(t, context.Background())
 
-	jerusalemURL := strings.Replace(dbURL, "timezone%3DUTC", "timezone%3DAsia%2FJerusalem", 1)
-	require.NotEqual(t, dbURL, jerusalemURL, "test URL should carry the pinned timezone")
+	jerusalemURL := withSessionTimezone(t, dbURL, "Asia/Jerusalem")
 
 	jerusalem, err := NewOrdersDBUrl(ctx, jerusalemURL, new(events.NoopEmitter))
 	require.NoError(t, err)

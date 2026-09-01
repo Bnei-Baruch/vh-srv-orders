@@ -59,10 +59,8 @@ func TestConcludeHHRequest_Approve_CreatesGrant(t *testing.T) {
 	r, err := db.CreateHHRequest(ctx, hhRequestReq("kc-req-approve"))
 	require.NoError(t, err)
 
-	// No pinned start: this test is about approval producing an *active* grant,
-	// and GetActiveHHGrant filters on end_date > NOW() AND start_date <= NOW().
-	// A fixed historical start would make it return nothing. What the end date is
-	// computed to is asserted separately, where it can be pinned safely.
+	// No pinned start: GetActiveHHGrant filters on start_date <= NOW() AND
+	// end_date > NOW(), so a historical start would return nothing here.
 	concluded, err := db.ConcludeHHRequest(ctx, r.ID, HHRequestConclusion{
 		Approved:    true,
 		Type:        common.HHGrantTypeHayal, // admin overrides the requested type
@@ -79,9 +77,8 @@ func TestConcludeHHRequest_Approve_CreatesGrant(t *testing.T) {
 	assert.Equal(t, r.ID, grant.RequestID, "grant is linked to its request")
 	assert.Equal(t, 75, grant.DiscountPct)
 	assert.Equal(t, common.HHGrantTypeHayal, grant.Type)
-	// The only coverage of the default start at repo/hh_request.go: the clamping
-	// test always passes an explicit one, and GetActiveHHGrant's start_date <=
-	// NOW() would accept a default a month in the past.
+	// The only coverage of the default start: the clamping test always passes an
+	// explicit one.
 	assert.WithinDuration(t, time.Now(), grant.StartDate, time.Minute)
 
 	joined, err := db.GetAllHHRequests(ctx, "", "kc-req-approve")
@@ -162,16 +159,10 @@ func TestGetAllHHRequests_FiltersByStatusAndKcid(t *testing.T) {
 	assert.Equal(t, common.HHRequestStatusDenied, byKcid[0].Status)
 }
 
-// The end date is start + months as Postgres computes it, clamped to the last
-// day a short month can hold: six months from 31 August is 28 February, not
-// 3 March where day arithmetic lands. A grant approved on the 31st must not
-// outlast one approved on the 30th.
-//
-// The start is pinned, and deliberately historical, so the assertion does not
-// depend on when the suite runs. That means reading the grant through
-// GetAllHHRequests, which joins hh_grants unconditionally — GetActiveHHGrant
-// filters on end_date > NOW() and would return nothing for a grant that has
-// already expired.
+// Six months from 31 August is 28 February: Postgres clamps to the last day the
+// month can hold. The start is pinned and historical so the assertion never
+// depends on the run date, which means reading through GetAllHHRequests —
+// GetActiveHHGrant filters on end_date > NOW() and would find nothing.
 func TestConcludeHHRequest_Approve_ClampsEndDateToAShorterMonth(t *testing.T) {
 	db, ctx := newTestDB(t)
 
@@ -197,14 +188,9 @@ func TestConcludeHHRequest_Approve_ClampsEndDateToAShorterMonth(t *testing.T) {
 	assert.Equal(t, time.Date(2021, 2, 28, 12, 0, 0, 0, time.UTC), joined[0].Grant.EndDate.UTC())
 }
 
-// The end date must not depend on the server's timezone, asserted through
-// ConcludeHHRequest rather than against the SQL expression on its own.
-//
-// This is the only test that can catch the regression. pkg/testutil pins every
-// session to UTC, where the fixed and unfixed expressions agree, so the clamping
-// test above passes either way — and an assertion against the expression string
-// passes even if the INSERT stops using it. So: a second pool onto the same
-// instance database with a non-UTC session, and the production path run over it.
+// The end date must not depend on the server's timezone, asserted through the
+// production path: every test session is pinned to UTC, where the correct and
+// incorrect expressions agree, so this needs its own pool with a different one.
 func TestConcludeHHRequest_EndDateIgnoresServerTimezone(t *testing.T) {
 	dbURL, err := testutil.NewTestOrdersDB(t, context.Background())
 	require.NoError(t, err)
@@ -239,7 +225,7 @@ func TestConcludeHHRequest_EndDateIgnoresServerTimezone(t *testing.T) {
 	require.Len(t, joined, 1)
 	require.NotNil(t, joined[0].Grant)
 
-	// Same instant a UTC server produces. Without the explicit conversion this is
-	// 13:00 UTC, an hour of grant length decided by server configuration.
+	// Without the explicit conversion this is 13:00 — an hour of grant length
+	// decided by server configuration.
 	assert.Equal(t, time.Date(2021, 2, 28, 12, 0, 0, 0, time.UTC), joined[0].Grant.EndDate.UTC())
 }

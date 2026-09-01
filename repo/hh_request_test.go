@@ -54,9 +54,10 @@ func TestConcludeHHRequest_Approve_CreatesGrant(t *testing.T) {
 	r, err := db.CreateHHRequest(ctx, hhRequestReq("kc-req-approve"))
 	require.NoError(t, err)
 
-	// No pinned start. A historical one would satisfy start_date <= NOW() but
-	// derive an end_date in the past, and GetActiveHHGrant requires
-	// end_date > NOW() — so it would find nothing here.
+	// No pinned start, so this covers the time.Now() default in ConcludeHHRequest.
+	// Read through GetAllHHRequests rather than GetActiveHHGrant: the latter
+	// filters start_date <= NOW() against the *database* clock, and the start
+	// here comes from the Go clock, so any skew between them makes it flake.
 	concluded, err := db.ConcludeHHRequest(ctx, r.ID, HHRequestConclusion{
 		Approved:    true,
 		Type:        common.HHGrantTypeHayal, // admin overrides the requested type
@@ -67,32 +68,53 @@ func TestConcludeHHRequest_Approve_CreatesGrant(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, common.HHRequestStatusApproved, concluded.Status)
 
-	grant, err := db.GetActiveHHGrant(ctx, "kc-req-approve")
+	joined, err := db.GetAllHHRequests(ctx, "", "kc-req-approve")
 	require.NoError(t, err)
-	require.NotNil(t, grant, "approval should create an active grant")
+	require.Len(t, joined, 1)
+	grant := joined[0].Grant
+	require.NotNil(t, grant, "approval creates a grant")
+
 	assert.Equal(t, r.ID, grant.RequestID, "grant is linked to its request")
 	assert.Equal(t, 75, grant.DiscountPct)
 	assert.Equal(t, common.HHGrantTypeHayal, grant.Type)
 	// Catches start and end being written to the wrong columns. It cannot show
-	// that the Go default was used — start is computed here and passed as a
+	// that the Go default was used — start is computed there and passed as a
 	// parameter, so this compares Go's clock against Go's own value and would
 	// pass just as well if a column default supplied it.
 	assert.WithinDuration(t, time.Now(), grant.StartDate, time.Minute)
-	// Coarse on purpose: the exact clamping semantics are pinned by the test
-	// below, and repeating them here would mean reimplementing Postgres month
-	// arithmetic in Go, which is the bug this file started with. Six months is
-	// somewhere between five and seven, which is enough to catch Months being
-	// ignored on the default-start path.
+	// Coarse on purpose: exact clamping is pinned below, and repeating it here
+	// would mean reimplementing Postgres month arithmetic in Go, which is the bug
+	// this file started with. Five to seven months is enough to catch Months
+	// being ignored on the default-start path.
 	assert.True(t, grant.EndDate.After(grant.StartDate.AddDate(0, 5, 0)),
 		"end %s is less than five months after start %s", grant.EndDate, grant.StartDate)
 	assert.True(t, grant.EndDate.Before(grant.StartDate.AddDate(0, 7, 0)),
 		"end %s is more than seven months after start %s", grant.EndDate, grant.StartDate)
+}
 
-	joined, err := db.GetAllHHRequests(ctx, "", "kc-req-approve")
+// A grant approved now is one GetActiveHHGrant will find. Separate from the test
+// above because that query compares start_date against the database clock while
+// the default start comes from the Go clock: a start a minute back tolerates
+// skew between them, which a start of "now" does not.
+func TestConcludeHHRequest_Approve_GrantIsActive(t *testing.T) {
+	db, ctx := newTestDB(t)
+
+	r, err := db.CreateHHRequest(ctx, hhRequestReq("kc-req-active"))
 	require.NoError(t, err)
-	require.Len(t, joined, 1)
-	require.NotNil(t, joined[0].Grant, "joined fetch embeds the grant")
-	assert.Equal(t, grant.ID, joined[0].Grant.ID)
+
+	_, err = db.ConcludeHHRequest(ctx, r.ID, HHRequestConclusion{
+		Approved:    true,
+		Type:        common.HHGrantTypeHayal,
+		DiscountPct: 75,
+		Months:      6,
+		StartDate:   null.TimeFrom(time.Now().Add(-time.Minute)),
+	})
+	require.NoError(t, err)
+
+	grant, err := db.GetActiveHHGrant(ctx, "kc-req-active")
+	require.NoError(t, err)
+	require.NotNil(t, grant, "a grant starting a minute ago should be active")
+	assert.Equal(t, 75, grant.DiscountPct)
 }
 
 func TestConcludeHHRequest_Approve_ReplacesActiveGrant(t *testing.T) {
@@ -192,7 +214,15 @@ func TestConcludeHHRequest_Approve_ClampsEndDateToAShorterMonth(t *testing.T) {
 	joined, err := db.GetAllHHRequests(ctx, "", "kc-req-clamp")
 	require.NoError(t, err)
 	require.Len(t, joined, 1)
-	require.NotNil(t, joined[0].Grant, "approval creates a grant regardless of its dates")
+	// The join returns a grant whatever its dates — a statement about this read
+	// path, not an endorsement of the write. A past start_date is accepted here
+	// and by the handler, which validates Type, DiscountPct and Months but not
+	// StartDate, and ConcludeHHRequest ends the member's current grant before
+	// inserting the replacement. So a stale start_date can retire a live grant
+	// and replace it with one that is already expired, and the request still
+	// succeeds. Out of scope for a test-only change; recorded so it is not read
+	// as intended behaviour.
+	require.NotNil(t, joined[0].Grant, "the join returns the grant whatever its dates")
 
 	// Exact instants because pkg/testutil pins the session to UTC. That makes
 	// this reproducible, not right: the production expression adds months in

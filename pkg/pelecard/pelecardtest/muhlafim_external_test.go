@@ -111,6 +111,25 @@ func TestFetchMuhlafim_EmptyWindow(t *testing.T) {
 	assert.Empty(t, entries)
 }
 
+// The direct Pelecard call skipped entries with no token. Nothing matches "" in
+// a caller's token map, so an empty key would be a silent miss rather than an
+// error.
+func TestFetchMuhlafim_DropsEmptyTokenKey(t *testing.T) {
+	client := withExternalPayments(t, "tok_secret", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{
+			"":     {"Token": "", "ActionDescription": "חיוב נקלט"},
+			"tok1": {"Token": "tok1", "ActionDescription": "נדחה לא יחויב"}
+		}`))
+	})
+
+	entries, err := client.FetchMuhlafim(context.Background(), "21/08/2025 00:00", "24/09/2025 00:00")
+
+	require.NoError(t, err)
+	assert.NotContains(t, entries, "", "an entry naming no replaced card is dropped")
+	assert.Len(t, entries, 1)
+	assert.Contains(t, entries, "tok1")
+}
+
 func TestFetchMuhlafim_Unauthorized(t *testing.T) {
 	client := withExternalPayments(t, "tok_wrong", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

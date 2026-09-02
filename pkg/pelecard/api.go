@@ -77,6 +77,18 @@ func (c *Client) FetchMuhlafim(ctx context.Context, startDate, endDate string) (
 		return nil, fmt.Errorf("failed to unmarshal external muhlafim response: %w", err)
 	}
 
+	// The direct Pelecard call this replaces skipped entries with no token, since
+	// a replacement that names no card being replaced cannot be matched to an
+	// order. external_payments keys the map by that token and is not expected to
+	// emit an empty one, so this only guards the contract rather than filtering
+	// anything in practice — and a caller that got one would look up "" in its
+	// own token map and match nothing silently.
+	if _, ok := entries[""]; ok {
+		delete(entries, "")
+		utils.LogFor(ctx).Warn("dropped muhlafim entry with an empty token",
+			slog.String("source", c.BaseURL))
+	}
+
 	return entries, nil
 }
 

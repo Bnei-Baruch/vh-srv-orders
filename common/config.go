@@ -24,12 +24,10 @@ type envConfig struct {
 	S3BucketName string `envconfig:"S3_BUCKET_NAME"`
 	S3Endpoint   string `envconfig:"S3_ENDPOINT"`
 
-	// Identifies this service to external_payments, which performs Pelecard
-	// access on its behalf. Must be a client key issued with an organization
-	// (ben2, matching what billing charges) — the organization is taken from the
-	// key and is not sent in the request. A shared internal token carries no
-	// organization and is rejected.
-
+	// Also identifies this service to external_payments, which performs the
+	// Pelecard access on its behalf: it resolves the Keycloak client to a
+	// registered caller and takes the organization from it, so nothing about the
+	// merchant account is sent in the request.
 	KeycloakServerUrl    string `envconfig:"KEYCLOAK_SERVER_URL"`
 	KeycloakRealm        string `envconfig:"KEYCLOAK_REALM"`
 	KeycloakClientID     string `envconfig:"KEYCLOAK_CLIENT_ID"`

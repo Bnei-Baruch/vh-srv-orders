@@ -15,16 +15,19 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
+// Still spelled "pelecard" so existing runbooks keep working, though this
+// service no longer reaches Pelecard: external_payments does, and owns the
+// credentials and terminals.
 var pelecardCmd = &cobra.Command{
 	Use:   "pelecard",
-	Short: "Pelecard commands",
-	Long:  "Pelecard commands. See subcommands for more details.",
+	Short: "Payment commands, served by external_payments",
+	Long:  "Payment commands. See subcommands for more details.",
 }
 
 var muhlafimCmd = &cobra.Command{
 	Use:   "muhlafim",
-	Short: "Process muhlafim (card status updates) from Pelecard",
-	Long:  "Fetches muhlafim data from Pelecard API and updates order flags based on action descriptions",
+	Short: "Process muhlafim (card status updates)",
+	Long:  "Fetches muhlafim data from external_payments and updates order flags based on action descriptions",
 	Run:   muhlafimFn,
 }
 
@@ -92,14 +95,13 @@ func parseFlags(cmd *cobra.Command) (string, string) {
 }
 
 func validateConfig() {
-	if common.Config.PelecardNewTerminalNumber == "" {
-		utils.LogFatal("PELECARD_NEW_TERMINAL_NUMBER environment variable is required")
+	// Muhlafim comes from external_payments now, so what this needs is a
+	// Keycloak identity rather than Pelecard credentials.
+	if common.Config.KeycloakServerUrl == "" || common.Config.KeycloakRealm == "" {
+		utils.LogFatal("KEYCLOAK_SERVER_URL and KEYCLOAK_REALM are required")
 	}
-	if common.Config.PelecardUser == "" {
-		utils.LogFatal("PELECARD_USER environment variable is required")
-	}
-	if common.Config.PelecardPassword == "" {
-		utils.LogFatal("PELECARD_PASSWORD environment variable is required")
+	if common.Config.KeycloakClientID == "" || common.Config.KeycloakClientSecret == "" {
+		utils.LogFatal("KEYCLOAK_CLIENT_ID and KEYCLOAK_CLIENT_SECRET are required")
 	}
 }
 

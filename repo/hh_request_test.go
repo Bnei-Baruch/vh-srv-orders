@@ -77,12 +77,20 @@ func TestConcludeHHRequest_Approve_CreatesGrant(t *testing.T) {
 	grant := joined[0].Grant
 	require.NotNil(t, grant, "approval creates a grant")
 
+	// Both start checks run before the poll, so neither is charged for the time it
+	// spends: a tolerance read after the poll would fail on the poll's own
+	// duration once that budget approaches it.
+	//
 	// The start was passed as a parameter from the Go clock, so comparing it to the
-	// Go clock is exact and no skew enters. Asserted here rather than left to the
-	// poll below, which cannot tell a future-dated start from a database that is
-	// behind and would retry both.
+	// Go clock is exact and no skew enters. The future-dating check has to be here
+	// rather than left to the poll, which cannot tell a future-dated start from a
+	// database that is behind and would retry both.
 	assert.False(t, grant.StartDate.After(time.Now()),
 		"the default start is in the future: %s", grant.StartDate)
+	// Catches start and end written to the wrong columns. It cannot show the Go
+	// default was used: start is passed as a parameter, so this compares Go's
+	// clock against Go's own value.
+	assert.WithinDuration(t, time.Now(), grant.StartDate, time.Minute)
 
 	// GetActiveHHGrant filters start_date <= NOW() on the database clock, against
 	// that Go-clock start, so a database behind the host has not reached it yet.
@@ -113,10 +121,6 @@ func TestConcludeHHRequest_Approve_CreatesGrant(t *testing.T) {
 	assert.Equal(t, r.ID, grant.RequestID, "grant is linked to its request")
 	assert.Equal(t, 75, grant.DiscountPct)
 	assert.Equal(t, common.HHGrantTypeHayal, grant.Type)
-	// Catches start and end written to the wrong columns. It cannot show the Go
-	// default was used: start is passed as a parameter, so this compares Go's
-	// clock against Go's own value.
-	assert.WithinDuration(t, time.Now(), grant.StartDate, time.Minute)
 	// Coarse on purpose: an exact expectation here means either reimplementing
 	// Postgres month arithmetic in Go — the bug this file started with — or
 	// copying the production expression. Pinned exactly in the clamping test.
@@ -265,10 +269,12 @@ func withSessionTimezone(t *testing.T, dbURL, timezone string) string {
 	require.NoError(t, err)
 	query := u.Query()
 
+	// Matched case-insensitively: Postgres parameter names are, so the pin is free
+	// to say TimeZone= or timezone= and this must find either.
 	settings := strings.Fields(query.Get("options"))
 	found := 0
 	for i, setting := range settings {
-		if strings.HasPrefix(setting, "timezone=") {
+		if strings.HasPrefix(strings.ToLower(setting), "timezone=") {
 			settings[i] = "timezone=" + timezone
 			found++
 		}

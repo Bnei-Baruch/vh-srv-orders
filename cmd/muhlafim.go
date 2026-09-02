@@ -15,16 +15,19 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
+// Still spelled "pelecard" so existing runbooks keep working, though this
+// service no longer reaches Pelecard: external_payments does, and owns the
+// credentials and terminals.
 var pelecardCmd = &cobra.Command{
 	Use:   "pelecard",
-	Short: "Pelecard commands",
-	Long:  "Pelecard commands. See subcommands for more details.",
+	Short: "Payment commands, served by external_payments",
+	Long:  "Payment commands. See subcommands for more details.",
 }
 
 var muhlafimCmd = &cobra.Command{
 	Use:   "muhlafim",
-	Short: "Process muhlafim (card status updates) from Pelecard",
-	Long:  "Fetches muhlafim data from Pelecard API and updates order flags based on action descriptions",
+	Short: "Process muhlafim (card status updates)",
+	Long:  "Fetches muhlafim data from external_payments and updates order flags based on action descriptions",
 	Run:   muhlafimFn,
 }
 

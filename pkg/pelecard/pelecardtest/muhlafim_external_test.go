@@ -117,6 +117,9 @@ func TestFetchMuhlafim_TokenNotSetOnSharedClient(t *testing.T) {
 	assert.Empty(t, client.Client.Header.Get("Authorization"))
 }
 
+// A genuinely quiet window is not an error, which is also what keeps the
+// key-equals-token guard from failing empty months: it errors only when a
+// response carried entries and kept none.
 func TestFetchMuhlafim_EmptyWindow(t *testing.T) {
 	client := withExternalPayments(t, "tok_secret", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{}`))
@@ -224,19 +227,6 @@ func TestFetchMuhlafim_AllEntriesDropped_IsAnError(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, entries)
 	assert.Contains(t, err.Error(), "none was keyed by its own token")
-}
-
-// A genuinely quiet window still has to be reportable, or the guard above would
-// fail every empty month.
-func TestFetchMuhlafim_EmptyWindow_IsNotAnError(t *testing.T) {
-	client := withExternalPayments(t, "tok_secret", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{}`))
-	})
-
-	entries, err := client.FetchMuhlafim(context.Background(), "21/08/2025 00:00", "24/09/2025 00:00")
-
-	require.NoError(t, err)
-	assert.Empty(t, entries)
 }
 
 func TestFetchMuhlafim_Unauthorized(t *testing.T) {

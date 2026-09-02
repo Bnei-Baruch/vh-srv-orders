@@ -57,8 +57,10 @@ func NewTestOrdersDB(t *testing.T, ctx context.Context) (string, error) {
 		// timezone is lost. Any two-parameter URL has that hazard, whichever
 		// spelling is used.
 		//
-		// The pin also hides the session-timezone dependence it compensates for,
-		// so no test in CI can observe it: issue #20.
+		// The pin also hides the session-timezone dependence it compensates for
+		// (issue #20), so a test that wants to observe it has to open its own pool
+		// against another timezone — repo.TestConcludeHHRequest_EndDateDependsOn-
+		// SessionTimezone does exactly that, and is the only test that may.
 		Options: "sslmode=disable&options=-c%20timezone%3DUTC",
 	}
 

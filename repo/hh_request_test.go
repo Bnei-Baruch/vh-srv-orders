@@ -77,11 +77,19 @@ func TestConcludeHHRequest_Approve_CreatesGrant(t *testing.T) {
 	grant := joined[0].Grant
 	require.NotNil(t, grant, "approval creates a grant")
 
+	// The start was passed as a parameter from the Go clock, so comparing it to the
+	// Go clock is exact and no skew enters. Asserted here rather than left to the
+	// poll below, which cannot tell a future-dated start from a database that is
+	// behind and would retry both.
+	assert.False(t, grant.StartDate.After(time.Now()),
+		"the default start is in the future: %s", grant.StartDate)
+
 	// GetActiveHHGrant filters start_date <= NOW() on the database clock, against
-	// a start that came from the Go clock, so a database behind the host has not
-	// reached it yet. Polled, with the same order of slack the rest of this file
-	// allows for skew. Only the no-rows result is retried: a query error would
-	// otherwise spend the whole budget and be reported as skew.
+	// that Go-clock start, so a database behind the host has not reached it yet.
+	// Polled, with the same order of slack the rest of this file allows for skew;
+	// the budget is skew tolerance only, since the assertion above already pins
+	// the part that must hold immediately. Only the no-rows result is retried: a
+	// query error would otherwise spend the whole budget and be reported as skew.
 	//
 	// Not require.Eventually — its failure-message arguments are evaluated before
 	// the first poll.
@@ -205,6 +213,11 @@ func TestGetAllHHRequests_FiltersByStatusAndKcid(t *testing.T) {
 // the month can hold. The start is pinned and historical so the assertion never
 // depends on the run date, which means reading through GetAllHHRequests —
 // a grant that has already ended fails GetActiveHHGrant's end_date > NOW().
+//
+// DEPENDS ON #19: the historical start only works because ConcludeHHRequest
+// accepts one. Fixing #19 makes the conclude call below fail, not the clamping
+// assertion — repin the start on a 31st the fix allows rather than loosening
+// the assertion, and keep it absolute so this test stays date-independent.
 func TestConcludeHHRequest_Approve_ClampsEndDateToAShorterMonth(t *testing.T) {
 	db, ctx := newTestDB(t)
 
@@ -242,6 +255,10 @@ func TestConcludeHHRequest_Approve_ClampsEndDateToAShorterMonth(t *testing.T) {
 // parameter of a pgtestdb URL. Parsed, not string-replaced, and only the
 // timezone setting is touched: the pin's encoding is pkg/testutil's business,
 // and any other -c setting it grows later has to survive.
+//
+// Splits on whitespace, so it holds for settings with whitespace-free values —
+// all the pin has ever carried. A value with an escaped space would need the
+// libpq quoting rules, which is not worth carrying here until something needs it.
 func withSessionTimezone(t *testing.T, dbURL, timezone string) string {
 	t.Helper()
 	u, err := url.Parse(dbURL)
@@ -283,7 +300,10 @@ func TestConcludeHHRequest_EndDateDependsOnSessionTimezone(t *testing.T) {
 	jerusalemURL := withSessionTimezone(t, dbURL, "Asia/Jerusalem")
 
 	jerusalem, err := NewOrdersDBUrl(ctx, jerusalemURL, new(events.NoopEmitter))
-	require.NoError(t, err)
+	// The server rejects the startup parameter outright if it does not know the
+	// zone, so this fails before the guard below with pgx's own wording.
+	require.NoError(t, err, "connecting with TimeZone=Asia/Jerusalem: does the "+
+		"server have tzdata for it?")
 	t.Cleanup(jerusalem.Close)
 
 	var tz string

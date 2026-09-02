@@ -54,14 +54,22 @@ func Do(w *Worker) {
 	}
 	defer sentry.Flush(2 * time.Second)
 
-	// do the thing
+	// do the thing.
+	//
+	// Close is called on the failure paths too, and explicitly rather than
+	// deferred: utils.LogFatal ends in os.Exit, which runs no deferred functions
+	// — the `defer sentry.Flush` above it does not run on these paths either.
+	// Without this the emitter is never drained on exactly the runs that produced
+	// events worth keeping.
 	if err := w.Init(); err != nil {
 		sentry.CaptureException(err)
+		w.Close()
 		utils.LogFatal("worker.Init", slog.Any("err", err))
 	}
 
 	if err := w.DoTask(); err != nil {
 		sentry.CaptureException(err)
+		w.Close()
 		utils.LogFatal("im.DoTask", slog.Any("err", err))
 	}
 
@@ -86,11 +94,18 @@ func (w *Worker) Init() error {
 	return nil
 }
 
+// Close is safe to call after a failed Init, which is where it matters: Init
+// creates the emitter before the repo, so a database failure leaves an emitter
+// holding undelivered events and no repo to close.
 func (w *Worker) Close() {
-	w.repo.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	w.eventEmitter.Close(ctx)
+	if w.repo != nil {
+		w.repo.Close()
+	}
+	if w.eventEmitter != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		w.eventEmitter.Close(ctx)
+	}
 }
 
 func (w *Worker) DoTask() error {

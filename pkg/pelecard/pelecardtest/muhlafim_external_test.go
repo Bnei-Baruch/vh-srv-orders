@@ -211,6 +211,34 @@ func TestFetchMuhlafim_DropsEntriesWhoseKeyIsNotTheirToken(t *testing.T) {
 	}, entries)
 }
 
+// Nothing surviving is the case that bites: returning an empty map with no error
+// lets the billing run proceed to charge cards Pelecard reported as replaced,
+// and reads exactly like a month with no replacements.
+func TestFetchMuhlafim_AllEntriesDropped_IsAnError(t *testing.T) {
+	client := withExternalPayments(t, "tok_secret", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"error": {"code": 502, "message": "upstream"}}`))
+	})
+
+	entries, err := client.FetchMuhlafim(context.Background(), "21/08/2025 00:00", "24/09/2025 00:00")
+
+	require.Error(t, err)
+	assert.Nil(t, entries)
+	assert.Contains(t, err.Error(), "none was keyed by its own token")
+}
+
+// A genuinely quiet window still has to be reportable, or the guard above would
+// fail every empty month.
+func TestFetchMuhlafim_EmptyWindow_IsNotAnError(t *testing.T) {
+	client := withExternalPayments(t, "tok_secret", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{}`))
+	})
+
+	entries, err := client.FetchMuhlafim(context.Background(), "21/08/2025 00:00", "24/09/2025 00:00")
+
+	require.NoError(t, err)
+	assert.Empty(t, entries)
+}
+
 func TestFetchMuhlafim_Unauthorized(t *testing.T) {
 	client := withExternalPayments(t, "tok_wrong", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

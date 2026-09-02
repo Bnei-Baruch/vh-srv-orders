@@ -45,14 +45,22 @@ func doImport(im importer) {
 	}
 	defer sentry.Flush(2 * time.Second)
 
-	// do the thing
+	// do the thing.
+	//
+	// Close is called on the failure paths too, and explicitly rather than
+	// deferred: utils.LogFatal ends in os.Exit, which runs no deferred functions
+	// — the `defer sentry.Flush` above it does not run on these paths either.
+	// Without this the emitter is never drained on exactly the runs that produced
+	// events worth keeping.
 	if err := im.Init(); err != nil {
 		sentry.CaptureException(err)
+		im.Close()
 		utils.LogFatal("importer.Init", slog.Any("err", err))
 	}
 
 	if err := im.Import(); err != nil {
 		sentry.CaptureException(err)
+		im.Close()
 		utils.LogFatal("im.Import", slog.Any("err", err))
 	}
 
@@ -89,10 +97,18 @@ func (im *BaseImporter) Init() error {
 	return nil
 }
 
+// Close is safe to call after a failed Init, which is where it matters: Init
+// creates the emitter before the repo, so a database failure leaves an emitter
+// holding undelivered events and no repo to close.
 func (im *BaseImporter) Close() {
-	im.repo.Close()
-	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
-	im.eventEmitter.Close(ctx)
+	if im.repo != nil {
+		im.repo.Close()
+	}
+	if im.eventEmitter != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		im.eventEmitter.Close(ctx)
+	}
 }
 
 func (im *BaseImporter) getOrCreateAccount(ctx context.Context, email string) (int, error) {

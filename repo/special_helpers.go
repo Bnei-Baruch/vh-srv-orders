@@ -39,6 +39,7 @@ func (o *OrdersDB) SetKeycloakIdByEmail(ctx context.Context, email string, keycl
 	}
 	return nil
 }
+
 // DeleteSpecialsByKeycloakId revokes the user's currently-active special(s) via
 // DeleteSpecialById — the single primitive that ends a row and emits delete_special.
 // Past spans keep their history and future spans stay scheduled.

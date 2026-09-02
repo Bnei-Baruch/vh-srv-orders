@@ -511,4 +511,3 @@ func TestRecordPostPaymentError_NilPayment_NoPanic(t *testing.T) {
 
 	assert.Equal(t, int64(1), stats.errorCount.Get("post_payment"))
 }
-

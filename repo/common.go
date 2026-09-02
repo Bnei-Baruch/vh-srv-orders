@@ -24,7 +24,7 @@ func GetDBURL() string {
 
 // Migration files path, also used in tests.
 func MigrationFiles() string {
-  return "file://./db/migrations"
+	return "file://./db/migrations"
 }
 
 func SyncDBStructInsertionAndMigrations() error {

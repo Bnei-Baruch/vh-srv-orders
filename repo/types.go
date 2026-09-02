@@ -295,7 +295,6 @@ type AccountMergeRequest struct {
 	DestinationKeycloakID null.String `json:"destination_keycloak_id"`
 }
 
-
 type RequestNewToken struct {
 	// Part for Pelecard
 	GoodURL   string `json:"GoodURL"`

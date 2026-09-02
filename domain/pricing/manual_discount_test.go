@@ -81,7 +81,7 @@ func TestApplyManualDiscount_FixedPriceEligible(t *testing.T) {
 }
 
 func TestApplyManualDiscount_FixedPriceInDifferentCurrency(t *testing.T) {
-	eval := baseEval() // base = 80 NIS, final = 80 NIS; 80 NIS = ~25.8 USD at 3.1
+	eval := baseEval()                                                             // base = 80 NIS, final = 80 NIS; 80 NIS = ~25.8 USD at 3.1
 	applyManualDiscount(context.Background(), eval, fixedDiscount(4, 10.0, "USD")) // 10 USD < 25.8 USD equiv
 
 	require.Len(t, eval.Discounts, 1)

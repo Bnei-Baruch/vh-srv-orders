@@ -150,7 +150,7 @@ func TestSameAmount_FloatTolerance(t *testing.T) {
 	assert.True(t, sameAmount(180, 179.999999999999)) // float noise doesn't block
 	assert.True(t, sameAmount(180, 180.000000000001))
 	assert.True(t, sameAmount(90, 89.99999999999999)) // e.g. noisy 50% discount math
-	assert.False(t, sameAmount(180, 180.01)) // a real cent difference blocks
+	assert.False(t, sameAmount(180, 180.01))          // a real cent difference blocks
 	assert.False(t, sameAmount(180, 179.99))
 	assert.False(t, sameAmount(180, 181))
 }

@@ -55,9 +55,9 @@ func testRenewalDataWithCard() *repo.RenewalData {
 	data := testRenewalData()
 	data.Order.CardDetailsId = null.IntFrom(99)
 	data.Card = &repo.CardDetails{
-		ID:     99,
-		Token:  null.StringFrom("CARD_TOKEN_789"),
-		Active: null.BoolFrom(true),
+		ID:        99,
+		Token:     null.StringFrom("CARD_TOKEN_789"),
+		Active:    null.BoolFrom(true),
 		CCNumber:  null.StringFrom("4111****1111"),
 		CCExpDate: null.StringFrom("1225"),
 	}
@@ -240,4 +240,3 @@ func TestProcessOrder_FinalizeError_PostPayment(t *testing.T) {
 	assert.NotNil(t, payment)
 	assert.Equal(t, "1", payment.Success.String, "payment succeeded at gateway even though DB failed")
 }
-

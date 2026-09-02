@@ -70,8 +70,8 @@ const (
 	OrderFlagMuhLotakin     = "muh_lotakin"
 	OrderFlagMuhAher        = "muh_aher"
 	OrderFlagPaused         = "paused"
-	OrderFlagSkip          = "skip"
-	OrderFlagPricingError  = "pricing_error"
+	OrderFlagSkip           = "skip"
+	OrderFlagPricingError   = "pricing_error"
 
 	HHGrantTypeHayal  = "hh-hayal"
 	HHGrantTypeGimlaj = "hh-gimlaj"

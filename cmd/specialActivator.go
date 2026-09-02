@@ -88,7 +88,8 @@ func (w *Worker) Init() error {
 
 func (w *Worker) Close() {
 	w.repo.Close()
-	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	w.eventEmitter.Close(ctx)
 }
 

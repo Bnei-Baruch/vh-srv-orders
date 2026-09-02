@@ -107,25 +107,38 @@ func (c *Client) FetchMuhlafim(ctx context.Context, startDate, endDate string) (
 
 	// The direct Pelecard call this replaces built the map itself, so the key was
 	// the entry's own token by construction. Reading a map off the wire loses
-	// that, and both ways of losing it fail silently: an entry keyed by "" — or
-	// keyed by anything that is not its own token — matches nothing in a caller's
-	// token map, and an HTTP-200 envelope whose values happen to be objects, say
-	// {"error":{...}}, unmarshals into one junk entry and reports as a window with
-	// no replacements. external_payments does key by entry.Token
-	// (pelecard/pelecard.go:250) and drops empty ones, so this guards the contract
-	// rather than filtering anything in practice.
+	// that, and an entry keyed by "" — or by anything that is not its own token —
+	// matches nothing in a caller's token map. external_payments does key by
+	// entry.Token and drops empty ones, so nothing is expected to be dropped here.
+	//
+	// An empty result is therefore reported as an error rather than as a quiet
+	// window: an HTTP-200 envelope whose values are objects, say {"error":{...}},
+	// unmarshals into junk entries that all fail this check, and returning
+	// (empty, nil) for that would let the billing run proceed to charge cards
+	// Pelecard had reported as replaced or cancelled — indistinguishable from a
+	// month with no replacements. The same applies if external_payments ever stops
+	// emitting the redundant Token field inside each value.
+	kept := make(map[string]MuhlafimEntry, len(entries))
 	for key, entry := range entries {
 		if key != "" && key == entry.Token {
-			continue
+			kept[key] = entry
 		}
-		delete(entries, key)
-		utils.LogFor(ctx).Warn("dropped muhlafim entry whose key is not its token",
-			slog.Bool("key_empty", key == ""),
-			slog.Bool("token_empty", entry.Token == ""),
-			slog.String("source", c.BaseURL))
 	}
 
-	return entries, nil
+	if dropped := len(entries) - len(kept); dropped > 0 {
+		utils.LogFor(ctx).Warn("dropped muhlafim entries whose key is not their token",
+			slog.Int("dropped", dropped),
+			slog.Int("kept", len(kept)),
+			slog.String("source", c.BaseURL))
+
+		if len(kept) == 0 {
+			return nil, fmt.Errorf(
+				"external muhlafim returned %d entries and none was keyed by its own token, "+
+					"refusing to report an empty window", dropped)
+		}
+	}
+
+	return kept, nil
 }
 
 // ChargeByToken sends a token-based charge request to the payment gateway.

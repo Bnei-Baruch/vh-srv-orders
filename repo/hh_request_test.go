@@ -85,12 +85,16 @@ func TestConcludeHHRequest_Approve_CreatesGrant(t *testing.T) {
 	// Go clock is exact and no skew enters. The future-dating check has to be here
 	// rather than left to the poll, which cannot tell a future-dated start from a
 	// database that is behind and would retry both.
-	assert.False(t, grant.StartDate.After(time.Now()),
+	// require, not assert: an assert would record and fall through into the poll,
+	// which then cannot match start_date <= NOW() and spends its whole budget to
+	// die pointing at clock skew — the misdiagnosis these two checks exist to
+	// prevent.
+	require.False(t, grant.StartDate.After(time.Now()),
 		"the default start is in the future: %s", grant.StartDate)
 	// Catches start and end written to the wrong columns. It cannot show the Go
 	// default was used: start is passed as a parameter, so this compares Go's
 	// clock against Go's own value.
-	assert.WithinDuration(t, time.Now(), grant.StartDate, time.Minute)
+	require.WithinDuration(t, time.Now(), grant.StartDate, time.Minute)
 
 	// GetActiveHHGrant filters start_date <= NOW() on the database clock, against
 	// that Go-clock start, so a database behind the host has not reached it yet.
@@ -270,7 +274,12 @@ func withSessionTimezone(t *testing.T, dbURL, timezone string) string {
 	t.Helper()
 	u, err := url.Parse(dbURL)
 	require.NoError(t, err)
-	query := u.Query()
+	// Not u.Query(), which discards ParseQuery's error and returns only the pairs
+	// it managed to parse. RawQuery is rebuilt from this map below, so a pair it
+	// could not parse would be dropped from the URL — including sslmode, and
+	// silently, since the found==1 guard only covers the timezone token.
+	query, err := url.ParseQuery(u.RawQuery)
+	require.NoError(t, err)
 
 	// Matched case-insensitively: Postgres parameter names are, so the pin is free
 	// to say TimeZone= or timezone= and this must find either.

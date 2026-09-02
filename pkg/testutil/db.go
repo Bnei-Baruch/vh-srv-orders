@@ -44,23 +44,15 @@ func NewTestOrdersDB(t *testing.T, ctx context.Context) (string, error) {
 		Host:       common.Config.PgHost,
 		Port:       common.Config.PgPort,
 		Database:   url.QueryEscape(common.Config.PgDbName),
-		// Timezone pinned so results do not depend on the developer's Postgres:
-		// SQL that resolves a calendar unit does so in the session timezone.
+		// Timezone pinned so calendar arithmetic does not depend on the developer's
+		// Postgres; it also hides the dependence it compensates for, so a test that
+		// wants to observe issue #20 must open its own pool on another timezone.
 		//
-		// An `options` startup parameter rather than `timezone=UTC`: both Go
-		// drivers forward the plain spelling, but psql rejects it outright with
-		// `invalid URI query parameter: "timezone"`, and the URL pgtestdb logs
-		// exists to be pasted into psql.
-		//
-		// Quote that URL when pasting it. Unquoted, the shell splits at the
-		// ampersand: psql goes to the background with sslmode alone and the
-		// timezone is lost. Any two-parameter URL has that hazard, whichever
-		// spelling is used.
-		//
-		// The pin also hides the session-timezone dependence it compensates for
-		// (issue #20), so a test that wants to observe it has to open its own pool
-		// against another timezone — repo.TestConcludeHHRequest_EndDateDependsOn-
-		// SessionTimezone does exactly that, and is the only test that may.
+		// Spelled as an `options` startup parameter, not `timezone=UTC`: the Go
+		// drivers take either, but psql rejects the plain form with
+		// `invalid URI query parameter: "timezone"`, and this URL gets pasted into
+		// psql. Quote it there — unquoted, the shell splits at the ampersand and
+		// the timezone is silently lost.
 		Options: "sslmode=disable&options=-c%20timezone%3DUTC",
 	}
 

@@ -96,8 +96,12 @@ func TestConcludeHHRequest_Approve_CreatesGrant(t *testing.T) {
 	// Only the no-rows result (nil, nil) is retried. A query error is a real
 	// failure — retrying one turns a dead pool into sixty identical failures and
 	// a three-second wait reported as clock skew.
+	// Thirty seconds, not three: the slack elsewhere in this file is a minute
+	// (below) and an hour (insertHHGrant), and a tight budget here would make a
+	// database seconds behind the host fail this test alone — which reads as a
+	// bug in the default start rather than as the skew it is.
 	var active *HHGrant
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for {
 		var err error
 		active, err = db.GetActiveHHGrant(ctx, "kc-req-approve")
@@ -277,7 +281,11 @@ func withSessionTimezone(t *testing.T, dbURL, timezone string) string {
 	require.Equal(t, 1, found, "test URL should carry exactly one pinned timezone")
 
 	query.Set("options", strings.Join(settings, " "))
-	u.RawQuery = query.Encode()
+	// Encode renders a space as "+", which libpq sends to the server literally —
+	// a URL that no longer connects when pasted into psql, which is what the
+	// pinned spelling in pkg/testutil exists to preserve. A literal plus is
+	// already "%2B" by here, so only spaces are affected.
+	u.RawQuery = strings.ReplaceAll(query.Encode(), "+", "%20")
 	return u.String()
 }
 

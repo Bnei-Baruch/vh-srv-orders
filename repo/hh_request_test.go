@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -89,20 +90,24 @@ func TestConcludeHHRequest_Approve_CreatesGrant(t *testing.T) {
 	// default is the point of this test — a backdated start would test something
 	// else. The sibling test can backdate, and does.
 	// Hand-rolled rather than require.Eventually: its failure message takes
-	// eagerly-evaluated arguments, so a message built from lastErr and the clock
-	// would report their values from before the first poll — always a nil error.
+	// eagerly-evaluated arguments, so a message built from the clock would report
+	// the value from before the first poll.
+	//
+	// Only the no-rows result (nil, nil) is retried. A query error is a real
+	// failure — retrying one turns a dead pool into sixty identical failures and
+	// a three-second wait reported as clock skew.
 	var active *HHGrant
-	var lastErr error
 	deadline := time.Now().Add(3 * time.Second)
 	for {
-		active, lastErr = db.GetActiveHHGrant(ctx, "kc-req-approve")
-		if lastErr == nil && active != nil {
+		var err error
+		active, err = db.GetActiveHHGrant(ctx, "kc-req-approve")
+		require.NoError(t, err)
+		if active != nil {
 			break
 		}
 		if time.Now().After(deadline) {
 			require.FailNowf(t, "a grant starting now never became active",
-				"last error %v; if there is no error, compare the database clock against %s",
-				lastErr, time.Now().UTC())
+				"no error, so compare the database clock against %s", time.Now().UTC())
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
@@ -247,18 +252,31 @@ func TestConcludeHHRequest_Approve_ClampsEndDateToAShorterMonth(t *testing.T) {
 	assert.Equal(t, time.Date(2020, 11, 30, 12, 0, 0, 0, time.UTC), joined[0].Grant.EndDate.UTC())
 }
 
-// withSessionTimezone repoints the `options` startup parameter of a pgtestdb URL
-// at another timezone. Parsed rather than string-replaced: the percent-encoding
-// of the pin is pkg/testutil's business, and a change there would turn a
-// replace into a silent no-op the guard below could only misreport.
+// withSessionTimezone repoints the timezone carried by the `options` startup
+// parameter of a pgtestdb URL. Parsed rather than string-replaced: the
+// percent-encoding of the pin is pkg/testutil's business, and a change there
+// would turn a replace into a silent no-op the guard could only misreport.
+//
+// Only the timezone setting is rewritten, and exactly one must be found:
+// overwriting the whole parameter would drop any other -c setting the pin grows
+// later, leaving this test the only one running without it.
 func withSessionTimezone(t *testing.T, dbURL, timezone string) string {
 	t.Helper()
 	u, err := url.Parse(dbURL)
 	require.NoError(t, err)
 	query := u.Query()
-	require.Contains(t, query.Get("options"), "timezone=",
-		"test URL should carry the pinned timezone")
-	query.Set("options", "-c timezone="+timezone)
+
+	settings := strings.Fields(query.Get("options"))
+	found := 0
+	for i, setting := range settings {
+		if strings.HasPrefix(setting, "timezone=") {
+			settings[i] = "timezone=" + timezone
+			found++
+		}
+	}
+	require.Equal(t, 1, found, "test URL should carry exactly one pinned timezone")
+
+	query.Set("options", strings.Join(settings, " "))
 	u.RawQuery = query.Encode()
 	return u.String()
 }
@@ -269,9 +287,15 @@ func withSessionTimezone(t *testing.T, dbURL, timezone string) string {
 // timezone-dependent. Going red is the intended signal that #20 is fixed —
 // delete this test then. Reviewed and kept deliberately; not a defect.
 //
-// Three months from 2020-08-31 12:00Z is 13:00Z under a +02 session, where UTC
-// gives 12:00Z. Every other test here runs under the UTC pin in pkg/testutil,
-// which is why this one opens its own pool.
+// The hour comes from DST, not from the offset: Asia/Jerusalem is +03 (IDT) on
+// 31 August 2020, so 12:00Z is 15:00 local, and three months later — 30 November,
+// clamped — the zone is back on +02 (IST), making 15:00 local 13:00Z. A UTC
+// session gives 12:00Z. A fixed-offset zone such as Etc/GMT-2 also gives 12:00Z
+// and would turn this test red without any bug: the offset cancels, the shift
+// between the two dates does not.
+//
+// Every other test here runs under the UTC pin in pkg/testutil, which is why
+// this one opens its own pool.
 func TestConcludeHHRequest_EndDateDependsOnSessionTimezone(t *testing.T) {
 	dbURL, err := testutil.NewTestOrdersDB(t, context.Background())
 	require.NoError(t, err)

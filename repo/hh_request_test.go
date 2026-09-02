@@ -70,13 +70,42 @@ func TestConcludeHHRequest_Approve_CreatesGrant(t *testing.T) {
 	assert.Equal(t, r.ID, grant.RequestID, "grant is linked to its request")
 	assert.Equal(t, 75, grant.DiscountPct)
 	assert.Equal(t, common.HHGrantTypeHayal, grant.Type)
-	assert.WithinDuration(t, time.Now().AddDate(0, 6, 0), grant.EndDate, time.Minute)
+	assert.True(t, grant.EndDate.After(time.Now()), "active grant ends in the future")
 
 	joined, err := db.GetAllHHRequests(ctx, "", "kc-req-approve")
 	require.NoError(t, err)
 	require.Len(t, joined, 1)
 	require.NotNil(t, joined[0].Grant, "joined fetch embeds the grant")
 	assert.Equal(t, grant.ID, joined[0].Grant.ID)
+}
+
+// TestConcludeHHRequest_GrantEndDateClampsMonthEnd guards the month-end behavior with
+// fixed dates (read via the join, so the grant need not be currently active): a 6-month
+// grant starting Aug 31 ends Feb 28 — Postgres make_interval clamps the day. This is the
+// case the old wall-clock assertion got wrong (Go AddDate overflows to Mar 3).
+func TestConcludeHHRequest_GrantEndDateClampsMonthEnd(t *testing.T) {
+	db, ctx := newTestDB(t)
+
+	r, err := db.CreateHHRequest(ctx, hhRequestReq("kc-req-clamp"))
+	require.NoError(t, err)
+
+	start := time.Date(2024, 8, 31, 0, 0, 0, 0, time.UTC)
+	_, err = db.ConcludeHHRequest(ctx, r.ID, HHRequestConclusion{
+		Approved:    true,
+		Type:        common.HHGrantTypeHayal,
+		DiscountPct: 50,
+		Months:      6,
+		StartDate:   null.TimeFrom(start),
+		Note:        null.StringFrom("clamp check"),
+	})
+	require.NoError(t, err)
+
+	joined, err := db.GetAllHHRequests(ctx, "", "kc-req-clamp")
+	require.NoError(t, err)
+	require.Len(t, joined, 1)
+	require.NotNil(t, joined[0].Grant)
+	expectedEnd := time.Date(2025, 2, 28, 0, 0, 0, 0, time.UTC) // Aug 31 + 6mo clamps to Feb 28
+	assert.WithinDuration(t, expectedEnd, joined[0].Grant.EndDate, time.Second)
 }
 
 func TestConcludeHHRequest_Approve_ReplacesActiveGrant(t *testing.T) {

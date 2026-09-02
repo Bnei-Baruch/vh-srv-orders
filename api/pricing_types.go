@@ -14,7 +14,6 @@ type monthlyPriceResponse struct {
 	PricingVersion string             `json:"pricing_version"`
 	HasErrors      bool               `json:"has_errors,omitempty"`
 	V2Details      *v2DetailsResponse `json:"v2_details,omitempty"`
-	V1AllPrices    map[string]float64 `json:"v1_all_prices,omitempty"`
 }
 
 type v2DetailsResponse struct {
@@ -43,7 +42,6 @@ func toMonthlyPriceResponse(res *pricing.MonthlyPriceRes, isAdmin bool) monthlyP
 		Amount:         res.Amount.Float64,
 		Currency:       res.Currency.String,
 		PricingVersion: res.PricingVersion.String,
-		V1AllPrices:    res.V1AllPrices,
 	}
 	if res.V2Details != nil {
 		eval := res.V2Details

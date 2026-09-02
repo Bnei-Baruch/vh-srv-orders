@@ -138,7 +138,8 @@ func TestConcludeHHRequest_Approve_ReplacesActiveGrant(t *testing.T) {
 	r, err := db.CreateHHRequest(ctx, hhRequestReq("kc-req-regrant"))
 	require.NoError(t, err)
 	// Start a minute back, since this test does not care where the start comes
-	// from: cheaper than the default-start test's poll, same skew protection.
+	// from: cheaper than the default-start test's poll, and tolerant of more skew
+	// than that poll's budget.
 	_, err = db.ConcludeHHRequest(ctx, r.ID, HHRequestConclusion{
 		Approved: true, Type: common.HHGrantTypeGimlaj, DiscountPct: 50, Months: 3,
 		StartDate: null.TimeFrom(time.Now().Add(-time.Minute)),
@@ -219,9 +220,11 @@ func TestGetAllHHRequests_FiltersByStatusAndKcid(t *testing.T) {
 // a grant that has already ended fails GetActiveHHGrant's end_date > NOW().
 //
 // DEPENDS ON #19: the historical start only works because ConcludeHHRequest
-// accepts one. Fixing #19 makes the conclude call below fail, not the clamping
-// assertion — repin the start on a 31st the fix allows rather than loosening
-// the assertion, and keep it absolute so this test stays date-independent.
+// accepts one. If #19 is fixed by rejecting past starts, the conclude call below
+// fails and this clamping assertion never runs — repin the start on a 31st the
+// fix allows, keeping it absolute so the test stays date-independent, rather
+// than loosening the assertion. A fix that instead leaves the live grant alone
+// does not touch this test.
 func TestConcludeHHRequest_Approve_ClampsEndDateToAShorterMonth(t *testing.T) {
 	db, ctx := newTestDB(t)
 

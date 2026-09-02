@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 
 	"github.com/go-resty/resty/v2"
 
@@ -17,11 +18,14 @@ type PelecardAPI interface {
 	ChargeByToken(ctx context.Context, request *ChargeRequest, terminal Terminal) (map[string]interface{}, error)
 }
 
-// Client is a client for interacting with Pelecard API
+// Client calls external_payments, which holds the Pelecard credentials and
+// terminals on this service's behalf.
 type Client struct {
 	Client *resty.Client
-	// BaseURL is external_payments. Overridable for the same reason
-	// Terminal.ChargeURL is: so tests can point at a stub.
+	// BaseURL is external_payments, overridable so tests can point at a stub.
+	// Not configurable: checkout's host is hardcoded in five other places here
+	// too (api/transaction_handler.go, common/consts.go), and a seam that covers
+	// one of six would imply staging is safe when it is not. See issue #22.
 	BaseURL string
 
 	// Tokens authenticates calls to external_payments.
@@ -43,17 +47,8 @@ func NewClient() *Client {
 	}
 }
 
-// FetchMuhlafim returns Pelecard's card replacements for a date window, keyed by
-// the token being replaced, from external_payments.
-//
-// This service used to query Pelecard directly for it — the only reason it held
-// Pelecard credentials and a terminal number at all. Both sources were kept
-// callable until a comparison over six windows agreed entry by entry and field
-// by field, and the direct call was then removed along with the credentials.
-func (c *Client) FetchMuhlafim(ctx context.Context, startDate, endDate string) (map[string]MuhlafimEntry, error) {
-	if c.Tokens == nil {
-		return nil, fmt.Errorf("no token source configured for external_payments")
-	}
+// postMuhlafim sends one /token/muhlafim request with a freshly taken token.
+func (c *Client) postMuhlafim(ctx context.Context, startDate, endDate string) (*resty.Response, error) {
 	token, err := c.Tokens.Token()
 	if err != nil {
 		return nil, fmt.Errorf("keycloak token for external_payments: %w", err)
@@ -68,6 +63,39 @@ func (c *Client) FetchMuhlafim(ctx context.Context, startDate, endDate string) (
 		return nil, fmt.Errorf("external muhlafim request failed: %w", err)
 	}
 
+	return resp, nil
+}
+
+// FetchMuhlafim returns Pelecard's card replacements for a date window, keyed by
+// the token being replaced, from external_payments.
+//
+// This service used to query Pelecard directly for it — the only reason it held
+// Pelecard credentials and a terminal number at all. Both sources were kept
+// callable until a comparison over six windows agreed entry by entry and field
+// by field, and the direct call was then removed along with the credentials.
+func (c *Client) FetchMuhlafim(ctx context.Context, startDate, endDate string) (map[string]MuhlafimEntry, error) {
+	if c.Tokens == nil {
+		return nil, fmt.Errorf("no token source configured for external_payments")
+	}
+
+	resp, err := c.postMuhlafim(ctx, startDate, endDate)
+	if err != nil {
+		return nil, err
+	}
+
+	// Retried once on 401 after invalidating the token, as pkg/accounting and
+	// pkg/profiles do: MapClaims.Valid() applies no clock leeway, so a token
+	// cached a moment before expiry is sent, rejected, and would otherwise abort
+	// the monthly billing run at its muhlafim step.
+	if resp.StatusCode() == http.StatusUnauthorized {
+		c.Tokens.Invalidate()
+		utils.LogFor(ctx).Warn("external muhlafim returned 401, retrying with a fresh token")
+
+		if resp, err = c.postMuhlafim(ctx, startDate, endDate); err != nil {
+			return nil, err
+		}
+	}
+
 	if resp.IsError() {
 		return nil, fmt.Errorf("external muhlafim error [%d]: %s", resp.StatusCode(), resp.String())
 	}
@@ -77,15 +105,23 @@ func (c *Client) FetchMuhlafim(ctx context.Context, startDate, endDate string) (
 		return nil, fmt.Errorf("failed to unmarshal external muhlafim response: %w", err)
 	}
 
-	// The direct Pelecard call this replaces skipped entries with no token, since
-	// a replacement that names no card being replaced cannot be matched to an
-	// order. external_payments keys the map by that token and is not expected to
-	// emit an empty one, so this only guards the contract rather than filtering
-	// anything in practice — and a caller that got one would look up "" in its
-	// own token map and match nothing silently.
-	if _, ok := entries[""]; ok {
-		delete(entries, "")
-		utils.LogFor(ctx).Warn("dropped muhlafim entry with an empty token",
+	// The direct Pelecard call this replaces built the map itself, so the key was
+	// the entry's own token by construction. Reading a map off the wire loses
+	// that, and both ways of losing it fail silently: an entry keyed by "" — or
+	// keyed by anything that is not its own token — matches nothing in a caller's
+	// token map, and an HTTP-200 envelope whose values happen to be objects, say
+	// {"error":{...}}, unmarshals into one junk entry and reports as a window with
+	// no replacements. external_payments does key by entry.Token
+	// (pelecard/pelecard.go:250) and drops empty ones, so this guards the contract
+	// rather than filtering anything in practice.
+	for key, entry := range entries {
+		if key != "" && key == entry.Token {
+			continue
+		}
+		delete(entries, key)
+		utils.LogFor(ctx).Warn("dropped muhlafim entry whose key is not its token",
+			slog.Bool("key_empty", key == ""),
+			slog.Bool("token_empty", entry.Token == ""),
 			slog.String("source", c.BaseURL))
 	}
 

@@ -20,6 +20,16 @@ import (
 // rather than one more gateway status.
 var ErrUnauthorized = errors.New("external_payments rejected the credential")
 
+// ErrNoCredential means this service could not obtain a token at all — Keycloak
+// is unreachable, refusing, or backing off after consecutive failures.
+//
+// Distinct for the same reason ErrUnauthorized is: it is not a fault of the
+// terminal the charge was attempted on, and the other terminal shares this
+// client, so falling back to it writes a second payment row and fails
+// identically. Without the sentinel a Keycloak outage is indistinguishable from
+// gateway trouble in the run summary.
+var ErrNoCredential = errors.New("no credential available for external_payments")
+
 type PelecardAPI interface {
 	FetchMuhlafim(ctx context.Context, startDate, endDate string) (map[string]MuhlafimEntry, error)
 	ChargeByToken(ctx context.Context, request *ChargeRequest, terminal Terminal) (map[string]interface{}, error)
@@ -68,13 +78,16 @@ func NewClient() *Client {
 // serves — including the /emv/charge leg the fallback uses — and replays the
 // original response, which this caller reads status out of. A 401 can come from
 // a hop in front of the handler, after the card was charged.
+//
+// Needs external_payments >= 46d5102, where /emv/charge replays like the token
+// routes instead of answering an empty payload.
 func (c *Client) sendAuthorized(ctx context.Context, what string,
 	do func(*resty.Request) (*resty.Response, error)) (*resty.Response, error) {
 
 	send := func() (*resty.Response, string, error) {
 		token, err := c.Tokens.Token()
 		if err != nil {
-			return nil, "", fmt.Errorf("keycloak token for external_payments: %w", err)
+			return nil, "", fmt.Errorf("%w: %w", ErrNoCredential, err)
 		}
 
 		resp, err := do(c.Client.NewRequest().

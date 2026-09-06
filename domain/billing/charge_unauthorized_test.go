@@ -92,3 +92,40 @@ func TestHandleNonRetryableError_GatewayErrorStillFallsThrough(t *testing.T) {
 	assert.Zero(t, stats.failedSum.Get(common.CurrencyNIS),
 		"the terminal branch records this one, after both terminals have been tried")
 }
+
+// A credential that could not be obtained at all is not a fault of this
+// terminal either: the other leg shares the same Keycloak client and would fail
+// identically, writing a second pending payment row for nothing.
+func TestHandleNonRetryableError_NoCredentialIsNotRetried(t *testing.T) {
+	stats := newChargeStats(1)
+	price := unauthorizedPrice()
+	err := fmt.Errorf("%w: keycloak unreachable", pelecard.ErrNoCredential)
+
+	handled := handleNonRetryableError(context.Background(), sentry.CurrentHub(), &stats,
+		pelecard.TokenTerminal.Name, price, nil, err)
+
+	require.True(t, handled, "the other terminal cannot obtain a credential either")
+	assert.Equal(t, int64(1), stats.errorCount.Get("no_credential"))
+	assert.Equal(t, price.Amount, stats.reasonFailedSum.Get("no_credential:"+common.CurrencyNIS))
+	assert.Equal(t, price.Amount, stats.failedSum.Get(common.CurrencyNIS))
+}
+
+// The two credential failures stay apart in the summary: one is a
+// misconfiguration, the other is Keycloak being unreachable, and they call for
+// different action.
+func TestHandleNonRetryableError_CredentialReasonsAreDistinct(t *testing.T) {
+	stats := newChargeStats(2)
+	price := unauthorizedPrice()
+
+	handleNonRetryableError(context.Background(), sentry.CurrentHub(), &stats,
+		pelecard.TokenTerminal.Name, price, nil,
+		fmt.Errorf("%w: charge gateway HTTP error [401]", pelecard.ErrUnauthorized))
+	handleNonRetryableError(context.Background(), sentry.CurrentHub(), &stats,
+		pelecard.TokenTerminal.Name, price, nil,
+		fmt.Errorf("%w: keycloak unreachable", pelecard.ErrNoCredential))
+
+	assert.Equal(t, int64(1), stats.errorCount.Get("unauthorized"))
+	assert.Equal(t, int64(1), stats.errorCount.Get("no_credential"))
+	assert.Equal(t, price.Amount*2, stats.failedSum.Get(common.CurrencyNIS),
+		"both amounts are uncollected and both belong in the total")
+}

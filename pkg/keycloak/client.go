@@ -32,10 +32,10 @@ type Client struct {
 	mu     sync.Mutex
 	token  *gocloak.JWT
 	claims *jwt.MapClaims
-	// lastFailure is when the most recent attempt to obtain a token failed. It
-	// short-circuits the next callers for loginFailureBackoff, so a Keycloak that
-	// is down or hanging fails the run quickly instead of every call paying a
-	// timeout in turn with the mutex held.
+	// failures counts consecutive failed attempts and lastFailure is when the
+	// most recent one happened. Together they short-circuit callers only once
+	// Keycloak looks genuinely down — see backingOff.
+	failures    int
 	lastFailure time.Time
 }
 
@@ -63,18 +63,31 @@ func NewClient(scopes ...string) *Client {
 // case per holder is four times this, not one.
 const tokenRequestTimeout = 10 * time.Second
 
-// loginFailureBackoff is how long a failed attempt suppresses the next one.
+// loginFailureBackoff is how long consecutive failures suppress further
+// attempts, and loginFailureThreshold is how many it takes.
 //
-// Without it a Keycloak that accepts connections and never answers costs every
-// caller the full timeout, with the mutex held, because nothing is cached on
-// failure: a renewal run of a few thousand orders across two terminal legs would
-// grind serially for hours rather than failing. Token() passes
-// context.Background(), so cancelling the run cannot interrupt those waits
-// either — the worker loop only checks ctx between orders.
+// Suppression exists because nothing is cached on failure: against a Keycloak
+// that accepts connections and never answers, every caller pays the full timeout
+// with the mutex held, so a renewal run across two terminal legs would grind
+// serially for hours rather than failing. Token() passes context.Background(),
+// so cancelling the run cannot interrupt those waits either — the worker loop
+// only checks ctx between orders.
 //
-// Short, because it makes callers fail while it lasts: long enough to collapse a
-// stampede against a dead Keycloak, short enough that a blip costs one window.
-const loginFailureBackoff = 5 * time.Second
+// Both numbers are the way they are because suppression is itself dangerous.
+// While it lasts, callers fail without trying, and a charge worker that cannot
+// get a token still writes a pending payment row per attempt: a single 500 or a
+// rolling pod could book hundreds of orders failed in a window, where the same
+// blip untreated only fails whatever was in flight. So:
+//
+//   - a threshold, so one or two failures with a success between them suppress
+//     nothing at all;
+//   - a window longer than the worst case of a single attempt, which is four
+//     requests at tokenRequestTimeout, so against a truly dead Keycloak the
+//     fast-failing stretch dominates the stalling one rather than the reverse.
+const (
+	loginFailureBackoff   = 45 * time.Second
+	loginFailureThreshold = 3
+)
 
 func (c *Client) Token() (string, error) {
 	token := c.AccessToken(context.Background())
@@ -93,8 +106,17 @@ func (c *Client) AccessToken(ctx context.Context) string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	// A valid cached token is returned before anything else, so a caller holding
+	// one is never refused by a backoff that concerns obtaining a new one.
+	if c.token != nil {
+		if err = c.claims.Valid(); err == nil {
+			return c.token.AccessToken
+		}
+	}
+
 	if c.backingOff() {
-		utils.LogFor(ctx).Warn("keycloak.Client.AccessToken() skipped, a recent attempt failed",
+		utils.LogFor(ctx).Warn("keycloak.Client.AccessToken() skipped, consecutive attempts failed",
+			slog.Int("failures", c.failures),
 			slog.Duration("backoff", loginFailureBackoff))
 		return ""
 	}
@@ -103,7 +125,7 @@ func (c *Client) AccessToken(ctx context.Context) string {
 	if c.token == nil {
 		if err = c.login(ctx); err != nil {
 			utils.LogFor(ctx).Warn("keycloak.Client.AccessToken() error login", slog.Any("err", err))
-			c.lastFailure = time.Now()
+			c.recordFailure()
 			return ""
 		}
 	}
@@ -124,22 +146,35 @@ func (c *Client) AccessToken(ctx context.Context) string {
 	// we are not able to refresh, we'll have to try and login again
 	if err = c.login(ctx); err != nil {
 		utils.LogFor(ctx).Warn("keycloak.Client.AccessToken() error login after failed refresh", slog.Any("err", err))
-		c.lastFailure = time.Now()
+		c.recordFailure()
 		return ""
 	}
 	if err = c.claims.Valid(); err != nil {
 		utils.LogFor(ctx).Warn("keycloak.Client.AccessToken() login after failed refresh got invalid claims", slog.Any("err", err))
-		c.lastFailure = time.Now()
+		c.recordFailure()
 		return ""
 	}
 
 	return c.token.AccessToken
 }
 
-// backingOff reports whether a recent failure should suppress this attempt.
-// Called with mu held.
+// backingOff reports whether enough consecutive failures have happened recently
+// to suppress this attempt. Called with mu held.
 func (c *Client) backingOff() bool {
-	return !c.lastFailure.IsZero() && time.Since(c.lastFailure) < loginFailureBackoff
+	return c.failures >= loginFailureThreshold && time.Since(c.lastFailure) < loginFailureBackoff
+}
+
+// recordFailure and clearFailures are the only writers of the failure state, so
+// the threshold counts consecutive failures rather than lifetime ones. Called
+// with mu held.
+func (c *Client) recordFailure() {
+	c.failures++
+	c.lastFailure = time.Now()
+}
+
+func (c *Client) clearFailures() {
+	c.failures = 0
+	c.lastFailure = time.Time{}
 }
 
 // Invalidate clears the cached token, forcing a fresh login on next Token() call
@@ -149,6 +184,10 @@ func (c *Client) Invalidate() {
 
 	c.token = nil
 	c.claims = nil
+	// An invalidation is a caller saying it knows this token is bad, which
+	// outranks a backoff: otherwise the retry that follows a 401 is suppressed
+	// and silently becomes no retry at all.
+	c.clearFailures()
 }
 
 // InvalidateToken clears the cache only if stale is still what is cached, so a
@@ -171,6 +210,9 @@ func (c *Client) InvalidateToken(stale string) {
 
 	c.token = nil
 	c.claims = nil
+	// As in Invalidate: an explicit "this token is bad" outranks the backoff, so
+	// the 401 retry actually gets an attempt.
+	c.clearFailures()
 }
 
 func (c *Client) login(ctx context.Context) error {
@@ -188,7 +230,7 @@ func (c *Client) login(ctx context.Context) error {
 	}
 
 	c.token = token
-	c.lastFailure = time.Time{}
+	c.clearFailures()
 
 	return nil
 }
@@ -207,7 +249,7 @@ func (c *Client) refresh(ctx context.Context, refreshToken string) error {
 	}
 
 	c.token = token
-	c.lastFailure = time.Time{}
+	c.clearFailures()
 
 	return nil
 }

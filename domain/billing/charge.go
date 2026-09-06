@@ -214,6 +214,7 @@ dispatchLoop:
 		slog.Int64("charge_success_db_fail", stats.errorCount.Get("charge_success_db_fail")),
 		slog.Int64("gateway_errors", stats.errorCount.Get("gateway")),
 		slog.Int64("unauthorized_errors", stats.errorCount.Get("unauthorized")),
+		slog.Int64("no_credential_errors", stats.errorCount.Get("no_credential")),
 		slog.Float64("unauthorized_failed_nis", stats.reasonFailedSum.Get("unauthorized:"+common.CurrencyNIS)),
 		slog.Float64("unauthorized_failed_usd", stats.reasonFailedSum.Get("unauthorized:"+common.CurrencyUSD)),
 		slog.Float64("unauthorized_failed_eur", stats.reasonFailedSum.Get("unauthorized:"+common.CurrencyEUR)),
@@ -380,17 +381,19 @@ func handleNonRetryableError(ctx context.Context, hub *sentry.Hub, stats *charge
 		recordPostPaymentError(ctx, hub, stats, terminal, payment, err)
 		return true
 	}
-	// A rejected credential is not a fault of this terminal, so falling back to
-	// the other one cannot help: it is the same credential. Treated as
-	// non-retryable so one order costs one failed attempt rather than four —
-	// two charge POSTs per terminal, each leaving a pending payment row — and so
-	// the run does not multiply a single misconfiguration by every order in it.
-	if errors.Is(err, pelecard.ErrUnauthorized) {
-		utils.LogFor(ctx).Error("external_payments rejected the credential; the other terminal would too",
+	// Neither a rejected credential nor a missing one is a fault of this
+	// terminal, so falling back to the other cannot help: both legs share the
+	// credential and the client that fetches it. Treated as non-retryable so one
+	// order costs one failed attempt rather than four — two charge POSTs per
+	// terminal, each leaving a pending payment row — and so the run does not
+	// multiply one outage or misconfiguration by every order in it.
+	if reason := credentialFailureReason(err); reason != "" {
+		utils.LogFor(ctx).Error("credential problem; the other terminal would fail the same way",
 			slog.String("terminal", terminal),
+			slog.String("reason", reason),
 			slog.Any("err", err))
-		captureError(hub, terminal, "unauthorized", err)
-		stats.errorCount.Inc("unauthorized", 1)
+		captureError(hub, terminal, reason, err)
+		stats.errorCount.Inc(reason, 1)
 
 		// Recorded in the money totals as well, mirroring the gateway-error
 		// branch. Short-circuiting past that branch is the point of returning
@@ -400,10 +403,28 @@ func handleNonRetryableError(ctx context.Context, hub *sentry.Hub, stats *charge
 		// by nobody.
 		stats.failedSum.Inc(price.Currency, price.Amount)
 		stats.versionFailedSum.Inc(price.PricingVersion+":"+price.Currency, price.Amount)
-		stats.reasonFailedSum.Inc("unauthorized:"+price.Currency, price.Amount)
+		stats.reasonFailedSum.Inc(reason+":"+price.Currency, price.Amount)
 		return true
 	}
 	return false
+}
+
+// credentialFailureReason names the counter key for an error that no terminal
+// can recover from, or "" if this is not one.
+//
+// Two of them: external_payments rejected the credential, or none could be
+// obtained at all. Kept apart in the summary because they call for different
+// action — a rejected credential is a misconfiguration on our side or theirs, a
+// missing one is Keycloak being unreachable.
+func credentialFailureReason(err error) string {
+	switch {
+	case errors.Is(err, pelecard.ErrUnauthorized):
+		return "unauthorized"
+	case errors.Is(err, pelecard.ErrNoCredential):
+		return "no_credential"
+	default:
+		return ""
+	}
 }
 
 func captureError(hub *sentry.Hub, terminal, errorType string, err error) {

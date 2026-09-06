@@ -1,6 +1,8 @@
 package keycloak
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -20,6 +22,11 @@ import (
 // detector, not the return value.
 func TestClientTokenReadRacesInvalidation(t *testing.T) {
 	client := &Client{kc: gocloak.NewClient("http://127.0.0.1:1")}
+	// NewClient is bypassed here, so the timeout it sets is not in place. A
+	// network that drops rather than refuses would otherwise block login with the
+	// mutex held, and the test would hang to go test's panic instead of failing.
+	client.kc.RestyClient().SetTimeout(time.Second)
+
 	seedToken(client, "cached")
 
 	var wg sync.WaitGroup
@@ -129,5 +136,54 @@ func TestInvalidateTokenOnEmptyCacheIsHarmless(t *testing.T) {
 
 	if client.token != nil || client.claims != nil {
 		t.Fatal("nothing was cached, so nothing should appear")
+	}
+}
+
+// Nothing is cached when an attempt fails, so without a backoff every caller
+// pays the full request timeout with the mutex held. A renewal run of a few
+// thousand orders across two terminal legs would grind serially for hours
+// against a Keycloak that accepts connections and never answers.
+func TestAccessTokenSkipsWhileBackingOff(t *testing.T) {
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	client := &Client{kc: gocloak.NewClient(server.URL)}
+	client.kc.RestyClient().SetTimeout(time.Second)
+
+	// First attempt reaches Keycloak and fails.
+	if _, err := client.Token(); err == nil {
+		t.Fatal("a 500 from Keycloak should not yield a token")
+	}
+	if requests != 1 {
+		t.Fatalf("expected one attempt, got %d", requests)
+	}
+
+	// The next callers are suppressed rather than each paying their own attempt.
+	for i := 0; i < 5; i++ {
+		if _, err := client.Token(); err == nil {
+			t.Fatal("expected the backoff to keep failing callers fast")
+		}
+	}
+	if requests != 1 {
+		t.Fatalf("backoff should have suppressed the retries, got %d attempts", requests)
+	}
+}
+
+// A backoff that outlived its window would keep failing callers after Keycloak
+// came back.
+func TestBackingOffExpires(t *testing.T) {
+	client := &Client{lastFailure: time.Now().Add(-loginFailureBackoff - time.Second)}
+
+	if client.backingOff() {
+		t.Fatal("a failure older than the window must not suppress anything")
+	}
+
+	client.lastFailure = time.Now()
+	if !client.backingOff() {
+		t.Fatal("a fresh failure must suppress the next attempt")
 	}
 }

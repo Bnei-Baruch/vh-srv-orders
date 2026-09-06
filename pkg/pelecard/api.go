@@ -45,23 +45,46 @@ func NewClient() *Client {
 	}
 }
 
-// fetchMuhlafim is a single attempt; the retry lives in FetchMuhlafim.
-func (c *Client) fetchMuhlafim(ctx context.Context, startDate, endDate string) (*resty.Response, error) {
-	token, err := c.Tokens.Token()
-	if err != nil {
-		return nil, fmt.Errorf("keycloak token for external_payments: %w", err)
+// sendAuthorized runs one request to external_payments with a Keycloak bearer,
+// retrying once on 401 with a fresh token.
+//
+// The header goes on the request, never on the shared resty client, which every
+// call this type makes reuses. TestFetchMuhlafim_TokenNotSetOnSharedClient pins
+// that.
+//
+// One implementation for both calls: an access token lives 15 minutes and the
+// renewal run is a burst of thousands of charges, so a run crosses an expiry,
+// and MapClaims.Valid() applies no clock leeway. The verb is the caller's —
+// muhlafim reads over GET, a charge posts.
+func (c *Client) sendAuthorized(ctx context.Context, what string,
+	do func(*resty.Request) (*resty.Response, error)) (*resty.Response, error) {
+
+	send := func() (*resty.Response, error) {
+		token, err := c.Tokens.Token()
+		if err != nil {
+			return nil, fmt.Errorf("keycloak token for external_payments: %w", err)
+		}
+
+		resp, err := do(c.Client.NewRequest().
+			SetContext(ctx).
+			SetHeader("Authorization", "Bearer "+token))
+		if err != nil {
+			return nil, fmt.Errorf("external %s request failed: %w", what, err)
+		}
+
+		return resp, nil
 	}
 
-	resp, err := c.Client.NewRequest().
-		SetContext(ctx).
-		SetQueryParams(map[string]string{"StartDate": startDate, "EndDate": endDate}).
-		SetHeader("Authorization", "Bearer "+token).
-		Get(c.BaseURL + "/token/muhlafim")
-	if err != nil {
-		return nil, fmt.Errorf("external muhlafim request failed: %w", err)
+	resp, err := send()
+	if err != nil || resp.StatusCode() != http.StatusUnauthorized {
+		return resp, err
 	}
 
-	return resp, nil
+	c.Tokens.Invalidate()
+	utils.LogFor(ctx).Warn("external_payments returned 401, retrying with a fresh token",
+		slog.String("call", what))
+
+	return send()
 }
 
 // FetchMuhlafim returns Pelecard's card replacements for a date window from
@@ -72,21 +95,12 @@ func (c *Client) FetchMuhlafim(ctx context.Context, startDate, endDate string) (
 		return nil, fmt.Errorf("no token source configured for external_payments")
 	}
 
-	resp, err := c.fetchMuhlafim(ctx, startDate, endDate)
+	resp, err := c.sendAuthorized(ctx, "muhlafim", func(r *resty.Request) (*resty.Response, error) {
+		return r.SetQueryParams(map[string]string{"StartDate": startDate, "EndDate": endDate}).
+			Get(c.BaseURL + "/token/muhlafim")
+	})
 	if err != nil {
 		return nil, err
-	}
-
-	// MapClaims.Valid() applies no clock leeway, so a token cached a moment
-	// before expiry is sent and rejected. Retried once, as pkg/accounting and
-	// pkg/profiles do.
-	if resp.StatusCode() == http.StatusUnauthorized {
-		c.Tokens.Invalidate()
-		utils.LogFor(ctx).Warn("external muhlafim returned 401, retrying with a fresh token")
-
-		if resp, err = c.fetchMuhlafim(ctx, startDate, endDate); err != nil {
-			return nil, err
-		}
 	}
 
 	if resp.IsError() {
@@ -102,19 +116,26 @@ func (c *Client) FetchMuhlafim(ctx context.Context, startDate, endDate string) (
 }
 
 // ChargeByToken sends a token-based charge request to the payment gateway.
+//
+// It authenticates: until now these calls arrived at external_payments with no
+// credential at all, which is why the monthly renewal burst shows up in its log
+// as `requested_by=anonymous` and why the organization still has to be sent in
+// the body. See sendAuthorized for where the header goes and why.
 func (c *Client) ChargeByToken(ctx context.Context, request *ChargeRequest, terminal Terminal) (map[string]interface{}, error) {
 	log := utils.LogFor(ctx)
 
 	if terminal.ChargeURL == "" {
 		return nil, fmt.Errorf("no charge URL for terminal %q", terminal.Name)
 	}
+	if c.Tokens == nil {
+		return nil, fmt.Errorf("no token source configured for external_payments")
+	}
 
-	resp, err := c.Client.NewRequest().
-		SetContext(ctx).
-		SetBody(request).
-		Post(terminal.ChargeURL)
+	resp, err := c.sendAuthorized(ctx, "charge", func(r *resty.Request) (*resty.Response, error) {
+		return r.SetBody(request).Post(terminal.ChargeURL)
+	})
 	if err != nil {
-		return nil, fmt.Errorf("charge request failed: %w", err)
+		return nil, err
 	}
 
 	log.Info("charge gateway response",

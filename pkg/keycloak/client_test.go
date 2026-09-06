@@ -3,14 +3,70 @@ package keycloak
 import (
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Nerzal/gocloak/v13"
 	"github.com/golang-jwt/jwt/v4"
 )
 
+// Token() is the reader every charge goes through, and the one that dereferences
+// what Invalidate nils, so it is the side worth pinning: an earlier version of
+// this file exercised only the clearers and stayed green with AccessToken's lock
+// deleted.
+//
+// No Keycloak is needed. The seeded claims carry a future exp, so a cache hit
+// returns without a network call; once a clearer wins, the login attempt goes to
+// a closed port and fails immediately, which is fine — the assertion is the race
+// detector, not the return value.
+func TestClientTokenReadRacesInvalidation(t *testing.T) {
+	client := &Client{kc: gocloak.NewClient("http://127.0.0.1:1")}
+	seedToken(client, "cached")
+
+	var wg sync.WaitGroup
+
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 150; j++ {
+				_, _ = client.Token()
+			}
+		}()
+	}
+
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			for j := 0; j < 150; j++ {
+				if worker%2 == 0 {
+					client.InvalidateToken("cached")
+				} else {
+					client.Invalidate()
+				}
+				seedToken(client, "cached")
+			}
+		}(i)
+	}
+
+	wg.Wait()
+}
+
+// seedToken puts a valid cached token in place, which no exported method can do
+// without a Keycloak to log in against.
+func seedToken(c *Client, access string) {
+	claims := jwt.MapClaims{"exp": float64(time.Now().Add(time.Hour).Unix())}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.token = &gocloak.JWT{AccessToken: access}
+	c.claims = &claims
+}
+
 // The renewal run charges through maxWorkers goroutines sharing one Client, so
 // these fields are read and written concurrently. Run with -race, this fails if
-// the mutex is removed.
+// the mutex is removed from either clearer.
 //
 // Login is not exercised: it needs a Keycloak. What is exercised is the part
 // that broke — a cached token being read while another goroutine clears it.

@@ -213,6 +213,10 @@ dispatchLoop:
 		slog.Int64("post_payment_errors", stats.errorCount.Get("post_payment")),
 		slog.Int64("charge_success_db_fail", stats.errorCount.Get("charge_success_db_fail")),
 		slog.Int64("gateway_errors", stats.errorCount.Get("gateway")),
+		slog.Int64("unauthorized_errors", stats.errorCount.Get("unauthorized")),
+		slog.Float64("unauthorized_failed_nis", stats.reasonFailedSum.Get("unauthorized:"+common.CurrencyNIS)),
+		slog.Float64("unauthorized_failed_usd", stats.reasonFailedSum.Get("unauthorized:"+common.CurrencyUSD)),
+		slog.Float64("unauthorized_failed_eur", stats.reasonFailedSum.Get("unauthorized:"+common.CurrencyEUR)),
 		slog.Int64("panics", stats.errorCount.Get("panic")),
 		// --- Per pricing version ---
 		slog.Int64("v1_orders", stats.pricingVersionCount.Get("v1")),
@@ -295,7 +299,7 @@ func (s *BillingService) processWithRecovery(ctx context.Context, workerID int, 
 			return
 		}
 		// Token declined — fall through to EMV
-	} else if handleNonRetryableError(ctx, hub, stats, pelecard.TokenTerminal.Name, tokenPayment, tokenErr) {
+	} else if handleNonRetryableError(ctx, hub, stats, pelecard.TokenTerminal.Name, ro.Price, tokenPayment, tokenErr) {
 		return
 	} else {
 		log.Error("Token terminal gateway error, falling back to EMV", slog.Any("err", tokenErr))
@@ -316,7 +320,7 @@ func (s *BillingService) processWithRecovery(ctx context.Context, workerID int, 
 		return
 	}
 
-	if handleNonRetryableError(ctx, hub, stats, pelecard.EMVTerminal.Name, emvPayment, emvErr) {
+	if handleNonRetryableError(ctx, hub, stats, pelecard.EMVTerminal.Name, ro.Price, emvPayment, emvErr) {
 		return
 	}
 
@@ -362,7 +366,8 @@ type chargeStats struct {
 	reasonFailedSum     *utils.CounterMap[float64] // "declined:NIS", "gateway:USD", "post_payment:EUR", etc.
 }
 
-func handleNonRetryableError(ctx context.Context, hub *sentry.Hub, stats *chargeStats, terminal string, payment *repo.Payment, err error) bool {
+func handleNonRetryableError(ctx context.Context, hub *sentry.Hub, stats *chargeStats, terminal string,
+	price *pricing.ChargePrice, payment *repo.Payment, err error) bool {
 	if errors.Is(err, common.ErrPrePayment) {
 		utils.LogFor(ctx).Error("Pre-payment error",
 			slog.String("terminal", terminal),
@@ -386,6 +391,16 @@ func handleNonRetryableError(ctx context.Context, hub *sentry.Hub, stats *charge
 			slog.Any("err", err))
 		captureError(hub, terminal, "unauthorized", err)
 		stats.errorCount.Inc("unauthorized", 1)
+
+		// Recorded in the money totals as well, mirroring the gateway-error
+		// branch. Short-circuiting past that branch is the point of returning
+		// true here, but the amount still went uncollected: without this a run
+		// that failed every order on its credential reports failed_nis=0, which
+		// reads as a month with nothing to collect rather than a month collected
+		// by nobody.
+		stats.failedSum.Inc(price.Currency, price.Amount)
+		stats.versionFailedSum.Inc(price.PricingVersion+":"+price.Currency, price.Amount)
+		stats.reasonFailedSum.Inc("unauthorized:"+price.Currency, price.Amount)
 		return true
 	}
 	return false

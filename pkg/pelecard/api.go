@@ -64,9 +64,10 @@ func NewClient() *Client {
 // The verb is the caller's — muhlafim reads over GET, a charge posts.
 //
 // Retrying a charge cannot charge twice: external_payments suppresses a
-// reference that already charged within the hour and replays the stored
-// response (db.FindRecentSuccessfulCharge). That matters because a 401 could
-// come from a hop in front of the handler, after the card was charged.
+// reference that already charged within the hour, on every charge route it
+// serves — including the /emv/charge leg the fallback uses. That matters
+// because a 401 could come from a hop in front of the handler, after the card
+// was charged.
 func (c *Client) sendAuthorized(ctx context.Context, what string,
 	do func(*resty.Request) (*resty.Response, error)) (*resty.Response, error) {
 
@@ -106,16 +107,25 @@ func (c *Client) sendAuthorized(ctx context.Context, what string,
 	return resp, err
 }
 
+// invalidateNamer is the comparing form of Invalidate: it names the token that
+// was rejected so a shared source can refuse to clear a newer one.
+//
+// keycloak.TokenSource only promises Invalidate(), and widening it would mean
+// regenerating the mocks and touching pkg/accounting and pkg/profiles, which
+// have no concurrent callers and no reason to change here. So the comparing form
+// is reached by assertion — and pinned below, because a structural assertion
+// matched by name and signature at runtime would otherwise stop matching in
+// silence if the method were renamed or the source wrapped by a shim that
+// forwards only Token() and Invalidate(). The fallback is the unconditional
+// clear this exists to avoid, so that silence would restore the stampede.
+type invalidateNamer interface{ InvalidateToken(string) }
+
+var _ invalidateNamer = (*keycloak.Client)(nil)
+
 // invalidate drops the rejected token, comparing before clearing where the
 // source supports it.
-//
-// keycloak.TokenSource only promises Invalidate(), and widening that interface
-// would mean regenerating the mocks and touching pkg/accounting and
-// pkg/profiles, which have no concurrent callers and no reason to change here.
-// keycloak.Client — the only source used in production on this path — carries
-// the comparing form.
 func (c *Client) invalidate(stale string) {
-	if source, ok := c.Tokens.(interface{ InvalidateToken(string) }); ok {
+	if source, ok := c.Tokens.(invalidateNamer); ok {
 		source.InvalidateToken(stale)
 		return
 	}
@@ -187,8 +197,10 @@ func (c *Client) ChargeByToken(ctx context.Context, request *ChargeRequest, term
 
 		// A rejected credential is worth telling apart from a declined card: one
 		// is a deployment fault that fails every charge in the run, the other is
-		// this member's card. The charge-check command turns on that distinction,
-		// and matching an error string for it would be fragile.
+		// this member's card. handleNonRetryableError (domain/billing/charge.go)
+		// branches on it to fail the order once instead of retrying the other
+		// terminal with the same credential, and matching an error string for
+		// that would be fragile.
 		if resp.StatusCode() == http.StatusUnauthorized {
 			return nil, fmt.Errorf("%w: charge gateway HTTP error [%d]",
 				ErrUnauthorized, resp.StatusCode())

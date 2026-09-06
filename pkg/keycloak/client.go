@@ -32,6 +32,11 @@ type Client struct {
 	mu     sync.Mutex
 	token  *gocloak.JWT
 	claims *jwt.MapClaims
+	// lastFailure is when the most recent attempt to obtain a token failed. It
+	// short-circuits the next callers for loginFailureBackoff, so a Keycloak that
+	// is down or hanging fails the run quickly instead of every call paying a
+	// timeout in turn with the mutex held.
+	lastFailure time.Time
 }
 
 func NewClient(scopes ...string) *Client {
@@ -52,9 +57,24 @@ func NewClient(scopes ...string) *Client {
 	return c
 }
 
-// tokenRequestTimeout bounds one login or refresh. A charge worker waiting on
-// the mutex can wait at most this long per holder ahead of it.
+// tokenRequestTimeout bounds one HTTP request, which is not the same as one
+// AccessToken call: a single holder of the mutex can issue up to four — refresh,
+// its certificate fetch, then login and its own certificate fetch — so the worst
+// case per holder is four times this, not one.
 const tokenRequestTimeout = 10 * time.Second
+
+// loginFailureBackoff is how long a failed attempt suppresses the next one.
+//
+// Without it a Keycloak that accepts connections and never answers costs every
+// caller the full timeout, with the mutex held, because nothing is cached on
+// failure: a renewal run of a few thousand orders across two terminal legs would
+// grind serially for hours rather than failing. Token() passes
+// context.Background(), so cancelling the run cannot interrupt those waits
+// either — the worker loop only checks ctx between orders.
+//
+// Short, because it makes callers fail while it lasts: long enough to collapse a
+// stampede against a dead Keycloak, short enough that a blip costs one window.
+const loginFailureBackoff = 5 * time.Second
 
 func (c *Client) Token() (string, error) {
 	token := c.AccessToken(context.Background())
@@ -73,10 +93,17 @@ func (c *Client) AccessToken(ctx context.Context) string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	if c.backingOff() {
+		utils.LogFor(ctx).Warn("keycloak.Client.AccessToken() skipped, a recent attempt failed",
+			slog.Duration("backoff", loginFailureBackoff))
+		return ""
+	}
+
 	// we have no token, let's login
 	if c.token == nil {
 		if err = c.login(ctx); err != nil {
 			utils.LogFor(ctx).Warn("keycloak.Client.AccessToken() error login", slog.Any("err", err))
+			c.lastFailure = time.Now()
 			return ""
 		}
 	}
@@ -97,14 +124,22 @@ func (c *Client) AccessToken(ctx context.Context) string {
 	// we are not able to refresh, we'll have to try and login again
 	if err = c.login(ctx); err != nil {
 		utils.LogFor(ctx).Warn("keycloak.Client.AccessToken() error login after failed refresh", slog.Any("err", err))
+		c.lastFailure = time.Now()
 		return ""
 	}
 	if err = c.claims.Valid(); err != nil {
 		utils.LogFor(ctx).Warn("keycloak.Client.AccessToken() login after failed refresh got invalid claims", slog.Any("err", err))
+		c.lastFailure = time.Now()
 		return ""
 	}
 
 	return c.token.AccessToken
+}
+
+// backingOff reports whether a recent failure should suppress this attempt.
+// Called with mu held.
+func (c *Client) backingOff() bool {
+	return !c.lastFailure.IsZero() && time.Since(c.lastFailure) < loginFailureBackoff
 }
 
 // Invalidate clears the cached token, forcing a fresh login on next Token() call
@@ -153,6 +188,7 @@ func (c *Client) login(ctx context.Context) error {
 	}
 
 	c.token = token
+	c.lastFailure = time.Time{}
 
 	return nil
 }
@@ -171,6 +207,7 @@ func (c *Client) refresh(ctx context.Context, refreshToken string) error {
 	}
 
 	c.token = token
+	c.lastFailure = time.Time{}
 
 	return nil
 }

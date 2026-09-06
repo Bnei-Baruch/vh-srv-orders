@@ -214,3 +214,25 @@ func TestFetchMuhlafim_NoTokenSource(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no token source")
 }
+
+// recordingTokens notes which token each invalidation names, which is what lets
+// a shared source compare before clearing.
+type recordingTokens struct {
+	current     string
+	next        string
+	invalidated []string
+}
+
+func (r *recordingTokens) Token() (string, error) { return r.current, nil }
+
+func (r *recordingTokens) Invalidate() {
+	r.invalidated = append(r.invalidated, "<unnamed>")
+	r.current = r.next
+}
+
+func (r *recordingTokens) InvalidateToken(stale string) {
+	r.invalidated = append(r.invalidated, stale)
+	if r.current == stale {
+		r.current = r.next
+	}
+}

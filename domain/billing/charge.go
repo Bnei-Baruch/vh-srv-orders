@@ -375,6 +375,19 @@ func handleNonRetryableError(ctx context.Context, hub *sentry.Hub, stats *charge
 		recordPostPaymentError(ctx, hub, stats, terminal, payment, err)
 		return true
 	}
+	// A rejected credential is not a fault of this terminal, so falling back to
+	// the other one cannot help: it is the same credential. Treated as
+	// non-retryable so one order costs one failed attempt rather than four —
+	// two charge POSTs per terminal, each leaving a pending payment row — and so
+	// the run does not multiply a single misconfiguration by every order in it.
+	if errors.Is(err, pelecard.ErrUnauthorized) {
+		utils.LogFor(ctx).Error("external_payments rejected the credential; the other terminal would too",
+			slog.String("terminal", terminal),
+			slog.Any("err", err))
+		captureError(hub, terminal, "unauthorized", err)
+		stats.errorCount.Inc("unauthorized", 1)
+		return true
+	}
 	return false
 }
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 
 	"github.com/Nerzal/gocloak/v13"
 	"github.com/golang-jwt/jwt/v4"
@@ -19,6 +20,15 @@ import (
 type Client struct {
 	kc     *gocloak.GoCloak
 	scopes []string
+
+	// mu guards token and claims, which are read and replaced together.
+	//
+	// It is held across the login and refresh calls, deliberately. One holder
+	// logging in while the others wait is the point: the alternative is every
+	// caller that saw the same expired token starting its own login. The
+	// renewal run charges through maxWorkers goroutines sharing one of these,
+	// so an expiry crossing would otherwise cost one login per worker.
+	mu     sync.Mutex
 	token  *gocloak.JWT
 	claims *jwt.MapClaims
 }
@@ -44,6 +54,9 @@ func (c *Client) Token() (string, error) {
 // If a token expires we'll try to refresh it a long as we can. If not we'll try to login again.
 func (c *Client) AccessToken(ctx context.Context) string {
 	var err error
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
 	// we have no token, let's login
 	if c.token == nil {
@@ -81,6 +94,31 @@ func (c *Client) AccessToken(ctx context.Context) string {
 
 // Invalidate clears the cached token, forcing a fresh login on next Token() call
 func (c *Client) Invalidate() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.token = nil
+	c.claims = nil
+}
+
+// InvalidateToken clears the cache only if stale is still what is cached, so a
+// caller reacting to a 401 cannot discard a token some other caller has already
+// replaced.
+//
+// Without the comparison, N workers holding the same expired token each clear
+// the cache in turn: the first replaces it, the second throws that replacement
+// away, and one expiry costs a login per worker. Worse, if the credential is
+// rejected for a reason a new token cannot fix — a missing scope for the route,
+// say — every charge in the run triggers its own login, which is a burst large
+// enough to look like an attack on the service account.
+func (c *Client) InvalidateToken(stale string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.token == nil || c.token.AccessToken != stale {
+		return
+	}
+
 	c.token = nil
 	c.claims = nil
 }

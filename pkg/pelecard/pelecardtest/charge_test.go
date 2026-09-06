@@ -435,3 +435,49 @@ func TestClient_ChargeByToken_TokenUnavailable(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "keycloak unreachable")
 }
+
+// The retry bound is pinned elsewhere; this pins the retry *trigger*. Widening
+// the condition to retry any error status would re-POST a charge on a 500 or
+// 502 from the gateway, which is a live double-charge, and nothing else in the
+// suite would notice.
+func TestClient_ChargeByToken_GatewayFailureIsNotRetried(t *testing.T) {
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusBadGateway)
+		w.Write([]byte(`{"error":"upstream"}`))
+	}))
+	defer server.Close()
+
+	client := newChargeClient(t)
+	_, err := client.ChargeByToken(context.Background(), &pelecard.ChargeRequest{Reference: "m-8-f2t"},
+		pelecard.Terminal{Name: "token", ChargeURL: server.URL})
+
+	require.Error(t, err)
+	assert.Equal(t, 1, requests, "only a 401 may be retried; a charge must not be re-sent on a gateway failure")
+}
+
+// Several workers share one token source during a run, so the one reacting to a
+// 401 must not discard a token another worker has already replaced.
+func TestClient_ChargeByToken_InvalidatesOnlyTheRejectedToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer stale" {
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"error":"unauthorized"}`))
+			return
+		}
+		w.Write([]byte(`{"status":"success","data":"{}"}`))
+	}))
+	defer server.Close()
+
+	tokens := &recordingTokens{current: "stale", next: "fresh"}
+	client := newChargeClient(t)
+	client.Tokens = tokens
+
+	_, err := client.ChargeByToken(context.Background(), &pelecard.ChargeRequest{Reference: "m-9-f2t"},
+		pelecard.Terminal{Name: "token", ChargeURL: server.URL})
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"stale"}, tokens.invalidated,
+		"the token that was rejected is named, so a source can refuse to clear a newer one")
+}

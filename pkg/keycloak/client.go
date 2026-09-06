@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/Nerzal/gocloak/v13"
 	"github.com/golang-jwt/jwt/v4"
@@ -37,9 +38,23 @@ func NewClient(scopes ...string) *Client {
 	c := new(Client)
 	c.kc = gocloak.NewClient(common.Config.KeycloakServerUrl)
 	gocloak.SetLegacyWildFlySupport()(c.kc)
+
+	// gocloak leaves its resty client without a deadline, so a Keycloak that
+	// accepts the connection and never answers would hang the caller forever.
+	// That is worse now than it was: the mutex below serialises waiters, so an
+	// unbounded stall would be paid once per waiting charge worker rather than
+	// once in parallel. Bounded here instead of threading a context through
+	// Token(), which is keycloak.TokenSource's signature and would mean
+	// regenerating every mock of it.
+	c.kc.RestyClient().SetTimeout(tokenRequestTimeout)
+
 	c.scopes = scopes
 	return c
 }
+
+// tokenRequestTimeout bounds one login or refresh. A charge worker waiting on
+// the mutex can wait at most this long per holder ahead of it.
+const tokenRequestTimeout = 10 * time.Second
 
 func (c *Client) Token() (string, error) {
 	token := c.AccessToken(context.Background())

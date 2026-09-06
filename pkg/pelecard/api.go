@@ -59,10 +59,14 @@ func NewClient() *Client {
 // call this type makes reuses. TestFetchMuhlafim_TokenNotSetOnSharedClient pins
 // that.
 //
-// One implementation for both calls: an access token lives 15 minutes and the
-// renewal run is a burst of thousands of charges, so a run crosses an expiry,
-// and MapClaims.Valid() applies no clock leeway. The verb is the caller's —
-// muhlafim reads over GET, a charge posts.
+// One implementation for both calls: an access token lives 15 minutes and a
+// renewal run crosses an expiry, and MapClaims.Valid() applies no clock leeway.
+// The verb is the caller's — muhlafim reads over GET, a charge posts.
+//
+// Retrying a charge cannot charge twice: external_payments suppresses a
+// reference that already charged within the hour and replays the stored
+// response (db.FindRecentSuccessfulCharge). That matters because a 401 could
+// come from a hop in front of the handler, after the card was charged.
 func (c *Client) sendAuthorized(ctx context.Context, what string,
 	do func(*resty.Request) (*resty.Response, error)) (*resty.Response, error) {
 

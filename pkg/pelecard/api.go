@@ -3,6 +3,7 @@ package pelecard
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -12,6 +13,12 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/pkg/keycloak"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 )
+
+// ErrUnauthorized means external_payments rejected this service's credential —
+// after one retry with a fresh token, so it is not a stale-token race. Every
+// charge in a run will fail the same way, which is why it is a distinct error
+// rather than one more gateway status.
+var ErrUnauthorized = errors.New("external_payments rejected the credential")
 
 type PelecardAPI interface {
 	FetchMuhlafim(ctx context.Context, startDate, endDate string) (map[string]MuhlafimEntry, error)
@@ -59,32 +66,57 @@ func NewClient() *Client {
 func (c *Client) sendAuthorized(ctx context.Context, what string,
 	do func(*resty.Request) (*resty.Response, error)) (*resty.Response, error) {
 
-	send := func() (*resty.Response, error) {
+	send := func() (*resty.Response, string, error) {
 		token, err := c.Tokens.Token()
 		if err != nil {
-			return nil, fmt.Errorf("keycloak token for external_payments: %w", err)
+			return nil, "", fmt.Errorf("keycloak token for external_payments: %w", err)
 		}
 
 		resp, err := do(c.Client.NewRequest().
 			SetContext(ctx).
 			SetHeader("Authorization", "Bearer "+token))
 		if err != nil {
-			return nil, fmt.Errorf("external %s request failed: %w", what, err)
+			return nil, token, fmt.Errorf("external %s request failed: %w", what, err)
 		}
 
-		return resp, nil
+		return resp, token, nil
 	}
 
-	resp, err := send()
+	resp, token, err := send()
 	if err != nil || resp.StatusCode() != http.StatusUnauthorized {
 		return resp, err
 	}
 
-	c.Tokens.Invalidate()
+	// Clear only the token that was actually rejected. The renewal run shares one
+	// keycloak.Client across its workers, so several of them can be holding the
+	// same expired token and get 401 together; an unconditional Invalidate would
+	// have each in turn discard the replacement the previous one just fetched,
+	// turning one expiry into a login per worker.
+	c.invalidate(token)
+
 	utils.LogFor(ctx).Warn("external_payments returned 401, retrying with a fresh token",
 		slog.String("call", what))
 
-	return send()
+	resp, _, err = send()
+
+	return resp, err
+}
+
+// invalidate drops the rejected token, comparing before clearing where the
+// source supports it.
+//
+// keycloak.TokenSource only promises Invalidate(), and widening that interface
+// would mean regenerating the mocks and touching pkg/accounting and
+// pkg/profiles, which have no concurrent callers and no reason to change here.
+// keycloak.Client — the only source used in production on this path — carries
+// the comparing form.
+func (c *Client) invalidate(stale string) {
+	if source, ok := c.Tokens.(interface{ InvalidateToken(string) }); ok {
+		source.InvalidateToken(stale)
+		return
+	}
+
+	c.Tokens.Invalidate()
 }
 
 // FetchMuhlafim returns Pelecard's card replacements for a date window from
@@ -148,6 +180,16 @@ func (c *Client) ChargeByToken(ctx context.Context, request *ChargeRequest, term
 			slog.String("terminal", terminal.Name),
 			slog.Int("http_status", resp.StatusCode()),
 			slog.String("body", string(resp.Body())))
+
+		// A rejected credential is worth telling apart from a declined card: one
+		// is a deployment fault that fails every charge in the run, the other is
+		// this member's card. The charge-check command turns on that distinction,
+		// and matching an error string for it would be fragile.
+		if resp.StatusCode() == http.StatusUnauthorized {
+			return nil, fmt.Errorf("%w: charge gateway HTTP error [%d]",
+				ErrUnauthorized, resp.StatusCode())
+		}
+
 		return nil, fmt.Errorf("charge gateway HTTP error [%d]", resp.StatusCode())
 	}
 

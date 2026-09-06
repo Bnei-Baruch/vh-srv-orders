@@ -481,3 +481,37 @@ func TestClient_ChargeByToken_InvalidatesOnlyTheRejectedToken(t *testing.T) {
 	assert.Equal(t, []string{"stale"}, tokens.invalidated,
 		"the token that was rejected is named, so a source can refuse to clear a newer one")
 }
+
+// A rejected credential fails every charge in a run; a declined card fails one
+// member's. charge-check turns on telling them apart, so the distinction is a
+// sentinel rather than a substring.
+func TestClient_ChargeByToken_UnauthorizedIsASentinel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error":"unauthorized"}`))
+	}))
+	defer server.Close()
+
+	client := newChargeClient(t)
+	_, err := client.ChargeByToken(context.Background(), &pelecard.ChargeRequest{Reference: "m-6-f2t"},
+		pelecard.Terminal{Name: "token", ChargeURL: server.URL})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, pelecard.ErrUnauthorized)
+}
+
+func TestClient_ChargeByToken_OtherErrorsAreNotUnauthorized(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		w.Write([]byte(`{"error":"upstream"}`))
+	}))
+	defer server.Close()
+
+	client := newChargeClient(t)
+	_, err := client.ChargeByToken(context.Background(), &pelecard.ChargeRequest{Reference: "m-7-f2t"},
+		pelecard.Terminal{Name: "token", ChargeURL: server.URL})
+
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, pelecard.ErrUnauthorized,
+		"a gateway failure must not read as a credential problem")
+}

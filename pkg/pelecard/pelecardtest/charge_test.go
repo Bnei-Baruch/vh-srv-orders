@@ -3,6 +3,7 @@ package pelecardtest
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -16,6 +17,9 @@ import (
 
 // newChargeClient creates a Client for ChargeByToken/Execute tests.
 // No URL rewriting is needed because terminal.ChargeURL is set directly to the test server URL.
+// Carries a token source, since charging authenticates now. Tests that care
+// which token is sent replace it; the rest only need the call to get past the
+// bearer being taken.
 func newChargeClient(t *testing.T) *pelecard.Client {
 	t.Helper()
 	restyClient := resty.New()
@@ -24,6 +28,7 @@ func newChargeClient(t *testing.T) *pelecard.Client {
 	})
 	return &pelecard.Client{
 		Client: restyClient,
+		Tokens: stubTokens{token: "tok_charge"},
 	}
 }
 
@@ -324,4 +329,109 @@ func TestDryRunChargeExecutor_Distribution(t *testing.T) {
 	assert.Equal(t, 15, failBoth, "15%% of orders should fail both terminals")
 	assert.Equal(t, 30, failToken, "30%% of orders should fail token but succeed on EMV")
 	assert.Equal(t, 55, succeedToken, "55%% of orders should succeed on token")
+}
+
+// --- charge authentication ---
+
+// Until this change these calls reached external_payments with no credential,
+// which is why its log shows the renewal burst as requested_by=anonymous.
+func TestClient_ChargeByToken_SendsBearerOnTheRequest(t *testing.T) {
+	var authHeader string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader = r.Header.Get("Authorization")
+		w.Write([]byte(`{"status":"success","data":"{}"}`))
+	}))
+	defer server.Close()
+
+	client := newChargeClient(t)
+	client.Tokens = stubTokens{token: "tok_secret"}
+
+	_, err := client.ChargeByToken(context.Background(), &pelecard.ChargeRequest{Reference: "m-1-f2t"},
+		pelecard.Terminal{Name: "token", ChargeURL: server.URL})
+
+	require.NoError(t, err)
+	assert.Equal(t, "Bearer tok_secret", authHeader)
+	assert.Empty(t, client.Client.Header.Get("Authorization"),
+		"the shared client must stay clean, or every call it makes carries this token")
+}
+
+// A Keycloak access token lives 15 minutes; the renewal run is a burst of
+// thousands of charges, so a run crosses an expiry. Without the retry, that
+// crossing is a failed renewal.
+func TestClient_ChargeByToken_RetriesOnceAfter401(t *testing.T) {
+	var seen []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Header.Get("Authorization"))
+		if len(seen) == 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"error":"unauthorized"}`))
+			return
+		}
+		w.Write([]byte(`{"status":"success","data":"{}"}`))
+	}))
+	defer server.Close()
+
+	tokens := &rotatingTokens{tokens: []string{"stale", "fresh"}}
+	client := newChargeClient(t)
+	client.Tokens = tokens
+
+	result, err := client.ChargeByToken(context.Background(), &pelecard.ChargeRequest{Reference: "m-2-f2t"},
+		pelecard.Terminal{Name: "token", ChargeURL: server.URL})
+
+	require.NoError(t, err)
+	assert.Equal(t, "success", result["status"])
+	assert.Equal(t, 1, tokens.invalidated, "the stale token is invalidated once")
+	assert.Equal(t, []string{"Bearer stale", "Bearer fresh"}, seen, "exactly one retry, with a different token")
+}
+
+func TestClient_ChargeByToken_PersistentUnauthorizedFails(t *testing.T) {
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error":"unauthorized"}`))
+	}))
+	defer server.Close()
+
+	client := newChargeClient(t)
+	client.Tokens = &rotatingTokens{tokens: []string{"stale", "fresh"}}
+
+	result, err := client.ChargeByToken(context.Background(), &pelecard.ChargeRequest{Reference: "m-3-f2t"},
+		pelecard.Terminal{Name: "token", ChargeURL: server.URL})
+
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "401")
+	assert.Equal(t, 2, requests, "a persistent 401 fails rather than looping")
+}
+
+// A charge must not be attempted at all without a credential, now that the
+// route it targets will reject one.
+func TestClient_ChargeByToken_NoTokenSource(t *testing.T) {
+	var called bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+	}))
+	defer server.Close()
+
+	client := newChargeClient(t)
+	client.Tokens = nil
+
+	_, err := client.ChargeByToken(context.Background(), &pelecard.ChargeRequest{Reference: "m-4-f2t"},
+		pelecard.Terminal{Name: "token", ChargeURL: server.URL})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no token source")
+	assert.False(t, called, "nothing should reach the gateway")
+}
+
+func TestClient_ChargeByToken_TokenUnavailable(t *testing.T) {
+	client := newChargeClient(t)
+	client.Tokens = stubTokens{err: errors.New("keycloak unreachable")}
+
+	_, err := client.ChargeByToken(context.Background(), &pelecard.ChargeRequest{Reference: "m-5-f2t"},
+		pelecard.Terminal{Name: "token", ChargeURL: "http://127.0.0.1:1"})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "keycloak unreachable")
 }

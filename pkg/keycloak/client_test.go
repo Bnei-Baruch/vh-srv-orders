@@ -4,11 +4,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/Nerzal/gocloak/v13"
 	"github.com/golang-jwt/jwt/v4"
+
+	"gitlab.bbdev.team/vh/pay/orders/common"
 )
 
 // Token() is the reader every charge goes through, and the one that dereferences
@@ -143,10 +146,12 @@ func TestInvalidateTokenOnEmptyCacheIsHarmless(t *testing.T) {
 // pays the full request timeout with the mutex held. A renewal run of a few
 // thousand orders across two terminal legs would grind serially for hours
 // against a Keycloak that accepts connections and never answers.
-func TestAccessTokenSkipsWhileBackingOff(t *testing.T) {
-	var requests int
+func TestAccessTokenSkipsOnlyAfterConsecutiveFailures(t *testing.T) {
+	// Written by the handler goroutine, read here: no happens-before edge comes
+	// from the HTTP round trip itself.
+	var requests atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests++
+		requests.Add(1)
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer server.Close()
@@ -154,36 +159,130 @@ func TestAccessTokenSkipsWhileBackingOff(t *testing.T) {
 	client := &Client{kc: gocloak.NewClient(server.URL)}
 	client.kc.RestyClient().SetTimeout(time.Second)
 
-	// First attempt reaches Keycloak and fails.
-	if _, err := client.Token(); err == nil {
-		t.Fatal("a 500 from Keycloak should not yield a token")
+	// Up to the threshold every caller still gets its own attempt: a blip that
+	// heals must not cost a whole window of orders.
+	for i := 0; i < loginFailureThreshold; i++ {
+		if _, err := client.Token(); err == nil {
+			t.Fatal("a 500 from Keycloak should not yield a token")
+		}
 	}
-	if requests != 1 {
-		t.Fatalf("expected one attempt, got %d", requests)
+	if got := requests.Load(); got != int64(loginFailureThreshold) {
+		t.Fatalf("expected %d attempts before suppression, got %d", loginFailureThreshold, got)
 	}
 
-	// The next callers are suppressed rather than each paying their own attempt.
+	// Past it, callers fail without adding load.
 	for i := 0; i < 5; i++ {
 		if _, err := client.Token(); err == nil {
 			t.Fatal("expected the backoff to keep failing callers fast")
 		}
 	}
-	if requests != 1 {
-		t.Fatalf("backoff should have suppressed the retries, got %d attempts", requests)
+	if got := requests.Load(); got != int64(loginFailureThreshold) {
+		t.Fatalf("backoff should have suppressed further attempts, got %d", got)
+	}
+}
+
+// One or two failures with a success between them must suppress nothing: a
+// suppressed charge worker still writes a pending payment row per order, so a
+// window of fast failures books orders failed that a healing blip would not.
+func TestFailuresBelowThresholdDoNotSuppress(t *testing.T) {
+	client := &Client{}
+
+	for i := 0; i < loginFailureThreshold-1; i++ {
+		client.recordFailure()
+	}
+	if client.backingOff() {
+		t.Fatalf("%d consecutive failures must not suppress anything", loginFailureThreshold-1)
+	}
+
+	client.recordFailure()
+	if !client.backingOff() {
+		t.Fatal("the threshold should be reached now")
+	}
+
+	// A success anywhere in the sequence resets the count.
+	client.clearFailures()
+	for i := 0; i < loginFailureThreshold-1; i++ {
+		client.recordFailure()
+	}
+	if client.backingOff() {
+		t.Fatal("a success in between must reset the consecutive count")
+	}
+}
+
+// A caller holding a valid token must never be refused because obtaining a new
+// one has been failing: the backoff concerns fetching, not using.
+func TestValidCachedTokenIsReturnedWhileBackingOff(t *testing.T) {
+	client := &Client{kc: gocloak.NewClient("http://127.0.0.1:1")}
+	client.kc.RestyClient().SetTimeout(time.Second)
+	seedToken(client, "still-good")
+
+	client.mu.Lock()
+	client.failures = loginFailureThreshold
+	client.lastFailure = time.Now()
+	client.mu.Unlock()
+
+	token, err := client.Token()
+	if err != nil {
+		t.Fatalf("a valid cached token should be returned during a backoff: %v", err)
+	}
+	if token != "still-good" {
+		t.Fatalf("got %q", token)
+	}
+}
+
+// An invalidation says the caller knows the token is bad, which has to outrank
+// the backoff — otherwise the retry after a 401 is suppressed and becomes no
+// retry at all.
+func TestInvalidationClearsTheBackoff(t *testing.T) {
+	client := &Client{}
+	for i := 0; i < loginFailureThreshold; i++ {
+		client.recordFailure()
+	}
+
+	client.Invalidate()
+	if client.backingOff() {
+		t.Fatal("Invalidate must clear the backoff")
+	}
+
+	seedToken(client, "cached")
+	for i := 0; i < loginFailureThreshold; i++ {
+		client.recordFailure()
+	}
+
+	client.InvalidateToken("cached")
+	if client.backingOff() {
+		t.Fatal("InvalidateToken must clear the backoff when it clears the token")
+	}
+}
+
+// NewClient is what production uses, and the timeout it sets is what bounds a
+// hung Keycloak. Deleting that line used to leave the whole suite green.
+func TestNewClientBoundsItsRequests(t *testing.T) {
+	saved := common.Config.KeycloakServerUrl
+	common.Config.KeycloakServerUrl = "http://127.0.0.1:1"
+	defer func() { common.Config.KeycloakServerUrl = saved }()
+
+	client := NewClient()
+
+	if got := client.kc.RestyClient().GetClient().Timeout; got != tokenRequestTimeout {
+		t.Fatalf("NewClient must bound its requests: timeout is %v, want %v", got, tokenRequestTimeout)
 	}
 }
 
 // A backoff that outlived its window would keep failing callers after Keycloak
 // came back.
 func TestBackingOffExpires(t *testing.T) {
-	client := &Client{lastFailure: time.Now().Add(-loginFailureBackoff - time.Second)}
+	client := &Client{
+		failures:    loginFailureThreshold,
+		lastFailure: time.Now().Add(-loginFailureBackoff - time.Second),
+	}
 
 	if client.backingOff() {
-		t.Fatal("a failure older than the window must not suppress anything")
+		t.Fatal("failures older than the window must not suppress anything")
 	}
 
 	client.lastFailure = time.Now()
 	if !client.backingOff() {
-		t.Fatal("a fresh failure must suppress the next attempt")
+		t.Fatal("failures at the threshold, inside the window, must suppress")
 	}
 }

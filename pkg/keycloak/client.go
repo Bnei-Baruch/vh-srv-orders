@@ -61,6 +61,10 @@ func NewClient(scopes ...string) *Client {
 // AccessToken call: a single holder of the mutex can issue up to four — refresh,
 // its certificate fetch, then login and its own certificate fetch — so the worst
 // case per holder is four times this, not one.
+//
+// That 4x is also the floor for loginFailureBackoff below, which is guarded at
+// compile time: raising this without raising the window would invert the ratio
+// the backoff exists to produce.
 const tokenRequestTimeout = 10 * time.Second
 
 // loginFailureBackoff is how long consecutive failures suppress further
@@ -88,6 +92,13 @@ const (
 	loginFailureBackoff   = 45 * time.Second
 	loginFailureThreshold = 3
 )
+
+// Compile-time guard for the second rule above: the window has to outlast the
+// worst case of a single attempt. Subtracting on unsigned constants makes an
+// inverting edit — raising tokenRequestTimeout, or adding a fifth request to
+// the token dance — a build failure rather than a run that spends more time
+// stalled on the mutex than making progress.
+const _ = uint(loginFailureBackoff/time.Second) - uint(4*tokenRequestTimeout/time.Second)
 
 func (c *Client) Token() (string, error) {
 	token := c.AccessToken(context.Background())

@@ -109,7 +109,13 @@ const (
 // that misses its cache — changes no constant here, so the real worst case
 // would grow while this still builds. Anyone adding one has to raise the
 // multiplier by hand.
-const _ = uint(loginFailureBackoff - 4*tokenRequestTimeout - 1)
+//
+// uint64 rather than uint, because in nanoseconds the satisfied value is about
+// 5e9: that overflows a 32-bit uint, so the guard failed to build under
+// GOARCH=386 and GOARCH=arm. Nothing here targets those today, and a negative
+// constant still fails to convert, so the guard behaves identically where it
+// matters.
+const _ = uint64(loginFailureBackoff - 4*tokenRequestTimeout - 1)
 
 func (c *Client) Token() (string, error) {
 	token := c.AccessToken(context.Background())

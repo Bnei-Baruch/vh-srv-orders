@@ -181,12 +181,23 @@ func TestAccessTokenSkipsOnlyAfterConsecutiveFailures(t *testing.T) {
 	}
 }
 
-// Deliberately written in literals rather than in terms of the constants. Every
-// other assertion here derives its bounds from loginFailureThreshold and
-// loginFailureBackoff, which restates them instead of constraining them: with
-// those assertions alone, setting the threshold to 1 — the behaviour that mass-
-// failed renewals on a blip, and which this design exists to remove — keeps the
-// suite green, and so does 100.
+// The threshold is asserted as a literal, on purpose. Every other assertion in
+// this package derives its bounds from loginFailureThreshold itself, which
+// restates the constant instead of constraining it: with those alone, setting
+// the threshold to 1 — the behaviour that mass-failed renewals on a blip, and
+// which this design exists to remove — keeps the suite green, and so does 100.
+//
+// The window is different, and the two bounds below are not the same kind of
+// assertion:
+//
+//   - the lower bound derives from tokenRequestTimeout, which constrains the
+//     relationship rather than restating a value. It is also the exact
+//     complement of the compile-time guard in client.go, so it cannot fire while
+//     that guard exists — its message will never be seen in practice. It is
+//     here as a backstop for the guard being deleted: remove the guard and set
+//     the window to 40s, and this is what catches it.
+//   - the upper bound is a literal, and is therefore the only assertion here
+//     that can actually fire while everything else is in place.
 func TestBackoffConstantsHaveTheirIntendedValues(t *testing.T) {
 	if loginFailureThreshold != 3 {
 		t.Errorf("threshold is %d: 1 suppresses on a single blip, and a suppressed "+

@@ -47,8 +47,14 @@ func newKeycloakStub(t *testing.T) *keycloakStub {
 	}
 	stub := &keycloakStub{key: key}
 
+	// Registered under /auth, which is what gocloak.SetLegacyWildFlySupport()
+	// in NewClient makes the client ask for. The stub is reached through
+	// NewClient (see client below) precisely so that option is on the path
+	// under test: registering the modern paths here instead would leave the
+	// package green with the option deleted, while every login in production
+	// 404s — the Keycloak this service talks to serves the legacy prefix.
 	mux := http.NewServeMux()
-	mux.HandleFunc("/realms/"+testRealm+"/protocol/openid-connect/token",
+	mux.HandleFunc("/auth/realms/"+testRealm+"/protocol/openid-connect/token",
 		func(w http.ResponseWriter, r *http.Request) {
 			stub.logins.Add(1)
 			if stub.failNext.Load() {
@@ -65,7 +71,7 @@ func newKeycloakStub(t *testing.T) *keycloakStub {
 				"expires_in":    900,
 			})
 		})
-	mux.HandleFunc("/realms/"+testRealm+"/protocol/openid-connect/certs",
+	mux.HandleFunc("/auth/realms/"+testRealm+"/protocol/openid-connect/certs",
 		func(w http.ResponseWriter, r *http.Request) {
 			kid, kty, alg, use := "test-key", "RSA", "RS256", "sig"
 			n := base64.RawURLEncoding.EncodeToString(key.PublicKey.N.Bytes())
@@ -107,20 +113,24 @@ const testRealm = "test-realm"
 func (s *keycloakStub) client(t *testing.T) *Client {
 	t.Helper()
 
-	savedRealm, savedID, savedSecret := common.Config.KeycloakRealm,
-		common.Config.KeycloakClientID, common.Config.KeycloakClientSecret
+	savedURL, savedRealm, savedID, savedSecret := common.Config.KeycloakServerUrl,
+		common.Config.KeycloakRealm, common.Config.KeycloakClientID,
+		common.Config.KeycloakClientSecret
+	common.Config.KeycloakServerUrl = s.server.URL
 	common.Config.KeycloakRealm = testRealm
 	common.Config.KeycloakClientID = "test-client"
 	common.Config.KeycloakClientSecret = "test-secret"
 	t.Cleanup(func() {
+		common.Config.KeycloakServerUrl = savedURL
 		common.Config.KeycloakRealm = savedRealm
 		common.Config.KeycloakClientID = savedID
 		common.Config.KeycloakClientSecret = savedSecret
 	})
 
-	client := &Client{kc: gocloak.NewClient(s.server.URL)}
-	client.kc.RestyClient().SetTimeout(2 * time.Second)
-	return client
+	// NewClient, not a hand-built Client: everything it applies to the gocloak
+	// client — the legacy /auth prefix, the request deadline — is then part of
+	// what these tests exercise rather than something they quietly skip.
+	return NewClient()
 }
 
 func TestSuccessfulLoginResetsTheFailureCount(t *testing.T) {

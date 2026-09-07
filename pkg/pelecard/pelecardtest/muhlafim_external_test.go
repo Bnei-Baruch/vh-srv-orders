@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+	"time"
 
 	"errors"
 
@@ -167,6 +168,21 @@ func TestFetchMuhlafim_RetriesOnlyOnce(t *testing.T) {
 	assert.Nil(t, entries)
 	assert.Contains(t, err.Error(), "401")
 	assert.Equal(t, 2, requests, "a persistent 401 fails rather than looping")
+}
+
+// Without a timeout a hung external_payments holds a charge worker for the life
+// of the process: the charge context is uncancellable by design. Set below
+// external_payments' own 120s WriteTimeout, a charge still in flight would be
+// abandoned and re-sent to the EMV terminal under a different reference, which
+// the duplicate suppression there cannot match.
+func TestChargeClientHasAGenerousDeadline(t *testing.T) {
+	const externalPaymentsWriteTimeout = 120 * time.Second
+
+	timeout := pelecard.NewClient().Client.GetClient().Timeout
+
+	require.NotZero(t, timeout, "the charge context is uncancellable")
+	assert.Greater(t, timeout, externalPaymentsWriteTimeout)
+	assert.LessOrEqual(t, timeout, 5*time.Minute, "long enough to be no bound at all")
 }
 
 func TestFetchMuhlafim_Unauthorized(t *testing.T) {

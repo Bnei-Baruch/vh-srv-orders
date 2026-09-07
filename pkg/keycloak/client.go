@@ -95,10 +95,21 @@ const (
 
 // Compile-time guard for the second rule above: the window has to outlast the
 // worst case of a single attempt. Subtracting on unsigned constants makes an
-// inverting edit — raising tokenRequestTimeout, or adding a fifth request to
-// the token dance — a build failure rather than a run that spends more time
-// stalled on the mutex than making progress.
-const _ = uint(loginFailureBackoff/time.Second) - uint(4*tokenRequestTimeout/time.Second)
+// edit to either constant that inverts it a build failure rather than a run
+// that spends more time stalled on the mutex than making progress.
+//
+// Strict and in nanoseconds, matching the rule as stated: "longer than", not
+// "at least". A window exactly four times the timeout would only tie, and
+// dividing to whole seconds first would let a sub-second overrun through —
+// tokenRequestTimeout at 11.3s puts the true worst case at 45.2s against a 45s
+// window, which truncation cannot see.
+//
+// What it does not guard is the 4 itself, which is a literal nothing derives.
+// A fifth request inside the mutex — an introspect, a userinfo, a certs fetch
+// that misses its cache — changes no constant here, so the real worst case
+// would grow while this still builds. Anyone adding one has to raise the
+// multiplier by hand.
+const _ = uint(loginFailureBackoff - 4*tokenRequestTimeout - 1)
 
 func (c *Client) Token() (string, error) {
 	token := c.AccessToken(context.Background())

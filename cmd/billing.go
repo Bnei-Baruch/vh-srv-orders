@@ -446,6 +446,16 @@ func buildChargeableBillingService(ordersDB *repo.OrdersDB, eventEmitter events.
 	if err := pricing.ValidateConfig(); err != nil {
 		utils.LogFatal("pricing.ValidateConfig", slog.Any("err", err))
 	}
+	// Charging authenticates to external_payments, so the credential is as
+	// required here as the pricing configuration above. Checked even for a dry
+	// run, which builds the same service and differs only in the executor:
+	// a dry run that passes on a host missing the secret would say the real run
+	// will work.
+	//
+	// Not covered by the muhlafim step's own check: `retry-pricing-errors` skips
+	// that step entirely, `--muhlafim=false` disables it, and with no flagged
+	// orders ProcessMuhlafim returns before it ever needs a token.
+	validateKeycloakConfig()
 
 	pelecardClient := pelecard.NewClient()
 	var chargeExecutor pelecard.ChargeExecutor

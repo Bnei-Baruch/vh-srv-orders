@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-resty/resty/v2"
 
@@ -47,10 +48,22 @@ type Client struct {
 	Tokens keycloak.TokenSource
 }
 
+// chargeRequestTimeout bounds a call to external_payments. Needed because the
+// charge context is uncancellable by design (context.WithoutCancel in
+// domain/billing/renewal.go), so the parent deadline is gone and a hung peer
+// would hold a worker for the life of the process.
+//
+// Above external_payments' own 120s WriteTimeout, deliberately: abandoning a
+// charge still in flight makes chargeResolved retry on the EMV terminal under a
+// different reference, which the duplicate suppression there cannot match, and
+// the member is charged twice. Past its write deadline it cannot answer anyway.
+const chargeRequestTimeout = 150 * time.Second
+
 // NewClient creates a client for external_payments. No Pelecard credentials and
 // no terminal number: this service no longer talks to Pelecard.
 func NewClient() *Client {
 	client := resty.New()
+	client.SetTimeout(chargeRequestTimeout)
 	client.SetHeaders(map[string]string{
 		"Content-Type": "application/json",
 	})

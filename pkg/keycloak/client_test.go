@@ -181,6 +181,61 @@ func TestAccessTokenSkipsOnlyAfterConsecutiveFailures(t *testing.T) {
 	}
 }
 
+// Deliberately written in literals rather than in terms of the constants. Every
+// other assertion here derives its bounds from loginFailureThreshold and
+// loginFailureBackoff, which restates them instead of constraining them: with
+// those assertions alone, setting the threshold to 1 — the behaviour that mass-
+// failed renewals on a blip, and which this design exists to remove — keeps the
+// suite green, and so does 100.
+func TestBackoffConstantsHaveTheirIntendedValues(t *testing.T) {
+	if loginFailureThreshold != 3 {
+		t.Errorf("threshold is %d: 1 suppresses on a single blip, and a suppressed "+
+			"charge worker still writes a pending payment row per order; a large value "+
+			"never suppresses and restores the serial grind", loginFailureThreshold)
+	}
+
+	if loginFailureBackoff < 40*time.Second || loginFailureBackoff > 2*time.Minute {
+		t.Errorf("backoff window is %v: it has to outlast the worst case of one attempt "+
+			"(four requests at %v) without freezing callers for minutes",
+			loginFailureBackoff, tokenRequestTimeout)
+	}
+}
+
+// The count that matters is the one before suppression: two consecutive
+// failures must each still reach Keycloak, and the third is the one that closes
+// the door. Written as literals so the constant cannot drift underneath it.
+func TestSecondFailureStillTriesAndThirdSuppresses(t *testing.T) {
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	client := &Client{kc: gocloak.NewClient(server.URL)}
+	client.kc.RestyClient().SetTimeout(time.Second)
+
+	_, _ = client.Token()
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("first call: %d attempts, want 1", got)
+	}
+
+	_, _ = client.Token()
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("second call must still reach Keycloak: %d attempts, want 2", got)
+	}
+
+	_, _ = client.Token()
+	if got := requests.Load(); got != 3 {
+		t.Fatalf("third call must still reach Keycloak: %d attempts, want 3", got)
+	}
+
+	_, _ = client.Token()
+	if got := requests.Load(); got != 3 {
+		t.Fatalf("fourth call must be suppressed: %d attempts, want 3", got)
+	}
+}
+
 // One or two failures with a success between them must suppress nothing: a
 // suppressed charge worker still writes a pending payment row per order, so a
 // window of fast failures books orders failed that a healing blip would not.

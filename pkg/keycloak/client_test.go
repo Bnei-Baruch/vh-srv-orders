@@ -194,7 +194,7 @@ func TestBackoffConstantsHaveTheirIntendedValues(t *testing.T) {
 			"never suppresses and restores the serial grind", loginFailureThreshold)
 	}
 
-	if loginFailureBackoff < 40*time.Second || loginFailureBackoff > 2*time.Minute {
+	if loginFailureBackoff <= 4*tokenRequestTimeout || loginFailureBackoff > 2*time.Minute {
 		t.Errorf("backoff window is %v: it has to outlast the worst case of one attempt "+
 			"(four requests at %v) without freezing callers for minutes",
 			loginFailureBackoff, tokenRequestTimeout)

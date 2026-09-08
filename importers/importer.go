@@ -91,7 +91,8 @@ func (im *BaseImporter) Init() error {
 
 func (im *BaseImporter) Close() {
 	im.repo.Close()
-	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	im.eventEmitter.Close(ctx)
 }
 

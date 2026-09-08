@@ -293,7 +293,8 @@ func (a *App) Run() {
 
 func (a *App) Shutdown() {
 	a.repo.Close()
-	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	a.eventEmitter.Close(ctx)
 	sentry.Flush(2 * time.Second)
 }

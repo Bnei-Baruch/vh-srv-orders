@@ -62,6 +62,23 @@ type EventListener struct {
 	runnerStarted bool
 }
 
+// queueCapacity is how many delivered events wait for the runner.
+//
+// It was written as `2^10`, which reads as 1024 and is not: Go has no power
+// operator, so that expression is 2 XOR 10 = 8. Left at 8 on purpose rather
+// than "corrected" upwards, because handleMessage acks on enqueue — so
+// everything sitting here is already acknowledged to JetStream and would be
+// lost, not redelivered, if the process died. A bigger buffer is a bigger
+// window of events that can vanish, and a longer drain to get through on
+// shutdown. When the buffer fills, the delivery callback blocks, which is
+// backpressure rather than loss.
+//
+// Raising it only makes sense together with acking after the handlers run,
+// which needs the handlers to report failure first: HandleProfilesEvent
+// currently logs and swallows, so an ack placed after it would still fire on a
+// failed handler.
+const queueCapacity = 8
+
 func NewEventListener() (*EventListener, error) {
 	el := new(EventListener)
 
@@ -93,7 +110,7 @@ func NewEventListener() (*EventListener, error) {
 		return nil, fmt.Errorf("jetstream.CreateOrUpdateConsumer: %w", err)
 	}
 
-	el.queue = make(chan Event, 2^10)
+	el.queue = make(chan Event, queueCapacity)
 	el.handlers = make([]EventHandler, 0)
 	el.quit = make(chan struct{})
 	el.done = make(chan struct{})

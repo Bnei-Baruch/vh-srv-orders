@@ -111,6 +111,8 @@ func runBillingStart(cmd *cobra.Command, args []string) {
 		utils.LogFatal("Failed to parse flags", slog.Any("error", err))
 	}
 
+	validateChargeConfig()
+
 	eventEmitter, ordersDB, cleanup, err := initBillingInfra()
 	if err != nil {
 		sentry.CaptureException(err)
@@ -138,6 +140,8 @@ func runBillingRetryPricingErrors(cmd *cobra.Command, args []string) {
 		sentry.CaptureException(err)
 		utils.LogFatal("Failed to parse flags", slog.Any("error", err))
 	}
+
+	validateChargeConfig()
 
 	eventEmitter, ordersDB, cleanup, err := initBillingInfra()
 	if err != nil {
@@ -442,21 +446,26 @@ func initBillingInfra() (events.EventEmitter, *repo.OrdersDB, func(), error) {
 
 // buildChargeableBillingService wires a BillingService with charge executor and pricing resolver.
 // Used by commands that perform charging (start, retry-pricing-errors).
-func buildChargeableBillingService(ordersDB *repo.OrdersDB, eventEmitter events.EventEmitter, dryRun bool) *billing.BillingService {
+// validateChargeConfig checks everything a charging run needs before it runs.
+//
+// Called by the commands, not from buildChargeableBillingService: the builder
+// runs after their `defer cleanup()`, so a fatal inside it would exit without
+// closing the pool or draining NATS.
+//
+// The credential is checked even for a dry run, which builds the same service
+// and differs only in the executor — a dry run passing on a host without the
+// secret would say the real run will work. And the muhlafim step's own check
+// does not cover charging: retry-pricing-errors skips that step,
+// --muhlafim=false disables it, and an empty window returns before it needs a
+// token.
+func validateChargeConfig() {
 	if err := pricing.ValidateConfig(); err != nil {
 		utils.LogFatal("pricing.ValidateConfig", slog.Any("err", err))
 	}
-	// Charging authenticates to external_payments, so the credential is as
-	// required here as the pricing configuration above. Checked even for a dry
-	// run, which builds the same service and differs only in the executor:
-	// a dry run that passes on a host missing the secret would say the real run
-	// will work.
-	//
-	// Not covered by the muhlafim step's own check: `retry-pricing-errors` skips
-	// that step entirely, `--muhlafim=false` disables it, and with no flagged
-	// orders ProcessMuhlafim returns before it ever needs a token.
 	validateKeycloakConfig()
+}
 
+func buildChargeableBillingService(ordersDB *repo.OrdersDB, eventEmitter events.EventEmitter, dryRun bool) *billing.BillingService {
 	pelecardClient := pelecard.NewClient()
 	var chargeExecutor pelecard.ChargeExecutor
 	if dryRun {

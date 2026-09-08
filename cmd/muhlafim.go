@@ -114,12 +114,12 @@ func initializeServices(ctx context.Context) (events.EventEmitter, *repo.OrdersD
 
 	ordersDB, err := repo.NewOrdersDB(ctx, eventEmitter)
 	if err != nil {
-		// The emitter is already live and holding whatever it has. Drained
-		// before exiting, as initBillingInfra does on the same path.
-		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		eventEmitter.Close(closeCtx)
-		utils.LogFatal("Failed to initialize database", slog.Any("error", err))
+		// The emitter is already live and holding whatever it has.
+		utils.FatalAfter(func() {
+			closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			eventEmitter.Close(closeCtx)
+		}, "Failed to initialize database", slog.Any("error", err))
 	}
 
 	return eventEmitter, ordersDB

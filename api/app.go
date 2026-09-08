@@ -69,11 +69,14 @@ func (a *App) initDB() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	var err error
-	a.repo, err = repo.NewOrdersDB(ctx, a.eventEmitter)
+	// Through a local: NewOrdersDB returns a concrete *repo.OrdersDB, and on
+	// failure that nil pointer boxes into a non-nil interface — Shutdown's guard
+	// would pass and its Close would panic on the nil receiver.
+	ordersDB, err := repo.NewOrdersDB(ctx, a.eventEmitter)
 	if err != nil {
 		utils.FatalAfter(a.Shutdown, "connect to db", slog.Any("err", err))
 	}
+	a.repo = ordersDB
 
 	err = repo.SyncDBStructInsertionAndMigrations()
 	if err != nil {
@@ -306,6 +309,12 @@ func (a *App) Run() {
 // it has to survive a partial Initialize: either field can still be nil when a
 // fatal happens on the way up.
 func (a *App) Shutdown() {
+	// The listener first: its consumer goroutine writes through the repo, so
+	// closing the pool underneath it turns in-flight profile events into
+	// `closed pool` errors, reported to Sentry and never acked.
+	if a.eventListener != nil {
+		a.eventListener.Close()
+	}
 	if a.repo != nil {
 		a.repo.Close()
 	}

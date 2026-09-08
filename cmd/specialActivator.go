@@ -54,19 +54,17 @@ func Do(w *Worker) {
 	}
 	defer sentry.Flush(2 * time.Second)
 
-	// do the thing. Close on the failure paths too, and explicitly: utils.LogFatal
-	// ends in os.Exit, which runs no deferred function — not even the sentry.Flush
-	// above.
+	// do the thing. The failure paths drain too, through FatalAfter: os.Exit runs
+	// no deferred function — not even the sentry.Flush above — and the reason has
+	// to be logged before the drain, which can block.
 	if err := w.Init(); err != nil {
 		sentry.CaptureException(err)
-		w.Close()
-		utils.LogFatal("worker.Init", slog.Any("err", err))
+		utils.FatalAfter(w.Close, "worker.Init", slog.Any("err", err))
 	}
 
 	if err := w.DoTask(); err != nil {
 		sentry.CaptureException(err)
-		w.Close()
-		utils.LogFatal("im.DoTask", slog.Any("err", err))
+		utils.FatalAfter(w.Close, "worker.DoTask", slog.Any("err", err))
 	}
 
 	w.Close()

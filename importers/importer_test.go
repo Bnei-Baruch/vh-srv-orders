@@ -13,8 +13,10 @@ import (
 func withFailingDB(t *testing.T) {
 	t.Helper()
 
-	saved := common.Config
-	t.Cleanup(func() { common.Config = saved })
+	// The value, not the pointer: common.Config is *envConfig, so saving the
+	// pointer and handing it back restores nothing.
+	saved := *common.Config
+	t.Cleanup(func() { *common.Config = saved })
 
 	common.Config.NatsUrl = ""
 	common.Config.PgHost, common.Config.PgPort = "127.0.0.1", "1"
@@ -28,7 +30,9 @@ func TestBaseImporterCloseAfterFailedInit(t *testing.T) {
 
 	im := NewBaseImporter()
 	require.Error(t, im.Init(), "the repo step must fail for this test to mean anything")
-	require.Nil(t, im.repo, "a failed Init must leave no typed nil behind")
+	// == nil, not require.Nil, which reflects into the interface and reports a
+	// boxed nil pointer as nil — the one thing this line exists to catch.
+	require.True(t, im.repo == nil, "a failed Init must leave no typed nil behind")
 
 	im.Close()
 }

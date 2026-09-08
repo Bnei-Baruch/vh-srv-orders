@@ -45,9 +45,8 @@ type NatsEventHandler struct {
 
 func NewNatsEventHandler() (*NatsEventHandler, error) {
 	eh := new(NatsEventHandler)
-	// Buffered, because the send in closedCallback has no receiver once Close has
-	// given up on its deadline: Close returns on ctx.Done() and the callback then
-	// blocks on the send for the life of the process.
+	// Buffered: once Close has given up on its deadline nothing receives, and
+	// closedCallback would block on the send for the life of the process.
 	eh.ncClosed = make(chan struct{}, 1)
 
 	var err error

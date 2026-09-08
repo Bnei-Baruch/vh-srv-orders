@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 
 	"github.com/go-resty/resty/v2"
 
-	"gitlab.bbdev.team/vh/pay/orders/common"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/keycloak"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 )
 
@@ -17,67 +18,87 @@ type PelecardAPI interface {
 	ChargeByToken(ctx context.Context, request *ChargeRequest, terminal Terminal) (map[string]interface{}, error)
 }
 
-// Client is a client for interacting with Pelecard API
+// Client calls external_payments, which holds the Pelecard credentials and
+// terminals on this service's behalf.
 type Client struct {
-	Client         *resty.Client
-	User           string
-	Password       string
-	TerminalNumber string
+	Client *resty.Client
+	// BaseURL is overridable so tests can point at a stub, not configurable:
+	// the host is hardcoded in five other places here too. See issue #22.
+	BaseURL string
+
+	// Tokens authenticates calls to external_payments.
+	Tokens keycloak.TokenSource
 }
 
-// NewClient creates a new Pelecard client (new terminal)
+// NewClient creates a client for external_payments. No Pelecard credentials and
+// no terminal number: this service no longer talks to Pelecard.
 func NewClient() *Client {
-	return NewClientWithTerminal(common.Config.PelecardNewTerminalNumber)
-}
-
-// NewClientWithTerminal creates a new Pelecard client with a specific terminal number
-func NewClientWithTerminal(terminalNumber string) *Client {
 	client := resty.New()
 	client.SetHeaders(map[string]string{
 		"Content-Type": "application/json",
 	})
 
 	return &Client{
-		Client:         client,
-		User:           common.Config.PelecardUser,
-		Password:       common.Config.PelecardPassword,
-		TerminalNumber: terminalNumber,
+		Client:  client,
+		BaseURL: EXTERNAL_PAYMENTS_BASE_URL,
+		Tokens:  keycloak.NewClient(),
 	}
 }
 
-// FetchMuhlafim fetches muhlafim data from Pelecard API for the given date range
-// Date format should be "DD/MM/YYYY HH:MM" (e.g., "21/08/2025 00:00")
-// Returns a map of token -> MuhlafimEntry, filtering out entries with empty tokens
-func (c *Client) FetchMuhlafim(ctx context.Context, startDate, endDate string) (map[string]MuhlafimEntry, error) {
-	req := NewMuhlafimRequest(c.newTerminalRequest(), startDate, endDate)
+// fetchMuhlafim is a single attempt; the retry lives in FetchMuhlafim.
+func (c *Client) fetchMuhlafim(ctx context.Context, startDate, endDate string) (*resty.Response, error) {
+	token, err := c.Tokens.Token()
+	if err != nil {
+		return nil, fmt.Errorf("keycloak token for external_payments: %w", err)
+	}
 
 	resp, err := c.Client.NewRequest().
 		SetContext(ctx).
-		SetBody(req).
-		Post(fmt.Sprintf("%s/services/GetTerminalMuhlafim", PELECARD_API_BASE_URL))
-
+		SetQueryParams(map[string]string{"StartDate": startDate, "EndDate": endDate}).
+		SetHeader("Authorization", "Bearer "+token).
+		Get(c.BaseURL + "/token/muhlafim")
 	if err != nil {
-		return nil, fmt.Errorf("pelecard muhlafim request failed: %w", err)
+		return nil, fmt.Errorf("external muhlafim request failed: %w", err)
 	}
 
-	if resp.IsError() {
-		return nil, fmt.Errorf("pelecard API error [%d]: %s", resp.StatusCode(), resp.String())
+	return resp, nil
+}
+
+// FetchMuhlafim returns Pelecard's card replacements for a date window from
+// external_payments, keyed by the token being replaced. An empty window is a
+// normal answer, not an error.
+func (c *Client) FetchMuhlafim(ctx context.Context, startDate, endDate string) (map[string]MuhlafimEntry, error) {
+	if c.Tokens == nil {
+		return nil, fmt.Errorf("no token source configured for external_payments")
 	}
 
-	var response MuhlafimResponse
-	if err := json.Unmarshal(resp.Body(), &response); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal pelecard response: %w", err)
+	resp, err := c.fetchMuhlafim(ctx, startDate, endDate)
+	if err != nil {
+		return nil, err
 	}
 
-	// Parse response into map, filtering out entries with empty tokens
-	result := make(map[string]MuhlafimEntry)
-	for _, entry := range response.ResultData {
-		if len(entry.Token) > 0 {
-			result[entry.Token] = entry
+	// MapClaims.Valid() applies no clock leeway, so a token cached a moment
+	// before expiry is sent and rejected. Retried once, as pkg/accounting and
+	// pkg/profiles do.
+	if resp.StatusCode() == http.StatusUnauthorized {
+		c.Tokens.Invalidate()
+		utils.LogFor(ctx).Warn("external muhlafim returned 401, retrying with a fresh token")
+
+		if resp, err = c.fetchMuhlafim(ctx, startDate, endDate); err != nil {
+			return nil, err
 		}
 	}
 
-	return result, nil
+	if resp.IsError() {
+		return nil, fmt.Errorf("external muhlafim error [%d]: %s", resp.StatusCode(), resp.String())
+	}
+
+	var entries map[string]MuhlafimEntry
+	if err := json.Unmarshal(resp.Body(), &entries); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal external muhlafim response: %w", err)
+	}
+
+	return entries, nil
 }
 
 // ChargeByToken sends a token-based charge request to the payment gateway.
@@ -125,14 +146,4 @@ func (c *Client) ChargeByToken(ctx context.Context, request *ChargeRequest, term
 // The orderID parameter is ignored — it exists for dry-run determinism only.
 func (c *Client) Execute(ctx context.Context, request *ChargeRequest, terminal Terminal, _ uint) (map[string]interface{}, error) {
 	return c.ChargeByToken(ctx, request, terminal)
-}
-
-func (c *Client) newTerminalRequest() TerminalRequest {
-	return TerminalRequest{
-		BaseRequest: BaseRequest{
-			User:     c.User,
-			Password: c.Password,
-		},
-		TerminalNumber: c.TerminalNumber,
-	}
 }

@@ -22,18 +22,16 @@ type PelecardAPI interface {
 // terminals on this service's behalf.
 type Client struct {
 	Client *resty.Client
-	// BaseURL is external_payments, overridable so tests can point at a stub.
-	// Not configurable: checkout's host is hardcoded in five other places here
-	// too (api/transaction_handler.go, common/consts.go), and a seam that covers
-	// one of six would imply staging is safe when it is not. See issue #22.
+	// BaseURL is overridable so tests can point at a stub, not configurable:
+	// the host is hardcoded in five other places here too. See issue #22.
 	BaseURL string
 
 	// Tokens authenticates calls to external_payments.
 	Tokens keycloak.TokenSource
 }
 
-// NewClient creates a client for external_payments. It holds no Pelecard
-// credentials and no terminal number: this service no longer talks to Pelecard.
+// NewClient creates a client for external_payments. No Pelecard credentials and
+// no terminal number: this service no longer talks to Pelecard.
 func NewClient() *Client {
 	client := resty.New()
 	client.SetHeaders(map[string]string{

@@ -15,9 +15,8 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
-// Still spelled "pelecard" so existing runbooks keep working, though this
-// service no longer reaches Pelecard: external_payments does, and owns the
-// credentials and terminals.
+// Still spelled "pelecard" so existing runbooks keep working, though the calls
+// now go to external_payments.
 var pelecardCmd = &cobra.Command{
 	Use:   "pelecard",
 	Short: "Payment commands, served by external_payments",
@@ -95,8 +94,6 @@ func parseFlags(cmd *cobra.Command) (string, string) {
 }
 
 func validateConfig() {
-	// Muhlafim comes from external_payments now, so what this needs is a
-	// Keycloak identity rather than Pelecard credentials.
 	if common.Config.KeycloakServerUrl == "" || common.Config.KeycloakRealm == "" {
 		utils.LogFatal("KEYCLOAK_SERVER_URL and KEYCLOAK_REALM are required")
 	}

@@ -15,8 +15,7 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/pkg/pelecard"
 )
 
-// stubTokens stands in for Keycloak. A fixed token when it should succeed, an
-// error when the point of the test is that the call never leaves the process.
+// stubTokens stands in for Keycloak.
 type stubTokens struct {
 	token string
 	err   error
@@ -25,8 +24,8 @@ type stubTokens struct {
 func (s stubTokens) Token() (string, error) { return s.token, s.err }
 func (s stubTokens) Invalidate()            {}
 
-// rotatingTokens hands out the next token after each Invalidate, so a retry can
-// be told apart from the attempt that preceded it.
+// rotatingTokens hands out the next token after each Invalidate, so a retry is
+// distinguishable from the attempt before it.
 type rotatingTokens struct {
 	tokens      []string
 	idx         int
@@ -42,8 +41,7 @@ func (r *rotatingTokens) Invalidate() {
 }
 
 // withExternalPayments starts a stub external_payments and returns a client
-// pointed at it, authenticating with the given token. Everything is restored
-// afterwards.
+// pointed at it.
 func withExternalPayments(t *testing.T, token string, handler http.HandlerFunc) *pelecard.Client {
 	t.Helper()
 	server := httptest.NewServer(handler)
@@ -105,9 +103,8 @@ func TestFetchMuhlafim_SendsNoCredentials(t *testing.T) {
 	}
 }
 
-// The resty client is shared with ChargeByToken, which sets no Authorization
-// header of its own. Setting ours on the client rather than the request would
-// attach it to every call the client makes.
+// The resty client is shared with ChargeByToken, so a header set on the client
+// rather than the request would attach to every call it makes.
 func TestFetchMuhlafim_TokenNotSetOnSharedClient(t *testing.T) {
 	client := withExternalPayments(t, "tok_secret", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{}`))
@@ -131,8 +128,7 @@ func TestFetchMuhlafim_EmptyWindow(t *testing.T) {
 	assert.Empty(t, entries)
 }
 
-// A token cached a moment before expiry is sent and rejected. Without the retry
-// the error reaches BillingService.processMuhlafim and aborts the monthly run.
+// Without the retry a token that expired in transit aborts the monthly run.
 func TestFetchMuhlafim_RetriesOnceAfter401(t *testing.T) {
 	var seen []string
 	client := withExternalPayments(t, "unused", func(w http.ResponseWriter, r *http.Request) {
@@ -207,8 +203,7 @@ func TestFetchMuhlafim_TokenUnavailable(t *testing.T) {
 	assert.False(t, called, "should not reach the server without a token")
 }
 
-// A client built without a token source must refuse rather than send an
-// unauthenticated request that external_payments would reject anyway.
+// Refuse rather than send a request external_payments would reject.
 func TestFetchMuhlafim_NoTokenSource(t *testing.T) {
 	client := newChargeClient(t)
 	client.BaseURL = "http://127.0.0.1:1"

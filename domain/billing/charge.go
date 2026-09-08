@@ -384,12 +384,9 @@ func handleNonRetryableError(ctx context.Context, hub *sentry.Hub, stats *charge
 		recordPostPaymentError(ctx, hub, stats, terminal, payment, err)
 		return true
 	}
-	// Neither a rejected credential nor a missing one is a fault of this
-	// terminal, so falling back to the other cannot help: both legs share the
-	// credential and the client that fetches it. Treated as non-retryable so one
-	// order costs one failed attempt rather than four — two charge POSTs per
-	// terminal, each leaving a pending payment row — and so the run does not
-	// multiply one outage or misconfiguration by every order in it.
+	// Both legs share the credential and the client that fetches it, so falling
+	// back cannot help. Non-retryable, so one order costs one failed attempt and
+	// one pending payment row rather than four.
 	if reason := credentialFailureReason(err); reason != "" {
 		utils.LogFor(ctx).Error("credential problem; the other terminal would fail the same way",
 			slog.String("terminal", terminal),
@@ -398,12 +395,9 @@ func handleNonRetryableError(ctx context.Context, hub *sentry.Hub, stats *charge
 		captureError(hub, terminal, reason, err)
 		stats.errorCount.Inc(reason, 1)
 
-		// Recorded in the money totals as well, mirroring the gateway-error
-		// branch. Short-circuiting past that branch is the point of returning
-		// true here, but the amount still went uncollected: without this a run
-		// that failed every order on its credential reports failed_nis=0, which
-		// reads as a month with nothing to collect rather than a month collected
-		// by nobody.
+		// Still counted in the money totals: without this a run that failed every
+		// order on its credential reports failed_nis=0, which reads as a month
+		// with nothing to collect.
 		stats.failedSum.Inc(price.Currency, price.Amount)
 		stats.versionFailedSum.Inc(price.PricingVersion+":"+price.Currency, price.Amount)
 		stats.reasonFailedSum.Inc(reason+":"+price.Currency, price.Amount)
@@ -412,13 +406,10 @@ func handleNonRetryableError(ctx context.Context, hub *sentry.Hub, stats *charge
 	return false
 }
 
-// credentialFailureReason names the counter key for an error that no terminal
-// can recover from, or "" if this is not one.
-//
-// Two of them: external_payments rejected the credential, or none could be
-// obtained at all. Kept apart in the summary because they call for different
-// action — a rejected credential is a misconfiguration on our side or theirs, a
-// missing one is Keycloak being unreachable.
+// credentialFailureReason names the counter key for an error no terminal can
+// recover from, or "" if this is not one. The two are kept apart because a
+// rejected credential is a misconfiguration and a missing one is Keycloak being
+// unreachable.
 func credentialFailureReason(err error) string {
 	switch {
 	case errors.Is(err, pelecard.ErrUnauthorized):

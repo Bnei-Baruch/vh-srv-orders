@@ -15,20 +15,15 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 )
 
-// ErrUnauthorized means external_payments rejected this service's credential —
-// after one retry with a fresh token, so it is not a stale-token race. Every
-// charge in a run will fail the same way, which is why it is a distinct error
-// rather than one more gateway status.
+// ErrUnauthorized means external_payments rejected the credential, after one
+// retry with a fresh token, so it is not a stale-token race. Every charge in the
+// run fails the same way.
 var ErrUnauthorized = errors.New("external_payments rejected the credential")
 
-// ErrNoCredential means this service could not obtain a token at all — Keycloak
-// is unreachable, refusing, or backing off after consecutive failures.
-//
-// Distinct for the same reason ErrUnauthorized is: it is not a fault of the
-// terminal the charge was attempted on, and the other terminal shares this
-// client, so falling back to it writes a second payment row and fails
-// identically. Without the sentinel a Keycloak outage is indistinguishable from
-// gateway trouble in the run summary.
+// ErrNoCredential means no token could be obtained at all. Distinct for the same
+// reason as ErrUnauthorized — the other terminal shares this client and would
+// fail identically — and so a Keycloak outage is not read as gateway trouble in
+// the run summary.
 var ErrNoCredential = errors.New("no credential available for external_payments")
 
 type PelecardAPI interface {
@@ -76,24 +71,15 @@ func NewClient() *Client {
 }
 
 // sendAuthorized runs one request to external_payments with a Keycloak bearer,
-// retrying once on 401 with a fresh token.
-//
-// The header goes on the request, never on the shared resty client, which every
-// call this type makes reuses. TestFetchMuhlafim_TokenNotSetOnSharedClient pins
-// that.
-//
-// One implementation for both calls: an access token lives 15 minutes and a
-// renewal run crosses an expiry, and MapClaims.Valid() applies no clock leeway.
-// The verb is the caller's — muhlafim reads over GET, a charge posts.
+// retrying once on 401 with a fresh token. The header goes on the request, not
+// on the shared resty client every call here reuses. The verb is the caller's:
+// muhlafim reads over GET, a charge posts.
 //
 // Retrying a charge cannot charge twice: external_payments suppresses a
-// reference that already charged within the hour, on every charge route it
-// serves — including the /emv/charge leg the fallback uses — and replays the
-// original response, which this caller reads status out of. A 401 can come from
-// a hop in front of the handler, after the card was charged.
-//
-// Needs external_payments >= 46d5102, where /emv/charge replays like the token
-// routes instead of answering an empty payload.
+// reference that already charged within the hour and replays the original
+// response, on every charge route including the /emv/charge leg the fallback
+// uses. Needs external_payments >= 46d5102 for that. A 401 can come from a hop
+// in front of the handler, after the card was charged.
 func (c *Client) sendAuthorized(ctx context.Context, what string,
 	do func(*resty.Request) (*resty.Response, error)) (*resty.Response, error) {
 
@@ -118,11 +104,9 @@ func (c *Client) sendAuthorized(ctx context.Context, what string,
 		return resp, err
 	}
 
-	// Clear only the token that was actually rejected. The renewal run shares one
-	// keycloak.Client across its workers, so several of them can be holding the
-	// same expired token and get 401 together; an unconditional Invalidate would
-	// have each in turn discard the replacement the previous one just fetched,
-	// turning one expiry into a login per worker.
+	// Only the token that was rejected: workers share one keycloak.Client, and an
+	// unconditional Invalidate has each discard the replacement the last one
+	// fetched, turning one expiry into a login per worker.
 	c.invalidate(token)
 
 	utils.LogFor(ctx).Warn("external_payments returned 401, retrying with a fresh token",
@@ -133,17 +117,10 @@ func (c *Client) sendAuthorized(ctx context.Context, what string,
 	return resp, err
 }
 
-// invalidateNamer is the comparing form of Invalidate: it names the token that
-// was rejected so a shared source can refuse to clear a newer one.
-//
-// keycloak.TokenSource only promises Invalidate(), and widening it would mean
-// regenerating the mocks and touching pkg/accounting and pkg/profiles, which
-// have no concurrent callers and no reason to change here. So the comparing form
-// is reached by assertion — and pinned below, because a structural assertion
-// matched by name and signature at runtime would otherwise stop matching in
-// silence if the method were renamed or the source wrapped by a shim that
-// forwards only Token() and Invalidate(). The fallback is the unconditional
-// clear this exists to avoid, so that silence would restore the stampede.
+// invalidateNamer is the comparing form of Invalidate: it names the rejected
+// token so a shared source can refuse to clear a newer one. Reached by assertion
+// because keycloak.TokenSource promises only Invalidate(), and pinned below —
+// a rename would otherwise fall back to the unconditional clear in silence.
 type invalidateNamer interface{ InvalidateToken(string) }
 
 var _ invalidateNamer = (*keycloak.Client)(nil)
@@ -189,10 +166,8 @@ func (c *Client) FetchMuhlafim(ctx context.Context, startDate, endDate string) (
 
 // ChargeByToken sends a token-based charge request to the payment gateway.
 //
-// It authenticates: until now these calls arrived at external_payments with no
-// credential at all, which is why the monthly renewal burst shows up in its log
-// as `requested_by=anonymous` and why the organization still has to be sent in
-// the body. See sendAuthorized for where the header goes and why.
+// It authenticates: these calls used to arrive with no credential, which is why
+// the renewal burst shows up in checkout's log as `requested_by=anonymous`.
 func (c *Client) ChargeByToken(ctx context.Context, request *ChargeRequest, terminal Terminal) (map[string]interface{}, error) {
 	log := utils.LogFor(ctx)
 
@@ -221,12 +196,9 @@ func (c *Client) ChargeByToken(ctx context.Context, request *ChargeRequest, term
 			slog.Int("http_status", resp.StatusCode()),
 			slog.String("body", string(resp.Body())))
 
-		// A rejected credential is worth telling apart from a declined card: one
-		// is a deployment fault that fails every charge in the run, the other is
-		// this member's card. handleNonRetryableError (domain/billing/charge.go)
-		// branches on it to fail the order once instead of retrying the other
-		// terminal with the same credential, and matching an error string for
-		// that would be fragile.
+		// Told apart from a declined card because handleNonRetryableError
+		// branches on it: one is a deployment fault that fails every charge, the
+		// other is this member's card.
 		if resp.StatusCode() == http.StatusUnauthorized {
 			return nil, fmt.Errorf("%w: charge gateway HTTP error [%d]",
 				ErrUnauthorized, resp.StatusCode())

@@ -18,19 +18,14 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/common"
 )
 
-// A Keycloak stub, because the property worth pinning here cannot be reached
-// any other way: that a *successful* login resets the consecutive-failure
-// count. Calling clearFailures() directly proves only that the setter works —
-// deleting the call from login() and refresh() left the package green.
+// A Keycloak stub, because the property it pins is not reachable otherwise: a
+// successful login resets the consecutive-failure count. Calling clearFailures()
+// directly proves only the setter — deleting the call from login() and refresh()
+// left the package green, and without the reset failures accumulate over a
+// process's lifetime rather than consecutively.
 //
-// Without that reset, failures accumulate over a process's lifetime rather than
-// consecutively, so a long-lived pod that saw three unrelated failures over
-// hours then treats any single later one as grounds to suppress every caller
-// for the whole window. That is the mass-failure this design exists to prevent,
-// arriving by a slower route.
-//
-// gocloak's login decodes the token it receives, which means the stub has to
-// serve a real RS256 JWT and the matching JWKS.
+// gocloak decodes the token it receives, so the stub serves a real RS256 JWT and
+// the matching JWKS.
 type keycloakStub struct {
 	server   *httptest.Server
 	key      *rsa.PrivateKey

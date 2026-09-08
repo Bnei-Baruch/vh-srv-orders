@@ -51,19 +51,11 @@ func TestKeycloakConfigErrorNamesTheMissingVariable(t *testing.T) {
 	}
 }
 
-// Charging authenticates to external_payments, so a charge command that does
-// not check the credential first is the failure this pins.
-//
-// It is a source check because the alternative is not reachable from a test:
-// the check exits the process, and buildChargeableBillingService opens a
-// database and builds five clients before returning. What matters is not how
-// the call is written but that it is there at all — the credential used to be
-// validated only by the muhlafim step, which `retry-pricing-errors` skips,
-// `--muhlafim=false` disables, and ProcessMuhlafim itself returns early from
-// when no order is flagged. Missing it is not a startup failure: processOrder
-// writes its pending payment row before the gateway call, so every order in the
-// run is stored, finalised unsuccessful and reported to Sentry, with nothing
-// charged and the whole run to redo.
+// A source check because the real thing is unreachable from a test: it exits
+// the process, and buildChargeableBillingService opens a database first. What
+// matters is only that the call is there — the credential used to be validated
+// by the muhlafim step alone, which retry-pricing-errors skips,
+// --muhlafim=false disables, and an empty window returns before.
 func TestTheChargeBuilderValidatesTheCredential(t *testing.T) {
 	source, err := os.ReadFile("billing.go")
 	if err != nil {

@@ -14,15 +14,10 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/pkg/pelecard"
 )
 
-// A credential external_payments rejects fails every order in the run, so it is
-// not a fault of the terminal it happened on and the other terminal cannot help.
-// These pin both halves of that: the order is not fanned out, and the amount it
-// failed to collect still reaches the money totals.
-//
-// Without the second half a run that failed all of its orders on the credential
-// reports failed_nis=0, which reads as a month with nothing to collect. Nothing
-// asserted that until this file: dropping the price argument, or restoring the
-// early return, left the whole suite green.
+// A rejected credential fails every order, so the fallback terminal cannot help.
+// These pin both halves: the order is not fanned out, and the amount still
+// reaches the money totals — without which a run that failed everything reports
+// failed_nis=0.
 
 func unauthorizedPrice() *pricing.ChargePrice {
 	return &pricing.ChargePrice{
@@ -63,9 +58,8 @@ func TestHandleNonRetryableError_UnauthorizedRecordsTheUncollectedAmount(t *test
 	assert.Zero(t, stats.successSum.Get(common.CurrencyNIS))
 }
 
-// The token leg returning true is what stops the EMV leg from running, so an
-// order can pass through this branch at most once. Counting it twice would
-// double the month's reported shortfall.
+// The order passes this branch at most once; counting twice would double the
+// month's reported shortfall.
 func TestHandleNonRetryableError_UnauthorizedCountsOncePerOrder(t *testing.T) {
 	stats := newChargeStats(1)
 	price := unauthorizedPrice()
@@ -93,9 +87,8 @@ func TestHandleNonRetryableError_GatewayErrorStillFallsThrough(t *testing.T) {
 		"the terminal branch records this one, after both terminals have been tried")
 }
 
-// A credential that could not be obtained at all is not a fault of this
-// terminal either: the other leg shares the same Keycloak client and would fail
-// identically, writing a second pending payment row for nothing.
+// The other leg shares the same Keycloak client, so it would fail identically
+// and write a second pending payment row for nothing.
 func TestHandleNonRetryableError_NoCredentialIsNotRetried(t *testing.T) {
 	stats := newChargeStats(1)
 	price := unauthorizedPrice()
@@ -110,9 +103,7 @@ func TestHandleNonRetryableError_NoCredentialIsNotRetried(t *testing.T) {
 	assert.Equal(t, price.Amount, stats.failedSum.Get(common.CurrencyNIS))
 }
 
-// The two credential failures stay apart in the summary: one is a
-// misconfiguration, the other is Keycloak being unreachable, and they call for
-// different action.
+// The two stay apart in the summary: misconfiguration versus Keycloak down.
 func TestHandleNonRetryableError_CredentialReasonsAreDistinct(t *testing.T) {
 	stats := newChargeStats(2)
 	price := unauthorizedPrice()

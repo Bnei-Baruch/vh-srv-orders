@@ -22,13 +22,10 @@ type Client struct {
 	kc     *gocloak.GoCloak
 	scopes []string
 
-	// mu guards token and claims, which are read and replaced together.
-	//
-	// It is held across the login and refresh calls, deliberately. One holder
-	// logging in while the others wait is the point: the alternative is every
+	// mu guards token and claims, and is held across login and refresh on
+	// purpose: one holder logging in while the rest wait, rather than every
 	// caller that saw the same expired token starting its own login. The
-	// renewal run charges through maxWorkers goroutines sharing one of these,
-	// so an expiry crossing would otherwise cost one login per worker.
+	// renewal run shares one client across maxWorkers goroutines.
 	mu     sync.Mutex
 	token  *gocloak.JWT
 	claims *jwt.MapClaims
@@ -44,77 +41,45 @@ func NewClient(scopes ...string) *Client {
 	c.kc = gocloak.NewClient(common.Config.KeycloakServerUrl)
 	gocloak.SetLegacyWildFlySupport()(c.kc)
 
-	// gocloak leaves its resty client without a deadline, so a Keycloak that
-	// accepts the connection and never answers would hang the caller forever.
-	// That is worse now than it was: the mutex below serialises waiters, so an
-	// unbounded stall would be paid once per waiting charge worker rather than
-	// once in parallel. Bounded here instead of threading a context through
-	// Token(), which is keycloak.TokenSource's signature and would mean
-	// regenerating every mock of it.
+	// gocloak leaves its resty client without a deadline, and the mutex above
+	// serialises waiters, so a Keycloak that never answers costs the full stall
+	// once per waiting worker.
 	c.kc.RestyClient().SetTimeout(tokenRequestTimeout)
 
 	c.scopes = scopes
 	return c
 }
 
-// tokenRequestTimeout bounds one HTTP request, which is not the same as one
-// AccessToken call: a single holder of the mutex can issue up to four — refresh,
-// its certificate fetch, then login and its own certificate fetch — so the worst
-// case per holder is four times this, not one.
-//
-// That 4x is also the floor for loginFailureBackoff below, which is guarded at
-// compile time: raising this without raising the window would invert the ratio
-// the backoff exists to produce.
+// tokenRequestTimeout bounds one HTTP request, not one AccessToken call: a
+// single holder of the mutex can issue four — refresh and its certificate
+// fetch, then login and its own — so the worst case per holder is 4x this.
+// That 4x is the floor for loginFailureBackoff, guarded below.
 const tokenRequestTimeout = 10 * time.Second
 
 // loginFailureBackoff is how long consecutive failures suppress further
-// attempts, and loginFailureThreshold is how many it takes.
+// attempts, loginFailureThreshold how many it takes.
 //
-// Suppression exists because nothing is cached on failure: against a Keycloak
-// that accepts connections and never answers, every caller pays the full timeout
-// with the mutex held, so a renewal run across two terminal legs would grind
-// serially for hours rather than failing. Token() passes context.Background(),
-// so cancelling the run cannot interrupt those waits either — the worker loop
-// only checks ctx between orders.
+// Suppression exists because against a Keycloak that accepts connections and
+// never answers, every caller pays the full timeout with the mutex held, and
+// Token() passes context.Background() so cancelling the run cannot interrupt it.
 //
-// Both numbers are the way they are because suppression is itself dangerous.
-// While it lasts, callers fail without trying, and a charge worker that cannot
-// get a token still writes a pending payment row per attempt: a single 500 or a
-// rolling pod could book hundreds of orders failed in a window, where the same
-// blip untreated only fails whatever was in flight. So:
-//
-//   - a threshold, so one or two failures with a success between them suppress
-//     nothing at all;
-//   - a window longer than the worst case of a single attempt, which is four
-//     requests at tokenRequestTimeout, so against a truly dead Keycloak the
-//     fast-failing stretch dominates the stalling one rather than the reverse.
+// But suppression is dangerous in its own right: a charge worker that cannot get
+// a token still writes a pending payment row per attempt, so a blip could book
+// hundreds of orders failed. Hence a threshold, so failures with a success
+// between them suppress nothing, and a window longer than one attempt's worst
+// case (4x tokenRequestTimeout) so the fast-failing stretch dominates.
 const (
 	loginFailureBackoff   = 45 * time.Second
 	loginFailureThreshold = 3
 )
 
-// Compile-time guard for the second rule above: the window has to outlast the
-// worst case of a single attempt. Subtracting on unsigned constants makes an
-// edit to either constant that inverts it a build failure rather than a run
-// that spends more time stalled on the mutex than making progress.
+// Compile-time guard: the window must outlast one attempt's worst case. Strict
+// and in nanoseconds, so a window exactly 4x the timeout fails and a sub-second
+// overrun cannot hide behind truncation. uint64, not uint, because the value is
+// ~5e9 and would overflow a 32-bit build.
 //
-// Strict and in nanoseconds, matching the rule as stated: "longer than", not
-// "at least". A window exactly four times the timeout would only tie, and
-// dividing to whole seconds first would let a sub-second overrun through —
-// tokenRequestTimeout at 11.3s puts the true worst case at 45.2s against a 45s
-// window, which truncation cannot see.
-//
-// What it does not guard is the 4 itself, which is a literal nothing derives.
-// A fifth request inside the mutex — an introspect, a userinfo, a certs fetch
-// that misses its cache — changes no constant here, so the real worst case
-// would grow while this still builds. Anyone adding one has to raise the
-// multiplier by hand.
-//
-// uint64 rather than uint, because in nanoseconds the satisfied value is about
-// 5e9: that overflows a 32-bit uint, so the guard failed to build under
-// GOARCH=386 and GOARCH=arm. Nothing here targets those today, and a negative
-// constant still fails to convert, so the guard behaves identically where it
-// matters.
+// The 4 is a literal nothing derives: a fifth request inside the mutex changes
+// no constant here, so raise the multiplier by hand if one is added.
 const _ = uint64(loginFailureBackoff - 4*tokenRequestTimeout - 1)
 
 func (c *Client) Token() (string, error) {
@@ -212,22 +177,16 @@ func (c *Client) Invalidate() {
 
 	c.token = nil
 	c.claims = nil
-	// An invalidation is a caller saying it knows this token is bad, which
-	// outranks a backoff: otherwise the retry that follows a 401 is suppressed
-	// and silently becomes no retry at all.
+	// A caller saying it knows this token is bad outranks a backoff, which would
+	// otherwise turn the retry after a 401 into no retry.
 	c.clearFailures()
 }
 
 // InvalidateToken clears the cache only if stale is still what is cached, so a
-// caller reacting to a 401 cannot discard a token some other caller has already
-// replaced.
-//
-// Without the comparison, N workers holding the same expired token each clear
-// the cache in turn: the first replaces it, the second throws that replacement
-// away, and one expiry costs a login per worker. Worse, if the credential is
-// rejected for a reason a new token cannot fix — a missing scope for the route,
-// say — every charge in the run triggers its own login, which is a burst large
-// enough to look like an attack on the service account.
+// caller reacting to a 401 cannot discard a token another caller just replaced.
+// Without the comparison, N workers holding the same expired token clear it in
+// turn and one expiry costs a login each — and if the credential is rejected for
+// a reason no new token fixes, every charge in the run logs in.
 func (c *Client) InvalidateToken(stale string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

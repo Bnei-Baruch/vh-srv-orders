@@ -14,20 +14,15 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/common"
 )
 
-// Token() is the reader every charge goes through, and the one that dereferences
-// what Invalidate nils, so it is the side worth pinning: an earlier version of
-// this file exercised only the clearers and stayed green with AccessToken's lock
-// deleted.
+// Token() is the reader that dereferences what Invalidate nils, so it is the
+// side worth pinning: exercising only the clearers stayed green with
+// AccessToken's lock deleted.
 //
-// No Keycloak is needed. The seeded claims carry a future exp, so a cache hit
-// returns without a network call; once a clearer wins, the login attempt goes to
-// a closed port and fails immediately, which is fine — the assertion is the race
-// detector, not the return value.
+// No Keycloak needed — the assertion is the race detector, not the return value.
 func TestClientTokenReadRacesInvalidation(t *testing.T) {
 	client := &Client{kc: gocloak.NewClient("http://127.0.0.1:1")}
-	// NewClient is bypassed here, so the timeout it sets is not in place. A
-	// network that drops rather than refuses would otherwise block login with the
-	// mutex held, and the test would hang to go test's panic instead of failing.
+	// NewClient is bypassed, so its timeout is not in place: a port that drops
+	// rather than refuses would hang the test with the mutex held.
 	client.kc.RestyClient().SetTimeout(time.Second)
 
 	seedToken(client, "cached")
@@ -74,12 +69,10 @@ func seedToken(c *Client, access string) {
 	c.claims = &claims
 }
 
-// The renewal run charges through maxWorkers goroutines sharing one Client, so
-// these fields are read and written concurrently. Run with -race, this fails if
-// the mutex is removed from either clearer.
-//
-// Login is not exercised: it needs a Keycloak. What is exercised is the part
-// that broke — a cached token being read while another goroutine clears it.
+// The renewal run shares one Client across maxWorkers goroutines. Run with
+// -race, this fails if the mutex is removed from either clearer. Login is not
+// exercised; the part that broke is a cached token read while another goroutine
+// clears it.
 func TestClientConcurrentTokenAccess(t *testing.T) {
 	claims := jwt.MapClaims{}
 	client := &Client{
@@ -106,9 +99,8 @@ func TestClientConcurrentTokenAccess(t *testing.T) {
 	wg.Wait()
 }
 
-// A worker reacting to a 401 must not throw away a token another worker already
-// replaced: otherwise one expiry costs a login per worker, and a credential
-// that is rejected for any other reason costs one per charge in the run.
+// A worker reacting to a 401 must not discard a token another worker already
+// replaced, or one expiry costs a login per worker.
 func TestInvalidateTokenClearsOnlyTheNamedToken(t *testing.T) {
 	claims := jwt.MapClaims{}
 	client := &Client{
@@ -142,10 +134,9 @@ func TestInvalidateTokenOnEmptyCacheIsHarmless(t *testing.T) {
 	}
 }
 
-// Nothing is cached when an attempt fails, so without a backoff every caller
-// pays the full request timeout with the mutex held. A renewal run of a few
-// thousand orders across two terminal legs would grind serially for hours
-// against a Keycloak that accepts connections and never answers.
+// Nothing is cached on failure, so without a backoff every caller pays the full
+// request timeout with the mutex held — hours, serially, for a run of a few
+// thousand orders.
 func TestAccessTokenSkipsOnlyAfterConsecutiveFailures(t *testing.T) {
 	// Written by the handler goroutine, read here: no happens-before edge comes
 	// from the HTTP round trip itself.
@@ -181,23 +172,13 @@ func TestAccessTokenSkipsOnlyAfterConsecutiveFailures(t *testing.T) {
 	}
 }
 
-// The threshold is asserted as a literal, on purpose. Every other assertion in
-// this package derives its bounds from loginFailureThreshold itself, which
-// restates the constant instead of constraining it: with those alone, setting
-// the threshold to 1 — the behaviour that mass-failed renewals on a blip, and
-// which this design exists to remove — keeps the suite green, and so does 100.
+// The threshold is a literal on purpose: every other assertion here derives its
+// bounds from the constant, which restates it instead of constraining it — a
+// threshold of 1 or of 100 keeps those green.
 //
-// The window is different, and the two bounds below are not the same kind of
-// assertion:
-//
-//   - the lower bound derives from tokenRequestTimeout, which constrains the
-//     relationship rather than restating a value. It is also the exact
-//     complement of the compile-time guard in client.go, so it cannot fire while
-//     that guard exists — its message will never be seen in practice. It is
-//     here as a backstop for the guard being deleted: remove the guard and set
-//     the window to 40s, and this is what catches it.
-//   - the upper bound is a literal, and is therefore the only assertion here
-//     that can actually fire while everything else is in place.
+// The window's lower bound is the exact complement of the compile-time guard in
+// client.go, so it can only fire if that guard is deleted. The upper bound is a
+// literal and is the one that can fire otherwise.
 func TestBackoffConstantsHaveTheirIntendedValues(t *testing.T) {
 	if loginFailureThreshold != 3 {
 		t.Errorf("threshold is %d: 1 suppresses on a single blip, and a suppressed "+

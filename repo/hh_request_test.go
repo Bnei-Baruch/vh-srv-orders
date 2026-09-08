@@ -77,34 +77,16 @@ func TestConcludeHHRequest_Approve_CreatesGrant(t *testing.T) {
 	grant := joined[0].Grant
 	require.NotNil(t, grant, "approval creates a grant")
 
-	// Both start checks run before the poll, so neither is charged for the time it
-	// spends: a tolerance read after the poll would fail on the poll's own
-	// duration once that budget approaches it.
-	//
-	// The start was passed as a parameter from the Go clock, so comparing it to the
-	// Go clock is exact and no skew enters. The future-dating check has to be here
-	// rather than left to the poll, which cannot tell a future-dated start from a
-	// database that is behind and would retry both.
-	// require, not assert: an assert would record and fall through into the poll,
-	// which then cannot match start_date <= NOW() and spends its whole budget to
-	// die pointing at clock skew — the misdiagnosis these two checks exist to
-	// prevent.
+	// Before the poll, and require: the poll cannot tell a future-dated start
+	// from a database that is behind, so it would report either as clock skew.
 	require.False(t, grant.StartDate.After(time.Now()),
 		"the default start is in the future: %s", grant.StartDate)
-	// Catches start and end written to the wrong columns. It cannot show the Go
-	// default was used: start is passed as a parameter, so this compares Go's
-	// clock against Go's own value.
 	require.WithinDuration(t, time.Now(), grant.StartDate, time.Minute)
 
-	// GetActiveHHGrant filters start_date <= NOW() on the database clock, against
-	// that Go-clock start, so a database behind the host has not reached it yet.
-	// Polled, with the same order of slack the rest of this file allows for skew;
-	// the budget is skew tolerance only, since the assertion above already pins
-	// the part that must hold immediately. Only the no-rows result is retried: a
-	// query error would otherwise spend the whole budget and be reported as skew.
-	//
-	// Not require.Eventually — its failure-message arguments are evaluated before
-	// the first poll.
+	// GetActiveHHGrant filters start_date <= NOW() on the database clock, so a
+	// database behind the host has not reached this Go-clock start yet. Polled
+	// for that skew, retrying no-rows only. Not require.Eventually, which
+	// evaluates its message arguments before the first poll.
 	var active *HHGrant
 	deadline := time.Now().Add(30 * time.Second)
 	for {
@@ -125,9 +107,9 @@ func TestConcludeHHRequest_Approve_CreatesGrant(t *testing.T) {
 	assert.Equal(t, r.ID, grant.RequestID, "grant is linked to its request")
 	assert.Equal(t, 75, grant.DiscountPct)
 	assert.Equal(t, common.HHGrantTypeHayal, grant.Type)
-	// Coarse on purpose: an exact expectation here means either reimplementing
-	// Postgres month arithmetic in Go — the bug this file started with — or
-	// copying the production expression. Pinned exactly in the clamping test.
+	// Coarse: an exact expectation means reimplementing Postgres month
+	// arithmetic in Go, which is the bug this file started with. Pinned exactly
+	// in the clamping test.
 	assert.True(t, grant.EndDate.After(grant.StartDate.AddDate(0, 5, 0)),
 		"end %s is less than five months after start %s", grant.EndDate, grant.StartDate)
 	assert.True(t, grant.EndDate.Before(grant.StartDate.AddDate(0, 7, 0)),
@@ -141,9 +123,8 @@ func TestConcludeHHRequest_Approve_ReplacesActiveGrant(t *testing.T) {
 
 	r, err := db.CreateHHRequest(ctx, hhRequestReq("kc-req-regrant"))
 	require.NoError(t, err)
-	// Start a minute back, since this test does not care where the start comes
-	// from: cheaper than the default-start test's poll, and tolerant of more skew
-	// than that poll's budget.
+	// A minute back, so no poll is needed: this test does not care where the
+	// start comes from.
 	_, err = db.ConcludeHHRequest(ctx, r.ID, HHRequestConclusion{
 		Approved: true, Type: common.HHGrantTypeGimlaj, DiscountPct: 50, Months: 3,
 		StartDate: null.TimeFrom(time.Now().Add(-time.Minute)),
@@ -151,9 +132,7 @@ func TestConcludeHHRequest_Approve_ReplacesActiveGrant(t *testing.T) {
 	require.NoError(t, err)
 
 	// GetActiveHHGrant orders by id DESC LIMIT 1, so it returns the new grant
-	// whether or not the old one was ended — this has to be asked directly. Skew
-	// still enters: the row is only ended if ConcludeHHRequest's UPDATE matched
-	// start_date <= NOW() against insertHHGrant's Go-clock start, an hour back.
+	// whether or not the old one was ended. Asked directly.
 	var oldEnded bool
 	require.NoError(t, db.QueryRow(ctx,
 		`SELECT end_date < NOW() FROM hh_grants WHERE id = $1`, oldID).Scan(&oldEnded))
@@ -219,25 +198,20 @@ func TestGetAllHHRequests_FiltersByStatusAndKcid(t *testing.T) {
 }
 
 // Three months from 31 August is 30 November: Postgres clamps to the last day
-// the month can hold. The start is pinned and historical so the assertion never
-// depends on the run date, which means reading through GetAllHHRequests —
-// a grant that has already ended fails GetActiveHHGrant's end_date > NOW().
+// the month holds. The start is historical so the assertion never depends on the
+// run date, which is why this reads through GetAllHHRequests — an ended grant
+// fails GetActiveHHGrant's end_date > NOW().
 //
-// DEPENDS ON #19: the historical start only works because ConcludeHHRequest
-// accepts one. If #19 is fixed by rejecting past starts, the conclude call below
-// fails and this clamping assertion never runs — repin the start on a 31st the
-// fix allows, keeping it absolute so the test stays date-independent, rather
-// than loosening the assertion. A fix that instead leaves the live grant alone
-// does not touch this test.
+// Depends on #19: if past starts are rejected, repin on a 31st the fix allows
+// rather than loosening the assertion.
 func TestConcludeHHRequest_Approve_ClampsEndDateToAShorterMonth(t *testing.T) {
 	db, ctx := newTestDB(t)
 
 	r, err := db.CreateHHRequest(ctx, hhRequestReq("kc-req-clamp"))
 	require.NoError(t, err)
 
-	// Three, where the request asked for six: the approved term is the admin's,
-	// and an implementation reading request.Months would pass with both the same.
-	// 31 August plus three months is 31 November, which does not exist.
+	// Three where the request asked for six, so an implementation reading
+	// request.Months fails here.
 	start := time.Date(2020, 8, 31, 12, 0, 0, 0, time.UTC)
 	_, err = db.ConcludeHHRequest(ctx, r.ID, HHRequestConclusion{
 		Approved:    true,
@@ -251,38 +225,27 @@ func TestConcludeHHRequest_Approve_ClampsEndDateToAShorterMonth(t *testing.T) {
 	joined, err := db.GetAllHHRequests(ctx, "", "kc-req-clamp")
 	require.NoError(t, err)
 	require.Len(t, joined, 1)
-	// Whatever its dates — this join has no NOW() filter. That a past start_date
-	// is accepted at all is issue #19, not intended behaviour.
 	require.NotNil(t, joined[0].Grant, "the join returns the grant whatever its dates")
 
-	// Exact instants because pkg/testutil pins the session to UTC — reproducible,
-	// not right: the expression adds months in the session timezone. A whole-hour
-	// offset here means the connection string, not the grant code.
+	// Exact instants only because pkg/testutil pins the session to UTC; the
+	// expression adds months in the session timezone. A whole-hour offset here
+	// means the connection string, not the grant code.
 	assert.Equal(t, start, joined[0].Grant.StartDate.UTC(), "start is stored as given")
 	assert.Equal(t, time.Date(2020, 11, 30, 12, 0, 0, 0, time.UTC), joined[0].Grant.EndDate.UTC())
 }
 
-// withSessionTimezone repoints the timezone carried by the `options` startup
-// parameter of a pgtestdb URL. Parsed, not string-replaced, and only the
-// timezone setting is touched: the pin's encoding is pkg/testutil's business,
-// and any other -c setting it grows later has to survive.
-//
-// Splits on whitespace, so it holds for settings with whitespace-free values —
-// all the pin has ever carried. A value with an escaped space would need the
-// libpq quoting rules, which is not worth carrying here until something needs it.
+// withSessionTimezone repoints the timezone in the `options` startup parameter
+// of a pgtestdb URL, leaving any other -c setting alone.
 func withSessionTimezone(t *testing.T, dbURL, timezone string) string {
 	t.Helper()
 	u, err := url.Parse(dbURL)
 	require.NoError(t, err)
-	// Not u.Query(), which discards ParseQuery's error and returns only the pairs
-	// it managed to parse. RawQuery is rebuilt from this map below, so a pair it
-	// could not parse would be dropped from the URL — including sslmode, and
-	// silently, since the found==1 guard only covers the timezone token.
+	// Not u.Query(), which drops pairs it cannot parse and hides the error —
+	// RawQuery is rebuilt from this map, so sslmode would vanish with it.
 	query, err := url.ParseQuery(u.RawQuery)
 	require.NoError(t, err)
 
-	// Matched case-insensitively: Postgres parameter names are, so the pin is free
-	// to say TimeZone= or timezone= and this must find either.
+	// Case-insensitive, as Postgres parameter names are.
 	settings := strings.Fields(query.Get("options"))
 	found := 0
 	for i, setting := range settings {
@@ -294,22 +257,18 @@ func withSessionTimezone(t *testing.T, dbURL, timezone string) string {
 	require.Equal(t, 1, found, "test URL should carry exactly one pinned timezone")
 
 	query.Set("options", strings.Join(settings, " "))
-	// Encode renders a space as "+", which libpq sends literally: psql then fails
-	// with `unrecognized configuration parameter "+timezone"`. A literal plus is
-	// already "%2B" by here, so only spaces are affected.
+	// Encode renders a space as "+", which libpq sends literally. A real plus is
+	// already %2B by here, so only spaces are affected.
 	u.RawQuery = strings.ReplaceAll(query.Encode(), "+", "%20")
 	return u.String()
 }
 
-// CHARACTERIZATION: pins the end-date behaviour of issue #20, which every other
-// test here is blind to under pkg/testutil's UTC pin — hence its own pool. Going
-// red is the intended signal that #20 is fixed; delete this test then.
+// CHARACTERIZATION of issue #20, on its own pool because the UTC pin hides it.
+// Going red means #20 is fixed; delete the test then.
 //
-// The hour comes from DST, not from the offset: Asia/Jerusalem is +03 (IDT) on
-// 31 August 2020, so 12:00Z is 15:00 local, and by the clamped 30 November the
-// zone is back on +02 (IST), making 15:00 local 13:00Z. A fixed-offset zone such
-// as Etc/GMT-2 gives 12:00Z and would fail here with no bug present: the offset
-// cancels, the shift between the two dates does not.
+// The hour comes from DST, not the offset: 12:00Z is 15:00 IDT (+03) on 31
+// August, and 15:00 IST (+02) on the clamped 30 November is 13:00Z. A
+// fixed-offset zone cancels out and would fail here with no bug present.
 func TestConcludeHHRequest_EndDateDependsOnSessionTimezone(t *testing.T) {
 	dbURL, err := testutil.NewTestOrdersDB(t, context.Background())
 	require.NoError(t, err)
@@ -318,8 +277,6 @@ func TestConcludeHHRequest_EndDateDependsOnSessionTimezone(t *testing.T) {
 	jerusalemURL := withSessionTimezone(t, dbURL, "Asia/Jerusalem")
 
 	jerusalem, err := NewOrdersDBUrl(ctx, jerusalemURL, new(events.NoopEmitter))
-	// The server rejects the startup parameter outright if it does not know the
-	// zone, so this fails before the guard below with pgx's own wording.
 	require.NoError(t, err, "connecting with TimeZone=Asia/Jerusalem: does the "+
 		"server have tzdata for it?")
 	t.Cleanup(jerusalem.Close)

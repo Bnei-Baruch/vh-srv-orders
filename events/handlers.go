@@ -55,8 +55,14 @@ func NewNatsEventHandler() (*NatsEventHandler, error) {
 		return nil, fmt.Errorf("nats.Connect: %w", err)
 	}
 
+	// Every failure past this point has to close the connection. Returning
+	// (nil, err) makes CreateEmitter return a nil emitter, so the caller's Close
+	// has nothing to close and this connection is left open with no reference to
+	// it. The process exits immediately today, so the OS reaps the socket — but
+	// it is the one path this drain work would otherwise leave undrained.
 	eh.js, err = jetstream.New(eh.nc)
 	if err != nil {
+		eh.nc.Close()
 		return nil, fmt.Errorf("jetstream.New: %w", err)
 	}
 
@@ -71,6 +77,7 @@ func NewNatsEventHandler() (*NatsEventHandler, error) {
 		Storage:     jetstream.FileStorage,
 	})
 	if err != nil {
+		eh.nc.Close()
 		return nil, fmt.Errorf("jetstream.CreateOrUpdateStream: %w", err)
 	}
 

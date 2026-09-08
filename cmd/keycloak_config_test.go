@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"os"
 	"regexp"
 	"strings"
@@ -54,12 +55,45 @@ func TestKeycloakConfigErrorNamesTheMissingVariable(t *testing.T) {
 	}
 }
 
-// A source check because the real thing is unreachable from a test: it exits
-// the process, and buildChargeableBillingService opens a database first. What
-// matters is only that the call is there — the credential used to be validated
-// by the muhlafim step alone, which retry-pricing-errors skips,
-// --muhlafim=false disables, and an empty window returns before.
-func TestTheChargeBuilderValidatesTheCredential(t *testing.T) {
+// The charging commands must validate before they wire anything.
+//
+// A source check because the real thing is unreachable from a test: it exits the
+// process, and the commands open a database. Two properties matter and neither
+// is visible at a call site — that the check happens at all, and that it happens
+// in the command rather than in buildChargeableBillingService, which runs after
+// `defer cleanup()` and would therefore exit without draining.
+//
+// The credential used to be validated only by the muhlafim step, which
+// retry-pricing-errors skips, --muhlafim=false disables, and an empty window
+// returns before.
+func TestTheChargingCommandsValidateBeforeWiringAnything(t *testing.T) {
+	source, err := os.ReadFile("billing.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, fn := range []string{"runBillingStart", "runBillingRetryPricingErrors"} {
+		body := regexp.MustCompile(`(?s)func ` + fn + `\([^)]*\)[^{]*\{(.*?)\n\}`).FindSubmatch(source)
+		if body == nil {
+			t.Errorf("%s not found in billing.go — has it been renamed?", fn)
+			continue
+		}
+
+		validate := bytes.Index(body[1], []byte("validateChargeConfig()"))
+		wire := bytes.Index(body[1], []byte("initBillingInfra()"))
+		switch {
+		case validate < 0:
+			t.Errorf("%s must call validateChargeConfig()", fn)
+		case wire >= 0 && validate > wire:
+			t.Errorf("%s validates after initBillingInfra: a fatal then happens with the pool "+
+				"open and NATS undrained", fn)
+		}
+	}
+}
+
+// And the builder must not exit, for the same reason: its callers have already
+// deferred their cleanup by the time it runs.
+func TestTheChargeBuilderDoesNotFatal(t *testing.T) {
 	source, err := os.ReadFile("billing.go")
 	if err != nil {
 		t.Fatal(err)
@@ -71,9 +105,7 @@ func TestTheChargeBuilderValidatesTheCredential(t *testing.T) {
 		t.Fatal("buildChargeableBillingService not found in billing.go — has it been renamed?")
 	}
 
-	if !strings.Contains(string(body[1]), "validateKeycloakConfig()") {
-		t.Error("buildChargeableBillingService must call validateKeycloakConfig(): every command " +
-			"that charges authenticates to external_payments, and the muhlafim step's own check " +
-			"is skipped by retry-pricing-errors, by --muhlafim=false, and by an empty window")
+	if bytes.Contains(body[1], []byte("LogFatal")) {
+		t.Error("buildChargeableBillingService must not exit: validate in the command instead")
 	}
 }

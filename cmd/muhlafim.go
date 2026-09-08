@@ -44,22 +44,25 @@ func muhlafimFn(cmd *cobra.Command, args []string) {
 
 	ctx := context.Background()
 	eventEmitter, ordersDB := initializeServices(ctx)
-	defer func() {
+	// Named, so the fatal paths below can drain too — utils.LogFatal is
+	// os.Exit and runs no deferred function.
+	cleanup := func() {
+		ordersDB.Close()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		eventEmitter.Close(ctx)
-	}()
-	defer ordersDB.Close()
+	}
+	defer cleanup()
 
 	// Parse date strings to time.Time
 	startDate, err := parsePelecardDate(startDateStr)
 	if err != nil {
-		utils.LogFatal("Failed to parse start-date", slog.String("date", startDateStr), slog.Any("error", err))
+		fatalAfter(cleanup, "Failed to parse start-date", slog.String("date", startDateStr), slog.Any("error", err))
 	}
 
 	endDate, err := parsePelecardDate(endDateStr)
 	if err != nil {
-		utils.LogFatal("Failed to parse end-date", slog.String("date", endDateStr), slog.Any("error", err))
+		fatalAfter(cleanup, "Failed to parse end-date", slog.String("date", endDateStr), slog.Any("error", err))
 	}
 
 	// Initialize Pelecard client
@@ -68,7 +71,7 @@ func muhlafimFn(cmd *cobra.Command, args []string) {
 	// Process muhlafim using domain logic
 	result, err := billing.ProcessMuhlafim(ctx, ordersDB, pelecardClient, startDate, endDate, true, false)
 	if err != nil {
-		utils.LogFatal("Failed to process muhlafim", slog.Any("error", err))
+		fatalAfter(cleanup, "Failed to process muhlafim", slog.Any("error", err))
 	}
 
 	utils.LogFor(ctx).Info("Processing complete",
@@ -111,6 +114,11 @@ func initializeServices(ctx context.Context) (events.EventEmitter, *repo.OrdersD
 
 	ordersDB, err := repo.NewOrdersDB(ctx, eventEmitter)
 	if err != nil {
+		// The emitter is already live and holding whatever it has. Drained
+		// before exiting, as initBillingInfra does on the same path.
+		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		eventEmitter.Close(closeCtx)
 		utils.LogFatal("Failed to initialize database", slog.Any("error", err))
 	}
 

@@ -3,7 +3,8 @@ package pelecard
 import "context"
 
 const (
-	PELECARD_API_BASE_URL = "https://gateway20.pelecard.biz"
+	// external_payments, which holds the Pelecard credentials and terminals.
+	EXTERNAL_PAYMENTS_BASE_URL = "https://checkout.kbb1.com"
 
 	// Action description constants
 	MUH_HIYUV_NIKLAT = "חיוב נקלט"
@@ -11,36 +12,6 @@ const (
 	MUH_BITUL        = "ביטול הוראת קבע ע\"י הלקוח"
 	MUH_LOTAKIN      = "שונה סטאטוס (מתקין ללא תקין)"
 )
-
-type BaseRequest struct {
-	User     string `json:"user"`
-	Password string `json:"password"`
-}
-
-type TerminalRequest struct {
-	BaseRequest
-	TerminalNumber string `json:"terminalNumber"`
-}
-
-// MuhlafimRequest represents the request payload for the Pelecard muhlafim API
-type MuhlafimRequest struct {
-	TerminalRequest
-	StartDate string `json:"startDate"`
-	EndDate   string `json:"endDate"`
-}
-
-func NewMuhlafimRequest(terminalRequest TerminalRequest, startDate, endDate string) *MuhlafimRequest {
-	return &MuhlafimRequest{
-		TerminalRequest: terminalRequest,
-		StartDate:       startDate,
-		EndDate:         endDate,
-	}
-}
-
-// MuhlafimResponse represents the response from the Pelecard muhlafim API
-type MuhlafimResponse struct {
-	ResultData []MuhlafimEntry `json:"ResultData"`
-}
 
 // MuhlafimEntry represents a single muhlafim entry from the API
 type MuhlafimEntry struct {
@@ -56,8 +27,8 @@ type Terminal struct {
 	ChargeURL string `json:"-"`
 }
 
-var TokenTerminal = Terminal{Name: "token", PMX: "t", ChargeURL: "https://checkout.kbb1.com/token/charge"}
-var EMVTerminal = Terminal{Name: "emv", PMX: "e", ChargeURL: "https://checkout.kbb1.com/emv/charge"}
+var TokenTerminal = Terminal{Name: "token", PMX: "t", ChargeURL: EXTERNAL_PAYMENTS_BASE_URL + "/token/charge"}
+var EMVTerminal = Terminal{Name: "emv", PMX: "e", ChargeURL: EXTERNAL_PAYMENTS_BASE_URL + "/emv/charge"}
 
 // TerminalByPMX returns the Terminal for a given PMX value.
 // PMX is the canonical identifier used across internal code, Priority, and Pelecard.

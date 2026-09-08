@@ -213,6 +213,14 @@ dispatchLoop:
 		slog.Int64("post_payment_errors", stats.errorCount.Get("post_payment")),
 		slog.Int64("charge_success_db_fail", stats.errorCount.Get("charge_success_db_fail")),
 		slog.Int64("gateway_errors", stats.errorCount.Get("gateway")),
+		slog.Int64("unauthorized_errors", stats.errorCount.Get("unauthorized")),
+		slog.Int64("no_credential_errors", stats.errorCount.Get("no_credential")),
+		slog.Float64("no_credential_failed_nis", stats.reasonFailedSum.Get("no_credential:"+common.CurrencyNIS)),
+		slog.Float64("no_credential_failed_usd", stats.reasonFailedSum.Get("no_credential:"+common.CurrencyUSD)),
+		slog.Float64("no_credential_failed_eur", stats.reasonFailedSum.Get("no_credential:"+common.CurrencyEUR)),
+		slog.Float64("unauthorized_failed_nis", stats.reasonFailedSum.Get("unauthorized:"+common.CurrencyNIS)),
+		slog.Float64("unauthorized_failed_usd", stats.reasonFailedSum.Get("unauthorized:"+common.CurrencyUSD)),
+		slog.Float64("unauthorized_failed_eur", stats.reasonFailedSum.Get("unauthorized:"+common.CurrencyEUR)),
 		slog.Int64("panics", stats.errorCount.Get("panic")),
 		// --- Per pricing version ---
 		slog.Int64("v1_orders", stats.pricingVersionCount.Get("v1")),
@@ -295,7 +303,7 @@ func (s *BillingService) processWithRecovery(ctx context.Context, workerID int, 
 			return
 		}
 		// Token declined — fall through to EMV
-	} else if handleNonRetryableError(ctx, hub, stats, pelecard.TokenTerminal.Name, tokenPayment, tokenErr) {
+	} else if handleNonRetryableError(ctx, hub, stats, pelecard.TokenTerminal.Name, ro.Price, tokenPayment, tokenErr) {
 		return
 	} else {
 		log.Error("Token terminal gateway error, falling back to EMV", slog.Any("err", tokenErr))
@@ -316,7 +324,7 @@ func (s *BillingService) processWithRecovery(ctx context.Context, workerID int, 
 		return
 	}
 
-	if handleNonRetryableError(ctx, hub, stats, pelecard.EMVTerminal.Name, emvPayment, emvErr) {
+	if handleNonRetryableError(ctx, hub, stats, pelecard.EMVTerminal.Name, ro.Price, emvPayment, emvErr) {
 		return
 	}
 
@@ -362,7 +370,8 @@ type chargeStats struct {
 	reasonFailedSum     *utils.CounterMap[float64] // "declined:NIS", "gateway:USD", "post_payment:EUR", etc.
 }
 
-func handleNonRetryableError(ctx context.Context, hub *sentry.Hub, stats *chargeStats, terminal string, payment *repo.Payment, err error) bool {
+func handleNonRetryableError(ctx context.Context, hub *sentry.Hub, stats *chargeStats, terminal string,
+	price *pricing.ChargePrice, payment *repo.Payment, err error) bool {
 	if errors.Is(err, common.ErrPrePayment) {
 		utils.LogFor(ctx).Error("Pre-payment error",
 			slog.String("terminal", terminal),
@@ -375,7 +384,41 @@ func handleNonRetryableError(ctx context.Context, hub *sentry.Hub, stats *charge
 		recordPostPaymentError(ctx, hub, stats, terminal, payment, err)
 		return true
 	}
+	// Both legs share the credential and the client that fetches it, so falling
+	// back cannot help. Non-retryable, so one order costs one failed attempt and
+	// one pending payment row rather than four.
+	if reason := credentialFailureReason(err); reason != "" {
+		utils.LogFor(ctx).Error("credential problem; the other terminal would fail the same way",
+			slog.String("terminal", terminal),
+			slog.String("reason", reason),
+			slog.Any("err", err))
+		captureError(hub, terminal, reason, err)
+		stats.errorCount.Inc(reason, 1)
+
+		// Still counted in the money totals: without this a run that failed every
+		// order on its credential reports failed_nis=0, which reads as a month
+		// with nothing to collect.
+		stats.failedSum.Inc(price.Currency, price.Amount)
+		stats.versionFailedSum.Inc(price.PricingVersion+":"+price.Currency, price.Amount)
+		stats.reasonFailedSum.Inc(reason+":"+price.Currency, price.Amount)
+		return true
+	}
 	return false
+}
+
+// credentialFailureReason names the counter key for an error no terminal can
+// recover from, or "" if this is not one. The two are kept apart because a
+// rejected credential is a misconfiguration and a missing one is Keycloak being
+// unreachable.
+func credentialFailureReason(err error) string {
+	switch {
+	case errors.Is(err, pelecard.ErrUnauthorized):
+		return "unauthorized"
+	case errors.Is(err, pelecard.ErrNoCredential):
+		return "no_credential"
+	default:
+		return ""
+	}
 }
 
 func captureError(hub *sentry.Hub, terminal, errorType string, err error) {

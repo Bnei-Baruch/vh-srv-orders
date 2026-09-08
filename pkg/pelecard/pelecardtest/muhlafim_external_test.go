@@ -2,9 +2,9 @@ package pelecardtest
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"errors"
@@ -56,13 +56,14 @@ func withExternalPayments(t *testing.T, token string, handler http.HandlerFunc) 
 }
 
 func TestFetchMuhlafim_SendsTokenAndParsesEntries(t *testing.T) {
-	var authHeader, path string
-	var body pelecard.ExternalMuhlafimRequest
+	var authHeader, method, path string
+	var query url.Values
 
 	client := withExternalPayments(t, "tok_secret", func(w http.ResponseWriter, r *http.Request) {
 		authHeader = r.Header.Get("Authorization")
+		method = r.Method
 		path = r.URL.Path
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		query = r.URL.Query()
 
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{
@@ -75,9 +76,10 @@ func TestFetchMuhlafim_SendsTokenAndParsesEntries(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "Bearer tok_secret", authHeader)
+	assert.Equal(t, http.MethodGet, method, "a read, not a post")
 	assert.Equal(t, "/token/muhlafim", path)
-	assert.Equal(t, "21/08/2025 00:00", body.StartDate)
-	assert.Equal(t, "24/09/2025 00:00", body.EndDate)
+	assert.Equal(t, "21/08/2025 00:00", query.Get("StartDate"))
+	assert.Equal(t, "24/09/2025 00:00", query.Get("EndDate"))
 
 	require.Len(t, entries, 2)
 	assert.Equal(t, "1234", entries["tok1"].NewCardNumber)
@@ -88,10 +90,10 @@ func TestFetchMuhlafim_SendsTokenAndParsesEntries(t *testing.T) {
 // The request carries no terminal and no credentials — that is the whole point
 // of external_payments owning the call.
 func TestFetchMuhlafim_SendsNoCredentials(t *testing.T) {
-	var raw map[string]any
+	var query url.Values
 
 	client := withExternalPayments(t, "tok_secret", func(w http.ResponseWriter, r *http.Request) {
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&raw))
+		query = r.URL.Query()
 		w.Write([]byte(`{}`))
 	})
 
@@ -99,7 +101,7 @@ func TestFetchMuhlafim_SendsNoCredentials(t *testing.T) {
 	require.NoError(t, err)
 
 	for _, forbidden := range []string{"user", "password", "terminalNumber", "TerminalNumber"} {
-		assert.NotContains(t, raw, forbidden)
+		assert.NotContains(t, query, forbidden)
 	}
 }
 

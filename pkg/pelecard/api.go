@@ -56,9 +56,9 @@ func (c *Client) fetchMuhlafim(ctx context.Context, startDate, endDate string) (
 
 	resp, err := c.Client.NewRequest().
 		SetContext(ctx).
-		SetBody(&ExternalMuhlafimRequest{StartDate: startDate, EndDate: endDate}).
+		SetQueryParams(map[string]string{"StartDate": startDate, "EndDate": endDate}).
 		SetHeader("Authorization", "Bearer "+token).
-		Post(c.BaseURL + "/token/muhlafim")
+		Get(c.BaseURL + "/token/muhlafim")
 	if err != nil {
 		return nil, fmt.Errorf("external muhlafim request failed: %w", err)
 	}

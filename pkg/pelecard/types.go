@@ -13,14 +13,6 @@ const (
 	MUH_LOTAKIN      = "שונה סטאטוס (מתקין ללא תקין)"
 )
 
-// ExternalMuhlafimRequest is the payload for external_payments' /token/muhlafim.
-// It carries no terminal and no credentials: external_payments holds both, and
-// the terminal these tokens live on is the one it charges them on.
-type ExternalMuhlafimRequest struct {
-	StartDate string `json:"StartDate"`
-	EndDate   string `json:"EndDate"`
-}
-
 // MuhlafimEntry represents a single muhlafim entry from the API
 type MuhlafimEntry struct {
 	Token             string `json:"Token"`

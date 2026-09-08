@@ -111,6 +111,14 @@ func runBillingStart(cmd *cobra.Command, args []string) {
 		utils.LogFatal("Failed to parse flags", slog.Any("error", err))
 	}
 
+	// Before initBillingInfra, so this exit has nothing to drain. It used to
+	// happen inside buildChargeableBillingService, which runs after
+	// `defer cleanup()` and therefore left the pool and the NATS connection
+	// behind. cmd/server.go validates in this order too.
+	if err := pricing.ValidateConfig(); err != nil {
+		utils.LogFatal("pricing.ValidateConfig", slog.Any("err", err))
+	}
+
 	eventEmitter, ordersDB, cleanup, err := initBillingInfra()
 	if err != nil {
 		sentry.CaptureException(err)
@@ -137,6 +145,11 @@ func runBillingRetryPricingErrors(cmd *cobra.Command, args []string) {
 	if err != nil {
 		sentry.CaptureException(err)
 		utils.LogFatal("Failed to parse flags", slog.Any("error", err))
+	}
+
+	// See runBillingStart: validated before there is anything to drain.
+	if err := pricing.ValidateConfig(); err != nil {
+		utils.LogFatal("pricing.ValidateConfig", slog.Any("err", err))
 	}
 
 	eventEmitter, ordersDB, cleanup, err := initBillingInfra()
@@ -440,23 +453,29 @@ func initBillingInfra() (events.EventEmitter, *repo.OrdersDB, func(), error) {
 	return eventEmitter, ordersDB, cleanup, nil
 }
 
-// fatalAfter drains and then exits. utils.LogFatal is os.Exit, which runs no
-// deferred function, so `defer cleanup()` does not survive a fatal — the drain
-// has to be called on the way out.
+// fatalAfter logs why the process is dying, drains, then exits. utils.LogFatal
+// is os.Exit, which runs no deferred function, so `defer cleanup()` does not
+// survive a fatal and the drain has to be called on the way out.
+//
+// The message goes first because the drain can be slow or can hang: closing the
+// emitter against a broken NATS spends its 5s context and then reports the
+// failure through a synchronous Sentry transport, and pgxpool.Close waits for
+// every acquired connection to come back. Draining first buries the reason
+// under that, or loses it entirely.
 func fatalAfter(cleanup func(), msg string, args ...any) {
+	slog.Error(msg, args...)
 	if cleanup != nil {
 		cleanup()
 	}
-	utils.LogFatal(msg, args...)
+	os.Exit(1)
 }
 
 // buildChargeableBillingService wires a BillingService with charge executor and pricing resolver.
 // Used by commands that perform charging (start, retry-pricing-errors).
+// The pricing configuration is validated by the callers, before they wire any
+// infrastructure — a fatal in here happens after their `defer cleanup()` and
+// would skip the drain.
 func buildChargeableBillingService(ordersDB *repo.OrdersDB, eventEmitter events.EventEmitter, dryRun bool) *billing.BillingService {
-	if err := pricing.ValidateConfig(); err != nil {
-		utils.LogFatal("pricing.ValidateConfig", slog.Any("err", err))
-	}
-
 	pelecardClient := pelecard.NewClient()
 	var chargeExecutor pelecard.ChargeExecutor
 	if dryRun {

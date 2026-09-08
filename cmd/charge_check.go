@@ -15,29 +15,18 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 )
 
-// The charge path sees real traffic once a month, in a single burst of ~3,500
-// calls at 02:00 on the 20th. A credential that does not land is therefore
-// invisible until it has already failed a month of renewals — the same shape of
-// problem the muhlafim comparison command was built for, and the reason this
-// exists before the charge routes start requiring a caller.
+// The charge path sees real traffic once a month, in one burst at 02:00 on the
+// 20th, so a credential that does not land is invisible until it has failed a
+// month of renewals.
 //
-// It charges nothing. The token it sends is deliberately invalid, so Pelecard
-// declines it; what is being tested is everything in front of the card:
+// It charges nothing: the card token it sends is invalid, so the gateway
+// declines it. A 401 means the credential was rejected; anything else means it
+// was accepted and the request reached the gateway. A decline is a pass.
 //
-//	401  -> the credential was rejected; every charge in a run would fail
-//	other -> the credential was accepted and the request reached the gateway
-//
-// A decline is therefore a pass. That inversion is the whole trick, and it is
-// why the command reports what it is asserting rather than just an exit code.
-//
-// What a pass does and does not mean, on the route this currently targets: the
-// shared /token/charge is in observe mode, so it accepts anonymous callers too,
-// and a pass there proves only that the credential was not *rejected*.
-// checkout's own log settles the rest, showing `requested_by=keycloak:vh`
-// against `anonymous`. Point --url at /vh/token/charge for an answer that
-// stands on its own: that route requires a caller, so a 401 is definitive and a
-// pass means the bearer was accepted. Once the terminals move there, the
-// default target becomes definitive too.
+// The default target /token/charge is in observe mode, so a pass there only
+// proves the credential was not rejected — checkout's log settles the rest,
+// showing `requested_by=keycloak:vh`. Point --url at /vh/token/charge, which
+// requires a caller, for an answer that stands on its own.
 var chargeCheckCmd = &cobra.Command{
 	Use:   "charge-check",
 	Short: "Verify that charge calls authenticate to external_payments",
@@ -85,8 +74,8 @@ func chargeCheckFn(cmd *cobra.Command, args []string) {
 	}
 
 	if reference == "" {
-		// Unique per run and obviously not a payment, so a row left behind by a
-		// declined attempt cannot be mistaken for a member's charge.
+		// Unique per run and obviously not a payment, so a row left by a declined
+		// attempt is not mistaken for a member's charge.
 		reference = fmt.Sprintf("m-authcheck-%d", os.Getpid())
 	}
 
@@ -100,16 +89,13 @@ func chargeCheckFn(cmd *cobra.Command, args []string) {
 		slog.String("reference", reference),
 		slog.String("keycloak_client", common.Config.KeycloakClientID))
 
-	// Deliberately unchargeable: an invalid card token with the smallest amount
-	// the gateway will look at. Everything else mirrors what a renewal sends, so
-	// the request is rejected on the card rather than on validation.
+	// Deliberately unchargeable, and otherwise identical to a renewal, so it is
+	// rejected on the card rather than on validation.
 	request := &pelecard.ChargeRequest{
 		UserKey: reference,
 		Token:   cardToken,
-		// Required by external_payments' validation, and it runs before the card
-		// is touched — leave them out and the request is rejected as malformed,
-		// which proves nothing about the credential. Never navigated to: the
-		// gateway refuses the card before any redirect is issued.
+		// Required by validation, which runs before the card is touched. Never
+		// navigated to.
 		GoodURL:      "https://example.invalid/good",
 		ErrorURL:     "https://example.invalid/error",
 		CancelURL:    "https://example.invalid/cancel",
@@ -135,10 +121,9 @@ func chargeCheckFn(cmd *cobra.Command, args []string) {
 
 	switch {
 	case err == nil:
-		// external_payments answers 200 for a declined card — it cannot yet tell a
-		// decline from a gateway outage, so it reports both as success-shaped and
-		// puts the reason in the body. VH's renewal path reads this same field
-		// rather than the HTTP status, so this command has to as well.
+		// external_payments answers 200 for a declined card and puts the reason in
+		// the body. The renewal path reads this same field rather than the HTTP
+		// status, so this does too.
 		status, _ := result["status"].(string)
 		if status == "success" {
 			log.Warn("PASSED, but the gateway accepted an invalid card token — worth investigating",
@@ -160,17 +145,15 @@ func chargeCheckFn(cmd *cobra.Command, args []string) {
 		utils.LogFatal("charge calls would fail for every renewal in a run")
 
 	case strings.Contains(err.Error(), "[400]"):
-		// Rejected as malformed, before the card and before anything that depends
-		// on the credential. Reporting this as a pass would be the command lying
-		// about what it exercised.
+		// Rejected as malformed, before the card and before the credential
+		// matters, so it proves nothing either way.
 		log.Error("INCONCLUSIVE: external_payments rejected the request as malformed",
 			slog.String("terminal", terminal.Name),
 			slog.Any("err", err))
 		utils.LogFatal("the request never reached the gateway, so nothing was proved")
 
 	default:
-		// Some other HTTP failure — the request still got past validation, so the
-		// credential was not what stopped it.
+		// Past validation, so the credential was not what stopped it.
 		log.Info("PASSED: the request was not rejected on its credential",
 			slog.String("terminal", terminal.Name),
 			slog.String("url", terminal.ChargeURL),

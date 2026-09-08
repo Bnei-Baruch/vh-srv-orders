@@ -8,9 +8,8 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/common"
 )
 
-// withFailingDB points the config at a port nothing listens on, and empties
-// NatsUrl so CreateEmitter still succeeds — that ordering is what makes Init
-// fail at the repo step, which is the step that matters here.
+// withFailingDB makes Init fail at the repo step: CreateEmitter still succeeds
+// with an empty NatsUrl, and nothing listens on port 1.
 func withFailingDB(t *testing.T) {
 	t.Helper()
 
@@ -21,14 +20,9 @@ func withFailingDB(t *testing.T) {
 	common.Config.PgHost, common.Config.PgPort = "127.0.0.1", "1"
 }
 
-// doImport calls Close on the Init failure path, so Close has to survive a
-// partial Init. The case that bites is the repo: NewOrdersDB returns a concrete
-// *repo.OrdersDB, so assigning it before checking the error boxes a nil pointer
-// into a non-nil interface — Close's nil guard passes and the call panics on the
-// nil receiver, before the emitter is ever drained.
-//
-// Driving Init for real is the point. Calling Close on a zero-value struct, as
-// this test first did, passes either way and proves nothing.
+// Close runs on the Init failure path, so it has to survive a partial Init.
+// Driving Init for real is the point: calling Close on a zero-value struct, as
+// this test first did, passes whether or not the bug is present.
 func TestBaseImporterCloseAfterFailedInit(t *testing.T) {
 	withFailingDB(t)
 

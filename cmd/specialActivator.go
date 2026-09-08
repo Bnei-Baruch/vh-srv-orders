@@ -82,10 +82,9 @@ func (w *Worker) Init() error {
 		return fmt.Errorf("events.CreateEmitter: %w", err)
 	}
 
-	// Through a local, never straight into the interface field: NewOrdersDB
-	// returns a concrete *repo.OrdersDB, and on failure that nil pointer boxes
-	// into a non-nil interface. Close's guard would pass and its call would
-	// panic on the nil receiver.
+	// Through a local: NewOrdersDB returns a concrete *repo.OrdersDB, and on
+	// failure that nil pointer boxes into a non-nil interface, defeating
+	// Close's guard.
 	ordersDB, err := repo.NewOrdersDB(context.Background(), w.eventEmitter)
 	if err != nil {
 		return fmt.Errorf("repo.NewOrdersDB: %w", err)

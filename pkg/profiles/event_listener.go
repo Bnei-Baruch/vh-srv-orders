@@ -59,8 +59,12 @@ func NewEventListener() (*EventListener, error) {
 		return nil, fmt.Errorf("nats.Connect: %w", err)
 	}
 
+	// Every failure past this point closes the connection: returning (nil, err)
+	// leaves it open with no reference to it, and the caller has nothing to
+	// close.
 	el.js, err = jetstream.New(el.nc)
 	if err != nil {
+		el.nc.Close()
 		return nil, fmt.Errorf("jetstream.New: %w", err)
 	}
 
@@ -73,6 +77,7 @@ func NewEventListener() (*EventListener, error) {
 		Description: "Events listener of vh-srv-orders for profile changes",
 	})
 	if err != nil {
+		el.nc.Close()
 		return nil, fmt.Errorf("jetstream.CreateOrUpdateConsumer: %w", err)
 	}
 
@@ -115,10 +120,18 @@ func (el *EventListener) Run() error {
 	return nil
 }
 
+// Close is called from App.Shutdown, which the fatal paths reach — including the
+// one where Run itself failed — so none of these are guaranteed to exist.
 func (el *EventListener) Close() {
-	el.consumerCtx.Stop()
-	el.nc.Close()
-	close(el.queue)
+	if el.consumerCtx != nil {
+		el.consumerCtx.Stop()
+	}
+	if el.nc != nil {
+		el.nc.Close()
+	}
+	if el.queue != nil {
+		close(el.queue)
+	}
 }
 
 func (el *EventListener) RegisterHandler(handler EventHandler) {

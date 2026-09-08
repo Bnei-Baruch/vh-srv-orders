@@ -26,12 +26,28 @@ func LogFatal(msg string, args ...any) {
 // under that, or loses it entirely.
 //
 // cleanup may be nil, for the fatal paths that have nothing to drain yet.
+//
+// A panic in cleanup does not change the outcome. cleanup is arbitrary shutdown
+// code, and if it unwinds instead of returning then os.Exit is never reached:
+// the process dies with status 2 rather than 1, and any `defer cleanup()` it
+// was called to substitute for runs a second time on the way out. Recovered and
+// logged, so the exit is still the exit.
 func FatalAfter(cleanup func(), msg string, args ...any) {
 	slog.Error(msg, args...)
 	if cleanup != nil {
-		cleanup()
+		drain(cleanup)
 	}
 	os.Exit(1)
+}
+
+func drain(cleanup func()) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("panic while draining on the fatal path", slog.Any("panic", r))
+		}
+	}()
+
+	cleanup()
 }
 
 func LogFor(ctx context.Context) *slog.Logger {

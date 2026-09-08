@@ -63,3 +63,35 @@ func TestFatalAfterAcceptsNoCleanup(t *testing.T) {
 		t.Fatalf("the fatal message is missing:\n%s", out)
 	}
 }
+
+// A cleanup that panics must not change the outcome: still exit 1, not an
+// unwind to 2, and not a second run of the deferred cleanup it stands in for.
+func TestFatalAfterSurvivesAPanickingCleanup(t *testing.T) {
+	if os.Getenv("FATAL_AFTER_PANIC_CHILD") == "1" {
+		defer fmt.Fprintln(os.Stderr, "DEFERRED RAN")
+		FatalAfter(func() { panic("drain exploded") }, "child exiting")
+		return
+	}
+
+	child := exec.Command(os.Args[0], "-test.run=TestFatalAfterSurvivesAPanickingCleanup")
+	child.Env = append(os.Environ(), "FATAL_AFTER_PANIC_CHILD=1")
+	out, err := child.CombinedOutput()
+	output := string(out)
+
+	exit, ok := err.(*exec.ExitError)
+	if !ok {
+		t.Fatalf("expected a non-zero exit, got %v:\n%s", err, output)
+	}
+	if exit.ExitCode() != 1 {
+		t.Errorf("exit code %d, want 1 — the panic changed the outcome:\n%s", exit.ExitCode(), output)
+	}
+	if !strings.Contains(output, "child exiting") {
+		t.Errorf("the reason is missing:\n%s", output)
+	}
+	if !strings.Contains(output, "panic while draining") {
+		t.Errorf("the drain panic was not reported:\n%s", output)
+	}
+	if strings.Contains(output, "DEFERRED RAN") {
+		t.Errorf("the panic unwound instead of exiting, so deferred cleanup ran again:\n%s", output)
+	}
+}

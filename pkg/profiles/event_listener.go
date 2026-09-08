@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime/debug"
+	"sync"
 	"time"
 
 	"github.com/getsentry/sentry-go"
@@ -48,6 +49,17 @@ type EventListener struct {
 
 	queue    chan Event
 	handlers []EventHandler
+
+	// quit tells the delivery callback and the runner to stop; done is closed
+	// by the runner once it has, so Close can wait for it. The queue is never
+	// closed: closing it would race the callback's send.
+	quit     chan struct{}
+	done     chan struct{}
+	quitOnce sync.Once
+	doneOnce sync.Once
+	// runnerStarted records that runQueue is up, so Close knows whether
+	// anything will ever close done.
+	runnerStarted bool
 }
 
 func NewEventListener() (*EventListener, error) {
@@ -83,6 +95,8 @@ func NewEventListener() (*EventListener, error) {
 
 	el.queue = make(chan Event, 2^10)
 	el.handlers = make([]EventHandler, 0)
+	el.quit = make(chan struct{})
+	el.done = make(chan struct{})
 	return el, nil
 }
 
@@ -93,44 +107,95 @@ func (el *EventListener) Run() error {
 		return fmt.Errorf("jetstream consumer.Consume: %w", err)
 	}
 
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				slog.Error("EventListener.Run panic", slog.Any("err", err))
-				sentry.CurrentHub().Recover(r)
-				debug.PrintStack()
-
-				el.consumerCtx.Stop()
-				if err := el.Run(); err != nil {
-					slog.Error("EventListener.Run error re-run after panic", slog.Any("err", err))
-					sentry.CaptureException(err)
-					panic(r)
-				}
-			}
-		}()
-
-		for event := range el.queue {
-			for _, handler := range el.handlers {
-				handler(event)
-			}
-		}
-		slog.Debug("EventListener runner goroutine exit")
-	}()
+	el.runnerStarted = true
+	go el.runQueue()
 
 	return nil
 }
 
-// Close is called from App.Shutdown, which the fatal paths reach — including the
-// one where Run itself failed — so none of these are guaranteed to exist.
+// runQueue delivers queued events to the handlers until Close says stop.
+//
+// It selects on quit rather than ranging over a closed queue, and signals done
+// on the way out — so Close can wait, and no handler runs after Close returns.
+// That is what keeps the repo alive underneath these handlers: they write
+// through it, and App.Shutdown closes it as soon as this has stopped.
+func (el *EventListener) runQueue() {
+	defer el.doneOnce.Do(func() { close(el.done) })
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("EventListener.runQueue panic", slog.Any("panic", r))
+			sentry.CurrentHub().Recover(r)
+			debug.PrintStack()
+
+			if el.consumerCtx != nil {
+				el.consumerCtx.Stop()
+			}
+			if err := el.Run(); err != nil {
+				slog.Error("EventListener.Run error re-run after panic", slog.Any("err", err))
+				sentry.CaptureException(err)
+				panic(r)
+			}
+		}
+	}()
+
+	for {
+		select {
+		case event := <-el.queue:
+			for _, handler := range el.handlers {
+				handler(event)
+			}
+		case <-el.quit:
+			// Buffered events are already acked — handleMessage acks on
+			// enqueue — so dropping them loses them for good. Handled before
+			// stopping, which is safe precisely because Close waits: the repo
+			// they write through is still open.
+			el.drainQueue()
+			slog.Debug("EventListener runner goroutine exit")
+			return
+		}
+	}
+}
+
+// drainQueue handles what is already buffered and returns. Bounded by the
+// queue's capacity, so it cannot hold up a shutdown indefinitely.
+func (el *EventListener) drainQueue() {
+	for {
+		select {
+		case event := <-el.queue:
+			for _, handler := range el.handlers {
+				handler(event)
+			}
+		default:
+			return
+		}
+	}
+}
+
+// Close stops delivery, waits for the runner to finish, and only then drops the
+// connection. Callers rely on that order: App.Shutdown closes the repo next, and
+// these handlers write through it.
+//
+// It is called from the fatal paths too, including the one where Run itself
+// failed, so nothing here is guaranteed to exist. The queue is deliberately not
+// closed — the delivery callback may be blocked on a send to it, and closing it
+// under that is a `send on closed channel` panic on the NATS dispatch
+// goroutine, which would take the process down before the rest of the drain.
 func (el *EventListener) Close() {
+	if el.quit != nil {
+		el.quitOnce.Do(func() { close(el.quit) })
+	}
 	if el.consumerCtx != nil {
 		el.consumerCtx.Stop()
 	}
+
+	// Only if the runner is up: Consume failing means nothing will ever close
+	// done, and waiting would hang the shutdown it was called to make orderly.
+	if el.runnerStarted && el.done != nil {
+		<-el.done
+	}
+
 	if el.nc != nil {
 		el.nc.Close()
-	}
-	if el.queue != nil {
-		close(el.queue)
 	}
 }
 
@@ -147,7 +212,13 @@ func (el *EventListener) handleMessage(msg jetstream.Msg) {
 		sentry.CaptureException(err)
 	}
 
-	el.queue <- event
-
-	msg.Ack()
+	// Not acked when shutting down: an event dropped here has not been handled,
+	// so leaving it unacked is what gets it redelivered. The select is also what
+	// makes closing the queue unnecessary — this send can never outlive Close.
+	select {
+	case el.queue <- event:
+		msg.Ack()
+	case <-el.quit:
+		slog.Debug("EventListener.handleMessage dropped during shutdown")
+	}
 }

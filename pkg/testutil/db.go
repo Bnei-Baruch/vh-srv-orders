@@ -44,7 +44,10 @@ func NewTestOrdersDB(t *testing.T, ctx context.Context) (string, error) {
 		Host:       common.Config.PgHost,
 		Port:       common.Config.PgPort,
 		Database:   url.QueryEscape(common.Config.PgDbName),
-		Options:    "sslmode=disable",
+		// Timezone pinned so calendar arithmetic does not depend on the
+		// developer's Postgres. As an `options` parameter because psql rejects
+		// plain `timezone=`; quote the URL when pasting it there.
+		Options: "sslmode=disable&options=-c%20timezone%3DUTC",
 	}
 
 	gm := golangmigrator.New(migrationsDir())
@@ -56,6 +59,7 @@ func NewTestOrdersDB(t *testing.T, ctx context.Context) (string, error) {
 		}
 	}
 
-	t.Log("testdbconf:", pgtestdb.Custom(t, config, gm).URL())
+	// Once: each call creates another instance database, and Custom logs the
+	// URL itself.
 	return pgtestdb.Custom(t, config, gm).URL(), nil
 }

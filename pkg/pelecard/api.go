@@ -47,8 +47,8 @@ func NewClient() *Client {
 	}
 }
 
-// postMuhlafim sends one /token/muhlafim request with a freshly taken token.
-func (c *Client) postMuhlafim(ctx context.Context, startDate, endDate string) (*resty.Response, error) {
+// fetchMuhlafim is a single attempt; the retry lives in FetchMuhlafim.
+func (c *Client) fetchMuhlafim(ctx context.Context, startDate, endDate string) (*resty.Response, error) {
 	token, err := c.Tokens.Token()
 	if err != nil {
 		return nil, fmt.Errorf("keycloak token for external_payments: %w", err)
@@ -66,32 +66,27 @@ func (c *Client) postMuhlafim(ctx context.Context, startDate, endDate string) (*
 	return resp, nil
 }
 
-// FetchMuhlafim returns Pelecard's card replacements for a date window, keyed by
-// the token being replaced, from external_payments.
-//
-// This service used to query Pelecard directly for it — the only reason it held
-// Pelecard credentials and a terminal number at all. Both sources were kept
-// callable until a comparison over six windows agreed entry by entry and field
-// by field, and the direct call was then removed along with the credentials.
+// FetchMuhlafim returns Pelecard's card replacements for a date window from
+// external_payments, keyed by the token being replaced. An empty window is a
+// normal answer, not an error.
 func (c *Client) FetchMuhlafim(ctx context.Context, startDate, endDate string) (map[string]MuhlafimEntry, error) {
 	if c.Tokens == nil {
 		return nil, fmt.Errorf("no token source configured for external_payments")
 	}
 
-	resp, err := c.postMuhlafim(ctx, startDate, endDate)
+	resp, err := c.fetchMuhlafim(ctx, startDate, endDate)
 	if err != nil {
 		return nil, err
 	}
 
-	// Retried once on 401 after invalidating the token, as pkg/accounting and
-	// pkg/profiles do: MapClaims.Valid() applies no clock leeway, so a token
-	// cached a moment before expiry is sent, rejected, and would otherwise abort
-	// the monthly billing run at its muhlafim step.
+	// MapClaims.Valid() applies no clock leeway, so a token cached a moment
+	// before expiry is sent and rejected. Retried once, as pkg/accounting and
+	// pkg/profiles do.
 	if resp.StatusCode() == http.StatusUnauthorized {
 		c.Tokens.Invalidate()
 		utils.LogFor(ctx).Warn("external muhlafim returned 401, retrying with a fresh token")
 
-		if resp, err = c.postMuhlafim(ctx, startDate, endDate); err != nil {
+		if resp, err = c.fetchMuhlafim(ctx, startDate, endDate); err != nil {
 			return nil, err
 		}
 	}
@@ -105,40 +100,7 @@ func (c *Client) FetchMuhlafim(ctx context.Context, startDate, endDate string) (
 		return nil, fmt.Errorf("failed to unmarshal external muhlafim response: %w", err)
 	}
 
-	// The direct Pelecard call this replaces built the map itself, so the key was
-	// the entry's own token by construction. Reading a map off the wire loses
-	// that, and an entry keyed by "" — or by anything that is not its own token —
-	// matches nothing in a caller's token map. external_payments does key by
-	// entry.Token and drops empty ones, so nothing is expected to be dropped here.
-	//
-	// An empty result is therefore reported as an error rather than as a quiet
-	// window: an HTTP-200 envelope whose values are objects, say {"error":{...}},
-	// unmarshals into junk entries that all fail this check, and returning
-	// (empty, nil) for that would let the billing run proceed to charge cards
-	// Pelecard had reported as replaced or cancelled — indistinguishable from a
-	// month with no replacements. The same applies if external_payments ever stops
-	// emitting the redundant Token field inside each value.
-	kept := make(map[string]MuhlafimEntry, len(entries))
-	for key, entry := range entries {
-		if key != "" && key == entry.Token {
-			kept[key] = entry
-		}
-	}
-
-	if dropped := len(entries) - len(kept); dropped > 0 {
-		utils.LogFor(ctx).Warn("dropped muhlafim entries whose key is not their token",
-			slog.Int("dropped", dropped),
-			slog.Int("kept", len(kept)),
-			slog.String("source", c.BaseURL))
-
-		if len(kept) == 0 {
-			return nil, fmt.Errorf(
-				"external muhlafim returned %d entries and none was keyed by its own token, "+
-					"refusing to report an empty window", dropped)
-		}
-	}
-
-	return kept, nil
+	return entries, nil
 }
 
 // ChargeByToken sends a token-based charge request to the payment gateway.

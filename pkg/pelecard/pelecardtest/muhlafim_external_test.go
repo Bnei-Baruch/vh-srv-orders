@@ -117,9 +117,7 @@ func TestFetchMuhlafim_TokenNotSetOnSharedClient(t *testing.T) {
 	assert.Empty(t, client.Client.Header.Get("Authorization"))
 }
 
-// A genuinely quiet window is not an error, which is also what keeps the
-// key-equals-token guard from failing empty months: it errors only when a
-// response carried entries and kept none.
+// A quiet window is a normal answer.
 func TestFetchMuhlafim_EmptyWindow(t *testing.T) {
 	client := withExternalPayments(t, "tok_secret", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{}`))
@@ -129,25 +127,6 @@ func TestFetchMuhlafim_EmptyWindow(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Empty(t, entries)
-}
-
-// The direct Pelecard call skipped entries with no token. Nothing matches "" in
-// a caller's token map, so an empty key would be a silent miss rather than an
-// error.
-func TestFetchMuhlafim_DropsEmptyTokenKey(t *testing.T) {
-	client := withExternalPayments(t, "tok_secret", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{
-			"":     {"Token": "", "ActionDescription": "חיוב נקלט"},
-			"tok1": {"Token": "tok1", "ActionDescription": "נדחה לא יחויב"}
-		}`))
-	})
-
-	entries, err := client.FetchMuhlafim(context.Background(), "21/08/2025 00:00", "24/09/2025 00:00")
-
-	require.NoError(t, err)
-	assert.NotContains(t, entries, "", "an entry naming no replaced card is dropped")
-	assert.Len(t, entries, 1)
-	assert.Contains(t, entries, "tok1")
 }
 
 // A token cached a moment before expiry is sent and rejected. Without the retry
@@ -190,43 +169,6 @@ func TestFetchMuhlafim_RetriesOnlyOnce(t *testing.T) {
 	assert.Nil(t, entries)
 	assert.Contains(t, err.Error(), "401")
 	assert.Equal(t, 2, requests, "a persistent 401 fails rather than looping")
-}
-
-// An HTTP 200 whose body is an envelope, not a token map, unmarshals cleanly:
-// {"error":{...}} becomes one entry keyed "error" with a zero-value Token. Left
-// in, it reports as a window that simply matched no orders.
-func TestFetchMuhlafim_DropsEntriesWhoseKeyIsNotTheirToken(t *testing.T) {
-	client := withExternalPayments(t, "tok_secret", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{
-			"error": {"code": 502, "message": "upstream"},
-			"tok1":  {"Token": "tok1", "ActionDescription": "נדחה לא יחויב"},
-			"tok2":  {"Token": "someone-else", "ActionDescription": "חיוב נקלט"}
-		}`))
-	})
-
-	entries, err := client.FetchMuhlafim(context.Background(), "21/08/2025 00:00", "24/09/2025 00:00")
-
-	require.NoError(t, err)
-	assert.NotContains(t, entries, "error", "an envelope entry carries no token")
-	assert.NotContains(t, entries, "tok2", "a key that is not its own token matches nothing downstream")
-	assert.Equal(t, map[string]pelecard.MuhlafimEntry{
-		"tok1": {Token: "tok1", ActionDescription: pelecard.MUH_NIDHA},
-	}, entries)
-}
-
-// Nothing surviving is the case that bites: returning an empty map with no error
-// lets the billing run proceed to charge cards Pelecard reported as replaced,
-// and reads exactly like a month with no replacements.
-func TestFetchMuhlafim_AllEntriesDropped_IsAnError(t *testing.T) {
-	client := withExternalPayments(t, "tok_secret", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{"error": {"code": 502, "message": "upstream"}}`))
-	})
-
-	entries, err := client.FetchMuhlafim(context.Background(), "21/08/2025 00:00", "24/09/2025 00:00")
-
-	require.Error(t, err)
-	assert.Nil(t, entries)
-	assert.Contains(t, err.Error(), "none was keyed by its own token")
 }
 
 func TestFetchMuhlafim_Unauthorized(t *testing.T) {

@@ -45,19 +45,17 @@ func doImport(im importer) {
 	}
 	defer sentry.Flush(2 * time.Second)
 
-	// do the thing. Close on the failure paths too, and explicitly: utils.LogFatal
-	// ends in os.Exit, which runs no deferred function — not even the sentry.Flush
-	// above.
+	// do the thing. The failure paths drain too, through FatalAfter: os.Exit runs
+	// no deferred function — not even the sentry.Flush above — and the reason has
+	// to be logged before the drain, which can block.
 	if err := im.Init(); err != nil {
 		sentry.CaptureException(err)
-		im.Close()
-		utils.LogFatal("importer.Init", slog.Any("err", err))
+		utils.FatalAfter(im.Close, "importer.Init", slog.Any("err", err))
 	}
 
 	if err := im.Import(); err != nil {
 		sentry.CaptureException(err)
-		im.Close()
-		utils.LogFatal("im.Import", slog.Any("err", err))
+		utils.FatalAfter(im.Close, "im.Import", slog.Any("err", err))
 	}
 
 	im.Close()

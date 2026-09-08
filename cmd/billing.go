@@ -122,7 +122,7 @@ func runBillingStart(cmd *cobra.Command, args []string) {
 	ctx := context.WithValue(context.Background(), common.CtxEventBuilder, new(BillingWorkflowEventBuilder))
 	if err := billingService.RunBillingWorkflow(ctx, month, year, opts); err != nil {
 		sentry.CaptureException(err)
-		utils.LogFatal("Billing workflow failed", slog.Any("error", err))
+		fatalAfter(cleanup, "Billing workflow failed", slog.Any("error", err))
 	}
 
 	slog.Info("Billing workflow completed successfully")
@@ -151,7 +151,7 @@ func runBillingRetryPricingErrors(cmd *cobra.Command, args []string) {
 	count, err := billingService.RetryPricingErrors(ctx, maxWorkers)
 	if err != nil {
 		sentry.CaptureException(err)
-		utils.LogFatal("Retry pricing errors failed", slog.Any("error", err))
+		fatalAfter(cleanup, "Retry pricing errors failed", slog.Any("error", err))
 	}
 
 	slog.Info("Retry pricing errors completed successfully", slog.Int("orders_charged", count))
@@ -240,7 +240,7 @@ func runBillingCompareContributions(cmd *cobra.Command, args []string) {
 
 	orderIDs, err := ordersDB.GetOrderIDsToRenew(ctx)
 	if err != nil {
-		utils.LogFatal("GetOrderIDsToRenew", slog.Any("error", err))
+		fatalAfter(cleanup, "GetOrderIDsToRenew", slog.Any("error", err))
 	}
 	if len(orderIDs) == 0 {
 		fmt.Println("No orders to renew")
@@ -275,7 +275,7 @@ func runBillingCompareContributions(cmd *cobra.Command, args []string) {
 	// 1. Batch fetch once, seed the pending map with one entry per email.
 	batchResult, err := client.GetLastContributionsBatch(ctx, emails)
 	if err != nil {
-		utils.LogFatal("GetLastContributionsBatch", slog.Any("error", err))
+		fatalAfter(cleanup, "GetLastContributionsBatch", slog.Any("error", err))
 	}
 
 	var mu sync.Mutex
@@ -438,6 +438,16 @@ func initBillingInfra() (events.EventEmitter, *repo.OrdersDB, func(), error) {
 		eventEmitter.Close(ctx)
 	}
 	return eventEmitter, ordersDB, cleanup, nil
+}
+
+// fatalAfter drains and then exits. utils.LogFatal is os.Exit, which runs no
+// deferred function, so `defer cleanup()` does not survive a fatal — the drain
+// has to be called on the way out.
+func fatalAfter(cleanup func(), msg string, args ...any) {
+	if cleanup != nil {
+		cleanup()
+	}
+	utils.LogFatal(msg, args...)
 }
 
 // buildChargeableBillingService wires a BillingService with charge executor and pricing resolver.

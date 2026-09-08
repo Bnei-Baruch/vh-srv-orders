@@ -2,8 +2,13 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/getsentry/sentry-go"
@@ -295,15 +300,49 @@ func (a *App) initHealth() {
 	})
 }
 
-// Run does not return: (*gin.Engine).Run never yields a nil error, so the server
-// always leaves through this fatal. `defer app.Shutdown()` in server.go
-// therefore never ran, and the long-lived process — the one that emits events
-// continuously — was the only one not draining anything on the way out.
+// Run serves until the process is asked to stop, then returns so its caller's
+// deferred Shutdown can drain.
+//
+// It used to call (*gin.Engine).Run, which returns only on a listen error — so
+// the only exit it covered was a failure to bind. The real exit for a
+// long-lived server is SIGTERM from the orchestrator, and with no handler for
+// it the runtime killed the process outright: Shutdown never ran, and the
+// service emitting events continuously was the one draining nothing.
+//
+// In-flight requests get shutdownGrace to finish. A second signal is not
+// caught, so an impatient operator still gets an immediate exit.
 func (a *App) Run() {
-	if err := a.gEngine.Run(":" + common.Config.Port); err != nil {
-		utils.FatalAfter(a.Shutdown, "gin.Run", slog.Any("err", err))
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	server := &http.Server{
+		Addr:    ":" + common.Config.Port,
+		Handler: a.gEngine,
+	}
+
+	go func() {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			utils.FatalAfter(a.Shutdown, "http.ListenAndServe", slog.Any("err", err))
+		}
+	}()
+	slog.Info("listening", slog.String("addr", server.Addr))
+
+	<-ctx.Done()
+	stop()
+	slog.Info("signal received, shutting down")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+	defer cancel()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		slog.Error("http.Server.Shutdown", slog.Any("err", err))
 	}
 }
+
+// shutdownGrace bounds how long in-flight requests have once a signal arrives.
+// Kubernetes sends SIGKILL 30s after SIGTERM by default, so this has to leave
+// room for the drain that follows it — repo close, emitter drain and
+// sentry.Flush.
+const shutdownGrace = 15 * time.Second
 
 // Shutdown is called from the fatal paths as well as from server.go's defer, so
 // it has to survive a partial Initialize: either field can still be nil when a

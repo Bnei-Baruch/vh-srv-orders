@@ -2,8 +2,15 @@ package api
 
 import (
 	"bytes"
+	"fmt"
 	"os"
+	"os/exec"
+	"strings"
+	"syscall"
 	"testing"
+	"time"
+
+	"github.com/gin-gonic/gin"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
@@ -96,5 +103,35 @@ func TestShutdownStopsTheListenerBeforeTheRepo(t *testing.T) {
 	case listener > repo:
 		t.Error("Shutdown closes the repo before stopping the listener, so in-flight profile " +
 			"events fail against a closed pool and are never acked")
+	}
+}
+
+// Run has to return on SIGTERM rather than let the runtime kill the process,
+// because its caller's deferred Shutdown is the only thing that drains. Driven
+// in a child, since the test process cannot signal itself without ending the
+// run.
+func TestRunReturnsOnSigterm(t *testing.T) {
+	if os.Getenv("RUN_SIGTERM_CHILD") == "1" {
+		saved := *common.Config
+		defer func() { *common.Config = saved }()
+		common.Config.Port = "18099"
+
+		app := App{gEngine: gin.New()}
+		go func() {
+			time.Sleep(300 * time.Millisecond)
+			_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
+		}()
+
+		app.Run()
+		fmt.Fprintln(os.Stderr, "RUN RETURNED")
+		return
+	}
+
+	child := exec.Command(os.Args[0], "-test.run=TestRunReturnsOnSigterm", "-test.timeout=30s")
+	child.Env = append(os.Environ(), "RUN_SIGTERM_CHILD=1")
+	out, _ := child.CombinedOutput()
+
+	if !strings.Contains(string(out), "RUN RETURNED") {
+		t.Errorf("Run did not return on SIGTERM, so Shutdown would never drain:\n%s", out)
 	}
 }

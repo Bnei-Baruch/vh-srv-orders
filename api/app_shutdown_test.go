@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"strings"
@@ -114,7 +115,7 @@ func TestRunReturnsOnSigterm(t *testing.T) {
 	if os.Getenv("RUN_SIGTERM_CHILD") == "1" {
 		saved := *common.Config
 		defer func() { *common.Config = saved }()
-		common.Config.Port = "18099"
+		common.Config.Port = freePort(t)
 
 		app := App{gEngine: gin.New()}
 		go func() {
@@ -129,9 +130,35 @@ func TestRunReturnsOnSigterm(t *testing.T) {
 
 	child := exec.Command(os.Args[0], "-test.run=TestRunReturnsOnSigterm", "-test.timeout=30s")
 	child.Env = append(os.Environ(), "RUN_SIGTERM_CHILD=1")
-	out, _ := child.CombinedOutput()
+	out, err := child.CombinedOutput()
+	output := string(out)
 
-	if !strings.Contains(string(out), "RUN RETURNED") {
-		t.Errorf("Run did not return on SIGTERM, so Shutdown would never drain:\n%s", out)
+	// Told apart from the SIGTERM question, so a busy port does not read as
+	// broken signal handling.
+	if strings.Contains(output, "http.ListenAndServe") {
+		t.Fatalf("the child could not listen, so this test proved nothing:\n%s", output)
 	}
+	if !strings.Contains(output, "RUN RETURNED") {
+		t.Errorf("Run did not return on SIGTERM (child: %v), so Shutdown would never drain:\n%s",
+			err, output)
+	}
+}
+
+// freePort asks the kernel for a port and hands it back. Racy in principle,
+// unlike a hard-coded port which fails whenever CI happens to hold it.
+func freePort(t *testing.T) string {
+	t.Helper()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, port, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return port
 }

@@ -12,8 +12,11 @@ import (
 func withKeycloakConfig(t *testing.T, url, realm, id, secret string) {
 	t.Helper()
 
-	saved := common.Config
-	t.Cleanup(func() { common.Config = saved })
+	// The value, not the pointer: common.Config is *envConfig, so saving the
+	// pointer restores nothing and the last case here would leak into every
+	// test that runs after it.
+	saved := *common.Config
+	t.Cleanup(func() { *common.Config = saved })
 
 	common.Config.KeycloakServerUrl = url
 	common.Config.KeycloakRealm = realm

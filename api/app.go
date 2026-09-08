@@ -47,14 +47,21 @@ func (a *App) Initialize() {
 	a.initHealth()
 }
 
+// initEventEmitter always builds one. It used to build one only when NatsUrl was
+// set, which left the field a nil interface — and nothing tolerates that: the
+// first emitEvent calls Emit on it and panics, and so does Shutdown. An empty
+// NATS_URL is the documented default in .env_example, so that was reachable by
+// following the instructions.
+//
+// events.CreateEmitter already degrades to logging-only without NATS, which is
+// what the condition was reaching for.
 func (a *App) initEventEmitter() {
-	if common.Config.NatsUrl != "" {
-		slog.Info("initializing events emitter")
-		var err error
-		a.eventEmitter, err = events.CreateEmitter()
-		if err != nil {
-			utils.LogFatal("events.CreateEmitter", slog.Any("err", err))
-		}
+	slog.Info("initializing events emitter")
+
+	var err error
+	a.eventEmitter, err = events.CreateEmitter()
+	if err != nil {
+		utils.FatalAfter(a.Shutdown, "events.CreateEmitter", slog.Any("err", err))
 	}
 }
 
@@ -65,12 +72,12 @@ func (a *App) initDB() {
 	var err error
 	a.repo, err = repo.NewOrdersDB(ctx, a.eventEmitter)
 	if err != nil {
-		utils.LogFatal("connect to db", slog.Any("err", err))
+		utils.FatalAfter(a.Shutdown, "connect to db", slog.Any("err", err))
 	}
 
 	err = repo.SyncDBStructInsertionAndMigrations()
 	if err != nil {
-		utils.LogFatal("db migrations", slog.Any("err", err))
+		utils.FatalAfter(a.Shutdown, "db migrations", slog.Any("err", err))
 	}
 
 	slog.Info("db connected and migrated")
@@ -83,14 +90,14 @@ func (a *App) initEventListener() {
 		var err error
 		a.eventListener, err = profiles.NewEventListener()
 		if err != nil {
-			utils.LogFatal("profiles.NewEventListener", slog.Any("err", err))
+			utils.FatalAfter(a.Shutdown, "profiles.NewEventListener", slog.Any("err", err))
 		}
 
 		a.domainEventsHandler = domain.NewEventsHandler(a.repo)
 		a.eventListener.RegisterHandler(a.domainEventsHandler.HandleProfilesEvent)
 
 		if err = a.eventListener.Run(); err != nil {
-			utils.LogFatal("eventListener.Run", slog.Any("err", err))
+			utils.FatalAfter(a.Shutdown, "eventListener.Run", slog.Any("err", err))
 		}
 	}
 }
@@ -112,7 +119,7 @@ func (a *App) initGinEngine() {
 	issuerUrl := fmt.Sprintf("%s/auth/realms/%s", common.Config.KeycloakServerUrl, common.Config.KeycloakRealm)
 	tokenVerifier, err := middleware.NewFailoverOIDCTokenVerifier(issuerUrl)
 	if err != nil {
-		utils.LogFatal("middleware.NewFailoverOIDCTokenVerifier", slog.Any("err", err))
+		utils.FatalAfter(a.Shutdown, "middleware.NewFailoverOIDCTokenVerifier", slog.Any("err", err))
 	}
 
 	// middleware
@@ -285,17 +292,28 @@ func (a *App) initHealth() {
 	})
 }
 
+// Run does not return: (*gin.Engine).Run never yields a nil error, so the server
+// always leaves through this fatal. `defer app.Shutdown()` in server.go
+// therefore never ran, and the long-lived process — the one that emits events
+// continuously — was the only one not draining anything on the way out.
 func (a *App) Run() {
 	if err := a.gEngine.Run(":" + common.Config.Port); err != nil {
-		utils.LogFatal("gin.Run", slog.Any("err", err))
+		utils.FatalAfter(a.Shutdown, "gin.Run", slog.Any("err", err))
 	}
 }
 
+// Shutdown is called from the fatal paths as well as from server.go's defer, so
+// it has to survive a partial Initialize: either field can still be nil when a
+// fatal happens on the way up.
 func (a *App) Shutdown() {
-	a.repo.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	a.eventEmitter.Close(ctx)
+	if a.repo != nil {
+		a.repo.Close()
+	}
+	if a.eventEmitter != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		a.eventEmitter.Close(ctx)
+	}
 	sentry.Flush(2 * time.Second)
 }
 

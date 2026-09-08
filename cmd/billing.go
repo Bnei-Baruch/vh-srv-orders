@@ -130,7 +130,7 @@ func runBillingStart(cmd *cobra.Command, args []string) {
 	ctx := context.WithValue(context.Background(), common.CtxEventBuilder, new(BillingWorkflowEventBuilder))
 	if err := billingService.RunBillingWorkflow(ctx, month, year, opts); err != nil {
 		sentry.CaptureException(err)
-		fatalAfter(cleanup, "Billing workflow failed", slog.Any("error", err))
+		utils.FatalAfter(cleanup, "Billing workflow failed", slog.Any("error", err))
 	}
 
 	slog.Info("Billing workflow completed successfully")
@@ -164,7 +164,7 @@ func runBillingRetryPricingErrors(cmd *cobra.Command, args []string) {
 	count, err := billingService.RetryPricingErrors(ctx, maxWorkers)
 	if err != nil {
 		sentry.CaptureException(err)
-		fatalAfter(cleanup, "Retry pricing errors failed", slog.Any("error", err))
+		utils.FatalAfter(cleanup, "Retry pricing errors failed", slog.Any("error", err))
 	}
 
 	slog.Info("Retry pricing errors completed successfully", slog.Int("orders_charged", count))
@@ -253,7 +253,7 @@ func runBillingCompareContributions(cmd *cobra.Command, args []string) {
 
 	orderIDs, err := ordersDB.GetOrderIDsToRenew(ctx)
 	if err != nil {
-		fatalAfter(cleanup, "GetOrderIDsToRenew", slog.Any("error", err))
+		utils.FatalAfter(cleanup, "GetOrderIDsToRenew", slog.Any("error", err))
 	}
 	if len(orderIDs) == 0 {
 		fmt.Println("No orders to renew")
@@ -288,7 +288,7 @@ func runBillingCompareContributions(cmd *cobra.Command, args []string) {
 	// 1. Batch fetch once, seed the pending map with one entry per email.
 	batchResult, err := client.GetLastContributionsBatch(ctx, emails)
 	if err != nil {
-		fatalAfter(cleanup, "GetLastContributionsBatch", slog.Any("error", err))
+		utils.FatalAfter(cleanup, "GetLastContributionsBatch", slog.Any("error", err))
 	}
 
 	var mu sync.Mutex
@@ -451,23 +451,6 @@ func initBillingInfra() (events.EventEmitter, *repo.OrdersDB, func(), error) {
 		eventEmitter.Close(ctx)
 	}
 	return eventEmitter, ordersDB, cleanup, nil
-}
-
-// fatalAfter logs why the process is dying, drains, then exits. utils.LogFatal
-// is os.Exit, which runs no deferred function, so `defer cleanup()` does not
-// survive a fatal and the drain has to be called on the way out.
-//
-// The message goes first because the drain can be slow or can hang: closing the
-// emitter against a broken NATS spends its 5s context and then reports the
-// failure through a synchronous Sentry transport, and pgxpool.Close waits for
-// every acquired connection to come back. Draining first buries the reason
-// under that, or loses it entirely.
-func fatalAfter(cleanup func(), msg string, args ...any) {
-	slog.Error(msg, args...)
-	if cleanup != nil {
-		cleanup()
-	}
-	os.Exit(1)
 }
 
 // buildChargeableBillingService wires a BillingService with charge executor and pricing resolver.

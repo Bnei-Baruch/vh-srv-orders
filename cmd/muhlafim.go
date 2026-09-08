@@ -57,12 +57,12 @@ func muhlafimFn(cmd *cobra.Command, args []string) {
 	// Parse date strings to time.Time
 	startDate, err := parsePelecardDate(startDateStr)
 	if err != nil {
-		fatalAfter(cleanup, "Failed to parse start-date", slog.String("date", startDateStr), slog.Any("error", err))
+		utils.FatalAfter(cleanup, "Failed to parse start-date", slog.String("date", startDateStr), slog.Any("error", err))
 	}
 
 	endDate, err := parsePelecardDate(endDateStr)
 	if err != nil {
-		fatalAfter(cleanup, "Failed to parse end-date", slog.String("date", endDateStr), slog.Any("error", err))
+		utils.FatalAfter(cleanup, "Failed to parse end-date", slog.String("date", endDateStr), slog.Any("error", err))
 	}
 
 	// Initialize Pelecard client
@@ -71,7 +71,7 @@ func muhlafimFn(cmd *cobra.Command, args []string) {
 	// Process muhlafim using domain logic
 	result, err := billing.ProcessMuhlafim(ctx, ordersDB, pelecardClient, startDate, endDate, true, false)
 	if err != nil {
-		fatalAfter(cleanup, "Failed to process muhlafim", slog.Any("error", err))
+		utils.FatalAfter(cleanup, "Failed to process muhlafim", slog.Any("error", err))
 	}
 
 	utils.LogFor(ctx).Info("Processing complete",

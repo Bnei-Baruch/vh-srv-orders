@@ -83,10 +83,15 @@ func (im *BaseImporter) Init() error {
 		return fmt.Errorf("events.CreateEmitter: %w", err)
 	}
 
-	im.repo, err = repo.NewOrdersDB(context.Background(), im.eventEmitter)
+	// Through a local, never straight into the interface field: NewOrdersDB
+	// returns a concrete *repo.OrdersDB, and on failure that nil pointer boxes
+	// into a non-nil interface. Close's guard would pass and its call would
+	// panic on the nil receiver.
+	ordersDB, err := repo.NewOrdersDB(context.Background(), im.eventEmitter)
 	if err != nil {
 		return fmt.Errorf("repo.NewOrdersDB: %w", err)
 	}
+	im.repo = ordersDB
 
 	im.profileService = profiles.NewProfileServiceAPI(keycloak.NewClient())
 

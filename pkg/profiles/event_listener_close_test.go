@@ -1,7 +1,10 @@
 package profiles
 
 import (
+	"bytes"
 	"context"
+	"os"
+	"regexp"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -13,12 +16,19 @@ import (
 // stubMsg is a delivered message that records its own acknowledgement. Only the
 // three methods this package touches do anything.
 type stubMsg struct {
-	data string
-	acks atomic.Int64
+	data      string
+	acks      atomic.Int64
+	ackPanics bool
 }
 
-func (m *stubMsg) Data() []byte                              { return []byte(m.data) }
-func (m *stubMsg) Ack() error                                { m.acks.Add(1); return nil }
+func (m *stubMsg) Data() []byte { return []byte(m.data) }
+func (m *stubMsg) Ack() error {
+	m.acks.Add(1)
+	if m.ackPanics {
+		panic("ack exploded")
+	}
+	return nil
+}
 func (m *stubMsg) Nak() error                                { return nil }
 func (m *stubMsg) NakWithDelay(time.Duration) error          { return nil }
 func (m *stubMsg) DoubleAck(context.Context) error           { return nil }
@@ -98,12 +108,22 @@ func TestCloseGivesUpOnAStuckRunner(t *testing.T) {
 	time.Sleep(30 * time.Millisecond) // let the handler block
 
 	start := time.Now()
-	listener.Close()
-	waited := time.Since(start)
+	closed := make(chan struct{})
+	go func() {
+		defer close(closed)
+		listener.Close()
+	}()
 
-	if waited > DrainGrace+2*time.Second {
-		t.Fatalf("Close waited %v on a stuck handler", waited)
+	// Bounded here too, so a regression reports itself instead of hanging until
+	// the package times out and prints a goroutine dump.
+	select {
+	case <-closed:
+	case <-time.After(DrainGrace + 5*time.Second):
+		t.Fatalf("Close did not return within %v of its own grace: the wait is unbounded",
+			5*time.Second)
 	}
+
+	waited := time.Since(start)
 	if waited < DrainGrace {
 		t.Fatalf("Close returned after %v, before its own grace — the wait is not happening", waited)
 	}
@@ -221,5 +241,51 @@ func TestConsumerBoundsItsRedelivery(t *testing.T) {
 	if config.MaxDeliver != 0 {
 		t.Errorf("MaxDeliver is %d, which drops the message on that delivery — there is no dead "+
 			"letter to catch it", config.MaxDeliver)
+	}
+}
+
+// The prefetch has to be bounded to the queue. Consume's default is 500
+// messages, every one of which starts its AckWait on delivery while the runner
+// works through them queueCapacity at a time — which is what turned a backlog
+// into redelivery once the ack moved after the handlers.
+//
+// A source check because a PullConsumeOpt is a function this package cannot
+// inspect from outside jetstream.
+func TestTheConsumeCallBoundsItsPrefetch(t *testing.T) {
+	source, err := os.ReadFile("event_listener.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	consume := regexp.MustCompile(`(?s)el\.consumer\.Consume\((.*?)\)\n`).FindSubmatch(source)
+	if consume == nil {
+		t.Fatal("the Consume call was not found in event_listener.go")
+	}
+
+	if !bytes.Contains(consume[1], []byte("jetstream.PullMaxMessages(queueCapacity)")) {
+		t.Error("Consume must bound its prefetch with jetstream.PullMaxMessages(queueCapacity): " +
+			"the default is 500 messages, all of them counting against AckWait while they wait " +
+			"for a runner that handles them one at a time")
+	}
+}
+
+// The runner has to survive a panic anywhere it goes, not only inside a handler.
+// deliver's deferred ack and drainQueue both run outside callHandler, and a
+// panic there leaves the goroutine and takes the process down — skipping the
+// drain this branch exists to perform. The self-restart removed earlier was
+// catching these by accident.
+func TestARunnerPanicOutsideAHandlerDoesNotKillTheProcess(t *testing.T) {
+	listener := newListener()
+
+	var handled atomic.Int64
+	listener.RegisterHandler(func(Event) { handled.Add(1) })
+
+	go listener.runQueue()
+	listener.queue <- queued{event: Event{}, msg: &stubMsg{ackPanics: true}}
+	listener.queue <- queued{event: Event{}, msg: &stubMsg{}}
+	listener.Close()
+
+	if handled.Load() != 2 {
+		t.Errorf("handled %d events, want 2 — the panic in the ack stopped the runner", handled.Load())
 	}
 }

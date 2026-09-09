@@ -2,9 +2,11 @@ package utils
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
 
 func HTTPCallAndGetBody(fullUrl string, authHeader string, bodyBuffer *bytes.Buffer, typeOfReq string) ([]byte, int) {
@@ -49,11 +51,25 @@ func HTTPCallAndGetBody(fullUrl string, authHeader string, bodyBuffer *bytes.Buf
 	return body, resp.StatusCode
 }
 
-func PostJSON(method string, url string, payload []byte) (*http.Response, error) {
-	req, err := http.NewRequest(method, url, bytes.NewReader(payload))
+// PostJSON posts payload and returns the response.
+//
+// The context is not decoration: a request whose connection is dropped during
+// shutdown has its context cancelled, and without carrying that through, the
+// outbound call kept running — so the charge to checkout outlived the request
+// that started it and the grace it was given. The timeout is the same argument
+// for the case where nobody cancels anything.
+func PostJSON(ctx context.Context, method string, url string, payload []byte) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(payload))
 	if err != nil {
-		return nil, fmt.Errorf("http.NewRequest: %w", err)
+		return nil, fmt.Errorf("http.NewRequestWithContext: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	return new(http.Client).Do((req))
+
+	client := &http.Client{Timeout: outboundTimeout}
+	return client.Do(req)
 }
+
+// outboundTimeout bounds one outbound call. Longer than any shutdown grace on
+// purpose: cancellation is what shortens these during a shutdown, and this is
+// only the backstop for a peer that accepts a connection and never answers.
+const outboundTimeout = 30 * time.Second

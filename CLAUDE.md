@@ -310,7 +310,10 @@ Uses [go-task](https://taskfile.dev) (`Taskfile.yml`). Run `task --list` to see 
 Things `task --list` won't tell you:
 - `task dev` uses the shared dev DB; `task dev:standalone` starts its own docker infra.
 - `task test` accepts `RACE=true` and `COVERAGE=true`.
-- `mockery` is **not** a task — run it directly to regenerate mocks.
+- `task mocks` regenerates the mocks, at a pinned mockery version. Run that
+  rather than a bare `mockery`: the version decides the output, and one from
+  before v3.8.0 fails against this toolchain while exiting as if there were
+  nothing to do.
 - Production entrypoint is `./orders server` (port 8185).
 - Build injects the git SHA: `-ldflags "-X gitlab.bbdev.team/vh/pay/orders/common.GitSHA=${GIT_SHA}"`
 

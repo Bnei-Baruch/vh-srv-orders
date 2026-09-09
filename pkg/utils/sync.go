@@ -30,41 +30,6 @@ func (c *CounterMap[T]) Get(key string) T {
 	return c.m[key]
 }
 
-// SyncMap is a generic thread-safe map.
-type SyncMap[K comparable, V any] struct {
-	mu sync.RWMutex
-	m  map[K]V
-}
-
-func NewSyncMap[K comparable, V any]() *SyncMap[K, V] {
-	return &SyncMap[K, V]{m: make(map[K]V)}
-}
-
-func (s *SyncMap[K, V]) Get(key K) (V, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	v, ok := s.m[key]
-	return v, ok
-}
-
-func (s *SyncMap[K, V]) Put(key K, value V) {
-	s.mu.Lock()
-	s.m[key] = value
-	s.mu.Unlock()
-}
-
-func (s *SyncMap[K, V]) Len() int {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return len(s.m)
-}
-
-func (s *SyncMap[K, V]) Clear() {
-	s.mu.Lock()
-	s.m = make(map[K]V)
-	s.mu.Unlock()
-}
-
 // TTLCache is a generic thread-safe cache with per-entry expiration.
 // Expired entries are lazily evicted on access.
 type TTLCache[K comparable, V any] struct {

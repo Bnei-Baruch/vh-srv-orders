@@ -1,8 +1,6 @@
 package utils
 
 import (
-	"time"
-
 	uuid "github.com/satori/go.uuid"
 )
 
@@ -16,10 +14,6 @@ func PointerInt(i int) *int {
 
 func PointerBool(b bool) *bool {
 	return &b
-}
-
-func PointerTime(t time.Time) *time.Time {
-	return &t
 }
 
 func PointerUUID(id uuid.UUID) *uuid.UUID {

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/getsentry/sentry-go"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
@@ -43,14 +44,22 @@ type NatsEventHandler struct {
 	ncClosed chan struct{}
 }
 
-// DrainTimeout bounds the library's own drain.
+// DrainTimeout bounds the subscription phase of the library's drain, and
+// CloseBudget is what a caller has to allow for the whole of it.
 //
-// Exported because it only works if the caller's grace is larger: api sizes
-// emitterDrainGrace from this. At 5s against that grace's 4s it did exactly
-// what its comment claimed to prevent — and worse than a missed drain, because
-// SimpleEmitter.Close reports the context error to Sentry, so every slow-NATS
-// shutdown produced a spurious failure alongside the lost publishes.
-const DrainTimeout = 3 * time.Second
+// They are two numbers because nats.go's drainConnection bounds the
+// subscriptions with DrainTimeout and then runs an unconditional
+// nc.FlushTimeout(5s) before closing, and it is the close that fires the
+// handler Close waits on. Allowing only DrainTimeout — which is what the
+// caller's grace did for two rounds — leaves the flush outside the budget, so
+// the drain is abandoned and SimpleEmitter.Close reports the context error as a
+// failure that did not happen.
+const (
+	DrainTimeout     = 3 * time.Second
+	natsFlushTimeout = 5 * time.Second
+
+	CloseBudget = DrainTimeout + natsFlushTimeout + time.Second
+)
 
 func NewNatsEventHandler() (*NatsEventHandler, error) {
 	eh := new(NatsEventHandler)
@@ -61,6 +70,19 @@ func NewNatsEventHandler() (*NatsEventHandler, error) {
 	var err error
 	eh.nc, err = nats.Connect(common.Config.NatsUrl,
 		nats.ClosedHandler(eh.closedCallback),
+		// Without this, an abandoned drain is silent: drainConnection reports
+		// a flush or subscription failure through the async error callback and
+		// then closes the connection anyway, so Close returns nil whether the
+		// drain finished or gave up — and cutting DrainTimeout from the 30s
+		// default made giving up much likelier.
+		nats.ErrorHandler(func(_ *nats.Conn, sub *nats.Subscription, natsErr error) {
+			subject := ""
+			if sub != nil {
+				subject = sub.Subject
+			}
+			slog.Error("nats async error", slog.String("subject", subject), slog.Any("err", natsErr))
+			sentry.CaptureException(natsErr)
+		}),
 		// Or the library spends its 30s default while Close waits the seconds
 		// its caller budgeted, and the drain is abandoned rather than finished
 		// — with the context error reported as a failure on the way out.

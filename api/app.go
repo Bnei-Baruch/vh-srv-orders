@@ -63,7 +63,7 @@ func (a *App) Initialize(ctx context.Context, stop func()) error {
 	}{
 		{"sentry", a.initSentry},
 		{"events emitter", a.initEventEmitter},
-		{"database", a.initDB},
+		{"database", func() { a.initDB(ctx) }},
 		{"events listener", a.initEventListener},
 		{"api", func() { a.ordersAPI = NewOrdersAPI(a.repo) }},
 		{"gin engine", a.initGinEngine},
@@ -98,8 +98,12 @@ func (a *App) initEventEmitter() {
 	}
 }
 
-func (a *App) initDB() {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+// initDB takes the startup context so a signal reaches the connect and the
+// migrations, rather than only the gap before them. Checking between steps left
+// the two slowest — this and the JWKS fetch — uninterruptible, which is where a
+// cancelled rollout actually lands.
+func (a *App) initDB(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	// Through a local: NewOrdersDB returns a concrete *repo.OrdersDB, and on
@@ -482,62 +486,68 @@ func (a *App) Shutdown() {
 }
 
 func (a *App) shutdown() {
-	// Bounded as a whole, not step by step. Every step here can block for as
-	// long as something else holds it: pgxpool.Close waits for every acquired
-	// connection to come back, so a handler parked on a row lock stops the
-	// emitter from ever being drained — and on a fatal path, stops os.Exit from
-	// being reached at all. Bounding only the listener's wait, as the previous
-	// version did, moved the hang one line down.
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-
-		// The listener first: its runner writes through the repo, so closing
-		// the pool underneath it turns in-flight profile events into
-		// `closed pool` errors, reported to Sentry and never acked.
-		if a.eventListener != nil {
-			a.eventListener.Close()
-		}
-		if a.repo != nil {
-			a.repo.Close()
-		}
-		if a.eventEmitter != nil {
+	// Each step bounded on its own, not the sequence. Bounding the sequence
+	// meant one stuck step spent another's grace: pgxpool.Close waits for every
+	// acquired connection and takes no context, so a handler parked on a row
+	// lock left the emitter — the only step with data in it — with whatever was
+	// left of a shared budget, which could be nothing.
+	//
+	// The listener goes first: its runner writes through the repo, so closing
+	// the pool underneath it turns in-flight profile events into `closed pool`
+	// errors, reported to Sentry and never acked.
+	if a.eventListener != nil {
+		runBounded("event listener", profiles.CloseGrace, a.eventListener.Close)
+	}
+	if a.repo != nil {
+		runBounded("repo", poolCloseGrace, a.repo.Close)
+	}
+	if a.eventEmitter != nil {
+		runBounded("event emitter", emitterDrainGrace, func() {
 			ctx, cancel := context.WithTimeout(context.Background(), emitterDrainGrace)
 			defer cancel()
 			a.eventEmitter.Close(ctx)
-		}
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(shutdownBudget):
-		slog.Error("App.Shutdown did not finish in time, exiting anyway",
-			slog.Duration("budget", shutdownBudget))
-		sentry.CaptureMessage("App.Shutdown timed out")
+		})
 	}
 
 	sentry.Flush(sentryFlushGrace)
 }
 
-// The shutdown budget and the grants inside it.
+// runBounded gives step its own grace and reports an overshoot. Returning
+// matters more than finishing: what follows is another step that also has data
+// to flush, or the exit.
+func runBounded(what string, grace time.Duration, step func()) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		step()
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(grace):
+		slog.Error("App.Shutdown step did not finish, continuing",
+			slog.String("step", what), slog.Duration("grace", grace))
+		sentry.CaptureMessage("App.Shutdown step timed out: " + what)
+	}
+}
+
+// The grants each shutdown step gets, and the budget they add up to.
 //
-// Derived from what each step is allowed, because picking it by hand went wrong
-// twice: first at 10s against 5s for the listener and 5s for the emitter, which
-// left the pool close between them with nothing; then again when the listener
-// grew a second wait and kept spending a per-wait grant the budget funded once.
-// profiles.CloseGrace is now the whole of Close, however many waits it makes. Any time pgxpool.Close spent came out of the
-// emitter drain — the one step with data in it — and the budget expired before
-// it started.
+// Every number here is derived from what a step is actually allowed to spend,
+// because picking them by hand went wrong three times: a budget equal to the
+// sum of two waits, leaving the pool close with nothing; a per-wait grant while
+// the listener spent several; and both NATS graces sized against a drain
+// timeout that turned out to exclude a hardcoded flush.
 //
-// poolCloseGrace is not enforceable: pgxpool.Close blocks until every acquired
-// connection is returned and takes no context. It is an allowance in the budget,
-// not a deadline on the call.
+// poolCloseGrace is not enforceable in the way the others are: pgxpool.Close
+// blocks until every acquired connection is returned and takes no context, so
+// it is what runBounded will wait before moving on, not a deadline the call
+// itself honours.
 const (
-	// Larger than the emitter's own drain timeout, so the library gives up
-	// inside this wait rather than the wait giving up on a drain still running:
-	// SimpleEmitter.Close reports the context error to Sentry, so losing that
-	// race costs a spurious failure as well as the publishes.
-	emitterDrainGrace = events.DrainTimeout + time.Second
+	// The emitter's whole close, not just its drain timeout: the library adds a
+	// hardcoded 5s flush after the subscription phase, and losing that race
+	// costs a spurious Sentry failure as well as the publishes.
+	emitterDrainGrace = events.CloseBudget
 	poolCloseGrace    = 3 * time.Second
 	sentryFlushGrace  = 2 * time.Second
 
@@ -558,7 +568,7 @@ const (
 //
 // TestTheExitFitsTheDeclaredStopGracePeriod reads the Compose file, so the two
 // cannot drift apart silently.
-const stopGracePeriod = 35 * time.Second
+const stopGracePeriod = 45 * time.Second
 
 // Guarded at compile time as well: subtracting on unsigned constants makes an
 // edit that overruns a build failure.

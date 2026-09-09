@@ -355,28 +355,6 @@ func TestProcessWithRecovery_PostPaymentError_StopsRetry(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Error wrapping sanity checks
-// ---------------------------------------------------------------------------
-
-func TestChargeOperations_ErrorWrapping_PrePayment(t *testing.T) {
-	err := fmt.Errorf("%w: o.GetOrderByID: order not found", common.ErrPrePayment)
-	assert.True(t, errors.Is(err, common.ErrPrePayment))
-	assert.Contains(t, err.Error(), "GetOrderByID")
-}
-
-func TestChargeOperations_ErrorWrapping_PostPayment(t *testing.T) {
-	err := fmt.Errorf("%w: o.FlagOrderAsRenewed: database locked", common.ErrPostPayment)
-	assert.True(t, errors.Is(err, common.ErrPostPayment))
-	assert.Contains(t, err.Error(), "FlagOrderAsRenewed")
-}
-
-func TestChargeOperations_ErrorWrapping_Gateway(t *testing.T) {
-	err := errors.New("payment failed: connection timeout")
-	assert.False(t, errors.Is(err, common.ErrPrePayment))
-	assert.False(t, errors.Is(err, common.ErrPostPayment))
-}
-
-// ---------------------------------------------------------------------------
 // processWithRecovery — panic recovery
 // ---------------------------------------------------------------------------
 

@@ -17,6 +17,22 @@ silent: true
 
 tasks:
 
+  mocks:
+    desc: Regenerate the mocks in internal/mocks
+    cmds:
+      # Both pins matter, and the second is not optional: mockery v3.8.0's own
+      # go.mod requires go >= 1.25.5, while this module declares 1.21 and every
+      # pipeline pins 1.21. On the declared toolchain it refuses to build —
+      # `requires go >= 1.25.5 (running go 1.21.13)` — and v3.7.0 wants 1.25.0,
+      # so no v3 mockery runs on 1.21 at all. Without GOTOOLCHAIN named here it
+      # works only because the default `auto` quietly fetches a newer Go, which
+      # is a different compiler per machine and therefore a different diff.
+      #
+      # Nothing in CI runs this; the generated files are committed. So the pins
+      # are about two developers getting the same output, not about the
+      # pipelines.
+      - GOTOOLCHAIN=go1.25.5 go run github.com/vektra/mockery/v3@v3.8.0
+
   dev:
     desc: Start development in shared mode (workspace)
     cmds:

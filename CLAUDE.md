@@ -33,7 +33,7 @@ Non-obvious placements: business logic orchestration lives in `domain/` (`billin
 - Prefer early returns to reduce nesting
 
 ### Interfaces
-- When adding a public method to `*OrdersDB`: add it to the `OrdersRepository` interface in `repo/orders_repository.go`, then run `mockery` to regenerate mocks
+- When adding a public method to `*OrdersDB`: add it to the `OrdersRepository` interface in `repo/orders_repository.go`, then run `task mocks` to regenerate mocks — not a bare `mockery`, which is a different generator version and possibly a different Go
 - Same applies to `PelecardAPI`, `ProfileService`, `TokenSource` — update interface + regenerate
 - Define interfaces in the same package as the implementation
 
@@ -276,7 +276,9 @@ CLI flags via Cobra for subcommand-specific options (`--month`, `--dry-run`, `--
 
 **Libraries:** `testify/assert`, `testify/require`, `testify/mock`
 
-**Mocks:** Auto-generated via mockery (`.mockery.yml`). Output in `internal/mocks/`. Regenerate with `mockery`.
+**Mocks:** Auto-generated via mockery (`.mockery.yml`). Output in `internal/mocks/`. Regenerate with `task mocks`, which pins both the generator version and the Go toolchain it runs on.
+
+The keycloak mock is emitted into its own package (`internal/mocks/pkg/keycloak`), because its consumers are keycloak's own dependents — `pkg/accounting` and `pkg/profiles` — and those are internal tests, so importing the combined mocks package from them is an import cycle.
 
 ```go
 mockRepo := mocks.NewMockOrdersRepository(t)
@@ -310,7 +312,13 @@ Uses [go-task](https://taskfile.dev) (`Taskfile.yml`). Run `task --list` to see 
 Things `task --list` won't tell you:
 - `task dev` uses the shared dev DB; `task dev:standalone` starts its own docker infra.
 - `task test` accepts `RACE=true` and `COVERAGE=true`.
-- `mockery` is **not** a task — run it directly to regenerate mocks.
+- `task mocks` regenerates the mocks, at a pinned mockery version. Run that
+  rather than a bare `mockery`: the version decides the output, so an unpinned
+  one rewrites every generated file with its own template and buries whatever
+  the interface change was. The task pins the Go toolchain too, because mockery
+  v3 requires a newer one than this module declares — on 1.21 it refuses to
+  build at all, and the default `GOTOOLCHAIN=auto` otherwise picks whatever
+  each machine happens to fetch.
 - Production entrypoint is `./orders server` (port 8185).
 - Build injects the git SHA: `-ldflags "-X gitlab.bbdev.team/vh/pay/orders/common.GitSHA=${GIT_SHA}"`
 

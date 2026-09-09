@@ -18,6 +18,7 @@ import (
 type stubMsg struct {
 	data      string
 	acks      atomic.Int64
+	naks      atomic.Int64
 	ackPanics bool
 }
 
@@ -29,7 +30,7 @@ func (m *stubMsg) Ack() error {
 	}
 	return nil
 }
-func (m *stubMsg) Nak() error                                { return nil }
+func (m *stubMsg) Nak() error                                { m.naks.Add(1); return nil }
 func (m *stubMsg) NakWithDelay(time.Duration) error          { return nil }
 func (m *stubMsg) DoubleAck(context.Context) error           { return nil }
 func (m *stubMsg) InProgress() error                         { return nil }
@@ -287,5 +288,24 @@ func TestARunnerPanicOutsideAHandlerDoesNotKillTheProcess(t *testing.T) {
 
 	if handled.Load() != 2 {
 		t.Errorf("handled %d events, want 2 — the panic in the ack stopped the runner", handled.Load())
+	}
+}
+
+// An event dropped because shutdown began is naked, not just left silent.
+// Unacknowledged it would come back anyway, but only after AckWait — two
+// minutes, chosen so a handler still working is not redelivered underneath
+// itself. Nothing is working on a dropped event.
+func TestADroppedEventIsNakedForPromptRedelivery(t *testing.T) {
+	listener := newListener()
+	listener.quitOnce.Do(func() { close(listener.quit) })
+
+	msg := &stubMsg{data: `{"type":"update_profile"}`}
+	listener.handleMessage(msg)
+
+	if msg.naks.Load() != 1 {
+		t.Errorf("naked %d times, want once — it waits out AckWait instead", msg.naks.Load())
+	}
+	if msg.acks.Load() != 0 {
+		t.Errorf("acked %d times: nothing handled it", msg.acks.Load())
 	}
 }

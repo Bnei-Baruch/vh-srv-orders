@@ -6,10 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
-	"os/signal"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/getsentry/sentry-go"
@@ -303,21 +300,23 @@ func (a *App) initHealth() {
 	})
 }
 
-// Run serves until the process is asked to stop, then returns so its caller's
-// deferred Shutdown can drain.
+// Run serves until ctx is done, then returns so its caller's deferred Shutdown
+// can drain.
 //
-// It used to call (*gin.Engine).Run, which returns only on a listen error — so
-// the only exit it covered was a failure to bind. The real exit for a
-// long-lived server is SIGTERM from the orchestrator, and with no handler for
-// it the runtime killed the process outright: Shutdown never ran, and the
-// service emitting events continuously was the one draining nothing.
+// The signal is not registered here. It used to be, which left everything
+// before Run — migrations, the JWKS fetch — running under the default
+// disposition: a SIGTERM during startup killed the process outright, with NATS
+// already connected and nothing drained. serverFn registers it before
+// Initialize and hands the context down, so a signal arriving during startup
+// means Run returns at once and the drain still happens.
 //
-// In-flight requests get shutdownGrace to finish. A second signal is not
-// caught, so an impatient operator still gets an immediate exit.
-func (a *App) Run() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
+// It used to call (*gin.Engine).Run, which returns only on a listen error, so
+// the only exit it covered was a failure to bind.
+//
+// In-flight requests get shutdownGrace to finish; past that their connections
+// are closed. A second signal is not caught, so an impatient operator still
+// gets an immediate exit.
+func (a *App) Run(ctx context.Context) {
 	server := &http.Server{
 		Addr:    ":" + common.Config.Port,
 		Handler: a.gEngine,
@@ -340,7 +339,6 @@ func (a *App) Run() {
 	case err := <-listenErr:
 		utils.FatalAfter(a.Shutdown, "http.ListenAndServe", slog.Any("err", err))
 	case <-ctx.Done():
-		stop()
 		slog.Info("signal received, shutting down")
 		a.stopServer(server, shutdownGrace)
 	}

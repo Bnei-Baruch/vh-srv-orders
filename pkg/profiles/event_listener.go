@@ -321,11 +321,34 @@ func (el *EventListener) handleMessage(msg jetstream.Msg) {
 		return
 	}
 
-	// Dropped events are left unacknowledged, so they come back on the next
-	// start. The select is also what makes closing the queue unnecessary.
+	// Quit checked on its own first. Both cases are otherwise ready at once
+	// while there is queue space, and select picks at random — so a shutdown
+	// already under way could still take on another event, which is the window
+	// that lets a send land after the runner has stopped.
+	select {
+	case <-el.quit:
+		el.drop(msg)
+		return
+	default:
+	}
+
 	select {
 	case el.queue <- queued{event: event, msg: msg}:
 	case <-el.quit:
-		slog.Debug("EventListener.handleMessage dropped during shutdown")
+		el.drop(msg)
+	}
+}
+
+// drop hands an event back rather than holding it through a shutdown.
+//
+// Naked, not left silent: unacknowledged it would return anyway, but only after
+// AckWait, and AckWait is two minutes because a handler that is still working
+// must not be redelivered underneath itself. Nothing is working on this one, so
+// it should come back on the next start instead of two minutes into it.
+func (el *EventListener) drop(msg jetstream.Msg) {
+	slog.Debug("EventListener dropped an event during shutdown")
+
+	if err := msg.Nak(); err != nil {
+		slog.Error("EventListener nak", slog.Any("err", err))
 	}
 }

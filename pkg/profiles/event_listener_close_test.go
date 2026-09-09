@@ -3,6 +3,7 @@ package profiles
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"regexp"
 	"sync/atomic"
@@ -49,6 +50,7 @@ func newListener() *EventListener {
 		queue:         make(chan queued, queueCapacity),
 		quit:          make(chan struct{}),
 		done:          make(chan struct{}),
+		ncClosed:      make(chan struct{}),
 		runnerStarted: true,
 	}
 }
@@ -332,38 +334,108 @@ func TestAckWaitCoversTheWholeQueue(t *testing.T) {
 	}
 }
 
-// Close waits for the connection drain, which is the only signal that the
-// delivery callbacks are done.
+// stubConn records what Close does with the connection, and lets the test
+// decide when the drain reports itself finished.
+type stubConn struct {
+	drains   atomic.Int64
+	closes   atomic.Int64
+	drained  chan struct{}
+	drainErr error
+}
+
+func (c *stubConn) Drain() error {
+	c.drains.Add(1)
+	if c.drained != nil {
+		close(c.drained)
+	}
+	return c.drainErr
+}
+
+func (c *stubConn) Close() { c.closes.Add(1) }
+
+// Close drains the connection and waits for it, rather than closing it outright.
 //
-// Both Drain calls return immediately — the consumer's is a flag and a closed
-// channel — so an earlier version counted callbacks in flight at this point,
-// counted zero, and closed the connection while the drained messages were still
-// on their way to the callback. Those events then waited out ackWait, which is
-// the outcome draining was meant to avoid.
-func TestCloseWaitsForTheConnectionDrain(t *testing.T) {
+// Both Drain calls in Close return immediately — the consumer's is a flag and a
+// closed channel — so nothing about the callbacks can be observed at that
+// point. The connection drain is what unsubscribes, waits for the handlers,
+// flushes what they published and then closes, which the ClosedHandler reports.
+// Closing instead cuts that short and the drained events wait out ackWait.
+func TestCloseDrainsTheConnectionAndWaitsForIt(t *testing.T) {
 	listener := newListener()
 	listener.runnerStarted = false
-	listener.ncClosed = make(chan struct{})
+	conn := &stubConn{drained: make(chan struct{})}
+	listener.nc = conn
 
-	// No connection, so drive the wait the way Close does once nc.Drain has
-	// been asked for: it returns only when the drain reports itself closed.
 	returned := make(chan struct{})
 	go func() {
 		defer close(returned)
-		listener.waitUntil("connection drain", listener.ncClosed, time.Now().Add(CloseGrace))
+		listener.Close()
 	}()
 
+	// It has to ask for the drain...
+	select {
+	case <-conn.drained:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close never asked the connection to drain")
+	}
+
+	// ...and then wait for it to report itself finished.
 	select {
 	case <-returned:
-		t.Fatal("the wait returned before the drain reported closed")
+		t.Fatal("Close returned without waiting for the drain to finish")
 	case <-time.After(200 * time.Millisecond):
 	}
 
 	listener.connectionClosed(nil)
 	select {
 	case <-returned:
-	case <-time.After(2 * time.Second):
-		t.Fatal("the wait did not return once the drain reported closed")
+	case <-time.After(CloseGrace + 2*time.Second):
+		t.Fatal("Close did not return once the drain reported closed")
+	}
+
+	if conn.closes.Load() != 0 {
+		t.Errorf("the connection was closed outright %d times, which skips the drain",
+			conn.closes.Load())
+	}
+}
+
+// A drain that cannot be started is not a reason to leave the connection open.
+func TestCloseFallsBackToClosingWhenTheDrainFails(t *testing.T) {
+	listener := newListener()
+	listener.runnerStarted = false
+	conn := &stubConn{drainErr: errors.New("connection closed")}
+	listener.nc = conn
+
+	listener.Close()
+
+	if conn.closes.Load() != 1 {
+		t.Errorf("closed %d times after a failed drain, want once", conn.closes.Load())
+	}
+}
+
+// Close is bounded as a whole, not per wait. CloseGrace is what the caller
+// budgets for, and Close makes several waits inside it — a runner that never
+// stops and a drain that never reports must together cost CloseGrace, not a
+// multiple of it.
+func TestCloseIsBoundedAsAWhole(t *testing.T) {
+	listener := newListener()
+	listener.RegisterHandler(func(Event) { time.Sleep(time.Hour) })
+	listener.nc = &stubConn{}
+
+	go listener.runQueue()
+	listener.queue <- queued{event: Event{}}
+	time.Sleep(50 * time.Millisecond) // let the handler start
+
+	start := time.Now()
+	listener.Close()
+	waited := time.Since(start)
+
+	if waited > CloseGrace+2*time.Second {
+		t.Fatalf("Close took %v against a %v grace: its waits are being spent one after another",
+			waited, CloseGrace)
+	}
+	if waited < CloseGrace/2 {
+		t.Fatalf("Close returned after %v, so nothing was waited on", waited)
 	}
 }
 

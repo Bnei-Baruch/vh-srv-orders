@@ -41,8 +41,17 @@ type Event struct {
 
 type EventHandler func(Event)
 
+// natsConn is the part of *nats.Conn that Close uses. An interface so Close's
+// own behaviour is testable: what it does with the connection is the whole
+// subject of this file's shutdown path, and a source check could only assert
+// which method name appears in it.
+type natsConn interface {
+	Drain() error
+	Close()
+}
+
 type EventListener struct {
-	nc          *nats.Conn
+	nc          natsConn
 	js          jetstream.JetStream
 	consumer    jetstream.Consumer
 	consumerCtx jetstream.ConsumeContext
@@ -98,20 +107,20 @@ const queueCapacity = 8
 func NewEventListener() (*EventListener, error) {
 	el := new(EventListener)
 
-	var err error
 	el.ncClosed = make(chan struct{})
-	el.nc, err = nats.Connect(common.Config.NatsUrl,
+	conn, err := nats.Connect(common.Config.NatsUrl,
 		nats.ClosedHandler(el.connectionClosed),
 		// So the library gives up inside the same budget Close does.
 		nats.DrainTimeout(CloseGrace))
 	if err != nil {
 		return nil, fmt.Errorf("nats.Connect: %w", err)
 	}
+	el.nc = conn
 
 	// Every failure past this point closes the connection: returning (nil, err)
 	// leaves it open with no reference to it, and the caller has nothing to
 	// close.
-	el.js, err = jetstream.New(el.nc)
+	el.js, err = jetstream.New(conn)
 	if err != nil {
 		el.nc.Close()
 		return nil, fmt.Errorf("jetstream.New: %w", err)
@@ -323,9 +332,6 @@ func (el *EventListener) Close() {
 	}
 }
 
-// nakRemaining hands back anything still queued once the runner has stopped.
-// Without it those events are neither handled nor returned until ackWait
-// expires, which is minutes.
 // waitUntil waits on ch until deadline, reporting an overshoot rather than
 // hanging the shutdown it is part of.
 func (el *EventListener) waitUntil(what string, ch <-chan struct{}, deadline time.Time) {
@@ -352,6 +358,9 @@ func (el *EventListener) waitUntil(what string, ch <-chan struct{}, deadline tim
 // shutdown that never finishes.
 const CloseGrace = 6 * time.Second
 
+// nakRemaining hands back anything still queued once the runner has stopped.
+// Without it those events are neither handled nor returned until ackWait
+// expires, which is minutes.
 func (el *EventListener) nakRemaining() {
 	for {
 		select {
@@ -386,6 +395,10 @@ func (el *EventListener) handleMessage(msg jetstream.Msg) {
 		// here would come back every AckWait for ever, reporting to Sentry each
 		// time. Without the return a zero-value Event went to the handlers, hit
 		// the default branch of their type switch, and the corruption vanished.
+		// The error is logged for form: TermWithReason needs a server at
+		// 2.10.4 or above to honour the reason, and the client returns nil
+		// either way, so a server that ignores it is not detectable here.
+		// Every NATS declared in this repo is on 2.10.
 		if termErr := msg.TermWithReason("unparseable payload"); termErr != nil {
 			slog.Error("EventListener.handleMessage term", slog.Any("err", termErr))
 		}

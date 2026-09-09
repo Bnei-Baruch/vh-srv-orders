@@ -315,8 +315,9 @@ Things `task --list` won't tell you:
 - `task mocks` regenerates the mocks, at a pinned mockery version. Run that
   rather than a bare `mockery`: the version decides the output, so an unpinned
   one rewrites every generated file with its own template and buries whatever
-  the interface change was. Anything before v3.8.0 fails outright against this
-  toolchain.
+  the interface change was. v3.8.0 is also a floor: earlier versions failed
+  outright under a local Go 1.27.1, though not necessarily under the 1.21 the
+  pipelines pin.
 - Production entrypoint is `./orders server` (port 8185).
 - Build injects the git SHA: `-ldflags "-X gitlab.bbdev.team/vh/pay/orders/common.GitSHA=${GIT_SHA}"`
 

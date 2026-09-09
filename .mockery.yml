@@ -27,7 +27,12 @@ packages:
     config:
       dir: './internal/mocks/pkg/keycloak'
       pkgname: 'keycloak'
-      filename: 'token_source_mocks.go'
+      # Named after the package, not the interface: `all: true` means a second
+      # interface in pkg/keycloak would otherwise be written into a file named
+      # after the first one. The global template cannot be reused here — it
+      # expands to pkg/keycloak_mocks.go, which under the dir above nests into
+      # internal/mocks/pkg/keycloak/pkg/.
+      filename: 'keycloak_mocks.go'
   gitlab.bbdev.team/vh/pay/orders/pkg/profiles:
   gitlab.bbdev.team/vh/pay/orders/pkg/pelecard:
   gitlab.bbdev.team/vh/pay/orders/pkg/accounting:

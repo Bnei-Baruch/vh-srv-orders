@@ -24,9 +24,11 @@ tasks:
       # rewrites every generated file with whatever its template does now, and
       # the diff then hides whatever the interface change was.
       #
-      # Reach for v3.8.0 or later. v3.7.0 and earlier fail against this
-      # toolchain — `internal error: package "context" without types was
-      # imported`, an x/tools behind Go 1.27 — and write nothing.
+      # Reach for v3.8.0 or later. v3.7.0 and earlier failed here with
+      # `internal error: package "context" without types was imported` and
+      # wrote nothing — observed under a local Go 1.27.1, not under the 1.21
+      # that go.mod declares and the pipelines pin, so treat it as a floor
+      # rather than a diagnosis.
       - go run github.com/vektra/mockery/v3@v3.8.0
 
   dev:

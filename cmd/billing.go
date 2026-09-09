@@ -111,6 +111,14 @@ func runBillingStart(cmd *cobra.Command, args []string) {
 		utils.LogFatal("Failed to parse flags", slog.Any("error", err))
 	}
 
+	// Before initBillingInfra, so this exit has nothing to drain. It used to
+	// happen inside buildChargeableBillingService, which runs after
+	// `defer cleanup()` and therefore left the pool and the NATS connection
+	// behind. cmd/server.go validates in this order too.
+	if err := pricing.ValidateConfig(); err != nil {
+		utils.LogFatal("pricing.ValidateConfig", slog.Any("err", err))
+	}
+
 	eventEmitter, ordersDB, cleanup, err := initBillingInfra()
 	if err != nil {
 		sentry.CaptureException(err)
@@ -122,7 +130,7 @@ func runBillingStart(cmd *cobra.Command, args []string) {
 	ctx := context.WithValue(context.Background(), common.CtxEventBuilder, new(BillingWorkflowEventBuilder))
 	if err := billingService.RunBillingWorkflow(ctx, month, year, opts); err != nil {
 		sentry.CaptureException(err)
-		utils.LogFatal("Billing workflow failed", slog.Any("error", err))
+		utils.FatalAfter(cleanup, "Billing workflow failed", slog.Any("error", err))
 	}
 
 	slog.Info("Billing workflow completed successfully")
@@ -139,6 +147,11 @@ func runBillingRetryPricingErrors(cmd *cobra.Command, args []string) {
 		utils.LogFatal("Failed to parse flags", slog.Any("error", err))
 	}
 
+	// See runBillingStart: validated before there is anything to drain.
+	if err := pricing.ValidateConfig(); err != nil {
+		utils.LogFatal("pricing.ValidateConfig", slog.Any("err", err))
+	}
+
 	eventEmitter, ordersDB, cleanup, err := initBillingInfra()
 	if err != nil {
 		sentry.CaptureException(err)
@@ -151,7 +164,7 @@ func runBillingRetryPricingErrors(cmd *cobra.Command, args []string) {
 	count, err := billingService.RetryPricingErrors(ctx, maxWorkers)
 	if err != nil {
 		sentry.CaptureException(err)
-		utils.LogFatal("Retry pricing errors failed", slog.Any("error", err))
+		utils.FatalAfter(cleanup, "Retry pricing errors failed", slog.Any("error", err))
 	}
 
 	slog.Info("Retry pricing errors completed successfully", slog.Int("orders_charged", count))
@@ -240,7 +253,7 @@ func runBillingCompareContributions(cmd *cobra.Command, args []string) {
 
 	orderIDs, err := ordersDB.GetOrderIDsToRenew(ctx)
 	if err != nil {
-		utils.LogFatal("GetOrderIDsToRenew", slog.Any("error", err))
+		utils.FatalAfter(cleanup, "GetOrderIDsToRenew", slog.Any("error", err))
 	}
 	if len(orderIDs) == 0 {
 		fmt.Println("No orders to renew")
@@ -275,7 +288,7 @@ func runBillingCompareContributions(cmd *cobra.Command, args []string) {
 	// 1. Batch fetch once, seed the pending map with one entry per email.
 	batchResult, err := client.GetLastContributionsBatch(ctx, emails)
 	if err != nil {
-		utils.LogFatal("GetLastContributionsBatch", slog.Any("error", err))
+		utils.FatalAfter(cleanup, "GetLastContributionsBatch", slog.Any("error", err))
 	}
 
 	var mu sync.Mutex
@@ -442,11 +455,10 @@ func initBillingInfra() (events.EventEmitter, *repo.OrdersDB, func(), error) {
 
 // buildChargeableBillingService wires a BillingService with charge executor and pricing resolver.
 // Used by commands that perform charging (start, retry-pricing-errors).
+// The pricing configuration is validated by the callers, before they wire any
+// infrastructure — a fatal in here happens after their `defer cleanup()` and
+// would skip the drain.
 func buildChargeableBillingService(ordersDB *repo.OrdersDB, eventEmitter events.EventEmitter, dryRun bool) *billing.BillingService {
-	if err := pricing.ValidateConfig(); err != nil {
-		utils.LogFatal("pricing.ValidateConfig", slog.Any("err", err))
-	}
-
 	pelecardClient := pelecard.NewClient()
 	var chargeExecutor pelecard.ChargeExecutor
 	if dryRun {

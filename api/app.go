@@ -334,16 +334,37 @@ func (a *App) Run() {
 	stop()
 	slog.Info("signal received, shutting down")
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+	a.stopServer(server, shutdownGrace)
+}
+
+// stopServer stops serving, waits grace for in-flight requests, and then takes
+// the connections out from under whatever is left.
+//
+// http.Server.Shutdown does not cancel handlers, it stops waiting for them, so
+// on its own it leaves them running into a pool that App.Shutdown is about to
+// close — the same failure the listener ordering exists to prevent, arriving
+// from the HTTP side. Close is the part that ends it: dropping a connection
+// cancels that request's context, so a handler that honours it unwinds, and the
+// pgx calls underneath it are cancelled with it.
+//
+// A request that ignores its context still runs, and will now fail against a
+// closed pool. That is deliberate: it has had its grace, and the alternative is
+// a shutdown that never finishes.
+func (a *App) stopServer(server *http.Server, grace time.Duration) {
+	ctx, cancel := context.WithTimeout(context.Background(), grace)
 	defer cancel()
-	if err := server.Shutdown(shutdownCtx); err != nil {
-		// Shutdown does not cancel handlers, it stops waiting for them. So
-		// anything still running past the grace will meet a closed pool and a
-		// drained emitter once Shutdown below runs — reported here because that
-		// is the only place it is visible.
-		slog.Error("http.Server.Shutdown: requests still in flight, their resources are about to close",
-			slog.Any("err", err), slog.Duration("grace", shutdownGrace))
-		sentry.CaptureException(err)
+
+	err := server.Shutdown(ctx)
+	if err == nil {
+		return
+	}
+
+	slog.Error("http.Server.Shutdown: requests still in flight after the grace, closing their connections",
+		slog.Any("err", err), slog.Duration("grace", grace))
+	sentry.CaptureException(err)
+
+	if err := server.Close(); err != nil {
+		slog.Error("http.Server.Close", slog.Any("err", err))
 	}
 }
 

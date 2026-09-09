@@ -111,6 +111,18 @@ func NewEventListener() (*EventListener, error) {
 	el.ncClosed = make(chan struct{})
 	conn, err := nats.Connect(common.Config.NatsUrl,
 		nats.ClosedHandler(el.connectionClosed),
+		// The same reporting the emitter has, and this is the more exposed of
+		// the two connections: a tighter drain timeout, and an abandoned drain
+		// here silently loses the Naks that drop and nakRemaining just
+		// published — the outcome those exist to prevent.
+		nats.ErrorHandler(func(_ *nats.Conn, sub *nats.Subscription, natsErr error) {
+			subject := ""
+			if sub != nil {
+				subject = sub.Subject
+			}
+			slog.Error("nats async error", slog.String("subject", subject), slog.Any("err", natsErr))
+			sentry.CaptureException(natsErr)
+		}),
 		// Strictly inside what Close has left, not equal to all of it: the
 		// connection drain is the last thing Close waits for, so by then the
 		// grace is partly spent. Handing the library the whole of CloseGrace —
@@ -322,8 +334,6 @@ func (el *EventListener) drainQueue() {
 // in handleMessage, is preempted, and lands its send after step 4. It is
 // unacknowledged, so it returns — after ackWait rather than at once.
 func (el *EventListener) Close() {
-	deadline := time.Now().Add(CloseGrace)
-
 	if el.quit != nil {
 		el.quitOnce.Do(func() { close(el.quit) })
 	}
@@ -334,7 +344,7 @@ func (el *EventListener) Close() {
 	// Only if the runner is up: Consume failing means nothing will ever close
 	// done, and waiting would hang the shutdown it was called to make orderly.
 	if el.runnerStarted && el.done != nil {
-		el.waitUntil("runner", el.done, deadline)
+		el.waitFor("runner", el.done, runnerShare)
 	}
 
 	el.nakRemaining()
@@ -345,24 +355,24 @@ func (el *EventListener) Close() {
 			el.nc.Close()
 			return
 		}
-		el.waitUntil("connection drain", el.ncClosed, deadline)
+		el.waitFor("connection drain", el.ncClosed, connDrainTimeout+natsFlushTimeout)
 	}
 }
 
-// waitUntil waits on ch until deadline, reporting an overshoot rather than
+// waitFor waits on ch for at most grace, reporting an overshoot rather than
 // hanging the shutdown it is part of.
-func (el *EventListener) waitUntil(what string, ch <-chan struct{}, deadline time.Time) {
-	remaining := time.Until(deadline)
-	if remaining <= 0 {
-		slog.Warn("EventListener.Close out of time, continuing", slog.String("before", what))
-		return
-	}
-
+//
+// Per wait, not against one deadline for the whole of Close. CloseGrace is the
+// sum of these, and a single deadline let the first wait spend the lot: one slow
+// handler took all ten seconds, the connection drain was then asked to wait a
+// negative remainder, and the Naks that nakRemaining had just published went
+// unflushed — the nine-minute redelivery the Nak path exists to avoid.
+func (el *EventListener) waitFor(what string, ch <-chan struct{}, grace time.Duration) {
 	select {
 	case <-ch:
-	case <-time.After(remaining):
+	case <-time.After(grace):
 		slog.Warn("EventListener.Close gave up waiting, continuing",
-			slog.String("on", what), slog.Duration("remaining", remaining))
+			slog.String("on", what), slog.Duration("grace", grace))
 	}
 }
 

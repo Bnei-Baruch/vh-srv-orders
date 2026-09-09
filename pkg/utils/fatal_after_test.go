@@ -109,9 +109,9 @@ func TestDrainGivesUpOnACleanupThatNeverReturns(t *testing.T) {
 	release := make(chan struct{})
 	defer close(release)
 
-	restore := cleanupBackstop
-	cleanupBackstop = 100 * time.Millisecond
-	defer func() { cleanupBackstop = restore }()
+	restore := CleanupBackstop
+	CleanupBackstop = 100 * time.Millisecond
+	defer func() { CleanupBackstop = restore }()
 
 	start := time.Now()
 	drain(func() { <-release })
@@ -126,25 +126,12 @@ func TestDrainGivesUpOnACleanupThatNeverReturns(t *testing.T) {
 	}
 }
 
-// And the backstop has to sit above the budget App.Shutdown gives itself, or a
-// drain that is bounded and progressing gets cut short by the generic bound.
-func TestTheCleanupBackstopDoesNotTruncateABoundedDrain(t *testing.T) {
-	// api.App's own ladder, which cannot be imported here without a cycle:
-	// profiles.CloseGrace 6s + pool 3s + emitter 4s, then sentry.Flush 2s.
-	const appShutdownWorstCase = 15 * time.Second
-
-	if cleanupBackstop <= appShutdownWorstCase {
-		t.Errorf("backstop %v does not exceed App.Shutdown's own %v, so it would cut a bounded "+
-			"drain short", cleanupBackstop, appShutdownWorstCase)
-	}
-}
-
 // And FatalAfter has to be the one applying that bound. Testing drain alone left
 // the wiring unpinned: handing it any other budget — or none — kept the package
 // green with the backstop still sitting in the file looking right.
 func TestFatalAfterAppliesTheCleanupBackstop(t *testing.T) {
 	if os.Getenv("FATAL_AFTER_BACKSTOP_CHILD") == "1" {
-		cleanupBackstop = 200 * time.Millisecond
+		CleanupBackstop = 200 * time.Millisecond
 		FatalAfter(func() { time.Sleep(time.Hour) }, "child exiting")
 		fmt.Fprintln(os.Stderr, "RETURNED INSTEAD OF EXITING")
 		return

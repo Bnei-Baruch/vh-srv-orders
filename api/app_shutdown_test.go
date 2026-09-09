@@ -23,6 +23,7 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/events"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
@@ -597,5 +598,58 @@ func TestServerFnDefersTheDrainAndDistinguishesACancelledStartup(t *testing.T) {
 	if !bytes.Contains(source, []byte("errors.Is(err, context.Canceled)")) {
 		t.Error("serverFn does not distinguish a cancelled startup from a failed one, so a " +
 			"signal during Initialize exits 1")
+	}
+}
+
+// A signal during the database connect is a stop, not a crash. Threading the
+// startup context into initDB without this made a SIGTERM mid-connect exit 1 —
+// past serverFn's own branch for it, because a.fatal exits rather than returning
+// up through Initialize.
+func TestACancelledConnectIsNotAFatal(t *testing.T) {
+	if os.Getenv("CANCELLED_CONNECT_CHILD") == "1" {
+		saved := *common.Config
+		defer func() { *common.Config = saved }()
+		// Nothing listening, so the connect would fail on its own merits too —
+		// what is under test is which of the two reasons wins.
+		common.Config.PgHost, common.Config.PgPort = "127.0.0.1", "1"
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		app := App{eventEmitter: &stubEmitter{}}
+		app.initDB(ctx)
+		fmt.Fprintln(os.Stderr, "RETURNED")
+		return
+	}
+
+	child := exec.Command(os.Args[0], "-test.run=TestACancelledConnectIsNotAFatal", "-test.timeout=60s")
+	child.Env = append(os.Environ(), "CANCELLED_CONNECT_CHILD=1")
+	out, err := child.CombinedOutput()
+	output := string(out)
+
+	if err != nil {
+		t.Errorf("a cancelled connect exited non-zero (%v), so a clean stop is recorded as a "+
+			"crashed startup:\n%s", err, output)
+	}
+	if !strings.Contains(output, "RETURNED") {
+		t.Errorf("initDB did not return on a cancelled context:\n%s", output)
+	}
+}
+
+// App.Shutdown's own ladder has to fit inside the backstop FatalAfter applies to
+// it, or a drain that is bounded and progressing gets cut short by the generic
+// bound.
+//
+// Compared against utils.CleanupBackstop rather than a copy of it: this
+// assertion used to live in pkg/utils with api's ladder hand-copied as 15s, and
+// the ladder had grown to 24s without the test noticing — it was passing on
+// slack it was not measuring.
+func TestTheShutdownLadderFitsTheFatalBackstop(t *testing.T) {
+	needed := shutdownBudget + sentryFlushGrace
+
+	if needed >= utils.CleanupBackstop {
+		t.Errorf("App.Shutdown needs %v (budget %v + flush %v) against FatalAfter's %v backstop, "+
+			"so a fatal would cut its own drain short", needed, shutdownBudget, sentryFlushGrace,
+			utils.CleanupBackstop)
 	}
 }

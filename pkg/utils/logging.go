@@ -41,7 +41,7 @@ func FatalAfter(cleanup func(), msg string, args ...any) {
 	os.Exit(1)
 }
 
-// cleanupBackstop bounds cleanup for the callers that do not bound themselves.
+// CleanupBackstop bounds cleanup for the callers that do not bound themselves.
 //
 // api.App.Shutdown budgets its own steps; the others hand this a closure that
 // reaches pgxpool.Close, which waits for every acquired connection to come back
@@ -50,17 +50,20 @@ func FatalAfter(cleanup func(), msg string, args ...any) {
 // function exists to guarantee, lost to the drain it added.
 //
 // Sits above App.Shutdown's own budget on purpose, so a drain that is bounded
-// and making progress is never cut short by this one.
-// A var, not a const, so a test can shorten it and observe that FatalAfter
-// actually applies it. As a parameter at the call site it was possible to pass
-// something else — or nothing — with the constant still sitting here looking
-// right.
-var cleanupBackstop = 30 * time.Second
+// and making progress is never cut short by this one. Exported so that ladder
+// can be checked against this number where it is defined rather than against a
+// copy: api's was hand-copied into a test here as 15s and had grown to 24s
+// without the test noticing.
+//
+// A var rather than a const so a test can shorten it and observe that
+// FatalAfter applies it — as a parameter at the call site it was possible to
+// pass something else entirely with this still sitting here looking right.
+var CleanupBackstop = 30 * time.Second
 
 // drain runs cleanup, recovered and bounded. Returning matters more than
 // finishing: the caller's next statement is the exit.
 func drain(cleanup func()) {
-	budget := cleanupBackstop
+	budget := CleanupBackstop
 
 	done := make(chan struct{})
 

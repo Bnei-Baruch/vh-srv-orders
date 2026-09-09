@@ -20,14 +20,13 @@ tasks:
   mocks:
     desc: Regenerate the mocks in internal/mocks
     cmds:
-      # Pinned, because the version decides the output: an unpinned mockery
+      # Pinned because the version decides the output: an unpinned mockery
       # rewrites every generated file with whatever its template does now, and
       # the diff then hides whatever the interface change was.
       #
-      # v3.7.0 and earlier fail against this toolchain with `internal error:
-      # package "context" without types was imported`, an x/tools behind Go
-      # 1.27 — and they exit non-zero having written nothing, which reads
-      # exactly like "no changes needed".
+      # Reach for v3.8.0 or later. v3.7.0 and earlier fail against this
+      # toolchain — `internal error: package "context" without types was
+      # imported`, an x/tools behind Go 1.27 — and write nothing.
       - go run github.com/vektra/mockery/v3@v3.8.0
 
   dev:

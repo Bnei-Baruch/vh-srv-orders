@@ -62,10 +62,16 @@ type EventListener struct {
 	runnerStarted bool
 }
 
-// ackWait is how long the server waits for an ack before redelivering. Generous
-// because the handlers have no deadline of their own, so a short wait
-// redelivers work that is still in progress.
-const ackWait = 2 * time.Minute
+// ackWait is how long the server waits for an ack before redelivering.
+//
+// Derived, because it does not bound one handler — it bounds a queue. The ack
+// happens after the handlers run, so a message prefetched into the last slot
+// waits for every message ahead of it: queueCapacity handlers, each of which
+// can spend requestTimeout on the profile service and again on a retry after a
+// 401. Two minutes covered one call and none of the queueing, so a slow profile
+// service redelivered events that were still sitting in the queue, and each
+// redelivery published its own derived account event.
+const ackWait = queueCapacity*2*requestTimeout + time.Minute
 
 // queued is a delivered message and its decoded event. The message travels with
 // the event so the ack happens after the handlers have run.

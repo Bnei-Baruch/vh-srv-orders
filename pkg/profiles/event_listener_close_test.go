@@ -101,10 +101,10 @@ func TestCloseGivesUpOnAStuckRunner(t *testing.T) {
 	listener.Close()
 	waited := time.Since(start)
 
-	if waited > drainGrace+2*time.Second {
+	if waited > DrainGrace+2*time.Second {
 		t.Fatalf("Close waited %v on a stuck handler", waited)
 	}
-	if waited < drainGrace {
+	if waited < DrainGrace {
 		t.Fatalf("Close returned after %v, before its own grace — the wait is not happening", waited)
 	}
 }
@@ -215,7 +215,11 @@ func TestConsumerBoundsItsRedelivery(t *testing.T) {
 	if config.AckWait < time.Minute {
 		t.Errorf("AckWait is %v, which a handler with no deadline of its own can exceed", config.AckWait)
 	}
-	if config.MaxDeliver <= 0 {
-		t.Error("MaxDeliver unset: a poison event is redelivered without limit")
+	// MaxDeliver is deliberately unset: capping deliveries without something
+	// consuming the MAX_DELIVERIES advisory discards the message instead of
+	// containing it, and a lost create_profile is worse than a visible retry.
+	if config.MaxDeliver != 0 {
+		t.Errorf("MaxDeliver is %d, which drops the message on that delivery — there is no dead "+
+			"letter to catch it", config.MaxDeliver)
 	}
 }

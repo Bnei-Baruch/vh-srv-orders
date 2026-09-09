@@ -1,7 +1,11 @@
 package cmd
 
 import (
+	"context"
 	"log/slog"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -25,8 +29,14 @@ func serverFn(cmd *cobra.Command, args []string) {
 		utils.LogFatal("pricing.ValidateConfig", slog.Any("err", err))
 	}
 
+	// Registered before anything is built, so a signal during Initialize —
+	// migrations, the JWKS fetch — is caught rather than killing the process
+	// with NATS already up.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	app := api.NewApp()
-	app.Initialize()
 	defer app.Shutdown()
-	app.Run()
+	app.Initialize()
+	app.Run(ctx)
 }

@@ -133,7 +133,7 @@ func TestRunReturnsOnSigterm(t *testing.T) {
 			_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
 		}()
 
-		app.Run(ctx)
+		app.Run(ctx, stop)
 		fmt.Fprintln(os.Stderr, "RUN RETURNED")
 		return
 	}
@@ -288,25 +288,23 @@ func TestStopServerCancelsRequestsThatOutlastTheGrace(t *testing.T) {
 // The budget has to cover every wait nested inside it, with something left for
 // the pool close between them. It used to be exactly the sum of the two waits,
 // so pgxpool.Close spent the emitter's drain and the budget expired before the
-// emitter had any of it.
-func TestTheShutdownBudgetCoversWhatIsInsideIt(t *testing.T) {
-	// CloseGrace is the whole of EventListener.Close, not one of its waits —
-	// that distinction is why this used to pass while the budget was short.
-	nested := profiles.CloseGrace + emitterDrainGrace
+// The whole exit has to fit the grace the deployment grants. Also guarded at
+// compile time in app.go; this states it in a form that names the numbers when
+// it fails.
+//
+// What is deliberately *not* asserted here is that shutdownBudget covers the
+// waits inside it. It is derived from those same constants, so any such
+// comparison is arithmetic on itself and cannot fail — an earlier version of
+// this test made exactly that comparison and stayed green through round 14's
+// undercount. The property it was reaching for, that profiles.CloseGrace bounds
+// EventListener.Close as a whole however many waits it makes, is tested in
+// pkg/profiles where it can be observed: TestCloseIsBoundedAsAWhole.
+func TestTheExitFitsTheGraceItIsGiven(t *testing.T) {
+	needed := shutdownGrace + shutdownBudget + sentryFlushGrace
 
-	if shutdownBudget <= nested {
-		t.Errorf("budget %v does not exceed the waits inside it (%v + %v): the pool close between "+
-			"them takes its time out of the emitter drain",
-			shutdownBudget, profiles.CloseGrace, emitterDrainGrace)
-	}
-
-	// And the whole exit still has to fit the grace the orchestrator gives it.
-	// Also guarded at compile time in app.go; this says it in a form that names
-	// the budget when it fails.
-	total := shutdownGrace + shutdownBudget + sentryFlushGrace
-	if total >= stopGracePeriod {
-		t.Errorf("the exit needs %v (requests %v + drain %v + flush %v) against a %v SIGKILL",
-			total, shutdownGrace, shutdownBudget, sentryFlushGrace, stopGracePeriod)
+	if needed >= stopGracePeriod {
+		t.Errorf("the exit needs %v (requests %v + drain %v + flush %v) against a %v grace",
+			needed, shutdownGrace, shutdownBudget, sentryFlushGrace, stopGracePeriod)
 	}
 }
 
@@ -328,7 +326,7 @@ func TestRunExitsNonZeroWhenItCannotBind(t *testing.T) {
 
 		common.Config.Port = port
 		app := App{gEngine: gin.New()}
-		app.Run(context.Background())
+		app.Run(context.Background(), func() {})
 		fmt.Fprintln(os.Stderr, "RUN RETURNED")
 		return
 	}
@@ -484,7 +482,7 @@ func TestALateListenErrorStillExitsNonZero(t *testing.T) {
 		listenErr := make(chan error, 1)
 		listenErr <- errors.New("listen tcp :8185: bind: address already in use")
 
-		new(App).reportLateListenError(listenErr)
+		new(App).reportLateListenError(listenErr, func() {})
 		fmt.Fprintln(os.Stderr, "RETURNED INSTEAD OF EXITING")
 		return
 	}
@@ -498,12 +496,12 @@ func TestALateListenErrorStillExitsNonZero(t *testing.T) {
 			listenErr <- errors.New("listen tcp :8185: bind: address already in use")
 		}()
 
-		new(App).reportLateListenError(listenErr)
+		new(App).reportLateListenError(listenErr, func() {})
 		fmt.Fprintln(os.Stderr, "RETURNED INSTEAD OF EXITING")
 		return
 	}
 	if os.Getenv("LATE_LISTEN_QUIET_CHILD") == "1" {
-		new(App).reportLateListenError(make(chan error, 1))
+		new(App).reportLateListenError(make(chan error, 1), func() {})
 		fmt.Fprintln(os.Stderr, "RETURNED")
 		return
 	}
@@ -568,5 +566,40 @@ func TestRunChecksForALateListenErrorOnTheGracefulPath(t *testing.T) {
 	case report < graceful:
 		t.Error("the check runs before the graceful branch, where it cannot see a failure that " +
 			"arrives during the shutdown")
+	}
+}
+
+// Run's fatal paths must restore the default signal disposition before they
+// drain. serverFn does it when Run returns, and these paths never return — so
+// without it the drain they start swallows every later signal, which is the
+// escape hatch Run's doc promises.
+func TestRunRestoresTheSignalDispositionBeforeItsFatalDrains(t *testing.T) {
+	source, err := os.ReadFile("app.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, fn := range []struct{ name, signature string }{
+		{"Run", `func (a *App) Run(ctx context.Context, stop func()) {`},
+		{"reportLateListenError", `func (a *App) reportLateListenError(listenErr <-chan error, stop func()) {`},
+	} {
+		at := bytes.Index(source, []byte(fn.signature))
+		if at < 0 {
+			t.Fatalf("%s not found: check this test before the code", fn.name)
+		}
+
+		body := source[at:]
+		if next := bytes.Index(body[len(fn.signature):], []byte("\nfunc ")); next >= 0 {
+			body = body[:len(fn.signature)+next]
+		}
+
+		fatal := bytes.Index(body, []byte("utils.FatalAfter(a.Shutdown"))
+		if fatal < 0 {
+			continue
+		}
+		if restore := bytes.LastIndex(body[:fatal], []byte("stop()")); restore < 0 {
+			t.Errorf("%s drains without restoring the signal disposition first, so a second "+
+				"signal cannot interrupt it", fn.name)
+		}
 	}
 }

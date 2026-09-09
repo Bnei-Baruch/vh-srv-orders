@@ -366,21 +366,31 @@ func (el *EventListener) waitUntil(what string, ch <-chan struct{}, deadline tim
 	}
 }
 
-// connDrainTimeout is what the library gets for the connection drain, and
-// CloseGrace is the whole of Close — the runner's wait, the queue sweep and
-// that drain. Derived from each other so the library's bound cannot come to
-// exceed what is left of the caller's, which is how the emitter's pair went
-// wrong.
+// The pieces of Close's budget, derived rather than picked so the library's
+// bound cannot come to exceed the caller's.
 //
-// CloseGrace is exported because api.App.Shutdown has to budget for it: Close
-// makes several waits and per-wait grants had the caller funding one.
+// natsFlushTimeout is not ours and not configurable: nats.go's drainConnection
+// bounds the subscription phase with the DrainTimeout option and then runs an
+// unconditional nc.FlushTimeout(5s) before closing — and it is that close, not
+// the drain, that fires the handler Close waits on. So the floor for any
+// connection drain is connDrainTimeout + 5s, which two rounds of deriving these
+// numbers from DrainTimeout alone missed.
 //
-// Neither can be unbounded — the handlers reach the profile service and the
-// drain waits on them — so one black-holed call would mean a shutdown that
-// never finishes.
+// CloseGrace is the whole of Close: the runner's wait, the queue sweep and that
+// drain. Exported because api.App.Shutdown budgets for it.
+//
+// runnerShare is what the runner gets, and it is smaller than one slow handler
+// needs — ackWait allows a handler two 30s calls. So stopping the listener
+// before the repo is best-effort exactly when the profile service is slow: past
+// this wait a handler does meet a closed pool, which Close's doc says and this
+// is the number that decides it. Fixing that means bounding the handlers
+// themselves, which is a change outside this branch.
 const (
+	natsFlushTimeout = 5 * time.Second
 	connDrainTimeout = 2 * time.Second
-	CloseGrace       = 3 * connDrainTimeout
+	runnerShare      = 3 * time.Second
+
+	CloseGrace = runnerShare + connDrainTimeout + natsFlushTimeout
 )
 
 // nakRemaining hands back anything still queued once the runner has stopped.

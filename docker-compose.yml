@@ -11,7 +11,11 @@ services:
     # profile listener, the connection pool, the NATS drain and the Sentry
     # flush. api.stopGracePeriod is the same number, and a test reads this file
     # to check they agree.
-    stop_grace_period: 35s
+    #
+    # 45s rather than 35s because both NATS drains carry a flush the library
+    # hardcodes at 5s on top of the timeout we set, which the budget did not
+    # allow for.
+    stop_grace_period: 45s
     volumes:
       - /root/google_application_credentials.json:/vh_google_app_creds.json:ro
     environment:

@@ -21,6 +21,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
+	"gitlab.bbdev.team/vh/pay/orders/events"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
@@ -101,8 +102,8 @@ func TestShutdownStopsTheListenerBeforeTheRepo(t *testing.T) {
 	}
 	shutdown := source[body:]
 
-	listener := bytes.Index(shutdown, []byte("a.eventListener.Close()"))
-	repo := bytes.Index(shutdown, []byte("a.repo.Close()"))
+	listener := bytes.Index(shutdown, []byte(`runBounded("event listener"`))
+	repo := bytes.Index(shutdown, []byte(`runBounded("repo"`))
 	switch {
 	case listener < 0:
 		t.Error("Shutdown must close the event listener: it holds a JetStream consumer and its " +
@@ -182,23 +183,39 @@ type stuckRepo struct {
 
 func (r *stuckRepo) Close() { <-r.release }
 
-// Shutdown has to be bounded as a whole. Bounding only the listener's wait moved
-// the hang one line down: the repo close blocks, so the emitter is never drained
-// and, on a fatal path, os.Exit is never reached.
-func TestShutdownGivesUpOnAStuckClose(t *testing.T) {
+// stubEmitter records that the emitter was given its turn.
+type stubEmitter struct{ closes atomic.Int64 }
+
+func (e *stubEmitter) Emit(context.Context, ...events.Event) {}
+func (e *stubEmitter) Close(context.Context)                 { e.closes.Add(1) }
+
+// A step that hangs costs its own grace and nothing else's. Bounding the
+// sequence instead meant a stuck pgxpool.Close — which waits for every acquired
+// connection and takes no context — could spend the emitter's share, and the
+// emitter is the only step here with data in it.
+//
+// The previous version of this test asserted only that Shutdown returned, which
+// is true whether or not the steps after the stuck one ever ran.
+func TestAStuckStepDoesNotSpendTheNextStepsGrace(t *testing.T) {
 	release := make(chan struct{})
 	defer close(release)
-	app := App{repo: &stuckRepo{release: release}}
+
+	emitter := &stubEmitter{}
+	app := App{repo: &stuckRepo{release: release}, eventEmitter: emitter}
 
 	start := time.Now()
 	app.Shutdown()
 	waited := time.Since(start)
 
-	if waited > shutdownBudget+3*time.Second {
-		t.Fatalf("Shutdown waited %v on a stuck close", waited)
+	if emitter.closes.Load() != 1 {
+		t.Errorf("the emitter was closed %d times: a stuck repo close consumed its turn",
+			emitter.closes.Load())
 	}
-	if waited < shutdownBudget {
-		t.Fatalf("Shutdown returned after %v, before its own budget — nothing is being waited on", waited)
+	if waited < poolCloseGrace {
+		t.Errorf("Shutdown returned after %v, before the repo's own grace of %v", waited, poolCloseGrace)
+	}
+	if waited > poolCloseGrace+emitterDrainGrace+3*time.Second {
+		t.Errorf("Shutdown took %v: a stuck step is spending more than its grace", waited)
 	}
 }
 

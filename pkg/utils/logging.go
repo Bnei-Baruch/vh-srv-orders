@@ -36,7 +36,7 @@ func LogFatal(msg string, args ...any) {
 func FatalAfter(cleanup func(), msg string, args ...any) {
 	slog.Error(msg, args...)
 	if cleanup != nil {
-		drain(cleanup, cleanupBackstop)
+		drain(cleanup)
 	}
 	os.Exit(1)
 }
@@ -51,11 +51,17 @@ func FatalAfter(cleanup func(), msg string, args ...any) {
 //
 // Sits above App.Shutdown's own budget on purpose, so a drain that is bounded
 // and making progress is never cut short by this one.
-const cleanupBackstop = 30 * time.Second
+// A var, not a const, so a test can shorten it and observe that FatalAfter
+// actually applies it. As a parameter at the call site it was possible to pass
+// something else — or nothing — with the constant still sitting here looking
+// right.
+var cleanupBackstop = 30 * time.Second
 
 // drain runs cleanup, recovered and bounded. Returning matters more than
 // finishing: the caller's next statement is the exit.
-func drain(cleanup func(), budget time.Duration) {
+func drain(cleanup func()) {
+	budget := cleanupBackstop
+
 	done := make(chan struct{})
 
 	go func() {

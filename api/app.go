@@ -369,6 +369,10 @@ func (a *App) Run(ctx context.Context, stop func()) {
 		stop()
 		utils.FatalAfter(a.Shutdown, "http.ListenAndServe", slog.Any("err", err))
 	case <-ctx.Done():
+		// Before the 15s request grace, which is the longest wait in the whole
+		// exit: the other two paths got this and the one that most needs
+		// interrupting did not.
+		stop()
 		slog.Info("signal received, shutting down")
 		a.stopServer(server, shutdownGrace)
 
@@ -507,7 +511,11 @@ func (a *App) shutdown() {
 // connection is returned and takes no context. It is an allowance in the budget,
 // not a deadline on the call.
 const (
-	emitterDrainGrace = 4 * time.Second
+	// Larger than the emitter's own drain timeout, so the library gives up
+	// inside this wait rather than the wait giving up on a drain still running:
+	// SimpleEmitter.Close reports the context error to Sentry, so losing that
+	// race costs a spurious failure as well as the publishes.
+	emitterDrainGrace = events.DrainTimeout + time.Second
 	poolCloseGrace    = 3 * time.Second
 	sentryFlushGrace  = 2 * time.Second
 

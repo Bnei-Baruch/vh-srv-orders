@@ -115,6 +115,10 @@ func NewEventListener() (*EventListener, error) {
 	if err != nil {
 		return nil, fmt.Errorf("nats.Connect: %w", err)
 	}
+	// After the error check, never before: nats.Connect returns a concrete
+	// *nats.Conn, and assigning it to the interface field first would put a
+	// typed nil there on failure — the trap this branch fixed in three other
+	// places, reintroduced by making this field an interface.
 	el.nc = conn
 
 	// Every failure past this point closes the connection: returning (nil, err)

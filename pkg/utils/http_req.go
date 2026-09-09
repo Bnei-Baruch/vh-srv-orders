@@ -15,8 +15,9 @@ import (
 // not abandon a call that may already have charged. So the deadline has to hold
 // even when nothing can be cancelled.
 //
-// The context is still worth taking — it carries the request's values, and a
-// non-payment caller can bound or cancel its own call through it.
+// The context is still worth taking for the request's values. Cancelling
+// through it is not something any caller does today: all three are payment
+// handlers, and all three pass a context with cancellation stripped.
 func PostJSON(ctx context.Context, method string, url string, payload []byte) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(payload))
 	if err != nil {

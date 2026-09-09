@@ -322,15 +322,33 @@ func TestTheProfileClientIsBounded(t *testing.T) {
 	}
 }
 
-// AckWait has to cover the queue, not one handler: the ack waits for the
-// handlers, so the last prefetched message waits for everything ahead of it.
-func TestAckWaitCoversTheWholeQueue(t *testing.T) {
-	worstCase := time.Duration(queueCapacity) * 2 * requestTimeout
+// AckWait covers the queue, and what makes that possible is the cap on
+// delivered-unacknowledged messages. So this asserts the cap, not the
+// arithmetic: comparing ackWait against queueCapacity*2*requestTimeout is
+// comparing the expression it is defined as against itself, minus a minute —
+// which is what the version of this test replaced here did, and why the missing
+// MaxAckPending went unnoticed for four rounds.
+//
+// PullMaxMessages does not bound unacked messages: nats.go decrements its
+// pending count on delivery and pulls again below the threshold, so acks never
+// enter it. Without MaxAckPending the server allows 1000 outstanding, and a
+// thousand messages waiting on a single-threaded runner outlast any AckWait
+// this file would pick.
+func TestTheConsumerCapsWhatCanBeWaitingForAnAck(t *testing.T) {
+	config := consumerConfig()
 
-	if ackWait <= worstCase {
-		t.Errorf("ackWait %v does not cover %d queued handlers at %v each with a retry (%v): "+
-			"events still sitting in the queue get redelivered, and each redelivery publishes "+
-			"its own derived account event", ackWait, queueCapacity, requestTimeout, worstCase)
+	if config.MaxAckPending != queueCapacity {
+		t.Errorf("MaxAckPending is %d, want %d: ackWait is derived against that number, and "+
+			"unset means the server's 1000", config.MaxAckPending, queueCapacity)
+	}
+
+	// And the derivation itself, stated against the cap rather than against
+	// ackWait's own definition.
+	perEvent := 2 * requestTimeout
+	if ackWait < time.Duration(config.MaxAckPending)*perEvent {
+		t.Errorf("ackWait %v does not cover %d events at %v each: events still queued get "+
+			"redelivered, and each redelivery publishes its own derived account event",
+			ackWait, config.MaxAckPending, perEvent)
 	}
 }
 

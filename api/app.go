@@ -36,6 +36,11 @@ type App struct {
 	gEngine             *gin.Engine
 
 	shutdownOnce sync.Once
+
+	// stop undoes the signal registration, so a fatal can hand signals back to
+	// their default disposition before it drains. Set by Initialize; nil in
+	// tests that build an App directly, which fatal tolerates.
+	stop func()
 }
 
 func NewApp() *App {
@@ -49,7 +54,9 @@ func NewApp() *App {
 // — and a signal arriving during it used to be noticed only once Run began. The
 // steps are cheap to abandon: nothing here is a payment, and the caller's
 // deferred Shutdown drains whatever was built.
-func (a *App) Initialize(ctx context.Context) error {
+func (a *App) Initialize(ctx context.Context, stop func()) error {
+	a.stop = stop
+
 	steps := []struct {
 		name string
 		run  func()
@@ -87,7 +94,7 @@ func (a *App) initEventEmitter() {
 	var err error
 	a.eventEmitter, err = events.CreateEmitter()
 	if err != nil {
-		utils.FatalAfter(a.Shutdown, "events.CreateEmitter", slog.Any("err", err))
+		a.fatal("events.CreateEmitter", slog.Any("err", err))
 	}
 }
 
@@ -100,13 +107,13 @@ func (a *App) initDB() {
 	// would pass and its Close would panic on the nil receiver.
 	ordersDB, err := repo.NewOrdersDB(ctx, a.eventEmitter)
 	if err != nil {
-		utils.FatalAfter(a.Shutdown, "connect to db", slog.Any("err", err))
+		a.fatal("connect to db", slog.Any("err", err))
 	}
 	a.repo = ordersDB
 
 	err = repo.SyncDBStructInsertionAndMigrations()
 	if err != nil {
-		utils.FatalAfter(a.Shutdown, "db migrations", slog.Any("err", err))
+		a.fatal("db migrations", slog.Any("err", err))
 	}
 
 	slog.Info("db connected and migrated")
@@ -119,14 +126,14 @@ func (a *App) initEventListener() {
 		var err error
 		a.eventListener, err = profiles.NewEventListener()
 		if err != nil {
-			utils.FatalAfter(a.Shutdown, "profiles.NewEventListener", slog.Any("err", err))
+			a.fatal("profiles.NewEventListener", slog.Any("err", err))
 		}
 
 		a.domainEventsHandler = domain.NewEventsHandler(a.repo)
 		a.eventListener.RegisterHandler(a.domainEventsHandler.HandleProfilesEvent)
 
 		if err = a.eventListener.Run(); err != nil {
-			utils.FatalAfter(a.Shutdown, "eventListener.Run", slog.Any("err", err))
+			a.fatal("eventListener.Run", slog.Any("err", err))
 		}
 	}
 }
@@ -148,7 +155,7 @@ func (a *App) initGinEngine() {
 	issuerUrl := fmt.Sprintf("%s/auth/realms/%s", common.Config.KeycloakServerUrl, common.Config.KeycloakRealm)
 	tokenVerifier, err := middleware.NewFailoverOIDCTokenVerifier(issuerUrl)
 	if err != nil {
-		utils.FatalAfter(a.Shutdown, "middleware.NewFailoverOIDCTokenVerifier", slog.Any("err", err))
+		a.fatal("middleware.NewFailoverOIDCTokenVerifier", slog.Any("err", err))
 	}
 
 	// middleware
@@ -337,12 +344,11 @@ func (a *App) initHealth() {
 // In-flight requests get shutdownGrace to finish; past that their connections
 // are closed.
 //
-// stop is the signal registration's undo, and Run needs it rather than leaving
-// it to its caller: serverFn restores the disposition when Run returns, and the
-// fatal paths here never return. Without it the drain they start swallows every
-// later signal, which is the escape hatch this doc used to promise and not
-// provide.
-func (a *App) Run(ctx context.Context, stop func()) {
+// The signal registration's undo reaches this through the App, set by
+// Initialize: serverFn restores the disposition when Run returns, and the fatal
+// paths never return. Without it the drain they start swallows every later
+// signal, which is the escape hatch this doc used to promise and not provide.
+func (a *App) Run(ctx context.Context) {
 	server := &http.Server{
 		Addr:    ":" + common.Config.Port,
 		Handler: a.gEngine,
@@ -363,21 +369,38 @@ func (a *App) Run(ctx context.Context, stop func()) {
 	// main exit 0 — reporting success for a server that never bound its port.
 	select {
 	case err := <-listenErr:
-		// Signals back to their default disposition before the drain, so a
-		// second one can cut it short. serverFn does this once Run returns, and
-		// these paths never return.
-		stop()
-		utils.FatalAfter(a.Shutdown, "http.ListenAndServe", slog.Any("err", err))
+		a.fatal("http.ListenAndServe", slog.Any("err", err))
 	case <-ctx.Done():
-		// Before the 15s request grace, which is the longest wait in the whole
-		// exit: the other two paths got this and the one that most needs
-		// interrupting did not.
-		stop()
+		// Before the 15s request grace, which is the longest wait in the exit.
+		// The fatal paths get this from a.fatal; this one returns, so it does it
+		// here.
+		if a.stop != nil {
+			a.stop()
+		}
 		slog.Info("signal received, shutting down")
 		a.stopServer(server, shutdownGrace)
 
-		a.reportLateListenError(listenErr, stop)
+		a.reportLateListenError(listenErr)
 	}
+}
+
+// fatal reports why the process is dying, drains, and exits.
+//
+// Every fatal path in this type goes through here, and that is the point rather
+// than tidiness: the drain and the signal restore have each been added to some
+// paths and not others across three rounds of review — the six sites in
+// Initialize kept the signals trapped for a whole round after Run stopped doing
+// so. One path cannot be half-fixed.
+//
+// Signals go back to their default disposition first, so a second one can cut
+// short a drain that is taking its time. utils.FatalAfter logs, drains within
+// its own backstop, and exits 1.
+func (a *App) fatal(msg string, args ...any) {
+	if a.stop != nil {
+		a.stop()
+	}
+
+	utils.FatalAfter(a.Shutdown, msg, args...)
 }
 
 // reportLateListenError exits non-zero if the server had in fact failed to
@@ -393,11 +416,10 @@ func (a *App) Run(ctx context.Context, stop func()) {
 // check finds nothing. A bind fails immediately when it fails, so this is long
 // enough to tell the two apart and short enough to be invisible in a real
 // shutdown.
-func (a *App) reportLateListenError(listenErr <-chan error, stop func()) {
+func (a *App) reportLateListenError(listenErr <-chan error) {
 	select {
 	case err := <-listenErr:
-		stop()
-		utils.FatalAfter(a.Shutdown, "http.ListenAndServe", slog.Any("err", err))
+		a.fatal("http.ListenAndServe", slog.Any("err", err))
 	case <-time.After(listenErrorWindow):
 	}
 }

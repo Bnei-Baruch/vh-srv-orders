@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -227,3 +228,53 @@ type countingRepo struct {
 }
 
 func (r *countingRepo) Close() { r.closes.Add(1); <-r.release }
+
+// A request that outlasts the grace gets its connection closed, which cancels
+// its context — so a handler that honours the context unwinds instead of running
+// on into a pool that Shutdown is about to close.
+func TestStopServerCancelsRequestsThatOutlastTheGrace(t *testing.T) {
+	started := make(chan struct{})
+	cancelled := make(chan struct{})
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-r.Context().Done()
+		close(cancelled)
+	})
+
+	port := freePort(t)
+	server := &http.Server{Addr: "127.0.0.1:" + port, Handler: handler}
+	go func() { _ = server.ListenAndServe() }()
+
+	go func() {
+		resp, err := http.Get("http://127.0.0.1:" + port + "/")
+		if err == nil {
+			_ = resp.Body.Close()
+		}
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the request never reached the handler")
+	}
+
+	var app App
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		app.stopServer(server, 50*time.Millisecond)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stopServer did not return: it waited for a handler that never finishes")
+	}
+
+	select {
+	case <-cancelled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the request context was never cancelled, so the handler runs on into a closed pool")
+	}
+}

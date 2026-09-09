@@ -66,7 +66,7 @@ func (a *App) Initialize(ctx context.Context, stop func()) error {
 		{"database", func() { a.initDB(ctx) }},
 		{"events listener", a.initEventListener},
 		{"api", func() { a.ordersAPI = NewOrdersAPI(a.repo) }},
-		{"gin engine", a.initGinEngine},
+		{"gin engine", func() { a.initGinEngine(ctx) }},
 		{"health", a.initHealth},
 	}
 
@@ -98,10 +98,19 @@ func (a *App) initEventEmitter() {
 	}
 }
 
-// initDB takes the startup context so a signal reaches the connect and the
-// migrations, rather than only the gap before them. Checking between steps left
-// the two slowest — this and the JWKS fetch — uninterruptible, which is where a
-// cancelled rollout actually lands.
+// initDB takes the startup context so a signal reaches the connect, rather than
+// only the gap before it.
+//
+// Only the connect: SyncDBStructInsertionAndMigrations takes no context, so the
+// slower half of this step is still uninterruptible. The earlier version of
+// this comment claimed both.
+//
+// A cancelled connect returns rather than exiting. Threading the context in
+// without that made a SIGTERM mid-connect into `ERROR connect to db: context
+// canceled` and exit 1 — a clean stop recorded as a crashed startup, and past
+// the very branch serverFn added to prevent it, because a.fatal exits instead
+// of returning up through Initialize. Returning lets Initialize's own check see
+// the cancellation on its next pass and hand it back as such.
 func (a *App) initDB(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -111,6 +120,10 @@ func (a *App) initDB(ctx context.Context) {
 	// would pass and its Close would panic on the nil receiver.
 	ordersDB, err := repo.NewOrdersDB(ctx, a.eventEmitter)
 	if err != nil {
+		if ctx.Err() != nil {
+			slog.Info("db connect abandoned, shutting down", slog.Any("err", err))
+			return
+		}
 		a.fatal("connect to db", slog.Any("err", err))
 	}
 	a.repo = ordersDB
@@ -153,12 +166,18 @@ func (a *App) initSentry() {
 	}
 }
 
-func (a *App) initGinEngine() {
+func (a *App) initGinEngine(ctx context.Context) {
 	gin.SetMode(common.Config.Mode)
 	a.gEngine = gin.New()
 	issuerUrl := fmt.Sprintf("%s/auth/realms/%s", common.Config.KeycloakServerUrl, common.Config.KeycloakRealm)
-	tokenVerifier, err := middleware.NewFailoverOIDCTokenVerifier(issuerUrl)
+	tokenVerifier, err := middleware.NewFailoverOIDCTokenVerifier(ctx, issuerUrl)
 	if err != nil {
+		// Same as initDB: a signal during the fetch is a shutdown, not a
+		// misconfiguration, and serverFn already reports it as one.
+		if ctx.Err() != nil {
+			slog.Info("jwks fetch abandoned, shutting down", slog.Any("err", err))
+			return
+		}
 		a.fatal("middleware.NewFailoverOIDCTokenVerifier", slog.Any("err", err))
 	}
 
@@ -473,14 +492,19 @@ const listenErrorWindow = 250 * time.Millisecond
 // Shutdown is called from the fatal paths as well as from server.go's defer, so
 // it has to survive a partial Initialize: either field can still be nil when a
 // fatal happens on the way up.
-// Shutdown drains what the app owns, once and within a budget.
+// Shutdown drains what the app owns: the event listener, the connection pool,
+// the event emitter, then Sentry.
 //
-// Once, because it is reached from two directions: FatalAfter on the way out of
-// a fatal, and serverFn's defer when Run returns. A bind failure racing a
-// SIGTERM ran both at the same time, which closed the emitter twice — the
-// second Drain reports ErrConnectionClosed as a failure, and only one of the two
-// waiters can take the single ncClosed token, so the other spends its whole
-// context and reports a second failure that never happened.
+// Once, because two directions reach it — App.fatal on the way out of a fatal,
+// and serverFn's defer when Run returns. A bind failure racing a SIGTERM ran
+// both at the same time, which closed the emitter twice: the second Drain
+// reports ErrConnectionClosed as a failure, and only one of the two waiters can
+// take the single ncClosed token, so the other spends its whole context and
+// reports a second failure that never happened.
+//
+// Each step is bounded on its own rather than sharing one budget — see the
+// constants for why — and none of them is guaranteed to exist, since the fatal
+// paths reach this with a partly built App.
 func (a *App) Shutdown() {
 	a.shutdownOnce.Do(a.shutdown)
 }
@@ -496,13 +520,13 @@ func (a *App) shutdown() {
 	// the pool underneath it turns in-flight profile events into `closed pool`
 	// errors, reported to Sentry and never acked.
 	if a.eventListener != nil {
-		runBounded("event listener", profiles.CloseGrace, a.eventListener.Close)
+		runBounded("event listener", profiles.CloseGrace+stepSlack, a.eventListener.Close)
 	}
 	if a.repo != nil {
 		runBounded("repo", poolCloseGrace, a.repo.Close)
 	}
 	if a.eventEmitter != nil {
-		runBounded("event emitter", emitterDrainGrace, func() {
+		runBounded("event emitter", emitterDrainGrace+stepSlack, func() {
 			ctx, cancel := context.WithTimeout(context.Background(), emitterDrainGrace)
 			defer cancel()
 			a.eventEmitter.Close(ctx)
@@ -551,7 +575,13 @@ const (
 	poolCloseGrace    = 3 * time.Second
 	sentryFlushGrace  = 2 * time.Second
 
-	shutdownBudget = profiles.CloseGrace + poolCloseGrace + emitterDrainGrace
+	// Every step whose own deadline equals its outer grace is a coin toss
+	// between finishing and being reported as hung: one that uses its full
+	// budget races runBounded's timer. So the outer grace is the inner deadline
+	// plus this, and the budget is the sum of the outer ones.
+	stepSlack = time.Second
+
+	shutdownBudget = (profiles.CloseGrace + stepSlack) + poolCloseGrace + (emitterDrainGrace + stepSlack)
 )
 
 // stopGracePeriod is how long the orchestrator waits before SIGKILL, and the

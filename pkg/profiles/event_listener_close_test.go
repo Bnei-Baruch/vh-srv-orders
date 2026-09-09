@@ -95,10 +95,10 @@ func TestCloseWaitsForTheRunnerAndDrainsWhatIsBuffered(t *testing.T) {
 	}
 }
 
-// The wait has to be bounded. The handlers reach the profile service over HTTP
-// with no deadline, so an unbounded wait turns one black-holed connection into a
-// shutdown that never finishes — and on a fatal path, a process that never
-// exits.
+// The runner's wait is bounded, and bounded by its own share rather than by the
+// whole of Close: the handlers reach the profile service with no deadline, so an
+// unbounded wait turns one black-holed call into a shutdown that never finishes,
+// and a wait against the whole budget leaves nothing for the connection drain.
 func TestCloseGivesUpOnAStuckRunner(t *testing.T) {
 	listener := newListener()
 
@@ -122,13 +122,17 @@ func TestCloseGivesUpOnAStuckRunner(t *testing.T) {
 	select {
 	case <-closed:
 	case <-time.After(CloseGrace + 5*time.Second):
-		t.Fatalf("Close did not return within %v of its own grace: the wait is unbounded",
-			5*time.Second)
+		t.Fatalf("Close did not return within %v of its budget: the wait is unbounded", CloseGrace)
 	}
 
 	waited := time.Since(start)
-	if waited < CloseGrace {
-		t.Fatalf("Close returned after %v, before its own grace — the wait is not happening", waited)
+	if waited < runnerShare {
+		t.Fatalf("Close returned after %v, before the runner's own share of %v — the wait is "+
+			"not happening", waited, runnerShare)
+	}
+	if waited > runnerShare+3*time.Second {
+		t.Fatalf("Close spent %v on a runner allowed %v: the wait is against the whole budget "+
+			"rather than its share", waited, runnerShare)
 	}
 }
 
@@ -528,5 +532,38 @@ func TestTheConnectionIsPublishedOnlyOnSuccess(t *testing.T) {
 	case assign < check:
 		t.Error("el.nc is assigned before nats.Connect's error is checked, which leaves a typed " +
 			"nil in an interface field on failure")
+	}
+}
+
+// A slow runner must not spend the connection drain's share. CloseGrace is the
+// sum of per-wait graces, and one deadline for the whole of Close let the first
+// wait take the lot — leaving the drain asked to wait a negative remainder and
+// the Naks unflushed.
+func TestASlowRunnerDoesNotSpendTheDrainsGrace(t *testing.T) {
+	listener := newListener()
+	listener.RegisterHandler(func(Event) { time.Sleep(time.Hour) })
+	conn := &stubConn{}
+	listener.nc = conn
+
+	go listener.runQueue()
+	listener.queue <- queued{event: Event{}}
+	time.Sleep(50 * time.Millisecond) // let the handler block
+
+	start := time.Now()
+	listener.Close()
+	waited := time.Since(start)
+
+	// The runner overshoots its share, and the drain still gets asked for and
+	// waited on afterwards.
+	if conn.drains.Load() != 1 {
+		t.Errorf("the connection was drained %d times: the runner consumed the drain's turn",
+			conn.drains.Load())
+	}
+	if waited < runnerShare+connDrainTimeout {
+		t.Errorf("Close returned after %v, which is less than the runner's %v plus the drain's "+
+			"own wait — one of them was skipped", waited, runnerShare)
+	}
+	if waited > CloseGrace+2*time.Second {
+		t.Errorf("Close took %v against a %v budget", waited, CloseGrace)
 	}
 }

@@ -323,18 +323,27 @@ func (a *App) Run() {
 		Handler: a.gEngine,
 	}
 
+	listenErr := make(chan error, 1)
 	go func() {
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			utils.FatalAfter(a.Shutdown, "http.ListenAndServe", slog.Any("err", err))
+			listenErr <- err
 		}
 	}()
 	slog.Info("listening", slog.String("addr", server.Addr))
 
-	<-ctx.Done()
-	stop()
-	slog.Info("signal received, shutting down")
-
-	a.stopServer(server, shutdownGrace)
+	// The listen failure is handled here rather than in the goroutine, so the
+	// exit belongs to one goroutine. Calling FatalAfter from there raced this
+	// one: the drain takes seconds, and a signal arriving inside that window let
+	// Run return, serverFn's deferred Shutdown find the Once already taken, and
+	// main exit 0 — reporting success for a server that never bound its port.
+	select {
+	case err := <-listenErr:
+		utils.FatalAfter(a.Shutdown, "http.ListenAndServe", slog.Any("err", err))
+	case <-ctx.Done():
+		stop()
+		slog.Info("signal received, shutting down")
+		a.stopServer(server, shutdownGrace)
+	}
 }
 
 // stopServer stops serving, waits grace for in-flight requests, and then takes
@@ -369,10 +378,11 @@ func (a *App) stopServer(server *http.Server, grace time.Duration) {
 }
 
 // shutdownGrace bounds how long in-flight requests have once a signal arrives.
-// Kubernetes sends SIGKILL 30s after SIGTERM by default, so this has to leave
-// room for the drain that follows it — repo close, emitter drain and
-// sentry.Flush.
-const shutdownGrace = 12 * time.Second
+//
+// Back at 15s: it was cut to 12s to make the compile guard below pass, which is
+// tuning a safety margin to fit arithmetic. The derived budget leaves room for
+// 15s, and the requests that need it are the ones that post to checkout.
+const shutdownGrace = 15 * time.Second
 
 // Shutdown is called from the fatal paths as well as from server.go's defer, so
 // it has to survive a partial Initialize: either field can still be nil when a

@@ -301,3 +301,43 @@ func TestTheShutdownBudgetCoversWhatIsInsideIt(t *testing.T) {
 			total, shutdownGrace, shutdownBudget, sentryFlushGrace, sigkillAfter)
 	}
 }
+
+// A server that cannot bind must exit non-zero. The failure used to be handled
+// on a goroutine while main waited for a signal, so a signal arriving during the
+// drain let main return first and the process reported success.
+func TestRunExitsNonZeroWhenItCannotBind(t *testing.T) {
+	if os.Getenv("RUN_BIND_CHILD") == "1" {
+		saved := *common.Config
+		defer func() { *common.Config = saved }()
+
+		// Hold the port, so the App cannot have it.
+		port := freePort(t)
+		blocker, err := net.Listen("tcp", ":"+port)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer blocker.Close()
+
+		common.Config.Port = port
+		app := App{gEngine: gin.New()}
+		app.Run()
+		fmt.Fprintln(os.Stderr, "RUN RETURNED")
+		return
+	}
+
+	child := exec.Command(os.Args[0], "-test.run=TestRunExitsNonZeroWhenItCannotBind", "-test.timeout=30s")
+	child.Env = append(os.Environ(), "RUN_BIND_CHILD=1")
+	out, err := child.CombinedOutput()
+	output := string(out)
+
+	exit, ok := err.(*exec.ExitError)
+	if !ok {
+		t.Fatalf("a server that cannot bind must exit non-zero, got %v:\n%s", err, output)
+	}
+	if exit.ExitCode() != 1 {
+		t.Errorf("exit code %d, want 1:\n%s", exit.ExitCode(), output)
+	}
+	if !strings.Contains(output, "http.ListenAndServe") {
+		t.Errorf("the bind failure was not reported:\n%s", output)
+	}
+}

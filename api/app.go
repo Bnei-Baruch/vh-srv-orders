@@ -372,7 +372,7 @@ func (a *App) stopServer(server *http.Server, grace time.Duration) {
 // Kubernetes sends SIGKILL 30s after SIGTERM by default, so this has to leave
 // room for the drain that follows it — repo close, emitter drain and
 // sentry.Flush.
-const shutdownGrace = 15 * time.Second
+const shutdownGrace = 12 * time.Second
 
 // Shutdown is called from the fatal paths as well as from server.go's defer, so
 // it has to survive a partial Initialize: either field can still be nil when a
@@ -427,14 +427,33 @@ func (a *App) shutdown() {
 	sentry.Flush(sentryFlushGrace)
 }
 
-// The shutdown budget, and the two grants inside it. Sized to fit a container's
-// 30s default grace alongside Run's own wait for in-flight requests: 15s there,
-// then this.
+// The shutdown budget and the grants inside it.
+//
+// The budget is derived rather than picked, because it used to be picked and was
+// wrong: 10s, against 5s for the listener and 5s for the emitter, left the pool
+// close between them with nothing. Any time pgxpool.Close spent came out of the
+// emitter drain — the one step with data in it — and the budget expired before
+// it started.
+//
+// poolCloseGrace is not enforceable: pgxpool.Close blocks until every acquired
+// connection is returned and takes no context. It is an allowance in the budget,
+// not a deadline on the call.
 const (
-	shutdownBudget    = 10 * time.Second
-	emitterDrainGrace = 5 * time.Second
+	emitterDrainGrace = 4 * time.Second
+	poolCloseGrace    = 3 * time.Second
 	sentryFlushGrace  = 2 * time.Second
+
+	shutdownBudget = profiles.DrainGrace + poolCloseGrace + emitterDrainGrace
 )
+
+// A container gets 30s between SIGTERM and SIGKILL by default, and the whole
+// exit has to fit: this much for in-flight requests, then the budget above, then
+// the Sentry flush. Guarded at compile time — subtracting on unsigned constants
+// makes an edit that overruns a build failure rather than a shutdown the
+// orchestrator cuts short.
+const sigkillAfter = 30 * time.Second
+
+const _ = uint64(sigkillAfter - shutdownGrace - shutdownBudget - sentryFlushGrace)
 
 func (a *App) SetEmitter(emitter events.EventEmitter) {
 	a.eventEmitter = emitter

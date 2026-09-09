@@ -62,19 +62,10 @@ type EventListener struct {
 	runnerStarted bool
 }
 
-// ackWait is how long the server waits for an ack before redelivering, and
-// maxDeliver caps how many times it will.
-//
-// The defaults (30s, unlimited) were survivable while the ack happened on
-// receipt. They are not now: a message sitting in the queue behind a slow
-// handler can exceed the wait, come back, queue up behind the same backlog and
-// come back again. The wait is generous because the handlers reach the profile
-// service with no deadline of their own, and the cap is what turns a poison
-// event into a dead letter instead of a loop.
-const (
-	ackWait    = 2 * time.Minute
-	maxDeliver = 5
-)
+// ackWait is how long the server waits for an ack before redelivering. Generous
+// because the handlers have no deadline of their own, so a short wait
+// redelivers work that is still in progress.
+const ackWait = 2 * time.Minute
 
 // queued is a delivered message and its decoded event. The message travels with
 // the event so the ack happens after the handlers have run.
@@ -133,14 +124,18 @@ func consumerConfig() jetstream.ConsumerConfig {
 		Name:        common.ServiceName,
 		Durable:     common.ServiceName,
 		Description: "Events listener of vh-srv-orders for profile changes",
-		// Both of these exist because the ack happens after the handlers run.
-		// Nothing is acknowledged on receipt any more, so the server's defaults
-		// decide what happens to a message waiting behind a backlog: AckWait's
-		// 30s would expire on anything the single-threaded runner had not
-		// reached, and with MaxDeliver unset that redelivery repeats without
-		// limit. A bulk profile job was enough to trigger it.
-		AckWait:    ackWait,
-		MaxDeliver: maxDeliver,
+		// AckWait exists because the ack happens after the handlers run: the
+		// server's 30s default would expire on anything the single-threaded
+		// runner had not reached, and the redelivery would queue behind the same
+		// backlog.
+		//
+		// MaxDeliver is deliberately left unset. Capping it without a dead
+		// letter does not contain a poison event, it discards one: nothing here
+		// consumes the MAX_DELIVERIES advisory, so the fifth delivery would be
+		// the last and a create_profile for a real member would vanish with
+		// nothing raised. Redelivery every AckWait is visible in the consumer's
+		// pending count; silent loss is not.
+		AckWait: ackWait,
 	}
 }
 
@@ -164,9 +159,8 @@ func (el *EventListener) Run() error {
 // runQueue delivers queued events to the handlers until Close says stop.
 //
 // It selects on quit rather than ranging over a closed queue, and signals done
-// on the way out — so Close can wait, and no handler runs after Close returns.
-// That is what keeps the repo alive underneath these handlers: they write
-// through it, and App.Shutdown closes it as soon as this has stopped.
+// on the way out, so Close can wait for it — unless Close's grace expires
+// first, in which case a handler does run on into a closed repo.
 func (el *EventListener) runQueue() {
 	defer el.doneOnce.Do(func() { close(el.done) })
 
@@ -199,8 +193,14 @@ func (el *EventListener) runQueue() {
 // would repeat the same outcome and a poison event would loop for ever.
 func (el *EventListener) deliver(item queued) {
 	defer func() {
-		if item.msg != nil {
-			item.msg.Ack()
+		if item.msg == nil {
+			return
+		}
+		// Logged, not ignored: past Close's grace this runs against a dropped
+		// connection, and the event is then redelivered and handled twice.
+		if err := item.msg.Ack(); err != nil {
+			slog.Error("EventListener ack", slog.Any("err", err),
+				slog.String("event_type", item.event.Type))
 		}
 	}()
 
@@ -241,20 +241,19 @@ func (el *EventListener) drainQueue() {
 	}
 }
 
-// Close stops delivery, waits for the runner to finish, and only then drops the
-// connection. Callers rely on that order: App.Shutdown closes the repo next, and
-// these handlers write through it.
+// Close stops delivery and waits for the runner, so App.Shutdown can close the
+// repo the handlers write through — but only up to DrainGrace. Past that it
+// returns with the runner still going, and those handlers do meet a closed pool.
 //
-// The consumer is stopped before quit is signalled, so no callback can still be
-// choosing between the queue and quit once the runner has gone. Signalling first
-// left that race: both cases ready, Go picks either, and the send could land
-// after the runner had stopped — acknowledging an event nothing would handle.
+// The consumer is stopped before quit is signalled, which is the useful order
+// but not a guarantee: ConsumeContext.Stop is asynchronous, so a callback can
+// still be in handleMessage's select afterwards. Its send then stays buffered
+// and unacked, which is why that select must keep its quit case.
 //
-// It is called from the fatal paths too, including the one where Run itself
-// failed, so nothing here is guaranteed to exist. The queue is deliberately not
-// closed — the delivery callback may be blocked on a send to it, and closing it
-// under that is a `send on closed channel` panic on the NATS dispatch goroutine,
-// which would take the process down before the rest of the drain.
+// Called from the fatal paths too, including the one where Run itself failed, so
+// nothing here is guaranteed to exist. The queue is never closed: the callback
+// may be blocked sending to it, and closing it under that is a panic on the NATS
+// dispatch goroutine.
 func (el *EventListener) Close() {
 	if el.consumerCtx != nil {
 		el.consumerCtx.Stop()
@@ -268,9 +267,9 @@ func (el *EventListener) Close() {
 	if el.runnerStarted && el.done != nil {
 		select {
 		case <-el.done:
-		case <-time.After(drainGrace):
+		case <-time.After(DrainGrace):
 			slog.Warn("EventListener.Close: runner did not stop in time, continuing",
-				slog.Duration("grace", drainGrace))
+				slog.Duration("grace", DrainGrace))
 		}
 	}
 
@@ -279,18 +278,14 @@ func (el *EventListener) Close() {
 	}
 }
 
-// drainGrace bounds how long Close waits for the runner.
+// DrainGrace bounds how long Close waits for the runner. Exported because the
+// caller has to budget for it: api.App.Shutdown wraps this wait and its own.
 //
-// The wait cannot be unbounded: the handlers reach the profile service over HTTP
-// with no deadline of their own, so a black-holed connection would mean a
-// shutdown that never finishes — the pool never closed, NATS never drained,
-// and on a fatal path a process that never exits at all. Overshoot is reported
-// and the drain carries on.
-//
-// Sized to fit inside a container's grace period alongside everything else that
-// runs on the way out: the HTTP server's own 15s, then this, the emitter's 5s
-// and sentry.Flush's 2s.
-const drainGrace = 5 * time.Second
+// It cannot be unbounded — the handlers reach the profile service with no
+// deadline of their own, so one black-holed connection would mean a shutdown
+// that never finishes. Overshoot is reported and the drain carries on, which
+// means a handler can outlive Close; see the note on Close.
+const DrainGrace = 4 * time.Second
 
 func (el *EventListener) RegisterHandler(handler EventHandler) {
 	el.handlers = append(el.handlers, handler)

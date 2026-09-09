@@ -61,6 +61,6 @@ func serverFn(cmd *cobra.Command, args []string) {
 		utils.FatalAfter(app.Shutdown, "app.Initialize", slog.Any("err", err))
 	}
 
-	app.Run(ctx)
+	app.Run(ctx, stop)
 	stop()
 }

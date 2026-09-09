@@ -43,6 +43,10 @@ type NatsEventHandler struct {
 	ncClosed chan struct{}
 }
 
+// drainTimeout bounds the library's own drain, so it fits inside the deadline
+// Close is given rather than outlasting it.
+const drainTimeout = 5 * time.Second
+
 func NewNatsEventHandler() (*NatsEventHandler, error) {
 	eh := new(NatsEventHandler)
 	// Buffered: once Close has given up on its deadline nothing receives, and
@@ -50,7 +54,11 @@ func NewNatsEventHandler() (*NatsEventHandler, error) {
 	eh.ncClosed = make(chan struct{}, 1)
 
 	var err error
-	eh.nc, err = nats.Connect(common.Config.NatsUrl, nats.ClosedHandler(eh.closedCallback))
+	eh.nc, err = nats.Connect(common.Config.NatsUrl,
+		nats.ClosedHandler(eh.closedCallback),
+		// Or the library spends its 30s default while Close waits the seconds
+		// its caller budgeted, and the drain is abandoned rather than finished.
+		nats.DrainTimeout(drainTimeout))
 	if err != nil {
 		return nil, fmt.Errorf("nats.Connect: %w", err)
 	}

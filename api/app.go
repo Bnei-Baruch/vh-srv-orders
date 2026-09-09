@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -36,6 +37,8 @@ type App struct {
 	domainEventsHandler *domain.EventsHandler
 	ordersAPI           *OrdersAPI
 	gEngine             *gin.Engine
+
+	shutdownOnce sync.Once
 }
 
 func NewApp() *App {
@@ -334,7 +337,13 @@ func (a *App) Run() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		slog.Error("http.Server.Shutdown", slog.Any("err", err))
+		// Shutdown does not cancel handlers, it stops waiting for them. So
+		// anything still running past the grace will meet a closed pool and a
+		// drained emitter once Shutdown below runs — reported here because that
+		// is the only place it is visible.
+		slog.Error("http.Server.Shutdown: requests still in flight, their resources are about to close",
+			slog.Any("err", err), slog.Duration("grace", shutdownGrace))
+		sentry.CaptureException(err)
 	}
 }
 
@@ -347,23 +356,64 @@ const shutdownGrace = 15 * time.Second
 // Shutdown is called from the fatal paths as well as from server.go's defer, so
 // it has to survive a partial Initialize: either field can still be nil when a
 // fatal happens on the way up.
+// Shutdown drains what the app owns, once and within a budget.
+//
+// Once, because it is reached from two directions: FatalAfter on the way out of
+// a fatal, and serverFn's defer when Run returns. A bind failure racing a
+// SIGTERM ran both at the same time, which closed the emitter twice — the
+// second Drain reports ErrConnectionClosed as a failure, and only one of the two
+// waiters can take the single ncClosed token, so the other spends its whole
+// context and reports a second failure that never happened.
 func (a *App) Shutdown() {
-	// The listener first: its consumer goroutine writes through the repo, so
-	// closing the pool underneath it turns in-flight profile events into
-	// `closed pool` errors, reported to Sentry and never acked.
-	if a.eventListener != nil {
-		a.eventListener.Close()
-	}
-	if a.repo != nil {
-		a.repo.Close()
-	}
-	if a.eventEmitter != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		a.eventEmitter.Close(ctx)
-	}
-	sentry.Flush(2 * time.Second)
+	a.shutdownOnce.Do(a.shutdown)
 }
+
+func (a *App) shutdown() {
+	// Bounded as a whole, not step by step. Every step here can block for as
+	// long as something else holds it: pgxpool.Close waits for every acquired
+	// connection to come back, so a handler parked on a row lock stops the
+	// emitter from ever being drained — and on a fatal path, stops os.Exit from
+	// being reached at all. Bounding only the listener's wait, as the previous
+	// version did, moved the hang one line down.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+
+		// The listener first: its runner writes through the repo, so closing
+		// the pool underneath it turns in-flight profile events into
+		// `closed pool` errors, reported to Sentry and never acked.
+		if a.eventListener != nil {
+			a.eventListener.Close()
+		}
+		if a.repo != nil {
+			a.repo.Close()
+		}
+		if a.eventEmitter != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), emitterDrainGrace)
+			defer cancel()
+			a.eventEmitter.Close(ctx)
+		}
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(shutdownBudget):
+		slog.Error("App.Shutdown did not finish in time, exiting anyway",
+			slog.Duration("budget", shutdownBudget))
+		sentry.CaptureMessage("App.Shutdown timed out")
+	}
+
+	sentry.Flush(sentryFlushGrace)
+}
+
+// The shutdown budget, and the two grants inside it. Sized to fit a container's
+// 30s default grace alongside Run's own wait for in-flight requests: 15s there,
+// then this.
+const (
+	shutdownBudget    = 10 * time.Second
+	emitterDrainGrace = 5 * time.Second
+	sentryFlushGrace  = 2 * time.Second
+)
 
 func (a *App) SetEmitter(emitter events.EventEmitter) {
 	a.eventEmitter = emitter

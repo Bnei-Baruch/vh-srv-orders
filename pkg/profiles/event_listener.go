@@ -167,9 +167,9 @@ func (el *EventListener) runQueue() {
 	for {
 		select {
 		case item := <-el.queue:
-			el.deliver(item)
+			el.recovered("deliver", func() { el.deliver(item) })
 		case <-el.quit:
-			el.drainQueue()
+			el.recovered("drainQueue", el.drainQueue)
 			slog.Debug("EventListener runner goroutine exit")
 			return
 		}
@@ -213,19 +213,28 @@ func (el *EventListener) deliver(item queued) {
 //
 // Per handler rather than per event: a panic in the first used to skip the rest,
 // which is invisible today because exactly one is registered, and would be a
-// silent gap the moment a second one is. The panic is swallowed either way, so
-// scoping it this tightly costs nothing.
+// silent gap the moment a second one is.
 func (el *EventListener) callHandler(handler EventHandler, event Event) {
+	el.recovered("handler:"+event.Type, func() { handler(event) })
+}
+
+// recovered runs fn, reporting a panic instead of letting it out.
+//
+// Every step the runner takes needs this, not only the handlers: a panic in
+// deliver's deferred ack, or in drainQueue, would otherwise leave the goroutine
+// and kill the process — skipping the drain this whole branch exists to
+// perform. The self-restart removed in an earlier commit was catching those by
+// accident, and took the net with it.
+func (el *EventListener) recovered(what string, fn func()) {
 	defer func() {
 		if r := recover(); r != nil {
-			slog.Error("EventListener handler panic",
-				slog.Any("panic", r), slog.String("event_type", event.Type))
+			slog.Error("EventListener panic", slog.String("in", what), slog.Any("panic", r))
 			sentry.CurrentHub().Recover(r)
 			debug.PrintStack()
 		}
 	}()
 
-	handler(event)
+	fn()
 }
 
 // drainQueue delivers what is already buffered and returns. Anything it does not
@@ -234,7 +243,9 @@ func (el *EventListener) drainQueue() {
 	for {
 		select {
 		case item := <-el.queue:
-			el.deliver(item)
+			// Per item, like the runner's own loop: recovering around the whole
+			// drain would abandon everything behind a panicking event.
+			el.recovered("deliver", func() { el.deliver(item) })
 		default:
 			return
 		}
@@ -298,11 +309,15 @@ func (el *EventListener) handleMessage(msg jetstream.Msg) {
 	if err := json.Unmarshal(msg.Data(), &event); err != nil {
 		slog.Error("EventListener.handleMessage json.Unmarshal", slog.Any("err", err))
 		sentry.CaptureException(err)
-		// Acked and dropped: the payload will never parse, so redelivering it
-		// only repeats this. Without the return a zero-value Event went to the
-		// handlers, hit the default branch of their type switch, and the
-		// corruption vanished.
-		msg.Ack()
+		// Terminated rather than acked: Term says "never redeliver this",
+		// which is what a payload that will never parse deserves, and it does
+		// not depend on a delivery cap — MaxDeliver is unset, so a failed ack
+		// here would come back every AckWait for ever, reporting to Sentry each
+		// time. Without the return a zero-value Event went to the handlers, hit
+		// the default branch of their type switch, and the corruption vanished.
+		if termErr := msg.TermWithReason("unparseable payload"); termErr != nil {
+			slog.Error("EventListener.handleMessage term", slog.Any("err", termErr))
+		}
 		return
 	}
 

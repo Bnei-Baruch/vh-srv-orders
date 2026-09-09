@@ -78,13 +78,14 @@ type EventListener struct {
 
 // ackWait is how long the server waits for an ack before redelivering.
 //
-// Derived, because it does not bound one handler — it bounds a queue. The ack
-// happens after the handlers run, so a message prefetched into the last slot
-// waits for every message ahead of it: queueCapacity handlers, each of which
-// can spend requestTimeout on the profile service and again on a retry after a
-// 401. Two minutes covered one call and none of the queueing, so a slow profile
-// service redelivered events that were still sitting in the queue, and each
-// redelivery published its own derived account event.
+// Derived, because it bounds a queue rather than a handler: the ack happens
+// after the handlers run, so a message waits for everything ahead of it. What
+// "ahead of it" can be is MaxAckPending — set to queueCapacity above, without
+// which the server's default of 1000 applies and this arithmetic is out by two
+// orders of magnitude.
+//
+// Each of those can spend requestTimeout on the profile service and again on a
+// retry after a 401, hence the doubling, plus a minute of slack.
 const ackWait = queueCapacity*2*requestTimeout + time.Minute
 
 // queued is a delivered message and its decoded event. The message travels with
@@ -110,8 +111,12 @@ func NewEventListener() (*EventListener, error) {
 	el.ncClosed = make(chan struct{})
 	conn, err := nats.Connect(common.Config.NatsUrl,
 		nats.ClosedHandler(el.connectionClosed),
-		// So the library gives up inside the same budget Close does.
-		nats.DrainTimeout(CloseGrace))
+		// Strictly inside what Close has left, not equal to all of it: the
+		// connection drain is the last thing Close waits for, so by then the
+		// grace is partly spent. Handing the library the whole of CloseGrace —
+		// which this did — is the inversion the emitter had, where the bound
+		// meant to keep the drain inside the caller's wait outlasted it.
+		nats.DrainTimeout(connDrainTimeout))
 	if err != nil {
 		return nil, fmt.Errorf("nats.Connect: %w", err)
 	}
@@ -164,6 +169,14 @@ func consumerConfig() jetstream.ConsumerConfig {
 		// nothing raised. Redelivery every AckWait is visible in the consumer's
 		// pending count; silent loss is not.
 		AckWait: ackWait,
+		// The cap ackWait is derived against, and the reason that derivation is
+		// now true. PullMaxMessages does not bound delivered-unacknowledged
+		// messages: nats.go decrements its pending count on delivery and pulls
+		// again once it drops below the threshold, so acks never enter that
+		// accounting. MaxAckPending is what bounds outstanding unacked, and the
+		// server default is 1000 — a thousand messages could sit with their
+		// AckWait running behind a runner that handles them one at a time.
+		MaxAckPending: queueCapacity,
 	}
 }
 
@@ -353,14 +366,22 @@ func (el *EventListener) waitUntil(what string, ch <-chan struct{}, deadline tim
 	}
 }
 
-// CloseGrace bounds Close as a whole, not each wait inside it. Exported because
-// the caller has to budget for it: api.App.Shutdown wraps this and its own, and
-// per-wait grants had the caller funding one wait while Close spent several.
+// connDrainTimeout is what the library gets for the connection drain, and
+// CloseGrace is the whole of Close — the runner's wait, the queue sweep and
+// that drain. Derived from each other so the library's bound cannot come to
+// exceed what is left of the caller's, which is how the emitter's pair went
+// wrong.
 //
-// It cannot be unbounded — the handlers reach the profile service and the
-// connection drain waits on them — so one black-holed call would mean a
-// shutdown that never finishes.
-const CloseGrace = 6 * time.Second
+// CloseGrace is exported because api.App.Shutdown has to budget for it: Close
+// makes several waits and per-wait grants had the caller funding one.
+//
+// Neither can be unbounded — the handlers reach the profile service and the
+// drain waits on them — so one black-holed call would mean a shutdown that
+// never finishes.
+const (
+	connDrainTimeout = 2 * time.Second
+	CloseGrace       = 3 * connDrainTimeout
+)
 
 // nakRemaining hands back anything still queued once the runner has stopped.
 // Without it those events are neither handled nor returned until ackWait

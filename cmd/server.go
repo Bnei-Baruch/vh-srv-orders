@@ -41,7 +41,7 @@ func serverFn(cmd *cobra.Command, args []string) {
 	// drains what was built.
 	defer app.Shutdown()
 
-	if err := app.Initialize(ctx); err != nil {
+	if err := app.Initialize(ctx, stop); err != nil {
 		// Signals go back to their default disposition before any drain, so a
 		// second Ctrl-C can cut a slow one short. signal.NotifyContext stops
 		// relaying once it has delivered one, so leaving this to the deferred
@@ -61,6 +61,6 @@ func serverFn(cmd *cobra.Command, args []string) {
 		utils.FatalAfter(app.Shutdown, "app.Initialize", slog.Any("err", err))
 	}
 
-	app.Run(ctx, stop)
+	app.Run(ctx)
 	stop()
 }

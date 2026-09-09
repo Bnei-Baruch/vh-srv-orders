@@ -20,16 +20,18 @@ tasks:
   mocks:
     desc: Regenerate the mocks in internal/mocks
     cmds:
-      # Pinned because the version decides the output: an unpinned mockery
-      # rewrites every generated file with whatever its template does now, and
-      # the diff then hides whatever the interface change was.
+      # Both pins matter, and the second is not optional: mockery v3.8.0's own
+      # go.mod requires go >= 1.25.5, while this module declares 1.21 and every
+      # pipeline pins 1.21. On the declared toolchain it refuses to build —
+      # `requires go >= 1.25.5 (running go 1.21.13)` — and v3.7.0 wants 1.25.0,
+      # so no v3 mockery runs on 1.21 at all. Without GOTOOLCHAIN named here it
+      # works only because the default `auto` quietly fetches a newer Go, which
+      # is a different compiler per machine and therefore a different diff.
       #
-      # Reach for v3.8.0 or later. v3.7.0 and earlier failed here with
-      # `internal error: package "context" without types was imported` and
-      # wrote nothing — observed under a local Go 1.27.1, not under the 1.21
-      # that go.mod declares and the pipelines pin, so treat it as a floor
-      # rather than a diagnosis.
-      - go run github.com/vektra/mockery/v3@v3.8.0
+      # Nothing in CI runs this; the generated files are committed. So the pins
+      # are about two developers getting the same output, not about the
+      # pipelines.
+      - GOTOOLCHAIN=go1.25.5 go run github.com/vektra/mockery/v3@v3.8.0
 
   dev:
     desc: Start development in shared mode (workspace)

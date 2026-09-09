@@ -290,12 +290,14 @@ func TestStopServerCancelsRequestsThatOutlastTheGrace(t *testing.T) {
 // so pgxpool.Close spent the emitter's drain and the budget expired before the
 // emitter had any of it.
 func TestTheShutdownBudgetCoversWhatIsInsideIt(t *testing.T) {
-	nested := profiles.DrainGrace + emitterDrainGrace
+	// CloseGrace is the whole of EventListener.Close, not one of its waits —
+	// that distinction is why this used to pass while the budget was short.
+	nested := profiles.CloseGrace + emitterDrainGrace
 
 	if shutdownBudget <= nested {
 		t.Errorf("budget %v does not exceed the waits inside it (%v + %v): the pool close between "+
 			"them takes its time out of the emitter drain",
-			shutdownBudget, profiles.DrainGrace, emitterDrainGrace)
+			shutdownBudget, profiles.CloseGrace, emitterDrainGrace)
 	}
 
 	// And the whole exit still has to fit the grace the orchestrator gives it.
@@ -470,5 +472,101 @@ func TestServerFnTreatsAStartupSignalAsACleanStop(t *testing.T) {
 	case stop > fatal:
 		t.Error("the signal disposition is restored after the fatal drain, so a second signal " +
 			"cannot cut that drain short either")
+	}
+}
+
+// A listen failure that arrives after a signal has taken Run down the graceful
+// path must still exit non-zero. Reproducing the race itself is not reliable —
+// either branch of Run's select can win — so this drives the reporting
+// directly, in a child process because it ends in os.Exit.
+func TestALateListenErrorStillExitsNonZero(t *testing.T) {
+	if os.Getenv("LATE_LISTEN_CHILD") == "1" {
+		listenErr := make(chan error, 1)
+		listenErr <- errors.New("listen tcp :8185: bind: address already in use")
+
+		new(App).reportLateListenError(listenErr)
+		fmt.Fprintln(os.Stderr, "RETURNED INSTEAD OF EXITING")
+		return
+	}
+	if os.Getenv("LATE_LISTEN_SLOW_CHILD") == "1" {
+		// Arrives after the call starts, which is the case a non-blocking check
+		// misses: with a signal already pending, Run can reach this before the
+		// listener has tried to bind.
+		listenErr := make(chan error, 1)
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			listenErr <- errors.New("listen tcp :8185: bind: address already in use")
+		}()
+
+		new(App).reportLateListenError(listenErr)
+		fmt.Fprintln(os.Stderr, "RETURNED INSTEAD OF EXITING")
+		return
+	}
+	if os.Getenv("LATE_LISTEN_QUIET_CHILD") == "1" {
+		new(App).reportLateListenError(make(chan error, 1))
+		fmt.Fprintln(os.Stderr, "RETURNED")
+		return
+	}
+
+	loud := exec.Command(os.Args[0], "-test.run=TestALateListenErrorStillExitsNonZero")
+	loud.Env = append(os.Environ(), "LATE_LISTEN_CHILD=1")
+	out, err := loud.CombinedOutput()
+	output := string(out)
+
+	if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 1 {
+		t.Errorf("a server that never bound must exit 1, got %v:\n%s", err, output)
+	}
+	if !strings.Contains(output, "http.ListenAndServe") {
+		t.Errorf("the failure was not reported:\n%s", output)
+	}
+	if strings.Contains(output, "RETURNED INSTEAD OF EXITING") {
+		t.Errorf("it returned instead of exiting:\n%s", output)
+	}
+
+	// The same, but arriving just after the call begins — which is what the
+	// window is for, and what a non-blocking check cannot see.
+	slow := exec.Command(os.Args[0], "-test.run=TestALateListenErrorStillExitsNonZero")
+	slow.Env = append(os.Environ(), "LATE_LISTEN_SLOW_CHILD=1")
+	slowOut, slowErr := slow.CombinedOutput()
+	if exit, ok := slowErr.(*exec.ExitError); !ok || exit.ExitCode() != 1 {
+		t.Errorf("a failure arriving during the window must still exit 1, got %v:\n%s",
+			slowErr, slowOut)
+	}
+
+	// And a shutdown with no listen failure must not be delayed into a fatal.
+	quiet := exec.Command(os.Args[0], "-test.run=TestALateListenErrorStillExitsNonZero")
+	quiet.Env = append(os.Environ(), "LATE_LISTEN_QUIET_CHILD=1")
+	quietOut, quietErr := quiet.CombinedOutput()
+	if quietErr != nil {
+		t.Errorf("a clean shutdown must not exit non-zero: %v\n%s", quietErr, quietOut)
+	}
+	if !strings.Contains(string(quietOut), "RETURNED") {
+		t.Errorf("it did not return on a clean shutdown:\n%s", quietOut)
+	}
+}
+
+// Run has to consult that channel on the graceful path. Testing the reporting
+// alone leaves the call site unpinned, and the call site is the whole point.
+func TestRunChecksForALateListenErrorOnTheGracefulPath(t *testing.T) {
+	source, err := os.ReadFile("app.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body := regexp.MustCompile(`(?s)func \(a \*App\) Run\(ctx context\.Context\) \{(.*?)\n\}`).
+		FindSubmatch(source)
+	if body == nil {
+		t.Fatal("Run was not found in app.go")
+	}
+
+	graceful := bytes.Index(body[1], []byte("case <-ctx.Done():"))
+	report := bytes.Index(body[1], []byte("a.reportLateListenError(listenErr)"))
+	switch {
+	case report < 0:
+		t.Error("Run does not check for a listen failure after the graceful path, so a signal " +
+			"racing a bind failure exits 0")
+	case report < graceful:
+		t.Error("the check runs before the graceful branch, where it cannot see a failure that " +
+			"arrives during the shutdown")
 	}
 }

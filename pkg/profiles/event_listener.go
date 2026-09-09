@@ -57,9 +57,11 @@ type EventListener struct {
 	done     chan struct{}
 	quitOnce sync.Once
 	doneOnce sync.Once
-	// callbacks counts delivery callbacks in flight, so Close can wait for the
-	// ones Drain pushes through before dropping the connection they answer on.
-	callbacks sync.WaitGroup
+	// ncClosed closes once the connection has finished draining, which is the
+	// only signal that the delivery callbacks are done: both Drain calls in
+	// Close are asynchronous.
+	ncClosed     chan struct{}
+	ncClosedOnce sync.Once
 	// runnerStarted records that runQueue is up, so Close knows whether
 	// anything will ever close done.
 	runnerStarted bool
@@ -97,7 +99,11 @@ func NewEventListener() (*EventListener, error) {
 	el := new(EventListener)
 
 	var err error
-	el.nc, err = nats.Connect(common.Config.NatsUrl)
+	el.ncClosed = make(chan struct{})
+	el.nc, err = nats.Connect(common.Config.NatsUrl,
+		nats.ClosedHandler(el.connectionClosed),
+		// So the library gives up inside the same budget Close does.
+		nats.DrainTimeout(CloseGrace))
 	if err != nil {
 		return nil, fmt.Errorf("nats.Connect: %w", err)
 	}
@@ -261,91 +267,113 @@ func (el *EventListener) drainQueue() {
 	}
 }
 
-// Close stops delivery and waits for the runner, so App.Shutdown can close the
-// repo the handlers write through — but only up to DrainGrace. Past that it
-// returns with the runner still going, and those handlers do meet a closed pool.
+// Close hands back what it can and stops, within CloseGrace.
 //
-// The consumer is stopped before quit is signalled, which is the useful order
-// but not a guarantee: ConsumeContext.Stop is asynchronous, so a callback can
-// still be in handleMessage's select afterwards. Its send then stays buffered
-// and unacked, which is why that select must keep its quit case.
+// Order matters and none of it is obvious:
+//
+//  1. quit, so anything arriving from here on is handed back rather than queued
+//     for a runner that is about to stop;
+//  2. consumerCtx.Drain, which asks the consumer to push what it has already
+//     prefetched through the callback instead of discarding it — Stop discards,
+//     and those messages have their AckWait clock running;
+//  3. wait for the runner, so no handler is still writing through the repo that
+//     App.Shutdown closes next;
+//  4. Nak whatever is still queued, because a callback can win the race in
+//     handleMessage and enqueue after the runner has gone;
+//  5. nc.Drain, and wait for it. This is the only wait that says anything about
+//     the callbacks. Both Drain calls return immediately — the consumer's is a
+//     flag and a closed channel — so counting callbacks in flight here counts
+//     zero, which is what an earlier version of this function did. The
+//     connection drain unsubscribes, waits for the handlers, flushes the Naks
+//     they published and then closes, which is what ncClosed reports.
 //
 // Called from the fatal paths too, including the one where Run itself failed, so
-// nothing here is guaranteed to exist. The queue is never closed: the callback
-// may be blocked sending to it, and closing it under that is a panic on the NATS
+// nothing here is guaranteed to exist. The queue is never closed: a callback may
+// be blocked sending to it, and closing it under that is a panic on the NATS
 // dispatch goroutine.
+//
+// One event can still be left to expire: a callback that passes the quit check
+// in handleMessage, is preempted, and lands its send after step 4. It is
+// unacknowledged, so it returns — after ackWait rather than at once.
 func (el *EventListener) Close() {
-	// Quit first, so anything Drain pushes through the callback below is handed
-	// back rather than queued for a runner that is about to stop.
+	deadline := time.Now().Add(CloseGrace)
+
 	if el.quit != nil {
 		el.quitOnce.Do(func() { close(el.quit) })
 	}
-
-	// Drain, not Stop. Stop discards whatever the consumer has already
-	// prefetched — up to queueCapacity messages whose AckWait clock is already
-	// running and which the callback therefore never sees, so they are neither
-	// handled nor handed back and come back only when the wait expires. Drain
-	// pushes them through the callback, where the closed quit turns each into a
-	// Nak and an immediate redelivery. It also means the quit branch in
-	// handleMessage does real work at shutdown rather than catching the one
-	// message that happened to be mid-callback.
 	if el.consumerCtx != nil {
 		el.consumerCtx.Drain()
 	}
 
-	// Those Naks travel on the connection dropped at the end of this function,
-	// so the callbacks have to finish first.
-	el.waitFor("callbacks", el.callbacksDone())
-
 	// Only if the runner is up: Consume failing means nothing will ever close
 	// done, and waiting would hang the shutdown it was called to make orderly.
 	if el.runnerStarted && el.done != nil {
-		el.waitFor("runner", el.done)
+		el.waitUntil("runner", el.done, deadline)
 	}
+
+	el.nakRemaining()
 
 	if el.nc != nil {
-		el.nc.Close()
+		if err := el.nc.Drain(); err != nil {
+			slog.Error("EventListener.Close nc.Drain", slog.Any("err", err))
+			el.nc.Close()
+			return
+		}
+		el.waitUntil("connection drain", el.ncClosed, deadline)
 	}
 }
 
-// waitFor waits on ch for at most DrainGrace, reporting an overshoot rather than
+// nakRemaining hands back anything still queued once the runner has stopped.
+// Without it those events are neither handled nor returned until ackWait
+// expires, which is minutes.
+// waitUntil waits on ch until deadline, reporting an overshoot rather than
 // hanging the shutdown it is part of.
-func (el *EventListener) waitFor(what string, ch <-chan struct{}) {
+func (el *EventListener) waitUntil(what string, ch <-chan struct{}, deadline time.Time) {
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		slog.Warn("EventListener.Close out of time, continuing", slog.String("before", what))
+		return
+	}
+
 	select {
 	case <-ch:
-	case <-time.After(DrainGrace):
+	case <-time.After(remaining):
 		slog.Warn("EventListener.Close gave up waiting, continuing",
-			slog.String("on", what), slog.Duration("grace", DrainGrace))
+			slog.String("on", what), slog.Duration("remaining", remaining))
 	}
 }
 
-// callbacksDone closes once no delivery callback is in flight.
-func (el *EventListener) callbacksDone() <-chan struct{} {
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		el.callbacks.Wait()
-	}()
-	return done
+// CloseGrace bounds Close as a whole, not each wait inside it. Exported because
+// the caller has to budget for it: api.App.Shutdown wraps this and its own, and
+// per-wait grants had the caller funding one wait while Close spent several.
+//
+// It cannot be unbounded — the handlers reach the profile service and the
+// connection drain waits on them — so one black-holed call would mean a
+// shutdown that never finishes.
+const CloseGrace = 6 * time.Second
+
+func (el *EventListener) nakRemaining() {
+	for {
+		select {
+		case item := <-el.queue:
+			if item.msg != nil {
+				el.nak(item.msg)
+			}
+		default:
+			return
+		}
+	}
 }
 
-// DrainGrace bounds how long Close waits for the runner. Exported because the
-// caller has to budget for it: api.App.Shutdown wraps this wait and its own.
-//
-// It cannot be unbounded — the handlers reach the profile service with no
-// deadline of their own, so one black-holed connection would mean a shutdown
-// that never finishes. Overshoot is reported and the drain carries on, which
-// means a handler can outlive Close; see the note on Close.
-const DrainGrace = 4 * time.Second
+func (el *EventListener) connectionClosed(*nats.Conn) {
+	el.ncClosedOnce.Do(func() { close(el.ncClosed) })
+}
 
 func (el *EventListener) RegisterHandler(handler EventHandler) {
 	el.handlers = append(el.handlers, handler)
 }
 
 func (el *EventListener) handleMessage(msg jetstream.Msg) {
-	el.callbacks.Add(1)
-	defer el.callbacks.Done()
-
 	slog.Debug("EventListener.handleMessage", slog.Any("data", msg.Data()))
 
 	var event Event
@@ -390,7 +418,10 @@ func (el *EventListener) handleMessage(msg jetstream.Msg) {
 // the next start rather than nine minutes into it.
 func (el *EventListener) drop(msg jetstream.Msg) {
 	slog.Debug("EventListener dropped an event during shutdown")
+	el.nak(msg)
+}
 
+func (el *EventListener) nak(msg jetstream.Msg) {
 	if err := msg.Nak(); err != nil {
 		slog.Error("EventListener nak", slog.Any("err", err))
 	}

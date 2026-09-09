@@ -278,3 +278,26 @@ func TestStopServerCancelsRequestsThatOutlastTheGrace(t *testing.T) {
 		t.Fatal("the request context was never cancelled, so the handler runs on into a closed pool")
 	}
 }
+
+// The budget has to cover every wait nested inside it, with something left for
+// the pool close between them. It used to be exactly the sum of the two waits,
+// so pgxpool.Close spent the emitter's drain and the budget expired before the
+// emitter had any of it.
+func TestTheShutdownBudgetCoversWhatIsInsideIt(t *testing.T) {
+	nested := profiles.DrainGrace + emitterDrainGrace
+
+	if shutdownBudget <= nested {
+		t.Errorf("budget %v does not exceed the waits inside it (%v + %v): the pool close between "+
+			"them takes its time out of the emitter drain",
+			shutdownBudget, profiles.DrainGrace, emitterDrainGrace)
+	}
+
+	// And the whole exit still has to fit a container's grace period. Also
+	// guarded at compile time in app.go; this says it in a form that names the
+	// budget when it fails.
+	total := shutdownGrace + shutdownBudget + sentryFlushGrace
+	if total >= sigkillAfter {
+		t.Errorf("the exit needs %v (requests %v + drain %v + flush %v) against a %v SIGKILL",
+			total, shutdownGrace, shutdownBudget, sentryFlushGrace, sigkillAfter)
+	}
+}

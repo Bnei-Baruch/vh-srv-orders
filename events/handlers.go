@@ -43,9 +43,14 @@ type NatsEventHandler struct {
 	ncClosed chan struct{}
 }
 
-// drainTimeout bounds the library's own drain, so it fits inside the deadline
-// Close is given rather than outlasting it.
-const drainTimeout = 5 * time.Second
+// DrainTimeout bounds the library's own drain.
+//
+// Exported because it only works if the caller's grace is larger: api sizes
+// emitterDrainGrace from this. At 5s against that grace's 4s it did exactly
+// what its comment claimed to prevent — and worse than a missed drain, because
+// SimpleEmitter.Close reports the context error to Sentry, so every slow-NATS
+// shutdown produced a spurious failure alongside the lost publishes.
+const DrainTimeout = 3 * time.Second
 
 func NewNatsEventHandler() (*NatsEventHandler, error) {
 	eh := new(NatsEventHandler)
@@ -57,8 +62,9 @@ func NewNatsEventHandler() (*NatsEventHandler, error) {
 	eh.nc, err = nats.Connect(common.Config.NatsUrl,
 		nats.ClosedHandler(eh.closedCallback),
 		// Or the library spends its 30s default while Close waits the seconds
-		// its caller budgeted, and the drain is abandoned rather than finished.
-		nats.DrainTimeout(drainTimeout))
+		// its caller budgeted, and the drain is abandoned rather than finished
+		// — with the context error reported as a failure on the way out.
+		nats.DrainTimeout(DrainTimeout))
 	if err != nil {
 		return nil, fmt.Errorf("nats.Connect: %w", err)
 	}

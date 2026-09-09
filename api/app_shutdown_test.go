@@ -431,8 +431,10 @@ func TestServerFnOrdersItsShutdownAndSignalRestore(t *testing.T) {
 	}
 
 	deferShutdown := bytes.Index(source, []byte("defer app.Shutdown()"))
-	initialize := bytes.Index(source, []byte("app.Initialize(ctx)"))
-	run := bytes.Index(source, []byte("app.Run(ctx)"))
+	// Matched on the call, not the argument list: these checks have broken twice
+	// on signature changes that left the ordering they protect intact.
+	initialize := bytes.Index(source, []byte("app.Initialize("))
+	run := bytes.Index(source, []byte("app.Run("))
 	stop := bytes.LastIndex(source, []byte("stop()"))
 
 	switch {
@@ -551,14 +553,14 @@ func TestRunChecksForALateListenErrorOnTheGracefulPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	body := regexp.MustCompile(`(?s)func \(a \*App\) Run\(ctx context\.Context\) \{(.*?)\n\}`).
+	body := regexp.MustCompile(`(?s)func \(a \*App\) Run\([^\n]*\) \{(.*?)\n\}`).
 		FindSubmatch(source)
 	if body == nil {
 		t.Fatal("Run was not found in app.go")
 	}
 
 	graceful := bytes.Index(body[1], []byte("case <-ctx.Done():"))
-	report := bytes.Index(body[1], []byte("a.reportLateListenError(listenErr)"))
+	report := bytes.Index(body[1], []byte("a.reportLateListenError("))
 	switch {
 	case report < 0:
 		t.Error("Run does not check for a listen failure after the graceful path, so a signal " +
@@ -579,9 +581,11 @@ func TestRunRestoresTheSignalDispositionBeforeItsFatalDrains(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Prefixes, so a changed parameter list is not mistaken for a missing
+	// function: that has already turned this class of check red twice.
 	for _, fn := range []struct{ name, signature string }{
-		{"Run", `func (a *App) Run(ctx context.Context, stop func()) {`},
-		{"reportLateListenError", `func (a *App) reportLateListenError(listenErr <-chan error, stop func()) {`},
+		{"Run", `func (a *App) Run(`},
+		{"reportLateListenError", `func (a *App) reportLateListenError(`},
 	} {
 		at := bytes.Index(source, []byte(fn.signature))
 		if at < 0 {

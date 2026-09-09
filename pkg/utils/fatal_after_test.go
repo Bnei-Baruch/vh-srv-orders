@@ -109,8 +109,12 @@ func TestDrainGivesUpOnACleanupThatNeverReturns(t *testing.T) {
 	release := make(chan struct{})
 	defer close(release)
 
+	restore := cleanupBackstop
+	cleanupBackstop = 100 * time.Millisecond
+	defer func() { cleanupBackstop = restore }()
+
 	start := time.Now()
-	drain(func() { <-release }, 100*time.Millisecond)
+	drain(func() { <-release })
 	waited := time.Since(start)
 
 	if waited > 3*time.Second {
@@ -132,5 +136,36 @@ func TestTheCleanupBackstopDoesNotTruncateABoundedDrain(t *testing.T) {
 	if cleanupBackstop <= appShutdownWorstCase {
 		t.Errorf("backstop %v does not exceed App.Shutdown's own %v, so it would cut a bounded "+
 			"drain short", cleanupBackstop, appShutdownWorstCase)
+	}
+}
+
+// And FatalAfter has to be the one applying that bound. Testing drain alone left
+// the wiring unpinned: handing it any other budget — or none — kept the package
+// green with the backstop still sitting in the file looking right.
+func TestFatalAfterAppliesTheCleanupBackstop(t *testing.T) {
+	if os.Getenv("FATAL_AFTER_BACKSTOP_CHILD") == "1" {
+		cleanupBackstop = 200 * time.Millisecond
+		FatalAfter(func() { time.Sleep(time.Hour) }, "child exiting")
+		fmt.Fprintln(os.Stderr, "RETURNED INSTEAD OF EXITING")
+		return
+	}
+
+	child := exec.Command(os.Args[0], "-test.run=TestFatalAfterAppliesTheCleanupBackstop",
+		"-test.timeout=30s")
+	child.Env = append(os.Environ(), "FATAL_AFTER_BACKSTOP_CHILD=1")
+
+	start := time.Now()
+	out, err := child.CombinedOutput()
+	waited := time.Since(start)
+	output := string(out)
+
+	if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 1 {
+		t.Fatalf("expected exit 1, got %v:\n%s", err, output)
+	}
+	if waited > 20*time.Second {
+		t.Errorf("the child took %v: FatalAfter is not applying the backstop it is given", waited)
+	}
+	if !strings.Contains(output, "did not finish") {
+		t.Errorf("the overshoot was not reported:\n%s", output)
 	}
 }

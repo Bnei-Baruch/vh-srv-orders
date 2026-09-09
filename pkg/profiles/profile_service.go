@@ -1,6 +1,8 @@
 package profiles
 
 import (
+	"time"
+
 	"context"
 	"errors"
 	"fmt"
@@ -23,9 +25,15 @@ type ProfileServiceAPI struct {
 	tokenSource keycloak.TokenSource
 }
 
+// requestTimeout bounds one call to the profile service.
+const requestTimeout = 30 * time.Second
+
 func NewProfileServiceAPI(tokenSource keycloak.TokenSource) *ProfileServiceAPI {
 	client := resty.New()
 	client.SetBaseURL(common.Config.ProfileServiceUrl)
+	// Bounded because the event listener's shutdown waits on handlers that call
+	// through here, and an unbounded call turns that wait into the whole grace.
+	client.SetTimeout(requestTimeout)
 	client.SetHeaders(map[string]string{
 		"Content-Type": "application/json",
 		"User-Agent":   common.ServiceName,

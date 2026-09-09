@@ -2,11 +2,13 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -122,12 +124,14 @@ func TestRunReturnsOnSigterm(t *testing.T) {
 		common.Config.Port = freePort(t)
 
 		app := App{gEngine: gin.New()}
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
+		defer stop()
 		go func() {
 			time.Sleep(300 * time.Millisecond)
 			_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
 		}()
 
-		app.Run()
+		app.Run(ctx)
 		fmt.Fprintln(os.Stderr, "RUN RETURNED")
 		return
 	}
@@ -320,7 +324,7 @@ func TestRunExitsNonZeroWhenItCannotBind(t *testing.T) {
 
 		common.Config.Port = port
 		app := App{gEngine: gin.New()}
-		app.Run()
+		app.Run(context.Background())
 		fmt.Fprintln(os.Stderr, "RUN RETURNED")
 		return
 	}
@@ -339,5 +343,27 @@ func TestRunExitsNonZeroWhenItCannotBind(t *testing.T) {
 	}
 	if !strings.Contains(output, "http.ListenAndServe") {
 		t.Errorf("the bind failure was not reported:\n%s", output)
+	}
+}
+
+// The payment handlers must post to checkout with the request's values but not
+// its cancellation: they write payment rows first, so a caller that goes away
+// mid-call must not abandon a call that may already have charged.
+//
+// A source check because the alternative is a live checkout: what matters is
+// which context reaches PostJSON.
+func TestThePaymentPostsAreNotCancelledByTheCaller(t *testing.T) {
+	source, err := os.ReadFile("transaction_handler.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if bytes.Contains(source, []byte("utils.PostJSON(c.Request.Context()")) {
+		t.Error("a payment POST takes the request context directly: a caller that disconnects " +
+			"then cancels a call that may already have charged, with rows already written. " +
+			"Use paymentCallContext, which strips cancellation and keeps the values")
+	}
+	if !bytes.Contains(source, []byte("context.WithoutCancel(c.Request.Context())")) {
+		t.Error("paymentCallContext should build on context.WithoutCancel")
 	}
 }

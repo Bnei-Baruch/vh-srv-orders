@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fatalAfter ends in os.Exit, so it is exercised in a child process — the only
@@ -93,5 +94,43 @@ func TestFatalAfterSurvivesAPanickingCleanup(t *testing.T) {
 	}
 	if strings.Contains(output, "DEFERRED RAN") {
 		t.Errorf("the panic unwound instead of exiting, so deferred cleanup ran again:\n%s", output)
+	}
+}
+
+// A cleanup that never returns must not become a process that never exits. Most
+// callers hand FatalAfter a closure that reaches pgxpool.Close, which waits for
+// every acquired connection and takes no context — so a failure with workers
+// still holding connections hung here instead of exiting 1.
+//
+// drain is tested directly rather than through FatalAfter: the budget that
+// matters in production is 30s, and what needs proving is that the wait is
+// bounded at all.
+func TestDrainGivesUpOnACleanupThatNeverReturns(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+
+	start := time.Now()
+	drain(func() { <-release }, 100*time.Millisecond)
+	waited := time.Since(start)
+
+	if waited > 3*time.Second {
+		t.Fatalf("drain waited %v on a cleanup that never returns", waited)
+	}
+	if waited < 100*time.Millisecond {
+		t.Fatalf("drain returned after %v, before its own budget — nothing is being waited on",
+			waited)
+	}
+}
+
+// And the backstop has to sit above the budget App.Shutdown gives itself, or a
+// drain that is bounded and progressing gets cut short by the generic bound.
+func TestTheCleanupBackstopDoesNotTruncateABoundedDrain(t *testing.T) {
+	// api.App's own ladder, which cannot be imported here without a cycle:
+	// profiles.CloseGrace 6s + pool 3s + emitter 4s, then sentry.Flush 2s.
+	const appShutdownWorstCase = 15 * time.Second
+
+	if cleanupBackstop <= appShutdownWorstCase {
+		t.Errorf("backstop %v does not exceed App.Shutdown's own %v, so it would cut a bounded "+
+			"drain short", cleanupBackstop, appShutdownWorstCase)
 	}
 }

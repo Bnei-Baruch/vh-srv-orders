@@ -335,9 +335,14 @@ func (a *App) initHealth() {
 // the only exit it covered was a failure to bind.
 //
 // In-flight requests get shutdownGrace to finish; past that their connections
-// are closed. serverFn restores the default signal disposition once Run
-// returns, so a second signal during the drain cuts it short.
-func (a *App) Run(ctx context.Context) {
+// are closed.
+//
+// stop is the signal registration's undo, and Run needs it rather than leaving
+// it to its caller: serverFn restores the disposition when Run returns, and the
+// fatal paths here never return. Without it the drain they start swallows every
+// later signal, which is the escape hatch this doc used to promise and not
+// provide.
+func (a *App) Run(ctx context.Context, stop func()) {
 	server := &http.Server{
 		Addr:    ":" + common.Config.Port,
 		Handler: a.gEngine,
@@ -358,12 +363,16 @@ func (a *App) Run(ctx context.Context) {
 	// main exit 0 — reporting success for a server that never bound its port.
 	select {
 	case err := <-listenErr:
+		// Signals back to their default disposition before the drain, so a
+		// second one can cut it short. serverFn does this once Run returns, and
+		// these paths never return.
+		stop()
 		utils.FatalAfter(a.Shutdown, "http.ListenAndServe", slog.Any("err", err))
 	case <-ctx.Done():
 		slog.Info("signal received, shutting down")
 		a.stopServer(server, shutdownGrace)
 
-		a.reportLateListenError(listenErr)
+		a.reportLateListenError(listenErr, stop)
 	}
 }
 
@@ -380,9 +389,10 @@ func (a *App) Run(ctx context.Context) {
 // check finds nothing. A bind fails immediately when it fails, so this is long
 // enough to tell the two apart and short enough to be invisible in a real
 // shutdown.
-func (a *App) reportLateListenError(listenErr <-chan error) {
+func (a *App) reportLateListenError(listenErr <-chan error, stop func()) {
 	select {
 	case err := <-listenErr:
+		stop()
 		utils.FatalAfter(a.Shutdown, "http.ListenAndServe", slog.Any("err", err))
 	case <-time.After(listenErrorWindow):
 	}

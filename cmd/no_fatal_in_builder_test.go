@@ -23,9 +23,14 @@ func TestTheChargeBuilderDoesNotFatal(t *testing.T) {
 		t.Fatal("buildChargeableBillingService not found in billing.go — has it been renamed?")
 	}
 
-	if bytes.Contains(body[1], []byte("LogFatal")) {
-		t.Error("buildChargeableBillingService must not exit: it is called after `defer cleanup()`, " +
-			"so a fatal here skips the drain. Validate in the command, before initBillingInfra, " +
-			"or return an error")
+	// Every way out, not just the one that was there when this was written: the
+	// invariant is "this function does not exit", and FatalAfter, log.Fatal or a
+	// bare os.Exit skip the drain exactly as LogFatal does.
+	for _, exit := range []string{"LogFatal", "FatalAfter", "os.Exit", "log.Fatal"} {
+		if bytes.Contains(body[1], []byte(exit)) {
+			t.Errorf("buildChargeableBillingService calls %s: it runs after its callers' "+
+				"`defer cleanup()`, so exiting here skips the drain. Validate in the command, "+
+				"before initBillingInfra, or return an error", exit)
+		}
 	}
 }

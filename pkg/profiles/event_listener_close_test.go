@@ -309,3 +309,25 @@ func TestADroppedEventIsNakedForPromptRedelivery(t *testing.T) {
 		t.Errorf("acked %d times: nothing handled it", msg.acks.Load())
 	}
 }
+
+// The profile client's timeout is what the listener's drain rests on: an
+// unbounded call turns Close's wait into the whole grace, every time.
+func TestTheProfileClientIsBounded(t *testing.T) {
+	timeout := NewProfileServiceAPI(nil).client.GetClient().Timeout
+
+	if timeout == 0 {
+		t.Error("the profile client has no timeout, so a handler can outlast any shutdown grace")
+	}
+}
+
+// AckWait has to cover the queue, not one handler: the ack waits for the
+// handlers, so the last prefetched message waits for everything ahead of it.
+func TestAckWaitCoversTheWholeQueue(t *testing.T) {
+	worstCase := time.Duration(queueCapacity) * 2 * requestTimeout
+
+	if ackWait <= worstCase {
+		t.Errorf("ackWait %v does not cover %d queued handlers at %v each with a retry (%v): "+
+			"events still sitting in the queue get redelivered, and each redelivery publishes "+
+			"its own derived account event", ackWait, queueCapacity, requestTimeout, worstCase)
+	}
+}

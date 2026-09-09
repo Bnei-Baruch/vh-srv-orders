@@ -155,17 +155,6 @@ func (o *OrdersDB) FlagOrder(ctx context.Context, id int, flag string) error {
 	return err
 }
 
-func (o *OrdersDB) FlagOrderAsRenewed(ctx context.Context, orderID uint) error {
-	res, err := o.Exec(ctx, `UPDATE orders SET "Flag"=$1, updated_at=$2 WHERE id = $3`, common.OrderFlagRenewed, time.Now(), orderID)
-	if err != nil {
-		return fmt.Errorf("o.Exec: %w", err)
-	}
-	if res.RowsAffected() == 0 {
-		return common.ErrNoRowsAffected
-	}
-	return nil
-}
-
 // GetFlaggedOrders returns all orders with Flag='torenew'
 // Returns a slice of orders with id, Flag, and AccountID
 func (o *OrdersDB) GetFlaggedOrders(ctx context.Context) ([]Order, error) {

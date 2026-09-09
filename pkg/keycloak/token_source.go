@@ -30,6 +30,11 @@ type authHeaderTokenSource struct {
 
 // StaticTokenSource will simply use the same token over and over again.
 // Main use case is when we proxy a token given in api calls to downstream services.
+//
+// Nothing constructs it today, and nothing has since it was added in 2023.
+// Kept because that use case is a real one this service does not yet cover:
+// every downstream call currently authenticates as the service, not as the
+// caller who asked for it.
 func StaticTokenSource(token string) TokenSource {
 	return staticTokenSource{token: token}
 }

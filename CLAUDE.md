@@ -276,7 +276,9 @@ CLI flags via Cobra for subcommand-specific options (`--month`, `--dry-run`, `--
 
 **Libraries:** `testify/assert`, `testify/require`, `testify/mock`
 
-**Mocks:** Auto-generated via mockery (`.mockery.yml`). Output in `internal/mocks/`. Regenerate with `mockery`.
+**Mocks:** Auto-generated via mockery (`.mockery.yml`). Output in `internal/mocks/`. Regenerate with `task mocks`, which pins the version.
+
+The keycloak mock is emitted into its own package (`internal/mocks/pkg/keycloak`), because its consumers are keycloak's own dependents — `pkg/accounting` and `pkg/profiles` — and those are internal tests, so importing the combined mocks package from them is an import cycle.
 
 ```go
 mockRepo := mocks.NewMockOrdersRepository(t)
@@ -311,9 +313,10 @@ Things `task --list` won't tell you:
 - `task dev` uses the shared dev DB; `task dev:standalone` starts its own docker infra.
 - `task test` accepts `RACE=true` and `COVERAGE=true`.
 - `task mocks` regenerates the mocks, at a pinned mockery version. Run that
-  rather than a bare `mockery`: the version decides the output, and one from
-  before v3.8.0 fails against this toolchain while exiting as if there were
-  nothing to do.
+  rather than a bare `mockery`: the version decides the output, so an unpinned
+  one rewrites every generated file with its own template and buries whatever
+  the interface change was. Anything before v3.8.0 fails outright against this
+  toolchain.
 - Production entrypoint is `./orders server` (port 8185).
 - Build injects the git SHA: `-ldflags "-X gitlab.bbdev.team/vh/pay/orders/common.GitSHA=${GIT_SHA}"`
 

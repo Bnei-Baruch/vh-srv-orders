@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -15,6 +17,7 @@ import (
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
+	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
 // Shutdown is reached from the fatal paths as well as from server.go's defer, so
@@ -162,3 +165,65 @@ func freePort(t *testing.T) string {
 	}
 	return port
 }
+
+// stuckRepo stands in for a pgx pool whose Close blocks — a handler parked on a
+// row lock holds an acquired connection, and pgxpool.Close waits for it.
+type stuckRepo struct {
+	repo.OrdersRepository
+	release chan struct{}
+}
+
+func (r *stuckRepo) Close() { <-r.release }
+
+// Shutdown has to be bounded as a whole. Bounding only the listener's wait moved
+// the hang one line down: the repo close blocks, so the emitter is never drained
+// and, on a fatal path, os.Exit is never reached.
+func TestShutdownGivesUpOnAStuckClose(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	app := App{repo: &stuckRepo{release: release}}
+
+	start := time.Now()
+	app.Shutdown()
+	waited := time.Since(start)
+
+	if waited > shutdownBudget+3*time.Second {
+		t.Fatalf("Shutdown waited %v on a stuck close", waited)
+	}
+	if waited < shutdownBudget {
+		t.Fatalf("Shutdown returned after %v, before its own budget — nothing is being waited on", waited)
+	}
+}
+
+// Shutdown runs once however many times it is called. A bind failure taking the
+// FatalAfter path while SIGTERM makes Run return had both callers draining at
+// the same time, which closes the emitter twice and reports two failures that
+// did not happen.
+func TestShutdownRunsOnce(t *testing.T) {
+	var closes atomic.Int64
+	release := make(chan struct{})
+	close(release)
+	app := App{repo: &countingRepo{release: release, closes: &closes}}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			app.Shutdown()
+		}()
+	}
+	wg.Wait()
+
+	if closes.Load() != 1 {
+		t.Errorf("the repo was closed %d times, want once", closes.Load())
+	}
+}
+
+type countingRepo struct {
+	repo.OrdersRepository
+	release chan struct{}
+	closes  *atomic.Int64
+}
+
+func (r *countingRepo) Close() { r.closes.Add(1); <-r.release }

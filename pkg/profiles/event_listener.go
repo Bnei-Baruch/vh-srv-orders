@@ -62,6 +62,20 @@ type EventListener struct {
 	runnerStarted bool
 }
 
+// ackWait is how long the server waits for an ack before redelivering, and
+// maxDeliver caps how many times it will.
+//
+// The defaults (30s, unlimited) were survivable while the ack happened on
+// receipt. They are not now: a message sitting in the queue behind a slow
+// handler can exceed the wait, come back, queue up behind the same backlog and
+// come back again. The wait is generous because the handlers reach the profile
+// service with no deadline of their own, and the cap is what turns a poison
+// event into a dead letter instead of a loop.
+const (
+	ackWait    = 2 * time.Minute
+	maxDeliver = 5
+)
+
 // queued is a delivered message and its decoded event. The message travels with
 // the event so the ack happens after the handlers have run.
 type queued struct {
@@ -100,11 +114,7 @@ func NewEventListener() (*EventListener, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	el.consumer, err = el.js.CreateOrUpdateConsumer(ctx, "VH_SRV_PROFILE", jetstream.ConsumerConfig{
-		Name:        common.ServiceName,
-		Durable:     common.ServiceName,
-		Description: "Events listener of vh-srv-orders for profile changes",
-	})
+	el.consumer, err = el.js.CreateOrUpdateConsumer(ctx, "VH_SRV_PROFILE", consumerConfig())
 	if err != nil {
 		el.nc.Close()
 		return nil, fmt.Errorf("jetstream.CreateOrUpdateConsumer: %w", err)
@@ -117,9 +127,30 @@ func NewEventListener() (*EventListener, error) {
 	return el, nil
 }
 
+// consumerConfig is separate so what it sets can be checked without a server.
+func consumerConfig() jetstream.ConsumerConfig {
+	return jetstream.ConsumerConfig{
+		Name:        common.ServiceName,
+		Durable:     common.ServiceName,
+		Description: "Events listener of vh-srv-orders for profile changes",
+		// Both of these exist because the ack happens after the handlers run.
+		// Nothing is acknowledged on receipt any more, so the server's defaults
+		// decide what happens to a message waiting behind a backlog: AckWait's
+		// 30s would expire on anything the single-threaded runner had not
+		// reached, and with MaxDeliver unset that redelivery repeats without
+		// limit. A bulk profile job was enough to trigger it.
+		AckWait:    ackWait,
+		MaxDeliver: maxDeliver,
+	}
+}
+
 func (el *EventListener) Run() error {
 	var err error
-	el.consumerCtx, err = el.consumer.Consume(el.handleMessage)
+	// Prefetch bounded to what the queue can hold. Consume's default is 500
+	// messages, all of which start their AckWait clock on delivery while the
+	// runner works through them eight at a time.
+	el.consumerCtx, err = el.consumer.Consume(el.handleMessage,
+		jetstream.PullMaxMessages(queueCapacity))
 	if err != nil {
 		return fmt.Errorf("jetstream consumer.Consume: %w", err)
 	}
@@ -153,8 +184,8 @@ func (el *EventListener) runQueue() {
 
 // deliver runs the handlers for one event and acknowledges it.
 //
-// The panic is recovered per event. It used to be recovered for the whole
-// runner, which then stopped the consumer and called Run again from this
+// A panic is recovered per handler, in callHandler. It used to be recovered for
+// the whole runner, which then stopped the consumer and called Run again from this
 // goroutine: that wrote consumerCtx and runnerStarted while Close was reading
 // them, and — because deferred calls run last-in-first-out — closed done before
 // the restarted runner existed. One handler panic therefore spent the handshake
@@ -168,21 +199,33 @@ func (el *EventListener) runQueue() {
 // would repeat the same outcome and a poison event would loop for ever.
 func (el *EventListener) deliver(item queued) {
 	defer func() {
-		if r := recover(); r != nil {
-			slog.Error("EventListener handler panic",
-				slog.Any("panic", r), slog.String("event_type", item.event.Type))
-			sentry.CurrentHub().Recover(r)
-			debug.PrintStack()
-		}
-
 		if item.msg != nil {
 			item.msg.Ack()
 		}
 	}()
 
 	for _, handler := range el.handlers {
-		handler(item.event)
+		el.callHandler(handler, item.event)
 	}
+}
+
+// callHandler runs one handler, recovered.
+//
+// Per handler rather than per event: a panic in the first used to skip the rest,
+// which is invisible today because exactly one is registered, and would be a
+// silent gap the moment a second one is. The panic is swallowed either way, so
+// scoping it this tightly costs nothing.
+func (el *EventListener) callHandler(handler EventHandler, event Event) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("EventListener handler panic",
+				slog.Any("panic", r), slog.String("event_type", event.Type))
+			sentry.CurrentHub().Recover(r)
+			debug.PrintStack()
+		}
+	}()
+
+	handler(event)
 }
 
 // drainQueue delivers what is already buffered and returns. Anything it does not

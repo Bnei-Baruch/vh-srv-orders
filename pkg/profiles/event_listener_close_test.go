@@ -178,3 +178,44 @@ func TestCloseDoesNotCloseTheQueue(t *testing.T) {
 		t.Fatal("the queue is full or closed after Close")
 	}
 }
+
+// One handler panicking must not cost the others their event. Invisible today,
+// since App registers exactly one — but RegisterHandler appends, so the second
+// one added would silently inherit "whatever the first panicked on, you do not
+// see".
+func TestAPanicInOneHandlerDoesNotSkipTheNext(t *testing.T) {
+	listener := newListener()
+
+	var second atomic.Int64
+	listener.RegisterHandler(func(Event) { panic("first handler exploded") })
+	listener.RegisterHandler(func(Event) { second.Add(1) })
+
+	go listener.runQueue()
+	msg := &stubMsg{}
+	listener.queue <- queued{event: Event{Type: "update_profile"}, msg: msg}
+	listener.Close()
+
+	if second.Load() != 1 {
+		t.Errorf("the second handler ran %d times, want once", second.Load())
+	}
+	if msg.acks.Load() != 1 {
+		t.Errorf("acked %d times, want once", msg.acks.Load())
+	}
+}
+
+// The consumer's ack window and delivery cap are load-bearing now that the ack
+// waits for the handlers: the server's defaults are 30s and unlimited, which
+// turns a backlog into endless redelivery.
+func TestConsumerBoundsItsRedelivery(t *testing.T) {
+	config := consumerConfig()
+
+	if config.AckWait <= 0 {
+		t.Error("AckWait unset: the server's 30s applies, and a queued event can outlast it")
+	}
+	if config.AckWait < time.Minute {
+		t.Errorf("AckWait is %v, which a handler with no deadline of its own can exceed", config.AckWait)
+	}
+	if config.MaxDeliver <= 0 {
+		t.Error("MaxDeliver unset: a poison event is redelivered without limit")
+	}
+}

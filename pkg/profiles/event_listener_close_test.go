@@ -119,13 +119,13 @@ func TestCloseGivesUpOnAStuckRunner(t *testing.T) {
 	// the package times out and prints a goroutine dump.
 	select {
 	case <-closed:
-	case <-time.After(DrainGrace + 5*time.Second):
+	case <-time.After(CloseGrace + 5*time.Second):
 		t.Fatalf("Close did not return within %v of its own grace: the wait is unbounded",
 			5*time.Second)
 	}
 
 	waited := time.Since(start)
-	if waited < DrainGrace {
+	if waited < CloseGrace {
 		t.Fatalf("Close returned after %v, before its own grace — the wait is not happening", waited)
 	}
 }
@@ -332,43 +332,60 @@ func TestAckWaitCoversTheWholeQueue(t *testing.T) {
 	}
 }
 
-// Close waits for delivery callbacks, not only for the runner. Drain pushes the
-// consumer's prefetched messages through the callback so each is naked, and
-// those Naks travel on the connection Close drops at the end — so dropping it
-// before the callbacks finish loses exactly the promptness Drain was for.
-func TestCloseWaitsForTheDeliveryCallbacks(t *testing.T) {
+// Close waits for the connection drain, which is the only signal that the
+// delivery callbacks are done.
+//
+// Both Drain calls return immediately — the consumer's is a flag and a closed
+// channel — so an earlier version counted callbacks in flight at this point,
+// counted zero, and closed the connection while the drained messages were still
+// on their way to the callback. Those events then waited out ackWait, which is
+// the outcome draining was meant to avoid.
+func TestCloseWaitsForTheConnectionDrain(t *testing.T) {
 	listener := newListener()
-	// No runner, so the only thing Close can be waiting on is the callback.
-	// With one, its 4s grace would satisfy the assertion below on its own.
 	listener.runnerStarted = false
+	listener.ncClosed = make(chan struct{})
 
-	inCallback := make(chan struct{})
-	release := make(chan struct{})
-	listener.callbacks.Add(1)
-	go func() {
-		defer listener.callbacks.Done()
-		close(inCallback)
-		<-release
-	}()
-	<-inCallback
-
+	// No connection, so drive the wait the way Close does once nc.Drain has
+	// been asked for: it returns only when the drain reports itself closed.
 	returned := make(chan struct{})
 	go func() {
 		defer close(returned)
-		listener.Close()
+		listener.waitUntil("connection drain", listener.ncClosed, time.Now().Add(CloseGrace))
 	}()
 
 	select {
 	case <-returned:
-		t.Fatal("Close returned while a delivery callback was still in flight")
+		t.Fatal("the wait returned before the drain reported closed")
 	case <-time.After(200 * time.Millisecond):
 	}
 
-	close(release)
+	listener.connectionClosed(nil)
 	select {
 	case <-returned:
-	case <-time.After(DrainGrace + 5*time.Second):
-		t.Fatal("Close did not return once the callback finished")
+	case <-time.After(2 * time.Second):
+		t.Fatal("the wait did not return once the drain reported closed")
+	}
+}
+
+// Anything still queued when the runner stops is handed back, not left to
+// expire: a callback can pass handleMessage's quit check and land its send after
+// the runner has gone.
+func TestCloseNaksWhatIsStillQueued(t *testing.T) {
+	listener := newListener()
+	listener.runnerStarted = false
+
+	stragglers := []*stubMsg{{}, {}}
+	for _, msg := range stragglers {
+		listener.queue <- queued{event: Event{}, msg: msg}
+	}
+
+	listener.Close()
+
+	for i, msg := range stragglers {
+		if msg.naks.Load() != 1 {
+			t.Errorf("straggler %d naked %d times, want once — it waits out ackWait instead",
+				i, msg.naks.Load())
+		}
 	}
 }
 

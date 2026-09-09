@@ -362,6 +362,29 @@ func (a *App) Run(ctx context.Context) {
 	case <-ctx.Done():
 		slog.Info("signal received, shutting down")
 		a.stopServer(server, shutdownGrace)
+
+		a.reportLateListenError(listenErr)
+	}
+}
+
+// reportLateListenError exits non-zero if the server had in fact failed to
+// listen, after a signal has already sent Run down the graceful path.
+//
+// Both cases of Run's select can be ready at once — a signal arriving as the
+// listener fails — and select picks either. Taking the graceful one left the
+// failure unread in its buffered channel and the process exiting 0 for a server
+// that never bound.
+//
+// Waited for rather than polled: with a signal already pending, that branch can
+// be reached before the goroutine has tried to bind at all, so a non-blocking
+// check finds nothing. A bind fails immediately when it fails, so this is long
+// enough to tell the two apart and short enough to be invisible in a real
+// shutdown.
+func (a *App) reportLateListenError(listenErr <-chan error) {
+	select {
+	case err := <-listenErr:
+		utils.FatalAfter(a.Shutdown, "http.ListenAndServe", slog.Any("err", err))
+	case <-time.After(listenErrorWindow):
 	}
 }
 
@@ -402,6 +425,10 @@ func (a *App) stopServer(server *http.Server, grace time.Duration) {
 // tuning a safety margin to fit arithmetic. The derived budget leaves room for
 // 15s, and the requests that need it are the ones that post to checkout.
 const shutdownGrace = 15 * time.Second
+
+// listenErrorWindow is how long Run looks for a listen failure after a signal
+// has already sent it down the graceful path.
+const listenErrorWindow = 250 * time.Millisecond
 
 // Shutdown is called from the fatal paths as well as from server.go's defer, so
 // it has to survive a partial Initialize: either field can still be nil when a
@@ -458,9 +485,11 @@ func (a *App) shutdown() {
 
 // The shutdown budget and the grants inside it.
 //
-// The budget is derived rather than picked, because it used to be picked and was
-// wrong: 10s, against 5s for the listener and 5s for the emitter, left the pool
-// close between them with nothing. Any time pgxpool.Close spent came out of the
+// Derived from what each step is allowed, because picking it by hand went wrong
+// twice: first at 10s against 5s for the listener and 5s for the emitter, which
+// left the pool close between them with nothing; then again when the listener
+// grew a second wait and kept spending a per-wait grant the budget funded once.
+// profiles.CloseGrace is now the whole of Close, however many waits it makes. Any time pgxpool.Close spent came out of the
 // emitter drain — the one step with data in it — and the budget expired before
 // it started.
 //
@@ -472,7 +501,7 @@ const (
 	poolCloseGrace    = 3 * time.Second
 	sentryFlushGrace  = 2 * time.Second
 
-	shutdownBudget = profiles.DrainGrace + poolCloseGrace + emitterDrainGrace
+	shutdownBudget = profiles.CloseGrace + poolCloseGrace + emitterDrainGrace
 )
 
 // stopGracePeriod is how long the orchestrator waits before SIGKILL, and the

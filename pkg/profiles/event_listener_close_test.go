@@ -488,3 +488,27 @@ func TestCloseDrainsTheConsumerRatherThanStoppingIt(t *testing.T) {
 		t.Error("Close calls consumerCtx.Stop(), which discards the prefetched buffer")
 	}
 }
+
+// The connection is published to its interface field only after the error is
+// checked. nats.Connect returns a concrete *nats.Conn, so assigning first puts
+// a typed nil in the field on failure — non-nil to every guard, and a panic on
+// use. Three other sites on this branch had that bug; making this field an
+// interface created a fourth, which is why it is checked the same way.
+func TestTheConnectionIsPublishedOnlyOnSuccess(t *testing.T) {
+	source, err := os.ReadFile("event_listener.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assign := bytes.Index(source, []byte("el.nc = conn"))
+	check := bytes.Index(source, []byte(`return nil, fmt.Errorf("nats.Connect`))
+	switch {
+	case assign < 0:
+		t.Fatal("the connection assignment was not found: check this test before the code")
+	case check < 0:
+		t.Fatal("nats.Connect's error branch was not found")
+	case assign < check:
+		t.Error("el.nc is assigned before nats.Connect's error is checked, which leaves a typed " +
+			"nil in an interface field on failure")
+	}
+}

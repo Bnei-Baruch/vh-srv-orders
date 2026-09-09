@@ -133,7 +133,7 @@ func TestRunReturnsOnSigterm(t *testing.T) {
 			_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
 		}()
 
-		app.Run(ctx, stop)
+		app.Run(ctx)
 		fmt.Fprintln(os.Stderr, "RUN RETURNED")
 		return
 	}
@@ -326,7 +326,7 @@ func TestRunExitsNonZeroWhenItCannotBind(t *testing.T) {
 
 		common.Config.Port = port
 		app := App{gEngine: gin.New()}
-		app.Run(context.Background(), func() {})
+		app.Run(context.Background())
 		fmt.Fprintln(os.Stderr, "RUN RETURNED")
 		return
 	}
@@ -410,68 +410,13 @@ func TestInitializeStopsOnAnAlreadyCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := new(App).Initialize(ctx)
+	err := new(App).Initialize(ctx, func() {})
 
 	if err == nil {
 		t.Fatal("Initialize ran to completion on a cancelled context")
 	}
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("error %v does not wrap context.Canceled", err)
-	}
-}
-
-// serverFn must defer the drain before it starts building, or a failure
-// part-way through startup drains nothing, and must restore the default signal
-// disposition before the drain rather than after it — otherwise a second
-// Ctrl-C during a slow drain is swallowed.
-func TestServerFnOrdersItsShutdownAndSignalRestore(t *testing.T) {
-	source, err := os.ReadFile("../cmd/server.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	deferShutdown := bytes.Index(source, []byte("defer app.Shutdown()"))
-	// Matched on the call, not the argument list: these checks have broken twice
-	// on signature changes that left the ordering they protect intact.
-	initialize := bytes.Index(source, []byte("app.Initialize("))
-	run := bytes.Index(source, []byte("app.Run("))
-	stop := bytes.LastIndex(source, []byte("stop()"))
-
-	switch {
-	case deferShutdown < 0 || initialize < 0 || run < 0:
-		t.Fatal("serverFn does not look like it did: check this test before the code")
-	case deferShutdown > initialize:
-		t.Error("the drain is deferred after Initialize, so a failure during startup drains nothing")
-	case stop < run:
-		t.Error("the signal disposition is restored before Run returns, so the shutdown it " +
-			"triggers cannot be interrupted by a second signal")
-	}
-}
-
-// A signal during startup is a stop, not a crash. serverFn has to tell the two
-// apart, because Initialize reports both as an error: reported as a failure it
-// would be `docker compose up -d` recreating the container mid-migration, and
-// the old process exiting 1 for having been asked to stop.
-func TestServerFnTreatsAStartupSignalAsACleanStop(t *testing.T) {
-	source, err := os.ReadFile("../cmd/server.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if !bytes.Contains(source, []byte("errors.Is(err, context.Canceled)")) {
-		t.Error("serverFn does not distinguish a cancelled startup from a failed one, so a " +
-			"signal during Initialize exits 1")
-	}
-
-	initErr := bytes.Index(source, []byte("app.Initialize(ctx); err != nil"))
-	fatal := bytes.Index(source, []byte(`utils.FatalAfter(app.Shutdown, "app.Initialize"`))
-	stop := bytes.Index(source, []byte("stop()"))
-	switch {
-	case initErr < 0 || fatal < 0:
-		t.Fatal("serverFn does not look like it did: check this test before the code")
-	case stop > fatal:
-		t.Error("the signal disposition is restored after the fatal drain, so a second signal " +
-			"cannot cut that drain short either")
 	}
 }
 
@@ -484,7 +429,7 @@ func TestALateListenErrorStillExitsNonZero(t *testing.T) {
 		listenErr := make(chan error, 1)
 		listenErr <- errors.New("listen tcp :8185: bind: address already in use")
 
-		new(App).reportLateListenError(listenErr, func() {})
+		new(App).reportLateListenError(listenErr)
 		fmt.Fprintln(os.Stderr, "RETURNED INSTEAD OF EXITING")
 		return
 	}
@@ -498,12 +443,12 @@ func TestALateListenErrorStillExitsNonZero(t *testing.T) {
 			listenErr <- errors.New("listen tcp :8185: bind: address already in use")
 		}()
 
-		new(App).reportLateListenError(listenErr, func() {})
+		new(App).reportLateListenError(listenErr)
 		fmt.Fprintln(os.Stderr, "RETURNED INSTEAD OF EXITING")
 		return
 	}
 	if os.Getenv("LATE_LISTEN_QUIET_CHILD") == "1" {
-		new(App).reportLateListenError(make(chan error, 1), func() {})
+		new(App).reportLateListenError(make(chan error, 1))
 		fmt.Fprintln(os.Stderr, "RETURNED")
 		return
 	}
@@ -571,39 +516,69 @@ func TestRunChecksForALateListenErrorOnTheGracefulPath(t *testing.T) {
 	}
 }
 
-// Run's fatal paths must restore the default signal disposition before they
-// drain. serverFn does it when Run returns, and these paths never return — so
-// without it the drain they start swallows every later signal, which is the
-// escape hatch Run's doc promises.
-func TestRunRestoresTheSignalDispositionBeforeItsFatalDrains(t *testing.T) {
+// Every fatal in this type goes through a.fatal, which is what makes the drain
+// and the signal restore impossible to half-apply. They have each been added to
+// some paths and not others across three rounds — six sites in Initialize kept
+// the signals trapped for a round after Run stopped doing so — and the guards
+// written then were brittle in the other direction: one matched a `stop()` that
+// belonged to a defer elsewhere, the other read only the branch it expected.
+//
+// This is one check for all of them, and it does not care how many paths there
+// are or what order their branches sit in.
+func TestEveryFatalPathGoesThroughOneFunction(t *testing.T) {
 	source, err := os.ReadFile("app.go")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Prefixes, so a changed parameter list is not mistaken for a missing
-	// function: that has already turned this class of check red twice.
-	for _, fn := range []struct{ name, signature string }{
-		{"Run", `func (a *App) Run(`},
-		{"reportLateListenError", `func (a *App) reportLateListenError(`},
-	} {
-		at := bytes.Index(source, []byte(fn.signature))
-		if at < 0 {
-			t.Fatalf("%s not found: check this test before the code", fn.name)
-		}
+	fatalBody := regexp.MustCompile(`(?s)func \(a \*App\) fatal\([^\n]*\) \{(.*?)\n\}`).
+		FindSubmatch(source)
+	if fatalBody == nil {
+		t.Fatal("App.fatal was not found in app.go")
+	}
 
-		body := source[at:]
-		if next := bytes.Index(body[len(fn.signature):], []byte("\nfunc ")); next >= 0 {
-			body = body[:len(fn.signature)+next]
-		}
+	// Signals first, then the drain: a drain that cannot be interrupted is the
+	// one an operator meets.
+	restore := bytes.Index(fatalBody[1], []byte("a.stop()"))
+	drainAndExit := bytes.Index(fatalBody[1], []byte("utils.FatalAfter("))
+	switch {
+	case restore < 0:
+		t.Error("App.fatal does not restore the signal disposition, so the drain it starts " +
+			"swallows every later signal")
+	case drainAndExit < 0:
+		t.Error("App.fatal does not drain and exit")
+	case restore > drainAndExit:
+		t.Error("App.fatal drains before restoring signals, so the drain cannot be interrupted")
+	}
 
-		fatal := bytes.Index(body, []byte("utils.FatalAfter(a.Shutdown"))
-		if fatal < 0 {
-			continue
-		}
-		if restore := bytes.LastIndex(body[:fatal], []byte("stop()")); restore < 0 {
-			t.Errorf("%s drains without restoring the signal disposition first, so a second "+
-				"signal cannot interrupt it", fn.name)
-		}
+	// And nothing may bypass it. Counting rather than locating, so a new fatal
+	// anywhere in the file fails this regardless of which function it is in.
+	if calls := bytes.Count(source, []byte("utils.FatalAfter(")); calls != 1 {
+		t.Errorf("app.go calls utils.FatalAfter %d times, want 1 — inside App.fatal. A direct "+
+			"call skips the signal restore, which is exactly how six sites in Initialize were "+
+			"missed", calls)
+	}
+}
+
+// serverFn defers the drain before it starts building, and treats a signal
+// during startup as a stop rather than a crash.
+func TestServerFnDefersTheDrainAndDistinguishesACancelledStartup(t *testing.T) {
+	source, err := os.ReadFile("../cmd/server.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	deferShutdown := bytes.Index(source, []byte("defer app.Shutdown()"))
+	initialize := bytes.Index(source, []byte("app.Initialize("))
+	switch {
+	case deferShutdown < 0 || initialize < 0:
+		t.Fatal("serverFn does not look like it did: check this test before the code")
+	case deferShutdown > initialize:
+		t.Error("the drain is deferred after Initialize, so a failure during startup drains nothing")
+	}
+
+	if !bytes.Contains(source, []byte("errors.Is(err, context.Canceled)")) {
+		t.Error("serverFn does not distinguish a cancelled startup from a failed one, so a " +
+			"signal during Initialize exits 1")
 	}
 }

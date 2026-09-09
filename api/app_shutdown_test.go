@@ -3,12 +3,14 @@ package api
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -296,13 +298,13 @@ func TestTheShutdownBudgetCoversWhatIsInsideIt(t *testing.T) {
 			shutdownBudget, profiles.DrainGrace, emitterDrainGrace)
 	}
 
-	// And the whole exit still has to fit a container's grace period. Also
-	// guarded at compile time in app.go; this says it in a form that names the
-	// budget when it fails.
+	// And the whole exit still has to fit the grace the orchestrator gives it.
+	// Also guarded at compile time in app.go; this says it in a form that names
+	// the budget when it fails.
 	total := shutdownGrace + shutdownBudget + sentryFlushGrace
-	if total >= sigkillAfter {
+	if total >= stopGracePeriod {
 		t.Errorf("the exit needs %v (requests %v + drain %v + flush %v) against a %v SIGKILL",
-			total, shutdownGrace, shutdownBudget, sentryFlushGrace, sigkillAfter)
+			total, shutdownGrace, shutdownBudget, sentryFlushGrace, stopGracePeriod)
 	}
 }
 
@@ -365,5 +367,81 @@ func TestThePaymentPostsAreNotCancelledByTheCaller(t *testing.T) {
 	}
 	if !bytes.Contains(source, []byte("context.WithoutCancel(c.Request.Context())")) {
 		t.Error("paymentCallContext should build on context.WithoutCancel")
+	}
+}
+
+// The grace the code budgets against has to be the grace the deployment
+// actually grants. It used to be neither: the constant claimed 30s because
+// "a container gets 30s by default", which is Kubernetes' default, while this
+// service deploys with docker compose — whose default is 10s, less than
+// shutdownGrace alone. So SIGKILL landed mid-drain on every deploy with a
+// request in flight, with the compile guard green.
+func TestTheExitFitsTheDeclaredStopGracePeriod(t *testing.T) {
+	compose, err := os.ReadFile("../docker-compose.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	declared := regexp.MustCompile(`stop_grace_period:\s*(\S+)`).FindSubmatch(compose)
+	if declared == nil {
+		t.Fatal("docker-compose.yml declares no stop_grace_period, so Compose's 10s default " +
+			"applies — less than shutdownGrace alone")
+	}
+
+	granted, err := time.ParseDuration(string(declared[1]))
+	if err != nil {
+		t.Fatalf("stop_grace_period %q does not parse: %v", declared[1], err)
+	}
+
+	if granted != stopGracePeriod {
+		t.Errorf("docker-compose.yml grants %v, the code budgets against %v", granted, stopGracePeriod)
+	}
+
+	needed := shutdownGrace + shutdownBudget + sentryFlushGrace
+	if needed >= granted {
+		t.Errorf("the exit needs %v and the deployment grants %v", needed, granted)
+	}
+}
+
+// Initialize has to observe the signal, because startup is not instant:
+// migrations and the JWKS fetch both wait on something, and a signal arriving
+// then used to be noticed only once Run began.
+func TestInitializeStopsOnAnAlreadyCancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := new(App).Initialize(ctx)
+
+	if err == nil {
+		t.Fatal("Initialize ran to completion on a cancelled context")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error %v does not wrap context.Canceled", err)
+	}
+}
+
+// serverFn must defer the drain before it starts building, or a failure
+// part-way through startup drains nothing, and must restore the default signal
+// disposition before the drain rather than after it — otherwise a second
+// Ctrl-C during a slow drain is swallowed.
+func TestServerFnOrdersItsShutdownAndSignalRestore(t *testing.T) {
+	source, err := os.ReadFile("../cmd/server.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	deferShutdown := bytes.Index(source, []byte("defer app.Shutdown()"))
+	initialize := bytes.Index(source, []byte("app.Initialize(ctx)"))
+	run := bytes.Index(source, []byte("app.Run(ctx)"))
+	stop := bytes.LastIndex(source, []byte("stop()"))
+
+	switch {
+	case deferShutdown < 0 || initialize < 0 || run < 0:
+		t.Fatal("serverFn does not look like it did: check this test before the code")
+	case deferShutdown > initialize:
+		t.Error("the drain is deferred after Initialize, so a failure during startup drains nothing")
+	case stop < run:
+		t.Error("the signal disposition is restored before Run returns, so the shutdown it " +
+			"triggers cannot be interrupted by a second signal")
 	}
 }

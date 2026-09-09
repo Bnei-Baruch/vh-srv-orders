@@ -36,7 +36,19 @@ func serverFn(cmd *cobra.Command, args []string) {
 	defer stop()
 
 	app := api.NewApp()
+	// Deferred before Initialize, so a failure part-way through startup still
+	// drains what was built.
 	defer app.Shutdown()
-	app.Initialize()
+
+	if err := app.Initialize(ctx); err != nil {
+		utils.FatalAfter(app.Shutdown, "app.Initialize", slog.Any("err", err))
+	}
+
 	app.Run(ctx)
+
+	// Signals go back to their default disposition before the drain, not after
+	// it. signal.NotifyContext stops relaying once it has delivered one, so
+	// leaving this to the defer meant a second Ctrl-C during the drain was
+	// swallowed and the operator had no way to cut it short.
+	stop()
 }

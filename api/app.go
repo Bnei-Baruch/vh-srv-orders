@@ -42,14 +42,35 @@ func NewApp() *App {
 	return new(App)
 }
 
-func (a *App) Initialize() {
-	a.initSentry()
-	a.initEventEmitter()
-	a.initDB()
-	a.initEventListener()
-	a.ordersAPI = NewOrdersAPI(a.repo)
-	a.initGinEngine()
-	a.initHealth()
+// Initialize builds the app, stopping early if the process is already being
+// asked to shut down.
+//
+// Startup is not instant — migrations and the JWKS fetch both talk to something
+// — and a signal arriving during it used to be noticed only once Run began. The
+// steps are cheap to abandon: nothing here is a payment, and the caller's
+// deferred Shutdown drains whatever was built.
+func (a *App) Initialize(ctx context.Context) error {
+	steps := []struct {
+		name string
+		run  func()
+	}{
+		{"sentry", a.initSentry},
+		{"events emitter", a.initEventEmitter},
+		{"database", a.initDB},
+		{"events listener", a.initEventListener},
+		{"api", func() { a.ordersAPI = NewOrdersAPI(a.repo) }},
+		{"gin engine", a.initGinEngine},
+		{"health", a.initHealth},
+	}
+
+	for _, step := range steps {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("aborted before %s: %w", step.name, err)
+		}
+		step.run()
+	}
+
+	return nil
 }
 
 // initEventEmitter always builds one. It used to build one only when NatsUrl was
@@ -314,8 +335,8 @@ func (a *App) initHealth() {
 // the only exit it covered was a failure to bind.
 //
 // In-flight requests get shutdownGrace to finish; past that their connections
-// are closed. A second signal is not caught, so an impatient operator still
-// gets an immediate exit.
+// are closed. serverFn restores the default signal disposition once Run
+// returns, so a second signal during the drain cuts it short.
 func (a *App) Run(ctx context.Context) {
 	server := &http.Server{
 		Addr:    ":" + common.Config.Port,
@@ -454,14 +475,25 @@ const (
 	shutdownBudget = profiles.DrainGrace + poolCloseGrace + emitterDrainGrace
 )
 
-// A container gets 30s between SIGTERM and SIGKILL by default, and the whole
-// exit has to fit: this much for in-flight requests, then the budget above, then
-// the Sentry flush. Guarded at compile time — subtracting on unsigned constants
-// makes an edit that overruns a build failure rather than a shutdown the
-// orchestrator cuts short.
-const sigkillAfter = 30 * time.Second
+// stopGracePeriod is how long the orchestrator waits before SIGKILL, and the
+// whole exit has to fit inside it: this much for in-flight requests, then the
+// budget above, then the Sentry flush.
+//
+// It is declared in docker-compose.yml as stop_grace_period, and it has to be:
+// Compose's default is 10 seconds, which the ladder below overruns nearly
+// threefold. This constant used to say 30s on the grounds that "a container
+// gets 30s by default" — true of Kubernetes, which this service does not
+// deploy to. Nothing was enforcing anything; the guard was checking arithmetic
+// against another platform's number while SIGKILL landed mid-drain on every
+// deploy with a request in flight.
+//
+// TestTheExitFitsTheDeclaredStopGracePeriod reads the Compose file, so the two
+// cannot drift apart silently.
+const stopGracePeriod = 35 * time.Second
 
-const _ = uint64(sigkillAfter - shutdownGrace - shutdownBudget - sentryFlushGrace)
+// Guarded at compile time as well: subtracting on unsigned constants makes an
+// edit that overruns a build failure.
+const _ = uint64(stopGracePeriod - shutdownGrace - shutdownBudget - sentryFlushGrace)
 
 func (a *App) SetEmitter(emitter events.EventEmitter) {
 	a.eventEmitter = emitter

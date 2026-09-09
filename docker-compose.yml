@@ -6,6 +6,12 @@ services:
     image: "${IMAGE_NAME}"
     container_name: 'vh-srv-orders'
     restart: unless-stopped
+    # Compose sends SIGKILL 10s after SIGTERM unless told otherwise, and this
+    # service needs longer to shut down cleanly: in-flight requests, then the
+    # profile listener, the connection pool, the NATS drain and the Sentry
+    # flush. api.stopGracePeriod is the same number, and a test reads this file
+    # to check they agree.
+    stop_grace_period: 35s
     volumes:
       - /root/google_application_credentials.json:/vh_google_app_creds.json:ro
     environment:

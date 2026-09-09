@@ -1,12 +1,11 @@
 package profiles
 
 import (
-	"time"
-
 	"context"
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/go-resty/resty/v2"
 

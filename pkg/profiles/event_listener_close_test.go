@@ -331,3 +331,71 @@ func TestAckWaitCoversTheWholeQueue(t *testing.T) {
 			"its own derived account event", ackWait, queueCapacity, requestTimeout, worstCase)
 	}
 }
+
+// Close waits for delivery callbacks, not only for the runner. Drain pushes the
+// consumer's prefetched messages through the callback so each is naked, and
+// those Naks travel on the connection Close drops at the end — so dropping it
+// before the callbacks finish loses exactly the promptness Drain was for.
+func TestCloseWaitsForTheDeliveryCallbacks(t *testing.T) {
+	listener := newListener()
+	// No runner, so the only thing Close can be waiting on is the callback.
+	// With one, its 4s grace would satisfy the assertion below on its own.
+	listener.runnerStarted = false
+
+	inCallback := make(chan struct{})
+	release := make(chan struct{})
+	listener.callbacks.Add(1)
+	go func() {
+		defer listener.callbacks.Done()
+		close(inCallback)
+		<-release
+	}()
+	<-inCallback
+
+	returned := make(chan struct{})
+	go func() {
+		defer close(returned)
+		listener.Close()
+	}()
+
+	select {
+	case <-returned:
+		t.Fatal("Close returned while a delivery callback was still in flight")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	close(release)
+	select {
+	case <-returned:
+	case <-time.After(DrainGrace + 5*time.Second):
+		t.Fatal("Close did not return once the callback finished")
+	}
+}
+
+// Close must Drain the consumer, not Stop it. Stop discards whatever has
+// already been prefetched — up to queueCapacity events whose AckWait clock is
+// running — so they are neither handled nor handed back, and come back only
+// when that wait expires. Drain pushes them through the callback, where the
+// closed quit turns each into a Nak.
+//
+// A source check: reaching this needs a live JetStream consumer.
+func TestCloseDrainsTheConsumerRatherThanStoppingIt(t *testing.T) {
+	source, err := os.ReadFile("event_listener.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	closeBody := regexp.MustCompile(`(?s)func \(el \*EventListener\) Close\(\) \{(.*?)\n\}`).
+		FindSubmatch(source)
+	if closeBody == nil {
+		t.Fatal("Close was not found in event_listener.go")
+	}
+
+	if !bytes.Contains(closeBody[1], []byte("el.consumerCtx.Drain()")) {
+		t.Error("Close must call consumerCtx.Drain(): Stop discards the prefetched buffer, so " +
+			"those events wait out ackWait instead of being naked back immediately")
+	}
+	if bytes.Contains(closeBody[1], []byte("el.consumerCtx.Stop()")) {
+		t.Error("Close calls consumerCtx.Stop(), which discards the prefetched buffer")
+	}
+}

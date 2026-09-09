@@ -445,3 +445,30 @@ func TestServerFnOrdersItsShutdownAndSignalRestore(t *testing.T) {
 			"triggers cannot be interrupted by a second signal")
 	}
 }
+
+// A signal during startup is a stop, not a crash. serverFn has to tell the two
+// apart, because Initialize reports both as an error: reported as a failure it
+// would be `docker compose up -d` recreating the container mid-migration, and
+// the old process exiting 1 for having been asked to stop.
+func TestServerFnTreatsAStartupSignalAsACleanStop(t *testing.T) {
+	source, err := os.ReadFile("../cmd/server.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !bytes.Contains(source, []byte("errors.Is(err, context.Canceled)")) {
+		t.Error("serverFn does not distinguish a cancelled startup from a failed one, so a " +
+			"signal during Initialize exits 1")
+	}
+
+	initErr := bytes.Index(source, []byte("app.Initialize(ctx); err != nil"))
+	fatal := bytes.Index(source, []byte(`utils.FatalAfter(app.Shutdown, "app.Initialize"`))
+	stop := bytes.Index(source, []byte("stop()"))
+	switch {
+	case initErr < 0 || fatal < 0:
+		t.Fatal("serverFn does not look like it did: check this test before the code")
+	case stop > fatal:
+		t.Error("the signal disposition is restored after the fatal drain, so a second signal " +
+			"cannot cut that drain short either")
+	}
+}

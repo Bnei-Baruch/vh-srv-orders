@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -41,14 +42,25 @@ func serverFn(cmd *cobra.Command, args []string) {
 	defer app.Shutdown()
 
 	if err := app.Initialize(ctx); err != nil {
+		// Signals go back to their default disposition before any drain, so a
+		// second Ctrl-C can cut a slow one short. signal.NotifyContext stops
+		// relaying once it has delivered one, so leaving this to the deferred
+		// stop meant every later signal was swallowed.
+		stop()
+
+		// A signal during startup is a stop, not a failure. Reported as a
+		// failure it would be `docker compose up -d` recreating the container
+		// mid-migration and the old process exiting 1 — a clean shutdown
+		// recorded as a crashed startup by Docker and anything reading exit
+		// codes.
+		if errors.Is(err, context.Canceled) {
+			slog.Info("signal received during startup, shutting down")
+			return
+		}
+
 		utils.FatalAfter(app.Shutdown, "app.Initialize", slog.Any("err", err))
 	}
 
 	app.Run(ctx)
-
-	// Signals go back to their default disposition before the drain, not after
-	// it. signal.NotifyContext stops relaying once it has delivered one, so
-	// leaving this to the defer meant a second Ctrl-C during the drain was
-	// swallowed and the operator had no way to cut it short.
 	stop()
 }

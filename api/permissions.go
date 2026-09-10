@@ -9,7 +9,12 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/common"
 )
 
-func (o *OrdersAPI) HasAnyRole(c *gin.Context, roles ...string) bool {
+// hasAnyRole and userKeyFromRequest read the request only — no dependency on
+// OrdersAPI's fields. They are functions so that a handler group with its own
+// struct (see CouponAPI) can enforce permissions without taking the whole of
+// OrdersAPI along for it. The methods below remain for the handlers still
+// hanging off OrdersAPI.
+func hasAnyRole(c *gin.Context, roles ...string) bool {
 
 	authData := c.Request.Context().Value(common.CtxAuthClaims)
 	if authData == nil {
@@ -24,6 +29,10 @@ func (o *OrdersAPI) HasAnyRole(c *gin.Context, roles ...string) bool {
 	}
 
 	return true
+}
+
+func (o *OrdersAPI) HasAnyRole(c *gin.Context, roles ...string) bool {
+	return hasAnyRole(c, roles...)
 }
 
 func (o *OrdersAPI) isSubjectOrHasAnyRole(c *gin.Context, keycloakID string, roles ...string) bool {
@@ -111,7 +120,7 @@ func (o *OrdersAPI) isUserOrHasAnyRole(c *gin.Context, userID string, roles ...s
 	return true
 }
 
-func (o *OrdersAPI) getUserKeyFromRequest(c *gin.Context) (string, bool) {
+func userKeyFromRequest(c *gin.Context) (string, bool) {
 
 	authData := c.Request.Context().Value(common.CtxAuthClaims)
 	if authData == nil {
@@ -125,6 +134,10 @@ func (o *OrdersAPI) getUserKeyFromRequest(c *gin.Context) (string, bool) {
 	}
 
 	return claims.Sub, true
+}
+
+func (o *OrdersAPI) getUserKeyFromRequest(c *gin.Context) (string, bool) {
+	return userKeyFromRequest(c)
 }
 
 // isAuthUserOrHasAnyRole checks whether the user is authenticated and/or has any of the specified roles.

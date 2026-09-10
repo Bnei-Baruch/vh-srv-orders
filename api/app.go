@@ -30,6 +30,7 @@ type App struct {
 	eventListener       *profiles.EventListener
 	domainEventsHandler *domain.EventsHandler
 	ordersAPI           *OrdersAPI
+	couponAPI           *CouponAPI
 	gEngine             *gin.Engine
 }
 
@@ -249,13 +250,13 @@ func (a *App) initRoutes() {
 
 	couponGroup := baseV2Path.Group("/coupon")
 	{
-		couponGroup.POST("/", a.ordersAPI.handleCreateCoupon)
-		couponGroup.GET("/", a.ordersAPI.handleListCoupons)
-		couponGroup.GET("/mine", a.ordersAPI.handleGetMyCoupons)
-		couponGroup.POST("/redeem", a.ordersAPI.handleRedeemCoupon)
-		couponGroup.GET("/:id/redemptions", a.ordersAPI.handleGetCouponRedemptions)
-		couponGroup.PATCH("/:id", a.ordersAPI.handleUpdateCoupon)
-		couponGroup.DELETE("/:id/redemption/:rid", a.ordersAPI.handleRevokeRedemption)
+		couponGroup.POST("/", a.couponAPI.handleCreateCoupon)
+		couponGroup.GET("/", a.couponAPI.handleListCoupons)
+		couponGroup.GET("/mine", a.couponAPI.handleGetMyCoupons)
+		couponGroup.POST("/redeem", a.couponAPI.handleRedeemCoupon)
+		couponGroup.GET("/:id/redemptions", a.couponAPI.handleGetCouponRedemptions)
+		couponGroup.PATCH("/:id", a.couponAPI.handleUpdateCoupon)
+		couponGroup.DELETE("/:id/redemption/:rid", a.couponAPI.handleRevokeRedemption)
 	}
 
 	a.gEngine.GET("/status/:email", a.ordersAPI.status)

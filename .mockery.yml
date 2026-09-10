@@ -13,6 +13,11 @@ template: testify
 template-schema: '{{.Template}}.schema.json'
 packages:
   gitlab.bbdev.team/vh/pay/orders/repo:
+  # Consumer-declared interfaces. These packages own the storage contracts
+  # their own code uses (domain.AccountsRepo, pricing's three providers,
+  # api.couponRepo), so this is where the mocks for them come from — mockery
+  # follows the interface, not the implementation.
+  gitlab.bbdev.team/vh/pay/orders/domain:
   # Its own package, because the tests that use this mock are keycloak's own
   # consumers — pkg/accounting and pkg/profiles — and importing the combined
   # mocks package from there is an import cycle: that package also holds

@@ -44,6 +44,7 @@ func (a *App) Initialize() {
 	a.initDB()
 	a.initEventListener()
 	a.ordersAPI = NewOrdersAPI(a.repo)
+	a.couponAPI = NewCouponAPI(a.repo)
 	a.initGinEngine()
 	a.initHealth()
 }

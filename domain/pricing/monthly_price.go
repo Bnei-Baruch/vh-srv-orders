@@ -10,7 +10,6 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/pkg/accounting"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/priority"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
-	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
 // MonthlyPriceRes is the response for a monthly price query.
@@ -46,9 +45,9 @@ func GetMonthlyPrice(
 	country string,
 	preferredCurrency string,
 	pricingVersion string,
-	discountProvider repo.ManualDiscountProvider,
-	hhProvider repo.HHGrantProvider,
-	couponProvider repo.CouponProvider,
+	discountProvider ManualDiscountProvider,
+	hhProvider HHGrantProvider,
+	couponProvider CouponProvider,
 ) (*MonthlyPriceRes, error) {
 	if preferredCurrency == "" {
 		preferredCurrency = common.CurrencyUSD

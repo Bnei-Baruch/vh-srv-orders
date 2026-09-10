@@ -15,7 +15,7 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
-// manualDiscountProviderFunc is a function adapter that implements repo.ManualDiscountProvider.
+// manualDiscountProviderFunc is a function adapter that implements ManualDiscountProvider.
 type manualDiscountProviderFunc func(ctx context.Context, keycloakID string) (*repo.ManualDiscount, error)
 
 func (f manualDiscountProviderFunc) GetActiveManualDiscount(ctx context.Context, keycloakID string) (*repo.ManualDiscount, error) {

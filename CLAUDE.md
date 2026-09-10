@@ -94,7 +94,7 @@ Logger is enriched per-request in middleware with `request_id`. Workers add `wor
 
 ## Interfaces
 
-`OrdersRepository` (90 methods) is the interface `domain/billing`, `cmd` and `importers` still take whole — they mock it, which is the remaining reason it exists. It is being broken up from the consumer side, one package at a time, and it shrinks when the last consumer of a block of methods has its own interface. Don't refactor it as part of unrelated work.
+`OrdersRepository` (25 methods) is the interface `domain/billing`, `cmd` and `importers` take whole — they mock it, which is the only remaining reason it is an interface at all. It is being broken up from the consumer side, one package at a time, and it shrinks when the last consumer of a block of methods has its own interface. Don't refactor it as part of unrelated work.
 
 `App.repo` and `OrdersAPI.repo` hold the concrete `*repo.OrdersDB`: nothing substitutes them (the api tests use real Postgres), and typing them as the interface is what forced every narrow interface's methods to stay on `OrdersRepository` too.
 

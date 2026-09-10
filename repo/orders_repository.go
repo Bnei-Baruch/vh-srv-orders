@@ -20,7 +20,6 @@ type OrdersRepository interface {
 	GetAccountIDByKeycloakID(ctx context.Context, keycloakId string) (int, error)
 	GetEmailByKeycloakID(ctx context.Context, keycloakId string) (string, error)
 	CreateAccount(ctx context.Context, a Account) (int, error)
-	GetOrCreateAccount(ctx context.Context, a Account) (int, error)
 	GetOrCreateAccountFromProfile(ctx context.Context, keycloakID string) (int, error)
 	PatchAccount(ctx context.Context, req Account, accountID int) error
 	PatchOrCreateAccount(ctx context.Context, a Account) (int, error)
@@ -107,26 +106,14 @@ type OrdersRepository interface {
 
 	UpsertManualDiscount(ctx context.Context, req ManualDiscountReq) (*ManualDiscount, error)
 	CancelManualDiscount(ctx context.Context, keycloakID string) error
-	GetActiveManualDiscount(ctx context.Context, keycloakID string) (*ManualDiscount, error)
 	GetAllManualDiscounts(ctx context.Context, search string) ([]*ManualDiscount, error)
 
 	CancelHHGrant(ctx context.Context, keycloakID string) error
-	GetActiveHHGrant(ctx context.Context, keycloakID string) (*HHGrant, error)
 
 	CreateHHRequest(ctx context.Context, req HHRequestReq) (*HHRequest, error)
 	GetAllHHRequests(ctx context.Context, status, search string) ([]*HHRequestWithGrant, error)
 	ConcludeHHRequest(ctx context.Context, id int, c HHRequestConclusion) (*HHRequest, error)
 
-	CreateCoupon(ctx context.Context, c Coupon) (*Coupon, error)
-	GetCouponByID(ctx context.Context, id int) (*Coupon, error)
-	ListCoupons(ctx context.Context) ([]CouponListItem, error)
-	UpdateCoupon(ctx context.Context, c Coupon) (*Coupon, error)
-	CountCouponRedemptions(ctx context.Context, couponID int) (int, error)
-	ListCouponRedemptions(ctx context.Context, couponID int) ([]CouponRedemptionDetail, error)
-	RevokeRedemption(ctx context.Context, couponID, redemptionID int) error
-	GetMyCoupons(ctx context.Context, keycloakID string) ([]MyCoupon, error)
-	GetActiveCouponRedemptions(ctx context.Context, keycloakID string) ([]ActiveCouponRedemption, error)
-	RedeemCoupon(ctx context.Context, keycloakID, code, country string) (*CouponRedemption, error)
 
 	HasPaidMembership(ctx context.Context, email string) (bool, error)
 	HasTicket(ctx context.Context, email string) (bool, error)

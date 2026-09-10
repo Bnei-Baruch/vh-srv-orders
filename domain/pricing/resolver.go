@@ -25,9 +25,9 @@ type PriceResolver struct {
 	priorityClient      *priority.Client
 	accountingService   accounting.AccountingService
 	quickbooksCompanyID string
-	discountProvider    repo.ManualDiscountProvider // optional; applies manual discount when set
-	hhProvider          repo.HHGrantProvider        // optional; applies Help Haver grant when set
-	couponProvider      repo.CouponProvider         // optional; applies redeemed coupons when set
+	discountProvider    ManualDiscountProvider // optional; applies manual discount when set
+	hhProvider          HHGrantProvider        // optional; applies Help Haver grant when set
+	couponProvider      CouponProvider         // optional; applies redeemed coupons when set
 }
 
 // NewPriceResolver creates a resolver for billing use.
@@ -47,19 +47,19 @@ func NewPriceResolver(
 
 // SetManualDiscountProvider wires the manual discount lookup into the resolver.
 // Call this after NewPriceResolver when a DB is available (e.g. billing commands).
-func (r *PriceResolver) SetManualDiscountProvider(p repo.ManualDiscountProvider) {
+func (r *PriceResolver) SetManualDiscountProvider(p ManualDiscountProvider) {
 	r.discountProvider = p
 }
 
 // SetHHGrantProvider wires the Help Haver grant lookup into the resolver.
 // Call this after NewPriceResolver when a DB is available (e.g. billing commands).
-func (r *PriceResolver) SetHHGrantProvider(p repo.HHGrantProvider) {
+func (r *PriceResolver) SetHHGrantProvider(p HHGrantProvider) {
 	r.hhProvider = p
 }
 
 // SetCouponProvider wires the coupon-redemption lookup into the resolver.
 // Call this after NewPriceResolver when a DB is available (e.g. billing commands).
-func (r *PriceResolver) SetCouponProvider(p repo.CouponProvider) {
+func (r *PriceResolver) SetCouponProvider(p CouponProvider) {
 	r.couponProvider = p
 }
 

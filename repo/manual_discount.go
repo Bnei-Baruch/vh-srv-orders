@@ -10,12 +10,6 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/common"
 )
 
-// ManualDiscountProvider fetches the active manual discount for a user.
-// Implemented by *OrdersDB; injected into the pricing resolver.
-type ManualDiscountProvider interface {
-	GetActiveManualDiscount(ctx context.Context, keycloakID string) (*ManualDiscount, error)
-}
-
 // UpsertManualDiscount cancels any other active discounts for the user, then inserts or updates
 // the record. If req.ID is set the existing row is updated; otherwise a new row is inserted.
 // Both operations run in a transaction.

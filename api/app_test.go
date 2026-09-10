@@ -33,6 +33,7 @@ func NewTestApp(t *testing.T) *App {
 	require.Nil(t, err)
 
 	a.ordersAPI = NewOrdersAPI(a.repo)
+	a.couponAPI = NewCouponAPI(a.repo)
 	a.gEngine = gin.Default()
 	a.gEngine.Use(
 		middleware.Logging(),

@@ -13,6 +13,11 @@ template: testify
 template-schema: '{{.Template}}.schema.json'
 packages:
   gitlab.bbdev.team/vh/pay/orders/repo:
+  # Here for domain.AccountsRepo: mockery follows the interface, and consumers
+  # now declare their own. domain/pricing is absent on purpose — its tests use
+  # function adapters, so mocks for its providers would be generated code
+  # nothing calls.
+  gitlab.bbdev.team/vh/pay/orders/domain:
   # Its own package, because the tests that use this mock are keycloak's own
   # consumers — pkg/accounting and pkg/profiles — and importing the combined
   # mocks package from there is an import cycle: that package also holds

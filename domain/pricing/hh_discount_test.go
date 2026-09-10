@@ -14,7 +14,7 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
-// hhGrantProviderFunc is a function adapter that implements repo.HHGrantProvider.
+// hhGrantProviderFunc is a function adapter that implements HHGrantProvider.
 type hhGrantProviderFunc func(ctx context.Context, keycloakID string) (*repo.HHGrant, error)
 
 func (f hhGrantProviderFunc) GetActiveHHGrant(ctx context.Context, keycloakID string) (*repo.HHGrant, error) {

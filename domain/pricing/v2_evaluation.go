@@ -15,7 +15,6 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/pkg/priority"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
-	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
 // Currency conversion ratios to NIS (hardcoded — update when rates change significantly).
@@ -138,9 +137,9 @@ func EvaluateV2Price(
 	primaryKeycloakID string,
 	primaryEmail string,
 	country string,
-	discountProvider repo.ManualDiscountProvider,
-	hhProvider repo.HHGrantProvider,
-	couponProvider repo.CouponProvider,
+	discountProvider ManualDiscountProvider,
+	hhProvider HHGrantProvider,
+	couponProvider CouponProvider,
 ) (*V2PricingEvaluation, error) {
 	ctx = context.WithValue(ctx, common.CtxLogger, utils.LogFor(ctx).With(
 		slog.Int("account_id", primaryAccountID),

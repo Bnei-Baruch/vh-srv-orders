@@ -10,14 +10,14 @@ import (
 )
 
 type OrdersAPI struct {
-	repo                repo.OrdersRepository
+	repo                *repo.OrdersDB
 	profileService      profiles.ProfileService
 	priorityClient      *priority.Client
 	accountingService   accounting.AccountingService
 	quickbooksCompanyID string
 }
 
-func NewOrdersAPI(db repo.OrdersRepository) *OrdersAPI {
+func NewOrdersAPI(db *repo.OrdersDB) *OrdersAPI {
 	return &OrdersAPI{
 		repo:                db,
 		profileService:      profiles.NewProfileServiceAPI(keycloak.NewClient()),

@@ -25,7 +25,7 @@ import (
 )
 
 type App struct {
-	repo                repo.OrdersRepository
+	repo                *repo.OrdersDB
 	eventEmitter        events.EventEmitter
 	eventListener       *profiles.EventListener
 	domainEventsHandler *domain.EventsHandler

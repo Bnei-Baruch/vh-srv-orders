@@ -101,7 +101,7 @@ func requestBody(t *testing.T, request any) io.Reader {
 
 func paymentsCount(t *testing.T, a *App) int {
 	var n int
-	err := a.repo.(*repo.OrdersDB).QueryRow(context.Background(), "SELECT count(*) FROM payments").Scan(&n)
+	err := a.repo.QueryRow(context.Background(), "SELECT count(*) FROM payments").Scan(&n)
 	require.NoError(t, err)
 	return n
 }
@@ -127,7 +127,7 @@ func TestCheckout_V2_AtPrice_ChargesAndPersistsEvaluation(t *testing.T) {
 	assert.Equal(t, "v2", p.PricingVersion.String)
 
 	var evaluation string
-	err := a.repo.(*repo.OrdersDB).QueryRow(context.Background(),
+	err := a.repo.QueryRow(context.Background(),
 		"SELECT pricing_evaluation::text FROM payments WHERE id = $1", p.ID).Scan(&evaluation)
 	require.NoError(t, err)
 	assert.Contains(t, evaluation, `"discounts"`)

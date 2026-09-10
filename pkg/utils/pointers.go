@@ -1,27 +1,10 @@
 package utils
 
-import (
-	"time"
-
-	uuid "github.com/satori/go.uuid"
-)
-
-func PointerString(s string) *string {
-	return &s
-}
-
-func PointerInt(i int) *int {
-	return &i
-}
-
-func PointerBool(b bool) *bool {
-	return &b
-}
-
-func PointerTime(t time.Time) *time.Time {
-	return &t
-}
-
-func PointerUUID(id uuid.UUID) *uuid.UUID {
-	return &id
+// Ptr returns a pointer to v, for the literals and function results that have
+// no address of their own.
+//
+// Superseded by the language at Go 1.26, where new(expr) does this — delete
+// this file and rewrite the calls when go.mod moves off 1.21.
+func Ptr[T any](v T) *T {
+	return &v
 }

@@ -9,11 +9,9 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/common"
 )
 
-// hasAnyRole and userKeyFromRequest read the request only — no dependency on
-// OrdersAPI's fields. They are functions so that a handler group with its own
-// struct (see CouponAPI) can enforce permissions without taking the whole of
-// OrdersAPI along for it. The methods below remain for the handlers still
-// hanging off OrdersAPI.
+// hasAnyRole and userKeyFromRequest read the request only, so a handler group
+// with its own struct (see CouponAPI) can use them without an *OrdersAPI. The
+// methods delegating to them are for the handlers still on OrdersAPI.
 func hasAnyRole(c *gin.Context, roles ...string) bool {
 
 	authData := c.Request.Context().Value(common.CtxAuthClaims)

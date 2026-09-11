@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/volatiletech/null/v9"
 
-	"gitlab.bbdev.team/vh/pay/orders/common"
 	pkgmocks "gitlab.bbdev.team/vh/pay/orders/internal/mocks/pkg"
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
@@ -42,7 +41,7 @@ func TestResolve_ManualDiscount_DBError_ReturnsError(t *testing.T) {
 		Email:   null.StringFrom("user@example.com"),
 	}
 
-	_, err := r.Resolve(context.Background(), account, common.CurrencyNIS)
+	_, err := r.Resolve(context.Background(), account)
 
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrDonationFetch)
@@ -65,7 +64,7 @@ func TestResolve_ManualDiscount_NoProvider_V2Succeeds(t *testing.T) {
 		Email:   null.StringFrom("user2@example.com"),
 	}
 
-	result, err := r.Resolve(context.Background(), account, common.CurrencyNIS)
+	result, err := r.Resolve(context.Background(), account)
 
 	require.NoError(t, err)
 	assert.Equal(t, "v2", result.PricingVersion)
@@ -92,7 +91,7 @@ func TestResolve_ManualDiscount_NoActiveDiscount_V2Succeeds(t *testing.T) {
 		Email:   null.StringFrom("user3@example.com"),
 	}
 
-	result, err := r.Resolve(context.Background(), account, common.CurrencyNIS)
+	result, err := r.Resolve(context.Background(), account)
 
 	require.NoError(t, err)
 	assert.Equal(t, "v2", result.PricingVersion)

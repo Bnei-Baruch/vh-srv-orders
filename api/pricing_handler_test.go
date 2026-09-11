@@ -29,45 +29,6 @@ func TestHandleMonthlyPriceByKCID_UnknownKeycloakID(t *testing.T) {
 	assert.Equal(t, false, got["success"])
 }
 
-func TestHandleMonthlyPriceByKCID_V1_USD(t *testing.T) {
-	a := NewTestApp(t)
-	defer CloseTestApp(a)
-
-	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
-
-	got := GET(t, a, fmt.Sprintf("/v2/pricing/monthly/%s?pricing_version=v1&currency=usd", USER_KEY), http.StatusOK)
-	assert.Equal(t, true, got["success"])
-	data := got["data"].(map[string]interface{})
-	assert.Equal(t, 20.0, data["amount"])
-	assert.Equal(t, common.CurrencyUSD, data["currency"])
-	assert.Equal(t, "v1", data["pricing_version"])
-	assert.Nil(t, data["v2_details"])
-}
-
-func TestHandleMonthlyPriceByKCID_V1_EUR(t *testing.T) {
-	a := NewTestApp(t)
-	defer CloseTestApp(a)
-
-	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
-
-	got := GET(t, a, fmt.Sprintf("/v2/pricing/monthly/%s?pricing_version=v1&currency=EUR", USER_KEY), http.StatusOK)
-	data := got["data"].(map[string]interface{})
-	assert.Equal(t, 20.0, data["amount"])
-	assert.Equal(t, common.CurrencyEUR, data["currency"])
-}
-
-func TestHandleMonthlyPriceByKCID_V1_FallbackToUSDForUnknownCurrency(t *testing.T) {
-	a := NewTestApp(t)
-	defer CloseTestApp(a)
-
-	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
-
-	got := GET(t, a, fmt.Sprintf("/v2/pricing/monthly/%s?pricing_version=v1&currency=GBP", USER_KEY), http.StatusOK)
-	data := got["data"].(map[string]interface{})
-	assert.Equal(t, 20.0, data["amount"])
-	assert.Equal(t, common.CurrencyUSD, data["currency"])
-}
-
 func TestHandleMonthlyPriceByKCID_NonAdminCannotAccessOtherUser(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)
@@ -76,7 +37,7 @@ func TestHandleMonthlyPriceByKCID_NonAdminCannotAccessOtherUser(t *testing.T) {
 
 	// Non-admin querying a different user's ID gets 403 (no JSON body).
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest("GET", "/v2/pricing/monthly/other-user?pricing_version=v1&currency=USD", nil)
+	r := httptest.NewRequest("GET", "/v2/pricing/monthly/other-user", nil)
 	ctx := context.WithValue(r.Context(), common.CtxAuthClaims, &middleware.IDTokenClaims{
 		Sub:         USER_KEY,
 		RealmAccess: middleware.Roles{Roles: []string{"some-role"}},
@@ -86,15 +47,37 @@ func TestHandleMonthlyPriceByKCID_NonAdminCannotAccessOtherUser(t *testing.T) {
 }
 
 func TestHandleMonthlyPriceByKCID_AdminCanQueryAnyUser(t *testing.T) {
+	priorityServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer priorityServer.Close()
+	origPriorityURL := common.Config.PriorityBaseURL
+	common.Config.PriorityBaseURL = priorityServer.URL
+	defer func() { common.Config.PriorityBaseURL = origPriorityURL }()
+
 	a := NewTestApp(t)
 	defer CloseTestApp(a)
+	a.ordersAPI.SetPriorityClient(priority.NewClient())
+	a.ordersAPI.SetProfileService(&notFoundProfileService{})
+	mockAcc := accountingmocks.NewMockAccountingService(t)
+	mockAcc.EXPECT().GetLastContributions(mock.Anything, mock.Anything, mock.Anything).
+		Return(&accounting.ContributionsResult{Found: false}, nil).Maybe()
+	mockAcc.EXPECT().GetEuropeContributions(mock.Anything, mock.Anything).
+		Return(&accounting.EuropeContributionsResult{}, nil).Maybe()
+	a.ordersAPI.SetAccountingService(mockAcc)
+	a.ordersAPI.SetQuickbooksCompanyID("test-company")
 
-	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom("other-user")}, http.StatusCreated)
+	POST_ROOT(t, a, "/v2/account/", repo.Account{
+		UserKey: null.StringFrom("other-user"),
+		Country: null.StringFrom("IL"),
+		Email:   null.StringFrom("other@example.com"),
+	}, http.StatusCreated)
 
-	got := do(t, a, "GET", "/v2/pricing/monthly/other-user?pricing_version=v1&currency=USD", nil, http.StatusOK, DoOptions{isRoot: true})
+	got := do(t, a, "GET", "/v2/pricing/monthly/other-user", nil, http.StatusOK, DoOptions{isRoot: true})
 	assert.Equal(t, true, got["success"])
 	data := got["data"].(map[string]interface{})
-	assert.Equal(t, 20.0, data["amount"])
+	assert.Equal(t, 180.0, data["amount"])
+	assert.Equal(t, "v2", data["pricing_version"])
 }
 
 func TestHandleMonthlyPriceByKCID_DonationFetchError_ReturnsDegradedResponse(t *testing.T) {

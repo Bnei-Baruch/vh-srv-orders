@@ -31,8 +31,7 @@ func checkoutPriceEnforced(req *repo.RequestOrder) bool {
 
 // enforceCheckoutPrice resolves the account's v2 monthly price, rejects requests
 // below it, and stamps the evaluation onto req so CreatePayment persists it.
-// Accounts outside v2 pricing (e.g. RU) are left untouched. Returns false if it
-// wrote an error response.
+// Returns false if it wrote an error response.
 func (o *OrdersAPI) enforceCheckoutPrice(c *gin.Context, req *repo.RequestOrder, accountID int) bool {
 	ctx := c.Request.Context()
 
@@ -42,15 +41,12 @@ func (o *OrdersAPI) enforceCheckoutPrice(c *gin.Context, req *repo.RequestOrder,
 		_ = c.Error(fmt.Errorf("enforceCheckoutPrice: repo.GetAccount: %w", err))
 		return false
 	}
-	if !pricing.V2Eligible(account.Country.String) {
-		return true
-	}
 
 	res, err := pricing.GetMonthlyPrice(
 		ctx,
 		o.profileService, o.priorityClient, o.accountingService, o.quickbooksCompanyID,
 		account.ID, account.UserKey.String, account.Email.String, account.Country.String,
-		strings.ToUpper(req.Currency.String), "v2", o.repo, o.repo, o.repo,
+		o.repo, o.repo, o.repo,
 	)
 	if err != nil {
 		c.Status(http.StatusInternalServerError)

@@ -18,8 +18,7 @@ type ChargePrice struct {
 	V2Evaluation   *V2PricingEvaluation `json:"v2_evaluation,omitempty"`
 }
 
-// PriceResolver resolves charge prices for billing. It routes between v1 and v2 pricing based on
-// the account's country.
+// PriceResolver resolves v2 charge prices for billing based on the account's country.
 type PriceResolver struct {
 	profileService      profiles.ProfileService
 	priorityClient      *priority.Client
@@ -63,38 +62,24 @@ func (r *PriceResolver) SetCouponProvider(p repo.CouponProvider) {
 	r.couponProvider = p
 }
 
-// Resolve determines the charge price for a renewal.
-// For v2-eligible countries, it evaluates country-based pricing with donation discounts.
-// For other countries, it uses static v1 pricing based on the order's existing currency.
-func (r *PriceResolver) Resolve(ctx context.Context, account *repo.Account, v1OrderCurrency string) (*ChargePrice, error) {
-	var result *ChargePrice
-	if V2Eligible(account.Country.String) {
-		eval, err := EvaluateV2Price(
-			ctx, r.profileService, r.priorityClient, r.accountingService, r.quickbooksCompanyID,
-			account.ID, account.UserKey.String, account.Email.String, account.Country.String,
-			r.discountProvider, r.hhProvider, r.couponProvider,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("EvaluateV2Price: %w", err)
-		}
-		if eval.HasDiscountErrors() {
-			return nil, fmt.Errorf("EvaluateV2Price: %w", ErrDonationFetch)
-		}
-		result = &ChargePrice{
-			Amount:         eval.FinalPrice.Amount,
-			Currency:       eval.FinalPrice.Currency,
-			PricingVersion: "v2",
-			V2Evaluation:   eval,
-		}
-	} else {
-		// v1 pricing is static; manual discounts are not applied by design.
-		price := selectV1Price(v1OrderCurrency)
-		result = &ChargePrice{
-			Amount:         price.Amount,
-			Currency:       price.Currency,
-			PricingVersion: "v1",
-		}
+// Resolve determines the charge price for a renewal by evaluating country-based
+// pricing with donation discounts.
+func (r *PriceResolver) Resolve(ctx context.Context, account *repo.Account) (*ChargePrice, error) {
+	eval, err := EvaluateV2Price(
+		ctx, r.profileService, r.priorityClient, r.accountingService, r.quickbooksCompanyID,
+		account.ID, account.UserKey.String, account.Email.String, account.Country.String,
+		r.discountProvider, r.hhProvider, r.couponProvider,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("EvaluateV2Price: %w", err)
 	}
-
-	return result, nil
+	if eval.HasDiscountErrors() {
+		return nil, fmt.Errorf("EvaluateV2Price: %w", ErrDonationFetch)
+	}
+	return &ChargePrice{
+		Amount:         eval.FinalPrice.Amount,
+		Currency:       eval.FinalPrice.Currency,
+		PricingVersion: "v2",
+		V2Evaluation:   eval,
+	}, nil
 }

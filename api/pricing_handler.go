@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -20,13 +19,8 @@ func (o *OrdersAPI) handleMonthlyPriceByKCID(c *gin.Context) {
 		return
 	}
 
-	preferredCurrency := strings.ToUpper(c.Query("currency"))
-	pricingVersion := c.Query("pricing_version")
-
 	utils.LogFor(c.Request.Context()).Info("handleMonthlyPriceByKCID",
 		slog.String("keycloak_id", keycloakId),
-		slog.String("pricing_version", pricingVersion),
-		slog.String("currency", preferredCurrency),
 	)
 
 	accountID, err := o.repo.GetAccountIDByKeycloakID(c.Request.Context(), keycloakId)
@@ -51,7 +45,7 @@ func (o *OrdersAPI) handleMonthlyPriceByKCID(c *gin.Context) {
 		c.Request.Context(),
 		o.profileService, o.priorityClient, o.accountingService, o.quickbooksCompanyID,
 		account.ID, account.UserKey.String, account.Email.String, account.Country.String,
-		preferredCurrency, pricingVersion, o.repo, o.repo, o.repo,
+		o.repo, o.repo, o.repo,
 	)
 	if err != nil {
 		c.Status(http.StatusInternalServerError)

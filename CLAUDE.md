@@ -315,10 +315,10 @@ Things `task --list` won't tell you:
 - `task mocks` regenerates the mocks, at a pinned mockery version. Run that
   rather than a bare `mockery`: the version decides the output, so an unpinned
   one rewrites every generated file with its own template and buries whatever
-  the interface change was. The task pins the Go toolchain too, because mockery
-  v3 requires a newer one than this module declares — on 1.21 it refuses to
-  build at all, and the default `GOTOOLCHAIN=auto` otherwise picks whatever
-  each machine happens to fetch.
+  the interface change was. The task names an exact Go toolchain too, because
+  `GOTOOLCHAIN=auto` picks whatever each machine happens to have and a different
+  compiler is a different diff. Raise that pin whenever go.mod's `go` directive
+  moves; it has to clear mockery v3.8.0's own floor of go 1.25.5 as well.
 - Production entrypoint is `./orders server` (port 8185).
 - Build injects the git SHA: `-ldflags "-X gitlab.bbdev.team/vh/pay/orders/common.GitSHA=${GIT_SHA}"`
 

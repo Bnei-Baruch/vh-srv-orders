@@ -25,6 +25,8 @@ import (
 )
 
 type App struct {
+	// Concrete, with the same promoted-pgx caveat as OrdersAPI.repo. Close() in
+	// Shutdown is the one pool method this type should call.
 	repo                *repo.OrdersDB
 	eventEmitter        events.EventEmitter
 	eventListener       *profiles.EventListener
@@ -43,8 +45,6 @@ func (a *App) Initialize() {
 	a.initEventEmitter()
 	a.initDB()
 	a.initEventListener()
-	a.ordersAPI = NewOrdersAPI(a.repo)
-	a.couponAPI = NewCouponAPI(a.repo)
 	a.initGinEngine()
 	a.initHealth()
 }
@@ -144,6 +144,13 @@ func (a *App) initGinEngine() {
 }
 
 func (a *App) initRoutes() {
+	// Constructed here so owning a group and registering its routes are one
+	// step. A route registered on a nil group compiles and starts fine, then
+	// panics on the first request — that shipped once (49628d8, fixed f878aa4)
+	// when only Initialize remembered and NewTestApp did not.
+	a.ordersAPI = NewOrdersAPI(a.repo)
+	a.couponAPI = NewCouponAPI(a.repo)
+
 	// routes
 	orders := a.gEngine.Group("/orders")
 	{

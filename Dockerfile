@@ -1,4 +1,4 @@
-FROM golang:1.21 AS base
+FROM golang:1.27 AS base
 
 # ARG here is to make the sha available for use in -ldflags
 ARG GIT_SHA

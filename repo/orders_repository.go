@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v4/pgxpool"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/volatiletech/null/v9"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
@@ -150,9 +150,18 @@ func NewOrdersDB(ctx context.Context, eventEmitter events.EventEmitter) (*Orders
 }
 
 func NewOrdersDBUrl(ctx context.Context, db_url string, eventEmitter events.EventEmitter) (*OrdersDB, error) {
-	pool, err := pgxpool.Connect(ctx, db_url)
+	pool, err := pgxpool.New(ctx, db_url)
 	if err != nil {
-		return nil, fmt.Errorf("pgxpool.Connect: %w", err)
+		return nil, fmt.Errorf("pgxpool.New: %w", err)
+	}
+	// v4's pgxpool.Connect dialled before returning; v5's New only parses the
+	// DSN and leaves connecting to a background goroutine, so without this the
+	// constructor succeeds against a dead database and every caller's error
+	// check is dead code. Close on failure, or the pool's health-check
+	// goroutine outlives the failed construction.
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("pool.Ping: %w", err)
 	}
 	return &OrdersDB{
 		Pool:           pool,

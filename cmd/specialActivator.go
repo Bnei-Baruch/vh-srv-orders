@@ -54,15 +54,17 @@ func Do(w *Worker) {
 	}
 	defer sentry.Flush(2 * time.Second)
 
-	// do the thing
+	// do the thing. The failure paths drain too, through FatalAfter: os.Exit runs
+	// no deferred function — not even the sentry.Flush above — and the reason has
+	// to be logged before the drain, which can block.
 	if err := w.Init(); err != nil {
 		sentry.CaptureException(err)
-		utils.LogFatal("worker.Init", slog.Any("err", err))
+		utils.FatalAfter(w.Close, "worker.Init", slog.Any("err", err))
 	}
 
 	if err := w.DoTask(); err != nil {
 		sentry.CaptureException(err)
-		utils.LogFatal("im.DoTask", slog.Any("err", err))
+		utils.FatalAfter(w.Close, "worker.DoTask", slog.Any("err", err))
 	}
 
 	w.Close()
@@ -78,19 +80,30 @@ func (w *Worker) Init() error {
 		return fmt.Errorf("events.CreateEmitter: %w", err)
 	}
 
-	w.repo, err = repo.NewOrdersDB(context.Background(), w.eventEmitter)
+	// Through a local: NewOrdersDB returns a concrete *repo.OrdersDB, and on
+	// failure that nil pointer boxes into a non-nil interface, defeating
+	// Close's guard.
+	ordersDB, err := repo.NewOrdersDB(context.Background(), w.eventEmitter)
 	if err != nil {
 		return fmt.Errorf("repo.NewOrdersDB: %w", err)
 	}
+	w.repo = ordersDB
 
 	return nil
 }
 
+// Close is safe after a failed Init, which is where it matters: Init creates the
+// emitter before the repo, so a database failure leaves events undelivered and
+// no repo to close.
 func (w *Worker) Close() {
-	w.repo.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	w.eventEmitter.Close(ctx)
+	if w.repo != nil {
+		w.repo.Close()
+	}
+	if w.eventEmitter != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		w.eventEmitter.Close(ctx)
+	}
 }
 
 func (w *Worker) DoTask() error {

@@ -80,11 +80,14 @@ type FailoverOIDCTokenVerifier struct {
 	verifiers []*oidc.IDTokenVerifier
 }
 
-func NewFailoverOIDCTokenVerifier(issuerUrls ...string) (OIDCTokenVerifier, error) {
+// NewFailoverOIDCTokenVerifier fetches each issuer's discovery document and JWKS
+// up front, so ctx is startup's: it bounds a keycloak that is up but not
+// answering, and carries the cancellation of a signal arriving mid-fetch.
+func NewFailoverOIDCTokenVerifier(ctx context.Context, issuerUrls ...string) (OIDCTokenVerifier, error) {
 	v := new(FailoverOIDCTokenVerifier)
 
 	for _, url := range issuerUrls {
-		provider, err := oidc.NewProvider(context.TODO(), url)
+		provider, err := oidc.NewProvider(ctx, url)
 		if err != nil {
 			return nil, fmt.Errorf("oidc.NewProvider: %w", err)
 		}

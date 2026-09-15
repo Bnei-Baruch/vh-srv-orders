@@ -1,6 +1,6 @@
 module gitlab.bbdev.team/vh/pay/orders
 
-go 1.21
+go 1.27
 
 require (
 	github.com/Nerzal/gocloak/v13 v13.8.0

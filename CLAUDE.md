@@ -1,6 +1,6 @@
 # Orders Service
 
-Go 1.21 service for managing orders, payments, and billing. Module: `gitlab.bbdev.team/vh/pay/orders`.
+Go 1.27 service for managing orders, payments, and billing. Module: `gitlab.bbdev.team/vh/pay/orders`.
 
 ## Project Structure
 

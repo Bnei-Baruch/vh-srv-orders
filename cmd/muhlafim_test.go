@@ -18,15 +18,6 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
-// MockPelecardAPIForCmd is a mock implementation for command testing
-type MockPelecardAPIForCmd struct {
-	data map[string]pelecard.MuhlafimEntry
-}
-
-func (m *MockPelecardAPIForCmd) FetchMuhlafim(ctx context.Context, startDate, endDate string) (map[string]pelecard.MuhlafimEntry, error) {
-	return m.data, nil
-}
-
 func TestMuhlafimCommand_Integration(t *testing.T) {
 	// Setup test database
 	dbURL, err := testutil.NewTestOrdersDB(t, context.Background())

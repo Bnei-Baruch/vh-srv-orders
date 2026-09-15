@@ -30,6 +30,14 @@ type authHeaderTokenSource struct {
 
 // StaticTokenSource will simply use the same token over and over again.
 // Main use case is when we proxy a token given in api calls to downstream services.
+//
+// Unused since it was added in 2023, and kept on purpose. One thing to know
+// before reaching for it: the proxying described above is already supplied.
+// middleware.TokenSource puts an AuthHeaderTokenSource under
+// common.CtxTokenSource on every request; what is missing is a reader for it —
+// two writers, no consumer outside one test assertion. So this is the second
+// supplier, and it is the one to use if the consuming side turns out to want a
+// token rather than a header.
 func StaticTokenSource(token string) TokenSource {
 	return staticTokenSource{token: token}
 }

@@ -17,6 +17,24 @@ silent: true
 
 tasks:
 
+  mocks:
+    desc: Regenerate the mocks in internal/mocks
+    cmds:
+      # Both pins matter. The mockery version decides the output, and the
+      # toolchain decides the compiler that produces it: with the default
+      # `auto`, Go picks whatever the machine happens to have, so two developers
+      # regenerate and get two diffs.
+      #
+      # Named exactly rather than as a floor, because a floor is what `auto`
+      # already is. It has to clear both bounds — mockery v3.8.0 needs
+      # go >= 1.25.5, and go.mod's own `go` directive is the other — so raise it
+      # when that directive moves, or this fails outright rather than degrading.
+      #
+      # Nothing in CI runs this; the generated files are committed. So the pins
+      # are about two developers getting the same output, not about the
+      # pipelines.
+      - GOTOOLCHAIN=go1.27.1 go run github.com/vektra/mockery/v3@v3.8.0
+
   dev:
     desc: Start development in shared mode (workspace)
     cmds:

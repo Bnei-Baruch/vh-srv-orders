@@ -40,7 +40,6 @@ type OrdersRepository interface {
 	FlagDuplicateOrders(ctx context.Context, ProductType string) (int, error)
 	FlagOrdersToRenew(ctx context.Context, month int64, year int64) (int64, error)
 	FlagOrder(ctx context.Context, id int, flag string) error
-	FlagOrderAsRenewed(ctx context.Context, orderID uint) error
 	GetFlaggedOrders(ctx context.Context) ([]Order, error)
 	GetOrderIDsToRenew(ctx context.Context) ([]uint, error)
 	GetOrderIDsWithPricingError(ctx context.Context) ([]uint, error)

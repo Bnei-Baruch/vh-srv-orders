@@ -19,10 +19,19 @@ func NewMockCouponProvider(t interface {
 	mock.TestingT
 	Cleanup(func())
 }) *MockCouponProvider {
+	if helper, ok := t.(interface{ Helper() }); ok {
+		helper.Helper()
+	}
+
 	mock := &MockCouponProvider{}
 	mock.Mock.Test(t)
 
-	t.Cleanup(func() { mock.AssertExpectations(t) })
+	t.Cleanup(func() {
+		if helper, ok := t.(interface{ Helper() }); ok {
+			helper.Helper()
+		}
+		mock.AssertExpectations(t)
+	})
 
 	return mock
 }
@@ -114,10 +123,19 @@ func NewMockHHGrantProvider(t interface {
 	mock.TestingT
 	Cleanup(func())
 }) *MockHHGrantProvider {
+	if helper, ok := t.(interface{ Helper() }); ok {
+		helper.Helper()
+	}
+
 	mock := &MockHHGrantProvider{}
 	mock.Mock.Test(t)
 
-	t.Cleanup(func() { mock.AssertExpectations(t) })
+	t.Cleanup(func() {
+		if helper, ok := t.(interface{ Helper() }); ok {
+			helper.Helper()
+		}
+		mock.AssertExpectations(t)
+	})
 
 	return mock
 }
@@ -209,10 +227,19 @@ func NewMockManualDiscountProvider(t interface {
 	mock.TestingT
 	Cleanup(func())
 }) *MockManualDiscountProvider {
+	if helper, ok := t.(interface{ Helper() }); ok {
+		helper.Helper()
+	}
+
 	mock := &MockManualDiscountProvider{}
 	mock.Mock.Test(t)
 
-	t.Cleanup(func() { mock.AssertExpectations(t) })
+	t.Cleanup(func() {
+		if helper, ok := t.(interface{ Helper() }); ok {
+			helper.Helper()
+		}
+		mock.AssertExpectations(t)
+	})
 
 	return mock
 }
@@ -304,10 +331,19 @@ func NewMockOrdersRepository(t interface {
 	mock.TestingT
 	Cleanup(func())
 }) *MockOrdersRepository {
+	if helper, ok := t.(interface{ Helper() }); ok {
+		helper.Helper()
+	}
+
 	mock := &MockOrdersRepository{}
 	mock.Mock.Test(t)
 
-	t.Cleanup(func() { mock.AssertExpectations(t) })
+	t.Cleanup(func() {
+		if helper, ok := t.(interface{ Helper() }); ok {
+			helper.Helper()
+		}
+		mock.AssertExpectations(t)
+	})
 
 	return mock
 }
@@ -2105,63 +2141,6 @@ func (_c *MockOrdersRepository_FlagOrder_Call) Return(err error) *MockOrdersRepo
 }
 
 func (_c *MockOrdersRepository_FlagOrder_Call) RunAndReturn(run func(ctx context.Context, id int, flag string) error) *MockOrdersRepository_FlagOrder_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// FlagOrderAsRenewed provides a mock function for the type MockOrdersRepository
-func (_mock *MockOrdersRepository) FlagOrderAsRenewed(ctx context.Context, orderID uint) error {
-	ret := _mock.Called(ctx, orderID)
-
-	if len(ret) == 0 {
-		panic("no return value specified for FlagOrderAsRenewed")
-	}
-
-	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, uint) error); ok {
-		r0 = returnFunc(ctx, orderID)
-	} else {
-		r0 = ret.Error(0)
-	}
-	return r0
-}
-
-// MockOrdersRepository_FlagOrderAsRenewed_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FlagOrderAsRenewed'
-type MockOrdersRepository_FlagOrderAsRenewed_Call struct {
-	*mock.Call
-}
-
-// FlagOrderAsRenewed is a helper method to define mock.On call
-//   - ctx context.Context
-//   - orderID uint
-func (_e *MockOrdersRepository_Expecter) FlagOrderAsRenewed(ctx any, orderID any) *MockOrdersRepository_FlagOrderAsRenewed_Call {
-	return &MockOrdersRepository_FlagOrderAsRenewed_Call{Call: _e.mock.On("FlagOrderAsRenewed", ctx, orderID)}
-}
-
-func (_c *MockOrdersRepository_FlagOrderAsRenewed_Call) Run(run func(ctx context.Context, orderID uint)) *MockOrdersRepository_FlagOrderAsRenewed_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 context.Context
-		if args[0] != nil {
-			arg0 = args[0].(context.Context)
-		}
-		var arg1 uint
-		if args[1] != nil {
-			arg1 = args[1].(uint)
-		}
-		run(
-			arg0,
-			arg1,
-		)
-	})
-	return _c
-}
-
-func (_c *MockOrdersRepository_FlagOrderAsRenewed_Call) Return(err error) *MockOrdersRepository_FlagOrderAsRenewed_Call {
-	_c.Call.Return(err)
-	return _c
-}
-
-func (_c *MockOrdersRepository_FlagOrderAsRenewed_Call) RunAndReturn(run func(ctx context.Context, orderID uint) error) *MockOrdersRepository_FlagOrderAsRenewed_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -10,14 +10,17 @@ import (
 )
 
 type OrdersAPI struct {
-	repo                repo.OrdersRepository
+	// Concrete, because nothing substitutes it. *OrdersDB embeds *pgxpool.Pool,
+	// so Exec/Query/Begin are promoted here too — writing SQL through them
+	// skips OrdersDB.emitEvent. repo_surface_test.go guards that.
+	repo                *repo.OrdersDB
 	profileService      profiles.ProfileService
 	priorityClient      *priority.Client
 	accountingService   accounting.AccountingService
 	quickbooksCompanyID string
 }
 
-func NewOrdersAPI(db repo.OrdersRepository) *OrdersAPI {
+func NewOrdersAPI(db *repo.OrdersDB) *OrdersAPI {
 	return &OrdersAPI{
 		repo:                db,
 		profileService:      profiles.NewProfileServiceAPI(keycloak.NewClient()),

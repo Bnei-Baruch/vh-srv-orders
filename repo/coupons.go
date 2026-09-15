@@ -15,12 +15,6 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/domain/coupon"
 )
 
-// CouponProvider fetches a member's active coupon redemptions for pricing.
-// Implemented by *OrdersDB; injected into the pricing evaluation.
-type CouponProvider interface {
-	GetActiveCouponRedemptions(ctx context.Context, keycloakID string) ([]ActiveCouponRedemption, error)
-}
-
 const couponColumns = `id, code, description, type, properties, enabled, redeem_from, redeem_until,
 	benefit_start, benefit_end, benefit_months, countries, max_redemptions, created_at, updated_at`
 

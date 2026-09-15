@@ -8,7 +8,6 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/pkg/accounting"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/priority"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
-	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
 // MonthlyPriceRes is the response for a monthly price query.
@@ -31,9 +30,9 @@ func GetMonthlyPrice(
 	keycloakID string,
 	email string,
 	country string,
-	discountProvider repo.ManualDiscountProvider,
-	hhProvider repo.HHGrantProvider,
-	couponProvider repo.CouponProvider,
+	discountProvider ManualDiscountProvider,
+	hhProvider HHGrantProvider,
+	couponProvider CouponProvider,
 ) (*MonthlyPriceRes, error) {
 	v2eval, err := EvaluateV2Price(ctx, profileService, priorityClient, accountingService, quickbooksCompanyID, accountID, keycloakID, email, country, discountProvider, hhProvider, couponProvider)
 	if err != nil {

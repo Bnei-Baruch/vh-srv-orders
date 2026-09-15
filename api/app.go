@@ -25,11 +25,14 @@ import (
 )
 
 type App struct {
-	repo                repo.OrdersRepository
+	// Concrete, with the same promoted-pgx caveat as OrdersAPI.repo. Close() in
+	// Shutdown is the one pool method this type should call.
+	repo                *repo.OrdersDB
 	eventEmitter        events.EventEmitter
 	eventListener       *profiles.EventListener
 	domainEventsHandler *domain.EventsHandler
 	ordersAPI           *OrdersAPI
+	couponAPI           *CouponAPI
 	gEngine             *gin.Engine
 }
 
@@ -42,7 +45,6 @@ func (a *App) Initialize() {
 	a.initEventEmitter()
 	a.initDB()
 	a.initEventListener()
-	a.ordersAPI = NewOrdersAPI(a.repo)
 	a.initGinEngine()
 	a.initHealth()
 }
@@ -142,6 +144,13 @@ func (a *App) initGinEngine() {
 }
 
 func (a *App) initRoutes() {
+	// Constructed here so owning a group and registering its routes are one
+	// step. A route registered on a nil group compiles and starts fine, then
+	// panics on the first request — that shipped once (49628d8, fixed f878aa4)
+	// when only Initialize remembered and NewTestApp did not.
+	a.ordersAPI = NewOrdersAPI(a.repo)
+	a.couponAPI = NewCouponAPI(a.repo)
+
 	// routes
 	orders := a.gEngine.Group("/orders")
 	{
@@ -249,13 +258,13 @@ func (a *App) initRoutes() {
 
 	couponGroup := baseV2Path.Group("/coupon")
 	{
-		couponGroup.POST("/", a.ordersAPI.handleCreateCoupon)
-		couponGroup.GET("/", a.ordersAPI.handleListCoupons)
-		couponGroup.GET("/mine", a.ordersAPI.handleGetMyCoupons)
-		couponGroup.POST("/redeem", a.ordersAPI.handleRedeemCoupon)
-		couponGroup.GET("/:id/redemptions", a.ordersAPI.handleGetCouponRedemptions)
-		couponGroup.PATCH("/:id", a.ordersAPI.handleUpdateCoupon)
-		couponGroup.DELETE("/:id/redemption/:rid", a.ordersAPI.handleRevokeRedemption)
+		couponGroup.POST("/", a.couponAPI.handleCreateCoupon)
+		couponGroup.GET("/", a.couponAPI.handleListCoupons)
+		couponGroup.GET("/mine", a.couponAPI.handleGetMyCoupons)
+		couponGroup.POST("/redeem", a.couponAPI.handleRedeemCoupon)
+		couponGroup.GET("/:id/redemptions", a.couponAPI.handleGetCouponRedemptions)
+		couponGroup.PATCH("/:id", a.couponAPI.handleUpdateCoupon)
+		couponGroup.DELETE("/:id/redemption/:rid", a.couponAPI.handleRevokeRedemption)
 	}
 
 	a.gEngine.GET("/status/:email", a.ordersAPI.status)

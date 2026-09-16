@@ -169,19 +169,6 @@ func TestFetchMuhlafim_RetriesOnlyOnce(t *testing.T) {
 	assert.Equal(t, 2, requests, "a persistent 401 fails rather than looping")
 }
 
-func TestFetchMuhlafim_Unauthorized(t *testing.T) {
-	client := withExternalPayments(t, "tok_wrong", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"error":"unauthorized"}`))
-	})
-
-	entries, err := client.FetchMuhlafim(context.Background(), "21/08/2025 00:00", "24/09/2025 00:00")
-
-	require.Error(t, err)
-	assert.Nil(t, entries)
-	assert.Contains(t, err.Error(), "401")
-}
-
 // Failing before the request makes a Keycloak problem obvious, rather than
 // surfacing as a 401 from somewhere else.
 func TestFetchMuhlafim_TokenUnavailable(t *testing.T) {

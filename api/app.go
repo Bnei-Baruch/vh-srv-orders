@@ -146,8 +146,9 @@ func (a *App) initGinEngine() {
 func (a *App) initRoutes() {
 	// Constructed here so owning a group and registering its routes are one
 	// step. A route registered on a nil group compiles and starts fine, then
-	// panics on the first request — that shipped once (49628d8, fixed f878aa4)
-	// when only Initialize remembered and NewTestApp did not.
+	// panics on the first request — this branch carried that bug while only
+	// Initialize remembered and NewTestApp did not, fixed in 9cd6a5f. It never
+	// left the branch.
 	a.ordersAPI = NewOrdersAPI(a.repo)
 	a.couponAPI = NewCouponAPI(a.repo)
 

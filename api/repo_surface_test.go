@@ -18,7 +18,7 @@ import (
 // Close is allowed (Shutdown owns the pool), and so are test files, where
 // reading rows back is the point and a skipped event corrupts nothing.
 func TestHandlersDoNotReachThePoolDirectly(t *testing.T) {
-	banned := regexp.MustCompile(`\b[a-z]\.repo\.(Exec|Query|QueryRow|Begin|BeginTx|SendBatch|CopyFrom|Acquire|Reset)\(`)
+	banned := regexp.MustCompile(`\b[A-Za-z_][A-Za-z0-9_]*\.repo\.(Exec|Query|QueryRow|QueryFunc|Begin|BeginTx|BeginFunc|BeginTxFunc|SendBatch|CopyFrom|Acquire|AcquireFunc|AcquireAllIdle|Reset)\(`)
 
 	entries, err := os.ReadDir(".")
 	if err != nil {

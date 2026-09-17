@@ -5,8 +5,8 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"path/filepath"
 	"reflect"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,31 +15,45 @@ import (
 	"github.com/jackc/pgx/v4/pgxpool"
 )
 
+// poolTypes are the declared types that carry the connection pool: *OrdersDB
+// embeds *pgxpool.Pool, so holding either reaches it.
+var poolTypes = map[string]bool{"repo.OrdersDB": true, "pgxpool.Pool": true}
+
+// mutating are the pool methods that write, and so skip OrdersDB.emitEvent.
+// The rest of the pool's surface is reported too, but as a layering leak, not
+// as a lost event — Ping does not skip anything.
+var mutating = map[string]bool{
+	"Exec": true, "CopyFrom": true, "SendBatch": true,
+	"Begin": true, "BeginTx": true, "BeginFunc": true, "BeginTxFunc": true,
+	"Query": true, "QueryRow": true, "QueryFunc": true,
+}
+
 // The repo fields hold *repo.OrdersDB, which embeds *pgxpool.Pool, so a handler
 // can write SQL directly and skip OrdersDB.emitEvent — the row changes, the
 // request succeeds, and the event downstream consumers key off is never sent.
 // The old interface-typed fields made that a compile error; this replaces the
 // guardrail their removal deleted.
 //
-// Two things this does not do by hand. The banned names are the method set of
-// *pgxpool.Pool read by reflection, not a list — a list omitted pgx's *Func
-// helpers, and would go stale again on the next pgx bump. And the receiver is
-// matched on the syntax tree rather than by regex, because `db := o.repo` and
-// `o.repo.Pool.Exec(...)` both reach the pool while matching no pattern written
-// against `.repo.`.
+// Three things are deliberately not hand-written. The banned names are the
+// method set of *pgxpool.Pool read by reflection, so a pgx bump cannot leave a
+// stale list behind. The receiver is matched on the syntax tree, so an alias is
+// visible. And the *names* that hold a pool are read from their declarations —
+// struct fields, parameters, locals — rather than assumed to be `repo`, because
+// the eight handler structs still to come will each name their own field.
+//
+// What this still cannot see, for want of type information: a pool that arrives
+// through an interface, or a field whose name collides with a non-pool field of
+// the same name elsewhere in the package. Both need go/types; neither is
+// reachable in api/ today.
 //
 // Test files are exempt: reading rows back is the point there, and a skipped
-// event corrupts nothing. Close is exempt in app.go only, where Shutdown owns
-// the pool's lifetime; the test below pins that call site so this comment
-// cannot drift away from what the code allows.
-//
-// If OrdersDB ever declares a method that shadows one of the pool's, the call
-// stops being a bypass and this test will report it anyway. Allowlist it then.
+// event corrupts nothing. Close is exempt in app.go alone, matched on the exact
+// base name, and the test pins that call site so this comment cannot drift.
 func TestHandlersDoNotReachThePoolDirectly(t *testing.T) {
 	banned := map[string]bool{}
-	poolType := reflect.TypeOf(&pgxpool.Pool{})
-	for i := range poolType.NumMethod() {
-		banned[poolType.Method(i).Name] = true
+	pt := reflect.TypeOf(&pgxpool.Pool{})
+	for i := range pt.NumMethod() {
+		banned[pt.Method(i).Name] = true
 	}
 	if len(banned) < 5 {
 		t.Fatalf("reflected only %d methods off *pgxpool.Pool; the guard would pass vacuously", len(banned))
@@ -53,14 +67,63 @@ func TestHandlersDoNotReachThePoolDirectly(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var offenders []string
-	closeSites := []string{}
-
+	var files []*ast.File
+	paths := map[*ast.File]string{}
 	for _, pkg := range pkgs {
-		for path, file := range pkg.Files {
-			aliases := poolAliases(file)
+		for path, f := range pkg.Files {
+			files = append(files, f)
+			paths[f] = path
+		}
+	}
 
-			ast.Inspect(file, func(n ast.Node) bool {
+	// Package-wide: any struct field declared with a pool type, whatever it is
+	// called. This is what makes the guard survive the next handler struct.
+	poolFields := map[string]bool{}
+	for _, f := range files {
+		ast.Inspect(f, func(n ast.Node) bool {
+			st, ok := n.(*ast.StructType)
+			if !ok || st.Fields == nil {
+				return true
+			}
+			for _, fld := range st.Fields.List {
+				if !isPoolType(fld.Type) {
+					continue
+				}
+				for _, name := range fld.Names {
+					poolFields[name.Name] = true
+				}
+			}
+			return true
+		})
+	}
+
+	var offenders []string
+	var closeSites []string
+
+	for _, f := range files {
+		path := paths[f]
+
+		ast.Inspect(f, func(n ast.Node) bool {
+			fn, ok := n.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				return true
+			}
+
+			// Locals and parameters are collected per function, so an alias in
+			// one body cannot condemn the same name in another.
+			local := map[string]bool{}
+			if fn.Type.Params != nil {
+				for _, p := range fn.Type.Params.List {
+					if isPoolType(p.Type) {
+						for _, name := range p.Names {
+							local[name.Name] = true
+						}
+					}
+				}
+			}
+			collectAliases(fn.Body, poolFields, local)
+
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
 				call, ok := n.(*ast.CallExpr)
 				if !ok {
 					return true
@@ -69,79 +132,98 @@ func TestHandlersDoNotReachThePoolDirectly(t *testing.T) {
 				if !ok || !banned[sel.Sel.Name] {
 					return true
 				}
-				if !reachesPool(chain(sel.X), aliases) {
+				recv := chain(sel.X)
+				if !reachesPool(recv, poolFields, local) {
 					return true
 				}
 
 				where := path + ":" + strconv.Itoa(fset.Position(call.Pos()).Line)
-				text := chain(sel.X) + "." + sel.Sel.Name + "(...)"
+				what := recv + "." + sel.Sel.Name + "(...)"
+				if !mutating[sel.Sel.Name] {
+					what += "  [layering, not a lost event]"
+				}
 
-				if sel.Sel.Name == "Close" && strings.HasSuffix(path, "app.go") {
-					closeSites = append(closeSites, where+"  "+text)
+				if sel.Sel.Name == "Close" && filepath.Base(path) == "app.go" {
+					closeSites = append(closeSites, where)
 					return true
 				}
-				offenders = append(offenders, where+"  "+text)
+				offenders = append(offenders, where+"  "+what)
 				return true
 			})
-		}
+			return true
+		})
 	}
 
 	if len(offenders) > 0 {
 		sort.Strings(offenders)
-		t.Errorf("handlers reached the connection pool directly, which skips the event "+
-			"every repo mutation emits — add a method to *OrdersDB instead. Found at:\n  %s",
-			strings.Join(offenders, "\n  "))
+		t.Errorf("handlers reached the connection pool directly. A mutating call skips the "+
+			"event every repo mutation emits; the rest leak the pool into the handler layer. "+
+			"Add a method to *OrdersDB instead. Found at:\n  %s", strings.Join(offenders, "\n  "))
 	}
 
 	if len(closeSites) != 1 {
-		t.Errorf("expected exactly one exempt repo.Close() in app.go (Shutdown owns the pool), found %d: %v",
+		t.Errorf("expected exactly one exempt Close() in app.go (Shutdown owns the pool), found %d: %v",
 			len(closeSites), closeSites)
 	}
 }
 
-var repoRooted = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*\.repo$`)
-
-// poolAliases collects locals that were handed the pool, so that
-// `db := o.repo` followed by `db.Exec(...)` is still caught.
-func poolAliases(file *ast.File) map[string]bool {
-	aliases := map[string]bool{}
-
-	// Two passes: an alias can be assigned from an earlier alias.
+// collectAliases records locals handed the pool, twice over so that an alias of
+// an alias is seen.
+func collectAliases(body *ast.BlockStmt, poolFields, local map[string]bool) {
 	for range 2 {
-		ast.Inspect(file, func(n ast.Node) bool {
+		ast.Inspect(body, func(n ast.Node) bool {
 			switch x := n.(type) {
 			case *ast.AssignStmt:
 				for i, rhs := range x.Rhs {
-					if i < len(x.Lhs) && reachesPool(chain(rhs), aliases) {
+					if i < len(x.Lhs) && reachesPool(chain(rhs), poolFields, local) {
 						if id, ok := x.Lhs[i].(*ast.Ident); ok {
-							aliases[id.Name] = true
+							local[id.Name] = true
 						}
 					}
 				}
 			case *ast.ValueSpec:
+				if isPoolType(x.Type) {
+					for _, name := range x.Names {
+						local[name.Name] = true
+					}
+				}
 				for i, v := range x.Values {
-					if i < len(x.Names) && reachesPool(chain(v), aliases) {
-						aliases[x.Names[i].Name] = true
+					if i < len(x.Names) && reachesPool(chain(v), poolFields, local) {
+						local[x.Names[i].Name] = true
 					}
 				}
 			}
 			return true
 		})
 	}
-	return aliases
 }
 
-// reachesPool reports whether a selector chain lands on the embedded pool:
-// `o.repo`, any receiver name, `.Pool` named explicitly, or a local alias of
-// either.
-func reachesPool(c string, aliases map[string]bool) bool {
+// reachesPool reports whether a selector chain lands on the pool: a local or
+// parameter that holds one, or any chain whose final field is pool-typed —
+// o.repo, a.ordersAPI.repo, x.db — with .Pool named explicitly or not.
+func reachesPool(c string, poolFields, local map[string]bool) bool {
 	if c == "" {
 		return false
 	}
 	for strings.HasSuffix(c, ".Pool") {
 		c = strings.TrimSuffix(c, ".Pool")
 	}
-	return repoRooted.MatchString(c) || aliases[c]
+	if c == "" {
+		return false
+	}
+	if i := strings.LastIndex(c, "."); i >= 0 {
+		return poolFields[c[i+1:]]
+	}
+	return local[c] || poolFields[c]
+}
+
+// isPoolType reports whether a type expression is *repo.OrdersDB or
+// *pgxpool.Pool, named or embedded.
+func isPoolType(e ast.Expr) bool {
+	if star, ok := e.(*ast.StarExpr); ok {
+		e = star.X
+	}
+	return poolTypes[chain(e)]
 }
 
 // chain renders a selector chain of plain identifiers, and "" for anything

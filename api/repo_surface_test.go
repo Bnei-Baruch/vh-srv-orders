@@ -47,9 +47,20 @@ const repoDir = "../repo"
 // the pool itself, and the bypass then reads as z.Exec(...), indistinguishable
 // at the call site from a repo method.
 //
-// Known gaps, all of which need go/types to close. This list has been wrong
-// before: six review rounds found shapes it did not mention, which is the
-// honest argument for type information rather than a longer list.
+// This guard is best-effort, deliberately. It answers "what type is this
+// expression" by looking at how the expression is spelled, and that question has
+// no syntactic answer, so the list below has been wrong before — six review
+// rounds each found shapes the previous version had not imagined. Treat a green
+// run as "no bypass in a shape we have seen", never as proof there is none.
+//
+// Doing it properly means go/types, which means golang.org/x/tools in the module
+// graph. That was tried and backed out: it pulls x/crypto, x/net, x/sys and
+// x/text up with it, so a test-only check would move the production dependency
+// graph. Not worth it for a guard that exists to cover the gap until the
+// consumer-side interfaces in the PR description make the bypass a compile error
+// again. Those are the fix; this buys time.
+//
+// Known gaps, needing the type information above to close:
 //
 //   - a *pgxpool.Conn taken from Acquire: calls on the conn are not tracked,
 //     which is why Acquire itself is treated as a write path;

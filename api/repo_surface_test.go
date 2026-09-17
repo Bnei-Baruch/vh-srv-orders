@@ -28,9 +28,9 @@ var writePath = map[string]bool{
 	"Acquire": true, "AcquireFunc": true, "AcquireAllIdle": true,
 }
 
-// poolReturning are functions known to hand back a pool, so that a local taking
-// their result is tracked like any other alias.
-var poolReturning = map[string]bool{"NewOrdersDB": true}
+// repoDir is the package that declares OrdersDB. Its constructors are read from
+// it rather than listed here, so a new one cannot be forgotten.
+const repoDir = "../repo"
 
 // The repo fields hold *repo.OrdersDB, which embeds *pgxpool.Pool, so a handler
 // can write SQL directly and skip OrdersDB.emitEvent — the row changes, the
@@ -47,12 +47,15 @@ var poolReturning = map[string]bool{"NewOrdersDB": true}
 // the pool itself, and the bypass then reads as z.Exec(...), indistinguishable
 // at the call site from a repo method.
 //
-// Known gaps, all of which need go/types to close:
+// Known gaps, all of which need go/types to close. This list has been wrong
+// before: six review rounds found shapes it did not mention, which is the
+// honest argument for type information rather than a longer list.
 //
 //   - a *pgxpool.Conn taken from Acquire: calls on the conn are not tracked,
 //     which is why Acquire itself is treated as a write path;
-//   - a pool reaching api through an interface, or from a helper outside this
-//     package that is not in poolReturning;
+//   - a pool reaching api through an interface, or from a helper in some third
+//     package — the repo package's own constructors are read from it, so those
+//     are covered;
 //   - a defined type (type X repo.OrdersDB) rather than an alias, which does
 //     not promote the pool's methods anyway.
 //
@@ -96,6 +99,9 @@ func TestHandlersDoNotReachThePoolDirectly(t *testing.T) {
 	s.scanAliases(files) // first: a field may be declared through an alias
 	s.scanDeclarations(files)
 	s.promoteEmbedders(files) // a field whose type embeds the pool is a way in too
+	if n := s.scanConstructors(t, fset); n == 0 {
+		t.Fatalf("found no constructor returning *OrdersDB in %s; the guard would miss every pool taken from one", repoDir)
+	}
 
 	var offenders []string
 	var closeSites []string
@@ -134,7 +140,15 @@ func TestHandlersDoNotReachThePoolDirectly(t *testing.T) {
 					return true
 				}
 				recv := chain(sel.X)
-				if !s.reaches(recv, local) {
+				switch {
+				case s.reaches(recv, local):
+				case recv == "" && s.yieldsPool(sel.X, local):
+					// chain() renders nothing for a call, so name it here:
+					// o.pool().Exec(...) reaches the pool as surely as o.repo does.
+					if call, ok := sel.X.(*ast.CallExpr); ok {
+						recv = chain(call.Fun) + "()"
+					}
+				default:
 					return true
 				}
 
@@ -174,6 +188,42 @@ type surface struct {
 	structs map[string]bool // struct types embedding one
 	pkgVars map[string]bool // package-level vars holding one
 	funcs   map[string]bool // functions in this package returning one
+}
+
+// scanConstructors records the functions in the repo package that hand back an
+// OrdersDB, so a local taking one is tracked like any other alias. Reading them
+// beats listing them: NewOrdersDBUrl was missing from the list this replaces.
+func (s *surface) scanConstructors(t *testing.T, fset *token.FileSet) int {
+	pkgs, err := parser.ParseDir(fset, repoDir, func(fi os.FileInfo) bool {
+		return !strings.HasSuffix(fi.Name(), "_test.go")
+	}, 0)
+	if err != nil {
+		t.Fatalf("parsing %s: %v", repoDir, err)
+	}
+
+	found := 0
+	for _, pkg := range pkgs {
+		for _, f := range pkg.Files {
+			for _, decl := range f.Decls {
+				fn, ok := decl.(*ast.FuncDecl)
+				if !ok || fn.Recv != nil || fn.Type.Results == nil {
+					continue
+				}
+				for _, r := range fn.Type.Results.List {
+					rt := r.Type
+					if star, ok := rt.(*ast.StarExpr); ok {
+						rt = star.X
+					}
+					// Named from inside its own package, so no qualifier.
+					if chain(rt) == "OrdersDB" {
+						s.funcs[fn.Name.Name] = true
+						found++
+					}
+				}
+			}
+		}
+	}
+	return found
 }
 
 func (s *surface) scanAliases(files []*ast.File) {
@@ -243,31 +293,55 @@ func (s *surface) scanDeclarations(files []*ast.File) {
 	}
 }
 
-// promoteEmbedders marks fields and vars whose type is a struct that embeds the
-// pool, so b.a.Exec(...) is caught when a's type embeds it. Run to a fixpoint,
-// since such a struct may itself be held by another.
+// promoteEmbedders propagates pool-ness outward: a field whose type embeds the
+// pool is a way in, and a struct that embeds such a struct is one too. Both feed
+// back into the scan, so it runs until nothing changes rather than a fixed
+// number of times — a transitive embed is otherwise missed.
 func (s *surface) promoteEmbedders(files []*ast.File) {
-	for range 3 {
+	for {
+		changed := false
 		for _, f := range files {
-			ast.Inspect(f, func(n ast.Node) bool {
-				st, ok := n.(*ast.StructType)
-				if !ok || st.Fields == nil {
-					return true
+			for _, decl := range f.Decls {
+				gd, ok := decl.(*ast.GenDecl)
+				if !ok || gd.Tok != token.TYPE {
+					continue
 				}
-				for _, fld := range st.Fields.List {
-					t := fld.Type
-					if star, ok := t.(*ast.StarExpr); ok {
-						t = star.X
-					}
-					if !s.structs[chain(t)] {
+				for _, spec := range gd.Specs {
+					ts, ok := spec.(*ast.TypeSpec)
+					if !ok {
 						continue
 					}
-					for _, name := range fld.Names {
-						s.fields[name.Name] = true
+					st, ok := ts.Type.(*ast.StructType)
+					if !ok || st.Fields == nil {
+						continue
+					}
+					for _, fld := range st.Fields.List {
+						t := fld.Type
+						if star, ok := t.(*ast.StarExpr); ok {
+							t = star.X
+						}
+						if !s.structs[chain(t)] {
+							continue
+						}
+						if len(fld.Names) == 0 {
+							if !s.structs[ts.Name.Name] {
+								s.structs[ts.Name.Name] = true
+								changed = true
+							}
+							continue
+						}
+						for _, name := range fld.Names {
+							if !s.fields[name.Name] {
+								s.fields[name.Name] = true
+								changed = true
+							}
+						}
 					}
 				}
-				return true
-			})
+			}
+		}
+		if !changed {
+			return
 		}
 	}
 }
@@ -345,25 +419,32 @@ func (s *surface) yieldsPool(e ast.Expr, local map[string]bool) bool {
 		if i := strings.LastIndex(c, "."); i >= 0 {
 			c = c[i+1:]
 		}
-		return s.funcs[c] || poolReturning[c]
+		return s.funcs[c]
 	}
 	return s.reaches(chain(e), local)
 }
 
-// reaches reports whether a selector chain lands on the pool. A bare identifier
-// is looked up only in the function's own scope, never in the package-wide
-// field set — two unrelated locals may share a name, and one of them being a
-// field elsewhere says nothing about the other.
+// reaches reports whether a selector chain lands on the pool. Resolution is
+// tried before trimming a trailing .Pool, so a field that is itself named Pool
+// is not erased by the trim that exists for the embedded *pgxpool.Pool.
 func (s *surface) reaches(c string, local map[string]bool) bool {
-	if c == "" {
-		return false
-	}
-	for strings.HasSuffix(c, ".Pool") {
+	for c != "" {
+		if s.resolves(c, local) {
+			return true
+		}
+		if !strings.HasSuffix(c, ".Pool") {
+			return false
+		}
 		c = strings.TrimSuffix(c, ".Pool")
 	}
-	if c == "" {
-		return false
-	}
+	return false
+}
+
+// resolves looks a chain up without unwrapping anything. A bare identifier is
+// looked up only in the function's own scope, never in the package-wide field
+// set — two unrelated locals may share a name, and one of them being a field
+// elsewhere says nothing about the other.
+func (s *surface) resolves(c string, local map[string]bool) bool {
 	if i := strings.LastIndex(c, "."); i >= 0 {
 		return s.fields[c[i+1:]]
 	}

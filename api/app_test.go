@@ -32,7 +32,6 @@ func NewTestApp(t *testing.T) *App {
 	a.repo, err = repo.NewOrdersDBUrl(context.Background(), dbURL, a.eventEmitter)
 	require.Nil(t, err)
 
-	a.ordersAPI = NewOrdersAPI(a.repo)
 	a.gEngine = gin.Default()
 	a.gEngine.Use(
 		middleware.Logging(),

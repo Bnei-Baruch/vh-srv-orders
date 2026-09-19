@@ -10,12 +10,6 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/common"
 )
 
-// HHGrantProvider fetches the active Help Haver grant for a user.
-// Implemented by *OrdersDB; injected into the pricing resolver.
-type HHGrantProvider interface {
-	GetActiveHHGrant(ctx context.Context, keycloakID string) (*HHGrant, error)
-}
-
 const hhGrantColumns = `id, request_id, keycloak_id, type, discount_pct, start_date, end_date, updated_at, note`
 
 // CancelHHGrant sets end_date to yesterday for the user's active grant.

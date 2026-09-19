@@ -33,9 +33,12 @@ Non-obvious placements: business logic orchestration lives in `domain/` (`billin
 - Prefer early returns to reduce nesting
 
 ### Interfaces
-- When adding a public method to `*OrdersDB`: add it to the `OrdersRepository` interface in `repo/orders_repository.go`, then run `task mocks` to regenerate mocks — not a bare `mockery`, which is a different generator version and possibly a different Go
-- Same applies to `PelecardAPI`, `ProfileService`, `TokenSource` — update interface + regenerate
-- Define interfaces in the same package as the implementation
+- **Declare an interface in the package that calls it, listing only the methods that package calls.** `*OrdersDB` satisfies it implicitly — nothing is added to `repo/`. See `domain.AccountsRepo` (4 methods), `domain/pricing`'s three providers (1 each), `api.couponRepo` (11)
+- Don't put `Close()` in a consumer interface. The pool's lifetime belongs to `App.Shutdown` and the `cmd` entrypoints
+- Unexported is the default for a consumer interface; export it only when its mock is generated or another package must name the type
+- `OrdersRepository` (`repo/orders_repository.go`) is the pre-existing fat interface. Add a new `*OrdersDB` method there only if `domain/billing`, `cmd` or `importers` calls it; if the caller is `api` or one of the narrow interfaces above, it does not belong in `OrdersRepository` at all
+- After changing any interface that has generated mocks, run `task mocks` — not a bare `mockery`, which is a different generator version and possibly a different Go
+- `PelecardAPI`, `ProfileService`, `TokenSource` are external-dependency interfaces and stay with their implementation: there the interface exists to swap the implementation, not to narrow it
 
 ### Imports
 Three groups separated by blank lines: stdlib, external, internal.
@@ -91,13 +94,19 @@ Logger is enriched per-request in middleware with `request_id`. Workers add `wor
 
 ## Interfaces
 
-`OrdersRepository` (~60 methods) is the central interface. It's large and due for a breakdown, but don't refactor it as part of unrelated work. Mockery generates mocks from it.
+`OrdersRepository` (25 methods) is the interface `domain/billing`, `cmd` and `importers` take whole — they mock it, which is the only remaining reason it is an interface at all. It is being broken up from the consumer side, one package at a time, and it shrinks when the last consumer of a block of methods has its own interface. Don't refactor it as part of unrelated work.
 
-Small interfaces for external dependencies: `PelecardAPI` (1), `ProfileService` (3), `EventEmitter` (2), `EventHandler` (2), `ChargeExecutor` (1), `TokenSource` (2). Defined in the same package as their primary implementation.
+`App.repo` and `OrdersAPI.repo` hold the concrete `*repo.OrdersDB`: nothing substitutes them (the api tests use real Postgres), and typing them as the interface is what forced every narrow interface's methods to stay on `OrdersRepository` too.
+
+Consumer-declared storage interfaces, each holding what one package calls: `domain.AccountsRepo` (4), `domain/pricing.ManualDiscountProvider` / `HHGrantProvider` / `CouponProvider` (1 each), `api.couponRepo` (11). `*OrdersDB` satisfies all of them implicitly.
+
+Small interfaces for external dependencies: `PelecardAPI` (1), `ProfileService` (3), `EventEmitter` (2), `EventHandler` (2), `ChargeExecutor` (1), `TokenSource` (2). Defined in the same package as their primary implementation — these exist to substitute the implementation, so they belong to it.
 
 ## Handler Patterns
 
 Handlers are methods on `*OrdersAPI`. They call `o.repo.*` directly — no service layer between handlers and repo.
+
+The coupon endpoints are the exception and the direction of travel: they are methods on `*CouponAPI`, which holds only `couponRepo` (`api/coupon_api.go`), wired alongside `ordersAPI` in `initRoutes`. Peeling a handler group off `OrdersAPI` is a receiver swap plus a route line — no change to handler bodies or tests.
 
 ### Request binding
 

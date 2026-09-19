@@ -103,7 +103,7 @@ func (im *RobokasaImporter) getSheetValues() ([]*RobokasaOrder, error) {
 		}
 
 		var err error
-		order.Amount, err = strconv.ParseFloat(row[2].(string), 10)
+		order.Amount, err = strconv.ParseFloat(row[2].(string), 64)
 		if err != nil {
 			slog.Warn("malformed row", slog.Int("row", i+1), slog.String("column", "amount"), slog.Any("err", err))
 			continue

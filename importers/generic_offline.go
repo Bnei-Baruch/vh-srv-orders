@@ -135,7 +135,10 @@ func parseGenericRows(values [][]any) ([]*GenericOrder, int, error) {
 		}
 
 		var err error
-		order.Amount, err = strconv.ParseFloat(cell(row, 1), 10)
+		// 64: ParseFloat takes 32 or 64 and treats everything else as 64, so
+		// the 10 that stood here parsed at 64 bits by accident. Amount is a
+		// float64 all the way to the column.
+		order.Amount, err = strconv.ParseFloat(cell(row, 1), 64)
 		if err != nil {
 			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "amount"), slog.Any("err", err))
 			dropped++

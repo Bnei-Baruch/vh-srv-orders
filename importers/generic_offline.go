@@ -35,14 +35,11 @@ func (im *GenericOfflineImporter) String() string {
 // Import fetches all orders and import them.
 // No idempotency is guaranteed, use carefully.
 func (im *GenericOfflineImporter) Import() error {
-	var err error
-
-	var sheetValues []*GenericOrder
-	sheetValues, err = im.getSheetValues()
+	sheetValues, dropped, err := im.getSheetValues()
 	if err != nil {
 		return fmt.Errorf("importer.getSheetValues: %w", err)
 	}
-	slog.Info("importer.getSheetValues", slog.Int("count", len(sheetValues)))
+	slog.Info("importer.getSheetValues", slog.Int("count", len(sheetValues)), slog.Int("dropped", dropped))
 
 	newOrders := 0
 	errOrders := 0
@@ -54,7 +51,10 @@ func (im *GenericOfflineImporter) Import() error {
 		}
 		newOrders++
 	}
-	slog.Info("import summary", slog.Int("new_orders", newOrders), slog.Int("with_errors", errOrders))
+	// dropped is counted separately from with_errors: a row the parser threw
+	// away never reaches createOrderAndPayments, so without this line it is in
+	// no total and the summary adds up to fewer rows than the sheet holds.
+	slog.Info("import summary", slog.Int("new_orders", newOrders), slog.Int("with_errors", errOrders), slog.Int("dropped_by_parser", dropped))
 
 	return nil
 }
@@ -69,12 +69,12 @@ type GenericOrder struct {
 	Comment       string
 }
 
-func (im *GenericOfflineImporter) getSheetValues() ([]*GenericOrder, error) {
+func (im *GenericOfflineImporter) getSheetValues() ([]*GenericOrder, int, error) {
 	sheetsService, err := sheets.NewService(context.TODO(),
 		option.WithCredentialsFile(common.Config.GoogleAppCredentials),
 		option.WithScopes(sheets.SpreadsheetsReadonlyScope))
 	if err != nil {
-		return nil, fmt.Errorf("sheets.NewService: %w", err)
+		return nil, 0, fmt.Errorf("sheets.NewService: %w", err)
 	}
 
 	const spreadsheetId = "1jRygsoYqD_tUpEKXxVHY2_nAS52F3cdGp5spxFw8Uak"
@@ -83,7 +83,7 @@ func (im *GenericOfflineImporter) getSheetValues() ([]*GenericOrder, error) {
 	call.Context(context.TODO())
 	resp, err := call.Do()
 	if err != nil {
-		return nil, fmt.Errorf("sheetsService.Spreadsheets.Values.Get: %w", err)
+		return nil, 0, fmt.Errorf("sheetsService.Spreadsheets.Values.Get: %w", err)
 	}
 
 	return parseGenericRows(resp.Values)
@@ -92,15 +92,18 @@ func (im *GenericOfflineImporter) getSheetValues() ([]*GenericOrder, error) {
 // parseGenericRows turns sheet rows into orders, skipping the header. Split out
 // of getSheetValues, which builds its Sheets client inline and so cannot be
 // reached from a test.
-func parseGenericRows(values [][]any) ([]*GenericOrder, error) {
+//
+// Returns the orders it could read and the number of data rows it dropped.
+func parseGenericRows(values [][]any) ([]*GenericOrder, int, error) {
 	orders := make([]*GenericOrder, 0)
 
 	// An empty sheet has no header to skip, and values[1:] panics on it rather
 	// than reporting an empty import.
 	if len(values) == 0 {
-		return orders, nil
+		return orders, 0, nil
 	}
 
+	dropped := 0
 	for i, row := range values[1:] {
 		// +2: i counts from the first data row, and the header is sheet row 1.
 		sheetRow := i + 2
@@ -119,6 +122,7 @@ func parseGenericRows(values [][]any) ([]*GenericOrder, error) {
 			// Was slog.Any("err", err) against the outer err from call.Do(),
 			// which is nil by here — the value that failed is the useful thing.
 			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "currency"), slog.String("value", order.Currency))
+			dropped++
 			continue
 		}
 
@@ -126,28 +130,44 @@ func parseGenericRows(values [][]any) ([]*GenericOrder, error) {
 		order.Amount, err = strconv.ParseFloat(cell(row, 1), 10)
 		if err != nil {
 			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "amount"), slog.Any("err", err))
+			dropped++
 			continue
 		}
 
-		// Atoi, not ParseInt(..., 64): the value ends up in null.IntFrom, which
-		// takes an int, and parsing wider than the destination then narrowing
-		// truncates a hostile cell on a 32-bit build instead of rejecting it.
-		order.Quantity, err = strconv.Atoi(cell(row, 3))
+		// 32, not Atoi: the destination is orders.quantity, which is int4.
+		// Parsing at Go's int width accepts 4294967297 on a 64-bit build and
+		// hands it to Postgres, which answers "4294967297 is greater than
+		// maximum value for int4" and fails the row at insert time, one row at
+		// a time, with the sheet already half imported. Rejecting it here makes
+		// it a malformed row like any other.
+		quantity, err := strconv.ParseInt(cell(row, 3), 10, 32)
 		if err != nil {
 			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "quantity"), slog.Any("err", err))
+			dropped++
 			continue
 		}
+		order.Quantity = int(quantity)
 
 		order.Timestamp, err = time.Parse(time.DateTime, cell(row, 4))
 		if err != nil {
 			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "timestamp"), slog.Any("err", err))
+			dropped++
 			continue
 		}
 
 		orders = append(orders, order)
 	}
 
-	return orders, nil
+	// Skipping a bad row keeps one broken cell from stopping the whole import.
+	// A sheet where *every* row is bad is a different event: one changed date
+	// format or one inserted column drops all of them, and the run then logs
+	// count=0 with_errors=0 and exits 0 — indistinguishable from an empty
+	// sheet, and silent in Sentry. Say so instead.
+	if dropped > 0 && len(orders) == 0 {
+		return nil, dropped, fmt.Errorf("every data row was dropped (%d of %d); the sheet format has probably changed", dropped, len(values)-1)
+	}
+
+	return orders, dropped, nil
 }
 
 // createOrderAndPayments will create a fresh Order, Payment and OfflinePayment for the given order

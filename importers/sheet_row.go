@@ -1,6 +1,9 @@
 package importers
 
-import "fmt"
+import (
+	"fmt"
+	"strconv"
+)
 
 // cell reads one cell of a sheet row.
 //
@@ -16,12 +19,21 @@ import "fmt"
 // A missing cell reads as empty, which is what it is. The value is rendered
 // rather than type-asserted: a numeric or boolean cell arrives as float64 or
 // bool, and .(string) on one of those panics the same way.
+//
+// float64 is formatted rather than handed to fmt.Sprint, which uses %g and so
+// renders a quantity of one million as "1e+06". Every caller feeds the result
+// to strconv, where that string is a malformed row. 'f' with precision -1 gives
+// the shortest decimal form that round-trips, so 12.5 stays "12.5".
 func cell(row []any, i int) string {
 	if i >= len(row) || row[i] == nil {
 		return ""
 	}
-	if s, ok := row[i].(string); ok {
-		return s
+	switch v := row[i].(type) {
+	case string:
+		return v
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	default:
+		return fmt.Sprint(v)
 	}
-	return fmt.Sprint(row[i])
 }

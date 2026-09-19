@@ -74,7 +74,7 @@ func TestParseGenericRows_SkipsHeaderKeepsData(t *testing.T) {
 	assert.Equal(t, "a@example.com", orders[0].Email)
 	assert.InDelta(t, 12.50, orders[0].Amount, 0.001)
 	assert.Equal(t, "USD", orders[0].Currency)
-	assert.Equal(t, int64(2), orders[0].Quantity)
+	assert.Equal(t, 2, orders[0].Quantity)
 }
 
 // A malformed row is skipped, not fatal — the importer logs and moves on, and
@@ -111,7 +111,7 @@ func TestParseRows_TrailingCellsOmitted(t *testing.T) {
 		assert.Empty(t, orders[0].Comment)
 		assert.Equal(t, "cash", orders[0].PaymentMethod)
 		assert.Empty(t, orders[1].PaymentMethod)
-		assert.Equal(t, int64(2), orders[1].Quantity)
+		assert.Equal(t, 2, orders[1].Quantity)
 	})
 
 	t.Run("specials drops sub-category and category", func(t *testing.T) {
@@ -139,7 +139,7 @@ func TestParseRows_NonStringCell(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Len(t, orders, 1)
-	assert.Equal(t, int64(3), orders[0].Quantity, "a numeric cell is read, not panicked on")
+	assert.Equal(t, 3, orders[0].Quantity, "a numeric cell is read, not panicked on")
 }
 
 // The header is sheet row 1, so the first data row is row 2. Reporting it as
@@ -172,4 +172,20 @@ func TestParseSpecialRows_SkipsBadDateAndContinues(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, records, 1, "the bad row is skipped, the good one still lands")
 	assert.Equal(t, "ok@example.com", records[0].Email.String)
+}
+
+// A quantity too large for the destination used to be parsed at 64 bits and
+// then narrowed to int, which truncates on a 32-bit build rather than
+// rejecting: 4294967297 lands as 1. It is parsed at the destination's width
+// now, so an out-of-range cell is a malformed row like any other.
+func TestParseGenericRows_RejectsOversizedQuantity(t *testing.T) {
+	orders, err := parseGenericRows([][]any{
+		{"email", "amount", "currency", "qty", "ts", "method", "comment"},
+		{"big@example.com", "1.00", "USD", "99999999999999999999", "2026-01-01 10:00:00", "cash"},
+		{"ok@example.com", "1.00", "USD", "3", "2026-01-01 10:00:00", "cash"},
+	})
+	require.NoError(t, err)
+	require.Len(t, orders, 1, "the oversized quantity is a malformed row, not a truncated one")
+	assert.Equal(t, "ok@example.com", orders[0].Email)
+	assert.Equal(t, 3, orders[0].Quantity)
 }

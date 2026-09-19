@@ -63,7 +63,7 @@ type GenericOrder struct {
 	Email         string
 	Amount        float64
 	Currency      string
-	Quantity      int64
+	Quantity      int
 	Timestamp     time.Time
 	PaymentMethod string
 	Comment       string
@@ -129,7 +129,10 @@ func parseGenericRows(values [][]any) ([]*GenericOrder, error) {
 			continue
 		}
 
-		order.Quantity, err = strconv.ParseInt(cell(row, 3), 10, 64)
+		// Atoi, not ParseInt(..., 64): the value ends up in null.IntFrom, which
+		// takes an int, and parsing wider than the destination then narrowing
+		// truncates a hostile cell on a 32-bit build instead of rejecting it.
+		order.Quantity, err = strconv.Atoi(cell(row, 3))
 		if err != nil {
 			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "quantity"), slog.Any("err", err))
 			continue
@@ -181,7 +184,7 @@ func (im *GenericOfflineImporter) createOrder(ctx context.Context, rOrder *Gener
 		Status:        null.StringFrom(common.OrderStatusPaid),
 		OrderLanguage: null.StringFrom(common.OrderLanguageEnglish),
 		PaymentDate:   null.TimeFrom(rOrder.Timestamp),
-		Quantity:      null.IntFrom(int(rOrder.Quantity)),
+		Quantity:      null.IntFrom(rOrder.Quantity),
 	}
 
 	var err error

@@ -26,6 +26,23 @@ type importer interface {
 	Import() error
 }
 
+// reportDroppedRows tells Sentry about rows the parser threw away.
+//
+// Before the parsers learned to skip, one unparseable cell returned an error
+// from getSheetValues and doImport turned that into CaptureException plus a
+// non-zero exit. Skipping is better per row and worse per sheet: 30 rows
+// dropped out of 200 because someone switched the date column to DD/MM/YYYY
+// leaves 170 imported, exit 0, and the only trace a log line nobody reads.
+// Those 30 people silently never get their specials. A drop is now a Sentry
+// event at any ratio, not only when the whole sheet goes.
+func reportDroppedRows(im importer, dropped, kept int) {
+	if dropped == 0 {
+		return
+	}
+	slog.Warn("importer dropped rows", slog.String("importer", im.String()), slog.Int("dropped", dropped), slog.Int("kept", kept))
+	sentry.CaptureMessage(fmt.Sprintf("%s: dropped %d of %d sheet rows as malformed", im.String(), dropped, dropped+kept))
+}
+
 func doImport(im importer) {
 	slog.Info("running importer", slog.String("importer", im.String()))
 

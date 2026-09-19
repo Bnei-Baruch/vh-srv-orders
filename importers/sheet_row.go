@@ -37,3 +37,11 @@ func cell(row []any, i int) string {
 		return fmt.Sprint(v)
 	}
 }
+
+// minRowsForFormatBreak is the smallest number of data rows from which "every
+// one of them was dropped" says something about the sheet rather than about a
+// row. Below it, a one-row sheet holding a single GBP donation would be read as
+// a changed format — and the consequence is LogFatal, so the cron would die on
+// every run until someone edited the sheet. A partial drop is reported to
+// Sentry either way, so nothing goes unseen by keeping this floor.
+const minRowsForFormatBreak = 2

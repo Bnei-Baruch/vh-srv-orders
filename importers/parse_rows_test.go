@@ -291,3 +291,100 @@ func TestParseGenericRows_QuantityBoundary(t *testing.T) {
 	assert.Equal(t, 1, dropped)
 	assert.Equal(t, 2147483647, orders[0].Quantity)
 }
+
+// "Every data row was dropped" is a statement about the sheet only when there
+// were enough rows for it to be one. A sheet holding a header and a single GBP
+// donation is not a changed format, and the consequence of calling it one is
+// LogFatal: the cron dies on every run until someone edits the sheet.
+func TestParseRows_SingleBadRowIsNotAFormatBreak(t *testing.T) {
+	t.Run("generic offline", func(t *testing.T) {
+		orders, dropped, err := parseGenericRows([][]any{
+			{"email", "amount", "currency", "qty", "ts", "method", "comment"},
+			{"a@example.com", "12.50", "GBP", "1", "2026-01-01 10:00:00", "cash"},
+		})
+		require.NoError(t, err, "one bad row out of one is a bad row, not a broken sheet")
+		assert.Empty(t, orders)
+		assert.Equal(t, 1, dropped)
+	})
+
+	t.Run("specials", func(t *testing.T) {
+		records, dropped, err := parseSpecialRows([][]any{
+			{"email", "keycloak_id", "start", "end", "category"},
+			{"a@example.com", "kc-1", "01/01/2026", "2026-12-31", "membership"},
+		})
+		require.NoError(t, err)
+		assert.Empty(t, records)
+		assert.Equal(t, 1, dropped)
+	})
+}
+
+// null.StringFrom("") is Valid and Set, so filling Email and KeycloakID
+// unconditionally made createSpecial's "can't both be empty" guard dead code.
+// A row with neither identifier then reached GetAccount(ctx, 0, ""), which
+// resolves to the most recent account carrying an empty email — and the special
+// would be stamped with that person's UserKey.
+func TestParseSpecialRows_SkipsRowWithNeitherIdentifier(t *testing.T) {
+	records, dropped, err := parseSpecialRows([][]any{
+		{"email", "keycloak_id", "start", "end", "category"},
+		{"", "", "2026-01-01", "2026-12-31", "membership"},
+		{"", "kc-2", "2026-01-01", "2026-12-31", "membership"},
+		{"ok@example.com", "", "2026-02-01", "2026-11-30", "membership"},
+	})
+	require.NoError(t, err)
+	require.Len(t, records, 2, "only the row with neither identifier is dropped")
+	assert.Equal(t, 1, dropped)
+
+	assert.False(t, records[0].Email.Valid, "an empty email cell leaves Email unset, not valid-and-empty")
+	assert.Equal(t, "kc-2", records[0].KeycloakID.String)
+	assert.Equal(t, "ok@example.com", records[1].Email.String)
+	assert.False(t, records[1].KeycloakID.Valid)
+}
+
+// A sub-category cell that is present and empty stored ” before the parser was
+// rewritten. Storing NULL instead flips three-valued logic for the cleanup
+// queries that compare it (`where subcategory <> 'rav'` never matches NULL), so
+// present-and-empty and absent have to stay different.
+func TestParseSpecialRows_PresentButEmptySubCategoryIsStored(t *testing.T) {
+	records, _, err := parseSpecialRows([][]any{
+		{"email", "keycloak_id", "start", "end", "category", "sub"},
+		{"a@example.com", "kc-1", "2026-01-01", "2026-12-31", "membership", ""},
+		{"b@example.com", "kc-2", "2026-01-01", "2026-12-31", "membership"},
+	})
+	require.NoError(t, err)
+	require.Len(t, records, 2)
+
+	assert.True(t, records[0].SubCategory.Valid, "a present empty cell is stored as ''")
+	assert.Empty(t, records[0].SubCategory.String)
+	assert.False(t, records[1].SubCategory.Valid, "an absent cell stays NULL")
+}
+
+// The record carries its sheet row because the caller iterates the *filtered*
+// slice: with rows dropped ahead of it, a survivor's index is no longer its
+// line in the sheet, and an insert failure logged by index names the wrong row.
+func TestParseRows_RecordCarriesItsSheetRow(t *testing.T) {
+	t.Run("generic offline", func(t *testing.T) {
+		orders, dropped, err := parseGenericRows([][]any{
+			{"email", "amount", "currency", "qty", "ts", "method", "comment"},
+			{"bad@example.com", "1.00", "GBP", "1", "2026-01-01 10:00:00", "cash"},  // sheet row 2
+			{"also@example.com", "1.00", "GBP", "1", "2026-01-01 10:00:00", "cash"}, // sheet row 3
+			{"ok@example.com", "1.00", "USD", "1", "2026-01-01 10:00:00", "cash"},   // sheet row 4
+		})
+		require.NoError(t, err)
+		require.Len(t, orders, 1)
+		assert.Equal(t, 2, dropped)
+		assert.Equal(t, 4, orders[0].SheetRow, "index 0 of the filtered slice is sheet row 4")
+	})
+
+	t.Run("specials", func(t *testing.T) {
+		records, dropped, err := parseSpecialRows([][]any{
+			{"email", "keycloak_id", "start", "end", "category"},
+			{"bad@example.com", "kc-1", "01/01/2026", "2026-12-31", "membership"},
+			{"also@example.com", "kc-2", "02/01/2026", "2026-12-31", "membership"},
+			{"ok@example.com", "kc-3", "2026-02-01", "2026-11-30", "membership"},
+		})
+		require.NoError(t, err)
+		require.Len(t, records, 1)
+		assert.Equal(t, 2, dropped)
+		assert.Equal(t, 4, records[0].SheetRow)
+	})
+}

@@ -40,12 +40,16 @@ func (im *GenericOfflineImporter) Import() error {
 		return fmt.Errorf("importer.getSheetValues: %w", err)
 	}
 	slog.Info("importer.getSheetValues", slog.Int("count", len(sheetValues)), slog.Int("dropped", dropped))
+	reportDroppedRows(im, dropped, len(sheetValues))
 
 	newOrders := 0
 	errOrders := 0
-	for i, row := range sheetValues {
+	for _, row := range sheetValues {
+		// row.SheetRow, not the loop index: sheetValues is the *filtered*
+		// slice, so with two rows dropped ahead of it the third survivor is
+		// index 0 and sheet row 4.
 		if err := im.createOrderAndPayments(row); err != nil {
-			slog.Error("importer.createOrderAndPayments", slog.Int("line", i+1), slog.Any("err", err))
+			slog.Error("importer.createOrderAndPayments", slog.Int("row", row.SheetRow), slog.Any("err", err))
 			errOrders++
 			continue
 		}
@@ -67,6 +71,9 @@ type GenericOrder struct {
 	Timestamp     time.Time
 	PaymentMethod string
 	Comment       string
+	// SheetRow is the 1-based row in the spreadsheet this order came from, so
+	// a failure at insert time can name the line an operator has to edit.
+	SheetRow int
 }
 
 func (im *GenericOfflineImporter) getSheetValues() ([]*GenericOrder, int, error) {
@@ -109,6 +116,7 @@ func parseGenericRows(values [][]any) ([]*GenericOrder, int, error) {
 		sheetRow := i + 2
 
 		order := &GenericOrder{
+			SheetRow:      sheetRow,
 			Email:         cell(row, 0),
 			Currency:      cell(row, 2),
 			PaymentMethod: cell(row, 5),
@@ -163,8 +171,9 @@ func parseGenericRows(values [][]any) ([]*GenericOrder, int, error) {
 	// format or one inserted column drops all of them, and the run then logs
 	// count=0 with_errors=0 and exits 0 — indistinguishable from an empty
 	// sheet, and silent in Sentry. Say so instead.
-	if dropped > 0 && len(orders) == 0 {
-		return nil, dropped, fmt.Errorf("every data row was dropped (%d of %d); the sheet format has probably changed", dropped, len(values)-1)
+	dataRows := len(values) - 1
+	if dataRows >= minRowsForFormatBreak && dropped == dataRows {
+		return nil, dropped, fmt.Errorf("every data row was dropped (%d of %d); the sheet format has probably changed", dropped, dataRows)
 	}
 
 	return orders, dropped, nil

@@ -31,18 +31,33 @@ func (im *SpecialsImporter) String() string {
 	return "importer specials"
 }
 
+// Import reads the sheet and creates a special per row.
+//
+// No idempotency is guaranteed, as in the generic importer: createSpecial
+// always INSERTs and `specials` carries no unique key. That used to be masked
+// here by the parser aborting on the first unparseable date — nothing was
+// inserted, you fixed the sheet and ran again. Now that a bad row is skipped
+// instead, a run that drops 3 of 200 rows has already inserted the other 197,
+// and re-running after fixing those 3 inserts all 197 a second time.
+// Clear the imported rows from the sheet between runs, or de-duplicate first.
 func (im *SpecialsImporter) Import() error {
 	sheetValues, dropped, err := im.getSheetValues()
 	if err != nil {
 		return fmt.Errorf("importer.getSheetValues: %w", err)
 	}
 	slog.Info("importer.getSheetValues", slog.Int("count", len(sheetValues)), slog.Int("dropped", dropped))
+	reportDroppedRows(im, dropped, len(sheetValues))
 
 	newRecords := 0
 	errRecords := 0
-	for i, row := range sheetValues {
+	for _, row := range sheetValues {
+		// row.SheetRow, not the loop index: sheetValues is the *filtered*
+		// slice, so with two rows dropped ahead of it the third survivor is
+		// index 0 and sheet row 4. Logging the index sends whoever is fixing
+		// the sheet to the wrong line — the off-by-one the parser's sheetRow
+		// was introduced to remove, reappearing one function further on.
 		if err := im.createSpecial(row); err != nil {
-			slog.Error("importer.createSpecial", slog.Int("line", i+1), slog.Any("err", err))
+			slog.Error("importer.createSpecial", slog.Int("row", row.SheetRow), slog.Any("err", err))
 			errRecords++
 			continue
 		}
@@ -63,6 +78,9 @@ type SpecialRecord struct {
 	EndDate     time.Time
 	Category    string
 	SubCategory null.String
+	// SheetRow is the 1-based row in the spreadsheet this record came from, so
+	// a failure at insert time can name the line an operator has to edit.
+	SheetRow int
 }
 
 func (im *SpecialsImporter) getSheetValues() ([]*SpecialRecord, int, error) {
@@ -128,14 +146,37 @@ func parseSpecialRows(values [][]any) ([]*SpecialRecord, int, error) {
 		}
 
 		record := &SpecialRecord{
-			Email:      null.StringFrom(cell(row, 0)),
-			KeycloakID: null.StringFrom(cell(row, 1)),
-			StartDate:  startDate,
-			EndDate:    endDate,
-			Category:   category,
+			StartDate: startDate,
+			EndDate:   endDate,
+			Category:  category,
+			SheetRow:  sheetRow,
 		}
-		if sub := cell(row, 5); sub != "" {
-			record.SubCategory = null.StringFrom(sub)
+
+		// Set only when the cell holds something. null.StringFrom("") is Valid
+		// and Set, so filling these unconditionally makes createSpecial's
+		// "KeycloakID and Email can't both be empty" guard dead code — it asks
+		// IsValid, which is true for the empty string. A row with neither
+		// identifier then reached GetAccount(ctx, 0, ""), which matches the
+		// most recent account carrying an empty email and stamps that person's
+		// UserKey on the special.
+		if email := cell(row, 0); email != "" {
+			record.Email = null.StringFrom(email)
+		}
+		if keycloakID := cell(row, 1); keycloakID != "" {
+			record.KeycloakID = null.StringFrom(keycloakID)
+		}
+		if !record.Email.Valid && !record.KeycloakID.Valid {
+			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "email/keycloak_id"), slog.String("reason", "both empty"))
+			dropped++
+			continue
+		}
+
+		// len(row) > 5 rather than a non-empty check: a sub-category cell that
+		// is present and empty stored '' before this change, and the cleanup
+		// queries compare it (`where subcategory <> 'rav'`), where NULL and ''
+		// are not the same answer. Absent stays unset, present stays stored.
+		if len(row) > 5 {
+			record.SubCategory = null.StringFrom(cell(row, 5))
 		}
 		records = append(records, record)
 	}
@@ -145,8 +186,9 @@ func parseSpecialRows(values [][]any) ([]*SpecialRecord, int, error) {
 	// format or one inserted column drops all of them, and the run then logs
 	// count=0 with_errors=0 and exits 0 — indistinguishable from an empty
 	// sheet, and silent in Sentry. Say so instead.
-	if dropped > 0 && len(records) == 0 {
-		return nil, dropped, fmt.Errorf("every data row was dropped (%d of %d); the sheet format has probably changed", dropped, len(values)-1)
+	dataRows := len(values) - 1
+	if dataRows >= minRowsForFormatBreak && dropped == dataRows {
+		return nil, dropped, fmt.Errorf("every data row was dropped (%d of %d); the sheet format has probably changed", dropped, dataRows)
 	}
 
 	return records, dropped, nil
@@ -166,13 +208,19 @@ func (im *SpecialsImporter) createSpecial(rSpecial *SpecialRecord) error {
 	special.SubCategory = rSpecial.SubCategory
 
 	ctx := context.WithValue(context.Background(), common.CtxEventBuilder, im)
-	account, err := im.repo.GetAccount(ctx, 0, rSpecial.Email.String)
-	if err == nil {
-		special.KeycloakId = account.UserKey
+	// Guarded: GetAccount with an empty email builds
+	// `where LOWER("Email") = LOWER('') order by created_at desc limit 1` and
+	// so returns whatever account was last created without an email — whose
+	// UserKey would then be stamped on this special, granting it to an
+	// unrelated person. A row can legitimately carry a keycloak id and no
+	// email, so reaching here with an invalid Email is normal.
+	if rSpecial.Email.Valid {
+		if account, err := im.repo.GetAccount(ctx, 0, rSpecial.Email.String); err == nil {
+			special.KeycloakId = account.UserKey
+		}
 	}
 
-	_, err = im.repo.CreateSpecial(ctx, special)
-	if err != nil {
+	if _, err := im.repo.CreateSpecial(ctx, special); err != nil {
 		return fmt.Errorf("importer.createSpecial: %w", err)
 	}
 	return nil

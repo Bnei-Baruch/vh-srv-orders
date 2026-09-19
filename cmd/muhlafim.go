@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -42,7 +43,7 @@ func init() {
 
 func muhlafimFn(cmd *cobra.Command, args []string) {
 	startDateStr, endDateStr := parseFlags(cmd)
-	validateConfig()
+	validateKeycloakConfig()
 
 	ctx := context.Background()
 	eventEmitter, ordersDB := initializeServices(ctx)
@@ -93,13 +94,28 @@ func parseFlags(cmd *cobra.Command) (string, string) {
 	return startDate, endDate
 }
 
-func validateConfig() {
+// validateKeycloakConfig fails the command before it does any work if the
+// credential is missing. Every charge needs it, not only muhlafim: without the
+// check a typo'd secret is a whole run of pending payment rows finalised
+// unsuccessful with nothing charged, rather than a startup failure.
+//
+// Presence only. Whether the credential is accepted is what
+// `pelecard charge-check` answers.
+func validateKeycloakConfig() {
+	if err := keycloakConfigError(); err != nil {
+		utils.LogFatal("keycloakConfigError", slog.Any("err", err))
+	}
+}
+
+// keycloakConfigError is the check, split from the exit so it can be tested.
+func keycloakConfigError() error {
 	if common.Config.KeycloakServerUrl == "" || common.Config.KeycloakRealm == "" {
-		utils.LogFatal("KEYCLOAK_SERVER_URL and KEYCLOAK_REALM are required")
+		return fmt.Errorf("KEYCLOAK_SERVER_URL and KEYCLOAK_REALM are required")
 	}
 	if common.Config.KeycloakClientID == "" || common.Config.KeycloakClientSecret == "" {
-		utils.LogFatal("KEYCLOAK_CLIENT_ID and KEYCLOAK_CLIENT_SECRET are required")
+		return fmt.Errorf("KEYCLOAK_CLIENT_ID and KEYCLOAK_CLIENT_SECRET are required")
 	}
+	return nil
 }
 
 func initializeServices(ctx context.Context) (events.EventEmitter, *repo.OrdersDB) {

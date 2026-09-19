@@ -32,13 +32,11 @@ func (im *SpecialsImporter) String() string {
 }
 
 func (im *SpecialsImporter) Import() error {
-	var err error
-	var sheetValues []*SpecialRecord
-	sheetValues, err = im.getSheetValues()
+	sheetValues, dropped, err := im.getSheetValues()
 	if err != nil {
 		return fmt.Errorf("importer.getSheetValues: %w", err)
 	}
-	slog.Info("importer.getSheetValues", slog.Int("count", len(sheetValues)))
+	slog.Info("importer.getSheetValues", slog.Int("count", len(sheetValues)), slog.Int("dropped", dropped))
 
 	newRecords := 0
 	errRecords := 0
@@ -50,7 +48,10 @@ func (im *SpecialsImporter) Import() error {
 		}
 		newRecords++
 	}
-	slog.Info("import summary", slog.Int("new_specials", newRecords), slog.Int("with_errors", errRecords))
+	// dropped is counted separately from with_errors: a row the parser threw
+	// away never reaches createSpecial, so without this line it is in no total
+	// and the summary adds up to fewer rows than the sheet holds.
+	slog.Info("import summary", slog.Int("new_specials", newRecords), slog.Int("with_errors", errRecords), slog.Int("dropped_by_parser", dropped))
 
 	return nil
 }
@@ -64,47 +65,91 @@ type SpecialRecord struct {
 	SubCategory null.String
 }
 
-func (im *SpecialsImporter) getSheetValues() ([]*SpecialRecord, error) {
+func (im *SpecialsImporter) getSheetValues() ([]*SpecialRecord, int, error) {
 	sheetsService, err := sheets.NewService(context.TODO(),
 		option.WithCredentialsFile(common.Config.GoogleAppCredentials),
 		option.WithScopes(sheets.SpreadsheetsReadonlyScope))
 	if err != nil {
-		return nil, fmt.Errorf("sheets.NewService: %w", err)
+		return nil, 0, fmt.Errorf("sheets.NewService: %w", err)
 	}
 
 	call := sheetsService.Spreadsheets.Values.Get(common.Config.ImportSpecialsSpreadsheetId, "import specials")
 	call.Context(context.TODO())
 	resp, err := call.Do()
 	if err != nil {
-		return nil, fmt.Errorf("sheetsService.Spreadsheets.Values.Get: %w", err)
+		return nil, 0, fmt.Errorf("sheetsService.Spreadsheets.Values.Get: %w", err)
 	}
 
-	records := make([]*SpecialRecord, 0)
-	layout := "2006-01-02"
+	return parseSpecialRows(resp.Values)
+}
 
-	for _, row := range resp.Values[1:] {
-		startDate, err := time.Parse(layout, row[2].(string))
+// parseSpecialRows turns sheet rows into records, skipping the header. Split
+// out of getSheetValues, which builds its Sheets client inline and so cannot be
+// reached from a test.
+//
+// Returns the records it could read and the number of data rows it dropped.
+func parseSpecialRows(values [][]any) ([]*SpecialRecord, int, error) {
+	records := make([]*SpecialRecord, 0)
+	const layout = "2006-01-02"
+
+	// An empty sheet has no header to skip, and values[1:] panics on it rather
+	// than reporting an empty import.
+	if len(values) == 0 {
+		return records, 0, nil
+	}
+
+	dropped := 0
+	for i, row := range values[1:] {
+		// +2: i counts from the first data row, and the header is sheet row 1.
+		sheetRow := i + 2
+
+		startDate, err := time.Parse(layout, cell(row, 2))
 		if err != nil {
-			return nil, fmt.Errorf("time.Parse: %w", err)
+			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "start_date"), slog.Any("err", err))
+			dropped++
+			continue
 		}
-		endDate, err := time.Parse(layout, row[3].(string))
+		endDate, err := time.Parse(layout, cell(row, 3))
 		if err != nil {
-			return nil, fmt.Errorf("time.Parse: %w", err)
+			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "end_date"), slog.Any("err", err))
+			dropped++
+			continue
+		}
+
+		// specials.category is varchar(50) NOT NULL, and null.StringFrom("") is
+		// Valid, so a missing category inserts '' rather than being rejected.
+		// The row then grants nothing — no category matches — and does it
+		// silently. A row that cannot say what it grants is malformed.
+		category := cell(row, 4)
+		if category == "" {
+			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "category"), slog.String("reason", "empty"))
+			dropped++
+			continue
 		}
 
 		record := &SpecialRecord{
-			Email:      null.StringFrom(row[0].(string)),
-			KeycloakID: null.StringFrom(row[1].(string)),
+			Email:      null.StringFrom(cell(row, 0)),
+			KeycloakID: null.StringFrom(cell(row, 1)),
 			StartDate:  startDate,
 			EndDate:    endDate,
-			Category:   row[4].(string),
+			Category:   category,
 		}
-		if len(row) > 5 {
-			record.SubCategory = null.StringFrom(row[5].(string))
+		if sub := cell(row, 5); sub != "" {
+			record.SubCategory = null.StringFrom(sub)
 		}
 		records = append(records, record)
 	}
-	return records, nil
+
+	// Skipping a bad row keeps one broken cell from stopping the whole import.
+	// A sheet where *every* row is bad is a different event: one changed date
+	// format or one inserted column drops all of them, and the run then logs
+	// count=0 with_errors=0 and exits 0 — indistinguishable from an empty
+	// sheet, and silent in Sentry. Say so instead.
+	if dropped > 0 && len(records) == 0 {
+		return nil, dropped, fmt.Errorf("every data row was dropped (%d of %d); the sheet format has probably changed", dropped, len(values)-1)
+	}
+
+	return records, dropped, nil
 }
 
 func (im *SpecialsImporter) createSpecial(rSpecial *SpecialRecord) error {

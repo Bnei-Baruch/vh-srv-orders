@@ -13,7 +13,7 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	healthnats "github.com/hellofresh/health-go/v5/checks/nats"
-	healthpgx "github.com/hellofresh/health-go/v5/checks/pgx4"
+	healthpgx "github.com/hellofresh/health-go/v5/checks/pgx5"
 
 	"gitlab.bbdev.team/vh/pay/orders/api/middleware"
 	"gitlab.bbdev.team/vh/pay/orders/common"

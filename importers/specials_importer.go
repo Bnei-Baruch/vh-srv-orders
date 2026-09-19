@@ -95,25 +95,30 @@ func parseSpecialRows(values [][]any) ([]*SpecialRecord, error) {
 		return records, nil
 	}
 
-	for _, row := range values[1:] {
-		startDate, err := time.Parse(layout, row[2].(string))
+	for i, row := range values[1:] {
+		// +2: i counts from the first data row, and the header is sheet row 1.
+		sheetRow := i + 2
+
+		startDate, err := time.Parse(layout, cell(row, 2))
 		if err != nil {
-			return nil, fmt.Errorf("time.Parse: %w", err)
+			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "start_date"), slog.Any("err", err))
+			continue
 		}
-		endDate, err := time.Parse(layout, row[3].(string))
+		endDate, err := time.Parse(layout, cell(row, 3))
 		if err != nil {
-			return nil, fmt.Errorf("time.Parse: %w", err)
+			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "end_date"), slog.Any("err", err))
+			continue
 		}
 
 		record := &SpecialRecord{
-			Email:      null.StringFrom(row[0].(string)),
-			KeycloakID: null.StringFrom(row[1].(string)),
+			Email:      null.StringFrom(cell(row, 0)),
+			KeycloakID: null.StringFrom(cell(row, 1)),
 			StartDate:  startDate,
 			EndDate:    endDate,
-			Category:   row[4].(string),
+			Category:   cell(row, 4),
 		}
-		if len(row) > 5 {
-			record.SubCategory = null.StringFrom(row[5].(string))
+		if sub := cell(row, 5); sub != "" {
+			record.SubCategory = null.StringFrom(sub)
 		}
 		records = append(records, record)
 	}

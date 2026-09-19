@@ -102,11 +102,14 @@ func parseGenericRows(values [][]any) ([]*GenericOrder, error) {
 	}
 
 	for i, row := range values[1:] {
+		// +2: i counts from the first data row, and the header is sheet row 1.
+		sheetRow := i + 2
+
 		order := &GenericOrder{
-			Email:         row[0].(string),
-			Currency:      row[2].(string),
-			PaymentMethod: row[5].(string),
-			Comment:       row[6].(string),
+			Email:         cell(row, 0),
+			Currency:      cell(row, 2),
+			PaymentMethod: cell(row, 5),
+			Comment:       cell(row, 6),
 		}
 
 		if order.Currency != common.CurrencyUSD &&
@@ -115,26 +118,26 @@ func parseGenericRows(values [][]any) ([]*GenericOrder, error) {
 			order.Currency != common.CurrencyRUR {
 			// Was slog.Any("err", err) against the outer err from call.Do(),
 			// which is nil by here — the value that failed is the useful thing.
-			slog.Warn("malformed row", slog.Int("row", i+1), slog.String("column", "currency"), slog.String("value", order.Currency))
+			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "currency"), slog.String("value", order.Currency))
 			continue
 		}
 
 		var err error
-		order.Amount, err = strconv.ParseFloat(row[1].(string), 10)
+		order.Amount, err = strconv.ParseFloat(cell(row, 1), 10)
 		if err != nil {
-			slog.Warn("malformed row", slog.Int("row", i+1), slog.String("column", "amount"), slog.Any("err", err))
+			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "amount"), slog.Any("err", err))
 			continue
 		}
 
-		order.Quantity, err = strconv.ParseInt(row[3].(string), 10, 64)
+		order.Quantity, err = strconv.ParseInt(cell(row, 3), 10, 64)
 		if err != nil {
-			slog.Warn("malformed row", slog.Int("row", i+1), slog.String("column", "quantity"), slog.Any("err", err))
+			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "quantity"), slog.Any("err", err))
 			continue
 		}
 
-		order.Timestamp, err = time.Parse(time.DateTime, row[4].(string))
+		order.Timestamp, err = time.Parse(time.DateTime, cell(row, 4))
 		if err != nil {
-			slog.Warn("malformed row", slog.Int("row", i+1), slog.String("column", "timestamp"), slog.Any("err", err))
+			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "timestamp"), slog.Any("err", err))
 			continue
 		}
 

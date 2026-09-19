@@ -79,10 +79,23 @@ func (im *SpecialsImporter) getSheetValues() ([]*SpecialRecord, error) {
 		return nil, fmt.Errorf("sheetsService.Spreadsheets.Values.Get: %w", err)
 	}
 
-	records := make([]*SpecialRecord, 0)
-	layout := "2006-01-02"
+	return parseSpecialRows(resp.Values)
+}
 
-	for _, row := range resp.Values[1:] {
+// parseSpecialRows turns sheet rows into records, skipping the header. Split
+// out of getSheetValues, which builds its Sheets client inline and so cannot be
+// reached from a test.
+func parseSpecialRows(values [][]any) ([]*SpecialRecord, error) {
+	records := make([]*SpecialRecord, 0)
+	const layout = "2006-01-02"
+
+	// An empty sheet has no header to skip, and values[1:] panics on it rather
+	// than reporting an empty import.
+	if len(values) == 0 {
+		return records, nil
+	}
+
+	for _, row := range values[1:] {
 		startDate, err := time.Parse(layout, row[2].(string))
 		if err != nil {
 			return nil, fmt.Errorf("time.Parse: %w", err)

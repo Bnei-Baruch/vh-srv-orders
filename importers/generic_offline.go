@@ -86,8 +86,22 @@ func (im *GenericOfflineImporter) getSheetValues() ([]*GenericOrder, error) {
 		return nil, fmt.Errorf("sheetsService.Spreadsheets.Values.Get: %w", err)
 	}
 
+	return parseGenericRows(resp.Values)
+}
+
+// parseGenericRows turns sheet rows into orders, skipping the header. Split out
+// of getSheetValues, which builds its Sheets client inline and so cannot be
+// reached from a test.
+func parseGenericRows(values [][]any) ([]*GenericOrder, error) {
 	orders := make([]*GenericOrder, 0)
-	for i, row := range resp.Values[1:] {
+
+	// An empty sheet has no header to skip, and values[1:] panics on it rather
+	// than reporting an empty import.
+	if len(values) == 0 {
+		return orders, nil
+	}
+
+	for i, row := range values[1:] {
 		order := &GenericOrder{
 			Email:         row[0].(string),
 			Currency:      row[2].(string),
@@ -99,7 +113,9 @@ func (im *GenericOfflineImporter) getSheetValues() ([]*GenericOrder, error) {
 			order.Currency != common.CurrencyEUR &&
 			order.Currency != common.CurrencyNIS &&
 			order.Currency != common.CurrencyRUR {
-			slog.Warn("malformed row", slog.Int("row", i+1), slog.String("column", "currency"), slog.Any("err", err))
+			// Was slog.Any("err", err) against the outer err from call.Do(),
+			// which is nil by here — the value that failed is the useful thing.
+			slog.Warn("malformed row", slog.Int("row", i+1), slog.String("column", "currency"), slog.String("value", order.Currency))
 			continue
 		}
 

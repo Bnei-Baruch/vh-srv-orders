@@ -12,20 +12,23 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jackc/pgx/v4/pgxpool"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// writePath are the pool methods that can reach a write, and so can skip
-// OrdersDB.emitEvent. Query and friends are here because a CTE or a
-// SELECT ... FOR UPDATE writes; the Acquire family is here because the
-// *pgxpool.Conn it hands back is the most direct way to run an unguarded Exec.
-// Everything else on the pool — Ping, Stat, Config, Reset — loses no event and
-// is reported as a layering leak instead.
-var writePath = map[string]bool{
-	"Exec": true, "CopyFrom": true, "SendBatch": true,
-	"Begin": true, "BeginTx": true, "BeginFunc": true, "BeginTxFunc": true,
-	"Query": true, "QueryRow": true, "QueryFunc": true,
-	"Acquire": true, "AcquireFunc": true, "AcquireAllIdle": true,
+// noWritePath are the pool methods that cannot reach a write, and so cannot
+// skip OrdersDB.emitEvent. They are still reported — a handler has no business
+// holding the pool either way — but as a layering leak rather than a lost
+// event.
+//
+// Listed this way round on purpose. The pgx v4 to v5 move deleted QueryFunc,
+// BeginFunc and BeginTxFunc, and the list that named the write path carried all
+// three for a while afterwards, matching nothing. Worse, a method a future pgx
+// adds would have defaulted to the reassuring label. Inverted, an unrecognised
+// method is treated as a write path until someone says otherwise, which is the
+// direction that fails safe: over-warning on a read costs a sentence,
+// under-warning on a write costs an event.
+var noWritePath = map[string]bool{
+	"Ping": true, "Stat": true, "Config": true, "Reset": true, "Close": true,
 }
 
 // repoDir is the package that declares OrdersDB. Its constructors are read from
@@ -165,7 +168,7 @@ func TestHandlersDoNotReachThePoolDirectly(t *testing.T) {
 
 				where := path + ":" + strconv.Itoa(fset.Position(call.Pos()).Line)
 				what := recv + "." + sel.Sel.Name + "(...)"
-				if !writePath[sel.Sel.Name] {
+				if noWritePath[sel.Sel.Name] {
 					what += "  [layering, no write path]"
 				}
 

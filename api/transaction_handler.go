@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,6 +23,21 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
+
+// paymentCallContext carries the request's values without its cancellation.
+//
+// These handlers write payment rows before they post to checkout, so a caller
+// that goes away mid-call must not cancel it: the rows are already written and
+// checkout may already have charged, and an abandoned call means nothing
+// records that. Threading the request context straight through — which an
+// earlier version of this branch did — bought shutdown cancellation and this
+// with it. utils.PostJSON's client timeout is what bounds the call instead.
+//
+// The convention is CLAUDE.md's, and domain/billing/renewal.go uses
+// WithoutCancel on the renewal path for the same reason.
+func paymentCallContext(c *gin.Context) context.Context {
+	return context.WithoutCancel(c.Request.Context())
+}
 
 func (o *OrdersAPI) handleTransactionGetByID(c *gin.Context) {
 
@@ -205,7 +221,7 @@ func (o *OrdersAPI) handleTransactionOrderAndPay(c *gin.Context) {
 	}
 	utils.LogFor(c.Request.Context()).Debug("payment endpoint", slog.String("endpoint", ENDPOINT))
 
-	resp, err := utils.PostJSON("POST", ENDPOINT, payload)
+	resp, err := utils.PostJSON(paymentCallContext(c), "POST", ENDPOINT, payload)
 	if err != nil {
 		utils.LogFor(c.Request.Context()).Info("POST external payment failed", slog.Any("err", err))
 		c.JSON(http.StatusOK, gin.H{"url": errorurl})
@@ -315,7 +331,7 @@ func (o *OrdersAPI) handleTransactionNewToken(c *gin.Context) {
 		return
 	}
 
-	resp, err := utils.PostJSON("POST", common.GetNewTokenEndpoint, payload)
+	resp, err := utils.PostJSON(paymentCallContext(c), "POST", common.GetNewTokenEndpoint, payload)
 	if err != nil {
 		utils.LogFor(c.Request.Context()).Info("POST handleTransactionNewToken failed", slog.Any("err", err))
 		c.JSON(http.StatusOK, gin.H{"url": req.ErrorURL})
@@ -410,7 +426,7 @@ func (o *OrdersAPI) handleTransactionNewTokenNoCVV(c *gin.Context) {
 		return
 	}
 
-	resp, err := utils.PostJSON("POST", common.GetNewTokenNoCVVEndpoint, payload)
+	resp, err := utils.PostJSON(paymentCallContext(c), "POST", common.GetNewTokenNoCVVEndpoint, payload)
 	if err != nil {
 		utils.LogFor(c.Request.Context()).Info("POST GetNewTokenNoCVVEndpoint failed", slog.Any("err", err))
 		c.JSON(http.StatusOK, gin.H{"url": req.ErrorURL})

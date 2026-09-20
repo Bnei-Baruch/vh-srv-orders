@@ -242,8 +242,12 @@ func (im *SpecialsImporter) createSpecial(rSpecial *SpecialRecord) error {
 	// UserKey would then be stamped on this special, granting it to an
 	// unrelated person. A row can legitimately carry a keycloak id and no
 	// email, so reaching here with an invalid Email is normal.
+	//
+	// UserKey.Valid because it is nullable too: overwriting with an invalid one
+	// drops the column from the insert, so keycloak_id lands NULL and
+	// DeleteSpecialsByKeycloakId can never find the row.
 	if rSpecial.Email.Valid {
-		if account, err := im.repo.GetAccount(ctx, 0, rSpecial.Email.String); err == nil {
+		if account, err := im.repo.GetAccount(ctx, 0, rSpecial.Email.String); err == nil && account.UserKey.Valid {
 			special.KeycloakId = account.UserKey
 		}
 	}

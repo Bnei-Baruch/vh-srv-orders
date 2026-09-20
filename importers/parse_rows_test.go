@@ -410,3 +410,43 @@ func TestParseRobokasaRows_ShortAndNumericCells(t *testing.T) {
 	assert.Equal(t, "rb-3", orders[1].OrderID)
 	assert.InDelta(t, 1e6, orders[1].Amount, 0.001)
 }
+
+// Idempotency is keyed on OrderID. An imported blank id occupies the key "",
+// so every later blank-id row matches it and is skipped forever as already
+// imported — counted as skipped_orders, which reads like success.
+func TestParseRobokasaRows_DropsRowWithNoOrderID(t *testing.T) {
+	orders, dropped := parseRobokasaRows([][]any{
+		{"rb-1", "a@example.com", "12.50", "2026-01-01 10:00:00"},
+		{"", "b@example.com", "5.00", "2026-01-01 11:00:00"},
+	})
+	require.Len(t, orders, 1, "a row that cannot name itself is malformed")
+	assert.Equal(t, "rb-1", orders[0].OrderID)
+	assert.Equal(t, 1, dropped)
+}
+
+// Same guard the other two parsers carry: getOrCreateAccount with an empty
+// email resolves to whichever account was created last without one, so the
+// order and its payment attach to an unrelated person, silently.
+func TestParseRobokasaRows_DropsRowWithNoEmail(t *testing.T) {
+	orders, dropped := parseRobokasaRows([][]any{
+		{"rb-1", "a@example.com", "12.50", "2026-01-01 10:00:00"},
+		{"rb-2", "", "5.00", "2026-01-01 11:00:00"},
+	})
+	require.Len(t, orders, 1)
+	assert.Equal(t, "rb-1", orders[0].OrderID)
+	assert.Equal(t, 1, dropped)
+}
+
+// Import logs the row an operator opens to fix the export; its loop index
+// counts survivors, short by every dropped and every already-imported row.
+func TestParseRobokasaRows_CarriesTheSheetRow(t *testing.T) {
+	orders, dropped := parseRobokasaRows([][]any{
+		{"rb-1", "a@example.com", "12.50", "2026-01-01 10:00:00"},
+		{"rb-2", "b@example.com", "not a number", "2026-01-01 11:00:00"},
+		{"rb-3", "c@example.com", "7.00", "2026-01-01 12:00:00"},
+	})
+	require.Len(t, orders, 2)
+	assert.Equal(t, 1, dropped)
+	assert.Equal(t, 1, orders[0].SheetRow)
+	assert.Equal(t, 3, orders[1].SheetRow, "the sheet row, not the index into the survivors")
+}

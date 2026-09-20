@@ -85,3 +85,55 @@ func TestCreateSpecial_RejectsRecordWithNeitherIdentifier(t *testing.T) {
 
 	require.Error(t, im.createSpecial(specialRecord()))
 }
+
+// Account.UserKey is nullable — accounts predating the profile-service path
+// have it NULL. Clobbering a valid id with an invalid one drops the column from
+// the insert, so keycloak_id lands NULL and DeleteSpecialsByKeycloakId
+// (keycloak_id = $1) can never revoke the special.
+func TestCreateSpecial_AccountWithoutAKeyDoesNotClobberTheSheetsID(t *testing.T) {
+	im := NewSpecialsImporter()
+	mockRepo := mocks.NewMockOrdersRepository(t)
+	im.repo = mockRepo
+
+	mockRepo.EXPECT().GetAccount(mock.Anything, 0, "a@example.com").
+		Return(&repo.Account{ID: 7}, nil).Once()
+
+	var got repo.Special
+	mockRepo.EXPECT().CreateSpecial(mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, s repo.Special) (int, error) {
+			got = s
+			return 1, nil
+		}).Once()
+
+	record := specialRecord()
+	record.Email = null.StringFrom("a@example.com")
+	record.KeycloakID = null.StringFrom("kc-from-sheet")
+	require.NoError(t, im.createSpecial(record))
+
+	assert.True(t, got.KeycloakId.Valid, "an account with no UserKey must not make this NULL")
+	assert.Equal(t, "kc-from-sheet", got.KeycloakId.String)
+}
+
+// The lookup still does its job when the account has a key — that is how an
+// email-only row acquires one.
+func TestCreateSpecial_AccountKeyResolvesAnEmailOnlyRow(t *testing.T) {
+	im := NewSpecialsImporter()
+	mockRepo := mocks.NewMockOrdersRepository(t)
+	im.repo = mockRepo
+
+	mockRepo.EXPECT().GetAccount(mock.Anything, 0, "a@example.com").
+		Return(&repo.Account{ID: 7, UserKey: null.StringFrom("kc-resolved")}, nil).Once()
+
+	var got repo.Special
+	mockRepo.EXPECT().CreateSpecial(mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, s repo.Special) (int, error) {
+			got = s
+			return 1, nil
+		}).Once()
+
+	record := specialRecord()
+	record.Email = null.StringFrom("a@example.com")
+	require.NoError(t, im.createSpecial(record))
+
+	assert.Equal(t, "kc-resolved", got.KeycloakId.String)
+}

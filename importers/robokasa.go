@@ -53,14 +53,14 @@ func (im *RobokasaImporter) Import() error {
 	newOrders := 0
 	skippedOrders := 0
 	errOrders := 0
-	for i, row := range sheetValues {
+	for _, row := range sheetValues {
 		if _, ok := existingPayments[row.OrderID]; ok {
 			skippedOrders++
 			continue
 		}
 
 		if err := im.createOrderAndPayments(row); err != nil {
-			slog.Error("importer.createOrderAndPayments", slog.Int("line", i+1), slog.String("robokasa_id", row.OrderID), slog.Any("err", err))
+			slog.Error("importer.createOrderAndPayments", slog.Int("row", row.SheetRow), slog.String("robokasa_id", row.OrderID), slog.Any("err", err))
 			errOrders++
 			continue
 		}
@@ -76,6 +76,9 @@ type RobokasaOrder struct {
 	Email     string
 	Amount    float64
 	Timestamp time.Time
+	// The 1-based sheet row, so a failure names a line an operator can open.
+	// Import's loop index counts survivors, not sheet rows.
+	SheetRow int
 }
 
 func (im *RobokasaImporter) getSheetValues() ([]*RobokasaOrder, int, error) {
@@ -112,14 +115,31 @@ func parseRobokasaRows(values [][]any) ([]*RobokasaOrder, int) {
 			continue
 		}
 
-		// cell(), not row[n].(string): this parser had both hazards
-		// sheet_row.go describes. A trailing blank shortens the row, so an
-		// export with an empty timestamp column gives len(row) == 3 and row[3]
-		// panics; and a cell the sheet stores as a number arrives as float64,
-		// where the assertion panics too. Either one killed the whole run.
+		// cell(), not row[n].(string): both hazards sheet_row.go describes hit
+		// here — a trailing blank shortens the row, and a numeric cell arrives
+		// as float64. Either panic killed the whole run.
 		order := &RobokasaOrder{
-			OrderID: cell(row, 0),
-			Email:   cell(row, 1),
+			OrderID:  cell(row, 0),
+			Email:    cell(row, 1),
+			SheetRow: sheetRow,
+		}
+
+		// Idempotency is keyed on OrderID, so one imported blank id occupies
+		// the key "" and every later blank-id row is skipped forever as
+		// already imported.
+		if order.OrderID == "" {
+			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "order_id"), slog.String("reason", "empty"))
+			dropped++
+			continue
+		}
+
+		// getOrCreateAccount with an empty email resolves to whichever account
+		// was created last without one, so the order would attach to an
+		// unrelated person with no error anywhere.
+		if order.Email == "" {
+			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "email"), slog.String("reason", "empty"))
+			dropped++
+			continue
 		}
 
 		var err error

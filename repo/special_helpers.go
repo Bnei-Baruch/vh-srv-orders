@@ -257,14 +257,16 @@ func (o *OrdersDB) GetUniqueEmailsFromSpecial(ctx context.Context) ([]string, er
 	defer rows.Close()
 
 	for rows.Next() {
-		// Same reason as DeleteSpecialById: the column is nullable. This scan
-		// runs first in specialActivator.DoTask, so one unscannable row used to
-		// stop every special from activating, for every user.
+		// Nullable column, and this scan runs first in specialActivator.DoTask,
+		// so one unscannable row stopped specials activating for everyone.
+		// Skip on validity, not emptiness: a keycloak-only special is stored
+		// with an empty email, and that is the key GetAllSpecialsByEmail
+		// finds it under.
 		var email null.String
 		if err := rows.Scan(&email); err != nil {
 			return nil, err
 		}
-		if email.String == "" {
+		if !email.Valid {
 			continue
 		}
 		emails = append(emails, email.String)

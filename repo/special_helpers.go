@@ -154,7 +154,7 @@ func (o *OrdersDB) GetAllSpecials(ctx context.Context) ([]*Special, error) {
 }
 
 // GetSpecialsStartingBetween returns the specials whose window starts inside
-// the given range, ordered so the longest is last per identifier.
+// the given range, in no particular order.
 //
 // Both callers want a narrow band of start dates: the activator wants today,
 // the importer's dedup index wants the span the sheet mentions. Reading the

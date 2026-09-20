@@ -108,3 +108,38 @@ func TestSpecials_StartingBetweenExcludesRowsOutsideTheWindow(t *testing.T) {
 	require.Len(t, found, 1, "the 30-day-old row starts outside the window")
 	assert.Equal(t, "kc-inside", found[0].KeycloakId.String)
 }
+
+// HardDeleteAllUserDataByAccountID and MergeAccountsOrders remove an account's
+// specials with
+// `email = (SELECT "Email" FROM accounts WHERE id = $1)`. Accounts whose own
+// email is the empty string exist — the guard in createSpecial's account lookup
+// is there because GetAccount(ctx, 0, "") resolves to the most recent one — and
+// without NULLIF that predicate matches every special stored with an empty
+// email, i.e. every keycloak-only grant in the table, for every user.
+func TestHardDeleteAllUserData_EmptyEmailDoesNotTakeEveryKeycloakOnlySpecial(t *testing.T) {
+	db, ctx := newTestDB(t)
+
+	emptyEmailAccount, err := db.CreateAccount(ctx, Account{
+		Email:   null.StringFrom(""),
+		UserKey: null.StringFrom("kc-owner"),
+	})
+	require.NoError(t, err)
+
+	// Somebody else's keycloak-only special, stored the way the importer used
+	// to write them.
+	bystander, err := db.CreateSpecial(ctx, Special{
+		KeycloakId: null.StringFrom("kc-bystander"),
+		Email:      null.StringFrom(""),
+		StartDate:  null.TimeFrom(time.Now().Add(-time.Hour)),
+		EndDate:    null.TimeFrom(time.Now().Add(24 * time.Hour)),
+		Category:   null.StringFrom("membership"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.DeleteSpecialById(ctx, bystander) })
+
+	require.NoError(t, db.HardDeleteAllUserDataByAccountID(ctx, emptyEmailAccount, "kc-owner"))
+
+	var survives bool
+	require.NoError(t, db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM specials WHERE id = $1)`, bystander).Scan(&survives))
+	assert.True(t, survives, "deleting an account with an empty email must not delete other people's specials")
+}

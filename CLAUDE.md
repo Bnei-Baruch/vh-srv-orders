@@ -390,15 +390,16 @@ Parsers return a `SheetRow` on each record and every log line uses it. The loop 
 
 The table has no unique key and `CreateSpecial` always INSERTs, so nothing about a rerun is idempotent on its own.
 
-- **Email is not an identity.** `handleCreateSpecial` requires neither identifier, and the importer writes `email = ''` for every keycloak-only sheet row. Anything keyed on email folds all of those into one person. `specialActivator` reads the specials directly and keys on the keycloak id.
-- **Both identity columns are written non-NULL** (`''` when the sheet supplies neither), because `prepareSpecialCreateQuery` omits an invalid field entirely and several readers scan into `*string`, where pgx refuses NULL.
+- **Neither column is an identity on its own.** `handleCreateSpecial` requires neither, and the importer writes a row before the account exists, so a person's rows can disagree about which column is populated. Two specials are the same person when they share *any* non-empty identifier — `specialActivator` groups by that, merging on either.
+- **An identifier the sheet does not supply is written NULL, not `''`.** The empty string is not inert: `HardDeleteAllUserDataByAccountID` and `MergeAccountsOrders` delete specials by `email = (SELECT "Email" FROM accounts WHERE id = $1)`, and accounts with an empty email exist, so `''` made one account deletion take every keycloak-only grant in the table. Those queries use `NULLIF` now; writing NULL is the second half.
 - **The account lookup may only add an identifier, never remove one.** `accounts."UserKey"` is nullable *and* empty on some rows; either value would overwrite a good id from the sheet with one `DeleteSpecialsByKeycloakId` can never match.
 - **Revoking is a soft update** — `DeleteSpecialById` rewrites `end_date` and emits `delete_special`. It is the single revoke primitive; `DeleteSpecialsByKeycloakId` funnels through it.
-- **`subcategory` NULL and `''` are different rows.** The cleanup queries compare the column, and `where subcategory <> 'rav'` does not answer the same for both.
+- **A blank `subcategory` from a sheet is stored `''`, never NULL** — and never conditioned on `len(row)`. The Sheets API omits trailing empty cells, so the same blank cell arrives as a 5-cell row until someone types a note into column G. Deciding NULL-vs-`''` on row length made the dedup key depend on an unrelated column. The cleanup queries still compare the column (`where subcategory <> 'rav'` does not match NULL), which is why the stored value is `''`.
+- **Revoking is invisible to anything that reads only `start_date`.** `specialActivator` checks `end_date` too, or it re-grants a special an admin revoked hours earlier.
 
 ### Rerun safety
 
-`importers/special_dedup.go` indexes what the table already holds and skips sheet rows that match. The key is identifier + start date + category + subcategory validity — **not `end_date`**, which a revoke rewrites; including it meant the next cron run silently re-granted anything an admin had revoked.
+`importers/special_dedup.go` indexes what the table already holds and skips sheet rows that match. The key is identifier + start date + category + subcategory — **not `end_date`**, which a revoke rewrites; including it meant the next cron run silently re-granted anything an admin had revoked. The date is taken in the process's own zone, because the column is timestamptz and a local midnight east of Greenwich is the previous day in UTC.
 
 Both identifiers are indexed for a stored row, because they do not survive the import symmetrically: an email-only sheet line comes back carrying the keycloak id the account lookup resolved.
 

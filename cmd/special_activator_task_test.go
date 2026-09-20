@@ -113,3 +113,56 @@ func TestDoTask_IgnoresSpecialsNotBeginningToday(t *testing.T) {
 	require.NoError(t, w.DoTask())
 	assert.Empty(t, emitter.emitted)
 }
+
+// Neither column identifies a person on its own, so two rows that name the same
+// human through different columns must not be two activations.
+//
+// Alice has one special created through the API (keycloak id and email) and one
+// written by this importer before her account existed (email only). Keying on
+// the keycloak id first put them in separate buckets and emitted both, so a
+// last-write-wins consumer could truncate her longer grant to the shorter one.
+func TestDoTask_OnePersonNamedTwoWaysIsOneActivation(t *testing.T) {
+	withBoth := specialFor("kc-alice", "a@x.com", 30*24*time.Hour)
+	emailOnly := specialFor("", "a@x.com", 365*24*time.Hour)
+	w, emitter := workerWithSpecials(t, withBoth, emailOnly)
+
+	require.NoError(t, w.DoTask())
+	require.Len(t, emitter.emitted, 1, "one person, one activation")
+	assert.Equal(t, emailOnly.EndDate, emitter.emitted[0].Payload["end_date"], "the longest window wins")
+}
+
+// Same person, reached the other way round: the row carrying both identifiers
+// arrives after the one carrying only the id.
+func TestDoTask_GroupsMergeWhicheverRowArrivesFirst(t *testing.T) {
+	keycloakOnly := specialFor("kc-alice", "", 30*24*time.Hour)
+	withBoth := specialFor("kc-alice", "a@x.com", 365*24*time.Hour)
+	w, emitter := workerWithSpecials(t, keycloakOnly, withBoth)
+
+	require.NoError(t, w.DoTask())
+	require.Len(t, emitter.emitted, 1)
+	assert.Equal(t, withBoth.EndDate, emitter.emitted[0].Payload["end_date"])
+}
+
+// Case-insensitively, because GetAllSpecialsByEmail matches with ilike.
+func TestDoTask_EmailsGroupCaseInsensitively(t *testing.T) {
+	w, emitter := workerWithSpecials(t,
+		specialFor("", "A@X.com", 30*24*time.Hour),
+		specialFor("", "a@x.com", 365*24*time.Hour),
+	)
+
+	require.NoError(t, w.DoTask())
+	assert.Len(t, emitter.emitted, 1)
+}
+
+// Revoking is a soft update that moves end_date into the past, and it reaches
+// rows that started at midnight today. Without an end_date check the next tick
+// re-emits create_special for a special an admin revoked hours earlier,
+// carrying an end_date that has already passed.
+func TestDoTask_DoesNotActivateASpecialRevokedToday(t *testing.T) {
+	revoked := specialFor("kc-alice", "", time.Hour)
+	revoked.EndDate = null.TimeFrom(time.Now().Add(-time.Hour))
+	w, emitter := workerWithSpecials(t, revoked)
+
+	require.NoError(t, w.DoTask())
+	assert.Empty(t, emitter.emitted, "a special that began and was ended is not one beginning today")
+}

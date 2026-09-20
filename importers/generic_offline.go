@@ -147,6 +147,16 @@ func parseGenericRows(values [][]any) ([]*GenericOrder, int) {
 			Comment:       cell(row, 6),
 		}
 
+		// payment_method is the one required business field on this row that
+		// was still falling through unvalidated: an empty cell reached
+		// createPayment as null.StringFrom("") and the offline payment landed
+		// with no method recorded and nothing in the log.
+		if order.PaymentMethod == "" {
+			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "payment_method"), slog.String("reason", "empty"))
+			dropped++
+			continue
+		}
+
 		if order.Currency != common.CurrencyUSD &&
 			order.Currency != common.CurrencyEUR &&
 			order.Currency != common.CurrencyNIS &&

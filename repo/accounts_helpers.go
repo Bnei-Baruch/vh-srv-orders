@@ -225,7 +225,11 @@ func (o *OrdersDB) HardDeleteAllUserDataByAccountID(ctx context.Context, account
 		return fmt.Errorf("delete from payments_pelecard: %w", err)
 	}
 
-	_, err = tx.Exec(ctx, `DELETE FROM specials where email = (SELECT "Email" FROM accounts WHERE id = $1)`, accountID)
+	// NULLIF: an account whose "Email" is the empty string would otherwise match
+	// every special stored with an empty email — i.e. every keycloak-only grant
+	// in the table, for every user. Such accounts exist; GetAccount(ctx, 0, "")
+	// resolving to one is why createSpecial guards its lookup.
+	_, err = tx.Exec(ctx, `DELETE FROM specials where email = (SELECT NULLIF("Email", '') FROM accounts WHERE id = $1)`, accountID)
 	if err != nil {
 		return fmt.Errorf("delete from specials: %w", err)
 	}
@@ -378,7 +382,7 @@ func (o *OrdersDB) MergeAccountsOrders(ctx context.Context, req AccountMergeRequ
 		return fmt.Errorf("UPDATE transaction : %w", err)
 	}
 
-	_, err = tx.Exec(ctx, `DELETE FROM specials where email = (SELECT "Email" FROM accounts WHERE id = $1)`, sourceAccountID)
+	_, err = tx.Exec(ctx, `DELETE FROM specials where email = (SELECT NULLIF("Email", '') FROM accounts WHERE id = $1)`, sourceAccountID)
 	if err != nil {
 		return fmt.Errorf("delete from specials: %w", err)
 	}

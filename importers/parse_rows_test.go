@@ -59,7 +59,7 @@ func TestParseSpecialRows_SkipsHeaderKeepsData(t *testing.T) {
 	assert.Equal(t, "kc-1", records[0].KeycloakID.String)
 	assert.Equal(t, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), records[0].StartDate)
 	assert.Equal(t, "membership", records[0].Category)
-	assert.False(t, records[0].SubCategory.Valid, "absent sixth column stays unset")
+	assert.Empty(t, records[0].SubCategory.String, "absent sixth column reads as blank")
 	assert.Equal(t, "sub", records[1].SubCategory.String)
 }
 
@@ -136,12 +136,10 @@ func TestParseRows_TrailingCellsOmitted(t *testing.T) {
 			// five present: no method either
 			{"b@example.com", "5.00", "EUR", "2", "2026-01-01 11:00:00"},
 		})
-		require.Len(t, orders, 2)
-		assert.Zero(t, dropped)
+		require.Len(t, orders, 1)
+		assert.Equal(t, 1, dropped, "the row that lost payment_method is dropped, not stored without one")
 		assert.Empty(t, orders[0].Comment)
 		assert.Equal(t, "cash", orders[0].PaymentMethod)
-		assert.Empty(t, orders[1].PaymentMethod)
-		assert.Equal(t, 2, orders[1].Quantity)
 	})
 
 	t.Run("specials drops sub-category", func(t *testing.T) {
@@ -152,7 +150,7 @@ func TestParseRows_TrailingCellsOmitted(t *testing.T) {
 		})
 		require.Len(t, records, 1)
 		assert.Zero(t, dropped)
-		assert.False(t, records[0].SubCategory.Valid)
+		assert.Empty(t, records[0].SubCategory.String)
 		assert.Equal(t, "membership", records[0].Category)
 	})
 }
@@ -341,21 +339,32 @@ func TestParseSpecialRows_SkipsRowWithNeitherIdentifier(t *testing.T) {
 	assert.False(t, records[1].KeycloakID.Valid)
 }
 
-// A sub-category cell that is present and empty stored ” before the parser was
-// rewritten. Storing NULL instead flips three-valued logic for the cleanup
-// queries that compare it (`where subcategory <> 'rav'` never matches NULL), so
-// present-and-empty and absent have to stay different.
-func TestParseSpecialRows_PresentButEmptySubCategoryIsStored(t *testing.T) {
+// A blank sub-category must key the same whether or not a later column happens
+// to be filled in.
+//
+// The Sheets API omits trailing empty cells, so index 5 exists only when
+// something at index >= 5 is populated: the same blank cell arrives as a 5-cell
+// row until an operator types a note into column G, then as a 7-cell one. While
+// the parser decided the storage on len(row), and specialKey kept blank and
+// absent apart, adding that note made the dedup miss and insert a second
+// special for the same person and window.
+//
+// The empty string rather than unset, because the cleanup queries compare the
+// column and `where subcategory <> 'rav'` never matches NULL.
+func TestParseSpecialRows_BlankSubCategoryDoesNotDependOnRowLength(t *testing.T) {
 	records, _ := parseSpecialRows([][]any{
-		{"email", "keycloak_id", "start", "end", "category", "sub"},
-		{"a@example.com", "kc-1", "2026-01-01", "2026-12-31", "membership", ""},
-		{"b@example.com", "kc-2", "2026-01-01", "2026-12-31", "membership"},
+		{"email", "keycloak_id", "start", "end", "category", "sub", "comment"},
+		// blank sub-category, nothing after it: 5 cells
+		{"a@example.com", "kc-1", "2026-01-01", "2026-12-31", "membership"},
+		// blank sub-category, a comment after it: 7 cells
+		{"b@example.com", "kc-2", "2026-01-01", "2026-12-31", "membership", "", "a note"},
 	})
 	require.Len(t, records, 2)
 
-	assert.True(t, records[0].SubCategory.Valid, "a present empty cell is stored as ''")
+	assert.True(t, records[0].SubCategory.Valid, "a blank sub-category is stored as '', never NULL")
 	assert.Empty(t, records[0].SubCategory.String)
-	assert.False(t, records[1].SubCategory.Valid, "an absent cell stays NULL")
+	assert.Equal(t, records[0].SubCategory, records[1].SubCategory,
+		"an unrelated trailing column must not change how the sub-category is stored")
 }
 
 // The record carries its sheet row because the caller iterates the *filtered*

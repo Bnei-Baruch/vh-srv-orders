@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -30,7 +31,7 @@ func captureCreatedSpecial(t *testing.T, im *SpecialsImporter) *repo.Special {
 	im.repo = mockRepo
 
 	mockRepo.EXPECT().GetAccount(mock.Anything, mock.Anything, mock.Anything).
-		Return(nil, errors.New("no such account")).Maybe()
+		Return(nil, pgx.ErrNoRows).Maybe()
 
 	var got repo.Special
 	mockRepo.EXPECT().CreateSpecial(mock.Anything, mock.Anything).
@@ -42,15 +43,17 @@ func captureCreatedSpecial(t *testing.T, im *SpecialsImporter) *repo.Special {
 	return &got
 }
 
-// specials.email is written by nothing else in production, and two readers scan
-// it into a plain string: GetUniqueEmailsFromSpecial, which specialActivator
-// calls before anything else, and DeleteSpecialById, on the revoke path. pgx
-// refuses NULL into *string, so a single NULL-email row stopped specials
-// activating for every user.
+// An identifier the sheet does not carry is left unset, so the column inserts
+// NULL rather than an empty string.
 //
-// The record keeps an unset Email — the guard and the account lookup read that
-// — but the row written carries "".
-func TestCreateSpecial_KeycloakOnlyRowStillWritesAnEmail(t *testing.T) {
+// The empty string was written deliberately for a while, because
+// GetUniqueEmailsFromSpecial and DeleteSpecialById scanned the column into a
+// plain string and pgx refuses NULL there. Both readers are gone or fixed, and
+// the sentinel turned out not to be inert: DeleteAccount and MergeAccounts
+// delete specials by `email = (SELECT "Email" FROM accounts WHERE id = $1)`, so
+// an account whose own email is empty matched every keycloak-only grant in the
+// table.
+func TestCreateSpecial_KeycloakOnlyRowLeavesTheEmailNull(t *testing.T) {
 	im := NewSpecialsImporter()
 	got := captureCreatedSpecial(t, im)
 
@@ -58,12 +61,11 @@ func TestCreateSpecial_KeycloakOnlyRowStillWritesAnEmail(t *testing.T) {
 	record.KeycloakID = null.StringFrom("kc-1")
 	require.NoError(t, im.createSpecial(record))
 
-	assert.True(t, got.Email.Valid, "an unset email must still be written as '', not NULL")
-	assert.Empty(t, got.Email.String)
+	assert.False(t, got.Email.Valid, "an identifier the sheet did not supply must insert NULL, not ''")
 	assert.Equal(t, "kc-1", got.KeycloakId.String)
 }
 
-func TestCreateSpecial_EmailOnlyRowStillWritesAKeycloakID(t *testing.T) {
+func TestCreateSpecial_EmailOnlyRowLeavesTheKeycloakIdNull(t *testing.T) {
 	im := NewSpecialsImporter()
 	got := captureCreatedSpecial(t, im)
 
@@ -72,8 +74,7 @@ func TestCreateSpecial_EmailOnlyRowStillWritesAKeycloakID(t *testing.T) {
 	require.NoError(t, im.createSpecial(record))
 
 	assert.Equal(t, "a@example.com", got.Email.String)
-	assert.True(t, got.KeycloakId.Valid, "an unset keycloak id must still be written as ''")
-	assert.Empty(t, got.KeycloakId.String)
+	assert.False(t, got.KeycloakId.Valid, "no account matched, so there is no id to write")
 }
 
 // A record with neither identifier never reaches here — the parser drops it —
@@ -163,4 +164,27 @@ func TestCreateSpecial_AccountWithAnEmptyKeyDoesNotClobberTheSheetsID(t *testing
 	require.NoError(t, im.createSpecial(record))
 
 	assert.Equal(t, "kc-from-sheet", got.KeycloakId.String)
+}
+
+// A GetAccount failure that is not "no such account" has to surface.
+//
+// The lookup used to swallow every error, which was self-correcting by accident
+// while the importer was not idempotent: the next tick re-inserted the row and
+// the account usually existed by then. With the dedup index in place the
+// half-written row is recognised as already present on every later run, so a
+// transient database error leaves a special that can never be revoked by
+// keycloak id and never gets retried.
+func TestCreateSpecial_ATransientAccountLookupFailureIsNotSwallowed(t *testing.T) {
+	im := NewSpecialsImporter()
+	mockRepo := mocks.NewMockOrdersRepository(t)
+	im.repo = mockRepo
+
+	mockRepo.EXPECT().GetAccount(mock.Anything, 0, "a@example.com").
+		Return(nil, errors.New("connection reset by peer")).Once()
+
+	record := specialRecord()
+	record.Email = null.StringFrom("a@example.com")
+	record.KeycloakID = null.StringFrom("kc-1")
+
+	require.Error(t, im.createSpecial(record), "the row must be retried, not written without its keycloak id")
 }

@@ -2,10 +2,12 @@ package importers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/volatiletech/null/v9"
 	"google.golang.org/api/option"
 	"google.golang.org/api/sheets/v4"
@@ -196,13 +198,18 @@ func parseSpecialRows(values [][]any) ([]*SpecialRecord, int) {
 			continue
 		}
 
-		// len(row) > 5 rather than a non-empty check: a sub-category cell that
-		// is present and empty stored '' before this change, and the cleanup
-		// queries compare it (`where subcategory <> 'rav'`), where NULL and ''
-		// are not the same answer. Absent stays unset, present stays stored.
-		if len(row) > 5 {
-			record.SubCategory = null.StringFrom(cell(row, 5))
-		}
+		// Always set, never conditioned on len(row). The Sheets API omits
+		// trailing empty cells, so index 5 exists only when some *later* column
+		// happens to be filled: the same blank sub-category arrives as a
+		// 5-cell row until an operator types a note into column G, and as a
+		// 7-cell row afterwards. Keying NULL and the empty string apart then
+		// made the dedup depend on a column unrelated to the grant, so an added
+		// comment produced a second special for the same person and window.
+		//
+		// The empty string rather than unset, because the cleanup queries
+		// compare the column (`where subcategory <> 'rav'`) and NULL is not the
+		// same answer there.
+		record.SubCategory = null.StringFrom(cell(row, 5))
 		records = append(records, record)
 	}
 
@@ -220,26 +227,28 @@ func (im *SpecialsImporter) createSpecial(rSpecial *SpecialRecord) error {
 		return fmt.Errorf("email & : KeycloakID can't be empty both")
 	}
 	var special repo.Special
-	// Written as empty strings rather than left unset. prepareSpecialCreateQuery
-	// omits a column whose field is not Valid, so an unset identifier inserts
-	// NULL — and DeleteSpecialById and GetUniqueEmailsFromSpecial scan email
-	// into a plain string, where pgx refuses NULL. GetUniqueEmailsFromSpecial
-	// is the first thing specialActivator does, so one such row stops specials
-	// activating for everyone. Every insert this importer made before carried a
-	// non-NULL email; keep it that way. The record's own fields stay unset,
-	// which is what the guard above and the account lookup below read.
-	special.Email = null.StringFrom(rSpecial.Email.String)
-	special.KeycloakId = null.StringFrom(rSpecial.KeycloakID.String)
+	// An identifier the sheet does not carry is left unset, so the column
+	// inserts NULL rather than an empty string. Every reader of specials.email
+	// scans null.String, so NULL costs nothing — and an empty one is not inert:
+	// DeleteAccount and MergeAccounts delete specials by
+	// `email = (SELECT "Email" FROM accounts WHERE id = $1)`, so an account
+	// whose own email is empty would match every keycloak-only grant in the
+	// table. That query is guarded now, but writing NULL is what keeps this row
+	// out of reach of the next such predicate.
+	special.Email = rSpecial.Email
+	special.KeycloakId = rSpecial.KeycloakID
 	special.StartDate = null.TimeFrom(rSpecial.StartDate)
 	special.EndDate = null.TimeFrom(rSpecial.EndDate)
 	special.Category = null.StringFrom(rSpecial.Category)
 	special.SubCategory = rSpecial.SubCategory
 
 	ctx := context.WithValue(context.Background(), common.CtxEventBuilder, im)
-	// Guarded: GetAccount with an empty email builds
-	// `where LOWER("Email") = LOWER('') order by created_at desc limit 1` and
-	// so returns whatever account was last created without an email — whose
-	// UserKey would then be stamped on this special, granting it to an
+	// Resolve the keycloak id from the account, when the sheet gave an email.
+	//
+	// Guarded on Email.Valid: GetAccount with an empty email matches on
+	// LOWER("Email") against an empty literal, ordered by created_at desc limit
+	// 1, so it returns whatever account was last created without an email —
+	// whose UserKey would then be stamped on this special, granting it to an
 	// unrelated person. A row can legitimately carry a keycloak id and no
 	// email, so reaching here with an invalid Email is normal.
 	//
@@ -247,9 +256,20 @@ func (im *SpecialsImporter) createSpecial(rSpecial *SpecialRecord) error {
 	// stored empty on some rows. Either one overwrites a good id from the sheet
 	// with something DeleteSpecialsByKeycloakId (keycloak_id = $1) can never
 	// match.
+	//
+	// pgx.ErrNoRows means no such account and is expected; anything else is a
+	// real failure and has to surface. The dedup index makes a swallowed error
+	// permanent — the row it half-wrote is recognised as already present on
+	// every later run, so it is never retried and the special never grants.
 	if rSpecial.Email.Valid {
-		if account, err := im.repo.GetAccount(ctx, 0, rSpecial.Email.String); err == nil && account.UserKey.String != "" {
-			special.KeycloakId = account.UserKey
+		account, err := im.repo.GetAccount(ctx, 0, rSpecial.Email.String)
+		switch {
+		case err == nil:
+			if account.UserKey.String != "" {
+				special.KeycloakId = account.UserKey
+			}
+		case !errors.Is(err, pgx.ErrNoRows):
+			return fmt.Errorf("repo.GetAccount: %w", err)
 		}
 	}
 

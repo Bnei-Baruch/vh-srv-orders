@@ -66,7 +66,11 @@ func (im *RobokasaImporter) Import() error {
 		}
 		newOrders++
 	}
-	slog.Info("import summary", slog.Int("new_orders", newOrders), slog.Int("skipped_orders", skippedOrders), slog.Int("with_errors", errOrders))
+	// dropped_by_parser for the same reason the other two importers carry it:
+	// a row the parser threw away reaches no counter below, so without it the
+	// summary adds up to fewer rows than the sheet holds.
+	slog.Info("import summary", slog.Int("new_orders", newOrders), slog.Int("skipped_orders", skippedOrders),
+		slog.Int("with_errors", errOrders), slog.Int("dropped_by_parser", dropped))
 
 	return nil
 }

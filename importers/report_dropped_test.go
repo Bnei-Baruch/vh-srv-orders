@@ -95,3 +95,30 @@ func TestReportDroppedRows_TheErrorLevelIsItsOwnIssue(t *testing.T) {
 	require.Len(t, transport.events, 2)
 	assert.NotEqual(t, transport.events[0].Fingerprint, transport.events[1].Fingerprint)
 }
+
+// The permanent nuisance and the real format break have to be separate Sentry
+// issues, or archiving the first swallows the second. Grouping on the importer
+// alone did exactly that: both are Warning.
+func TestReportDroppedRows_ARatioChangeIsItsOwnIssue(t *testing.T) {
+	transport := withCapturedSentry(t)
+
+	reportDroppedRows(NewSpecialsImporter(), 1, 199)  // the row nobody will fix
+	reportDroppedRows(NewSpecialsImporter(), 30, 170) // the date column changed format
+
+	require.Len(t, transport.events, 2)
+	assert.NotEqual(t, transport.events[0].Fingerprint, transport.events[1].Fingerprint,
+		"archiving the permanent 1-of-200 must not archive the 30-of-200")
+}
+
+// …while the same nuisance still groups as the sheet grows, which is what the
+// fingerprint exists for: the counts are in the message, so without it
+// 1-of-200 and 1-of-201 are two issues.
+func TestReportDroppedRows_TheSameNuisanceGroupsAsTheSheetGrows(t *testing.T) {
+	transport := withCapturedSentry(t)
+
+	reportDroppedRows(NewSpecialsImporter(), 1, 199)
+	reportDroppedRows(NewSpecialsImporter(), 1, 250)
+
+	require.Len(t, transport.events, 2)
+	assert.Equal(t, transport.events[0].Fingerprint, transport.events[1].Fingerprint)
+}

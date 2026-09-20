@@ -106,10 +106,14 @@ func TestSpecialKeys_ARevokedSpecialIsStillRecognised(t *testing.T) {
 		"the sheet row must not be re-imported over a revoke")
 }
 
-// NULL and an empty sub-category are different rows: parseSpecialRows keeps
-// them apart because the cleanup queries compare the column, and
-// `where subcategory <> 'rav'` does not answer the same for both. The dedup has
-// to preserve the distinction or the empty string is never written.
+// NULL and an empty sub-category are different stored values, and the cleanup
+// queries compare the column — `where subcategory <> 'rav'` does not answer the
+// same for both — so the key keeps them apart.
+//
+// The parser no longer produces NULL (a blank cell always stores the empty
+// string, because len(row) depends on unrelated trailing columns), so this only
+// separates a sheet row from an API-created one. It can cost a duplicate, never
+// a missed grant.
 func TestSpecialKeys_NullAndEmptySubCategoryAreDifferentRows(t *testing.T) {
 	keys := make(specialKeys)
 

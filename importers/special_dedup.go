@@ -20,9 +20,9 @@ import (
 // what made a rerun safe: nothing had been written yet. Now a run that drops 3
 // rows of 200 has already committed the other 197, and rerunning after fixing
 // those 3 would give 197 people a second row each. The duplicates are not
-// inert — GetAllSpecialsByEmail feeds specialActivator, and
-// DeleteSpecialsByKeycloakId has to end each active row individually, so a
-// partially duplicated table changes what revoking means.
+// inert — DeleteSpecialsByKeycloakId has to end each active row individually,
+// and specialActivator picks the longest window per person, so a partially
+// duplicated table changes what revoking means.
 //
 // A unique index is the durable answer and needs its own migration plus a
 // decision about what to do with the duplicates already in the table. This is
@@ -56,9 +56,17 @@ func specialKey(identifier string, start time.Time, category string, subCategory
 	}
 	return strings.Join([]string{
 		strings.ToLower(strings.TrimSpace(identifier)),
-		// The date, not the instant: these are stored as timestamptz and read
-		// back in the session's zone, and the sheet only ever says a date.
-		start.UTC().Format(time.DateOnly),
+		// The date in the process's own zone, not the UTC date. The sheet only
+		// ever says a date, but the column is timestamptz and a row created
+		// through the API carries whatever instant the client sent — a local
+		// midnight east of Greenwich is the previous day in UTC, so keying on
+		// the UTC date put the two on opposite sides of a date boundary and
+		// they could never match however wide the query window was.
+		//
+		// This aligns rows created in the same zone the importer runs in. A
+		// grant created in a different zone can still key to the neighbouring
+		// day; a unique index is what would settle that for good.
+		start.Local().Format(time.DateOnly),
 		strings.ToLower(category),
 		sub,
 	}, "\x00")
@@ -116,9 +124,9 @@ func (im *SpecialsImporter) existingSpecials(ctx context.Context, records []*Spe
 		}
 	}
 
-	// A day either side: the column is timestamptz and the key compares UTC
-	// dates, so a row stored at a local midnight sits on the other side of an
-	// exact bound.
+	// A day either side, because the key compares local dates and the bounds
+	// are instants: a row whose local date matches the sheet can sit up to a
+	// day outside an exact range.
 	existing, err := im.repo.GetSpecialsStartingBetween(ctx, from.AddDate(0, 0, -1), to.AddDate(0, 0, 1))
 	if err != nil {
 		return nil, fmt.Errorf("repo.GetSpecialsStartingBetween: %w", err)

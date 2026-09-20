@@ -54,16 +54,37 @@ func reportDroppedRows(im importer, dropped, kept int) {
 		level = sentry.LevelError
 		message = fmt.Sprintf("%s: dropped every one of %d sheet rows as malformed; the sheet format may have changed", im.String(), dropped)
 	}
-	// One issue per importer and level, rather than one per distinct count:
-	// the sheets are never cleared, so a row nobody will fix — a totals line, a
-	// half-typed entry — is dropped again on every tick, and an alert that
-	// repeats forever is the one that gets muted, taking the real 30-of-200
-	// event with it.
+	// Grouped by a bucketed ratio, not by the exact counts and not by the
+	// importer alone.
+	//
+	// The counts alone fragment: the sheets are never cleared, so the one row
+	// nobody will fix — a totals line, a half-typed entry — is dropped again
+	// every tick, and `1 of 200`, `1 of 201`, `1 of 202` open three issues as
+	// the sheet grows. The importer alone over-groups the other way: archiving
+	// that permanent nuisance would archive the 30-of-200 that means the date
+	// column just changed format. The ratio separates those two and is stable
+	// as the sheet grows.
 	sentry.WithScope(func(scope *sentry.Scope) {
 		scope.SetLevel(level)
-		scope.SetFingerprint([]string{"importer-dropped-rows", im.String(), string(level)})
+		scope.SetFingerprint([]string{"importer-dropped-rows", im.String(), dropRatioBucket(dropped, kept)})
 		sentry.CaptureMessage(message)
 	})
+}
+
+// dropRatioBucket names how much of the sheet was thrown away, coarsely enough
+// that one more row next week does not open a new Sentry issue.
+func dropRatioBucket(dropped, kept int) string {
+	total := dropped + kept
+	switch {
+	case kept == 0:
+		return "all"
+	case dropped*2 >= total:
+		return "most"
+	case dropped*10 >= total:
+		return "some"
+	default:
+		return "few"
+	}
 }
 
 func doImport(im importer) {

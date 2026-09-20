@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -130,4 +131,50 @@ func TestDeleteSpecialById_EventCarriesTheKeycloakId(t *testing.T) {
 	}
 	require.NotNil(t, payload, "revoking must emit delete_special")
 	assert.Equal(t, "kc-revoked", payload["keycloak_id"], "the revoke must name who was revoked")
+}
+
+// The listing is bounded because the table only grows — revoking rewrites
+// end_date rather than removing the row — and ordered, because LIMIT/OFFSET
+// without an ORDER BY lets two pages overlap or skip rows.
+//
+// created_at is scrambled after insert on purpose. Left in insertion order the
+// assertion passes with or without the ORDER BY, because that is the order
+// Postgres happens to return a small table in — which is exactly how an
+// ordering nobody pinned survives into production.
+func TestGetAllSpecials_IsPagedAndOrdered(t *testing.T) {
+	db, ctx := newTestDB(t)
+
+	start := time.Now()
+	ids := make([]int, 3)
+	for i := range ids {
+		id, err := db.CreateSpecial(ctx, Special{
+			KeycloakId: null.StringFrom(fmt.Sprintf("kc-%d", i)),
+			Email:      null.StringFrom(fmt.Sprintf("p%d@example.com", i)),
+			StartDate:  null.TimeFrom(start),
+			EndDate:    null.TimeFrom(start.Add(24 * time.Hour)),
+			Category:   null.StringFrom("membership"),
+		})
+		require.NoError(t, err)
+		ids[i] = id
+		t.Cleanup(func() { _ = db.DeleteSpecialById(ctx, id) })
+	}
+
+	// Newest first is ids[1], then ids[0], then ids[2] — deliberately not the
+	// order the rows were written in.
+	for offset, id := range map[int]int{0: ids[2], 1: ids[0], 2: ids[1]} {
+		_, err := db.Exec(ctx, `UPDATE specials SET created_at = $1 WHERE id = $2`,
+			start.Add(time.Duration(offset)*time.Minute), id)
+		require.NoError(t, err)
+	}
+	want := []int{ids[1], ids[0], ids[2]}
+
+	first, err := db.GetAllSpecials(ctx, 0, 2)
+	require.NoError(t, err)
+	require.Len(t, first, 2, "limit must bound the read")
+	assert.Equal(t, want[:2], []int{first[0].Id.Int, first[1].Id.Int}, "newest first")
+
+	second, err := db.GetAllSpecials(ctx, 2, 2)
+	require.NoError(t, err)
+	require.Len(t, second, 1, "offset must skip the first page")
+	assert.Equal(t, want[2], second[0].Id.Int, "and the pages must not overlap")
 }

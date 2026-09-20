@@ -3200,8 +3200,8 @@ func (_c *MockOrdersRepository_GetAllPayments_Call) RunAndReturn(run func(ctx co
 }
 
 // GetAllSpecials provides a mock function for the type MockOrdersRepository
-func (_mock *MockOrdersRepository) GetAllSpecials(ctx context.Context) ([]*repo.Special, error) {
-	ret := _mock.Called(ctx)
+func (_mock *MockOrdersRepository) GetAllSpecials(ctx context.Context, skip int, limit int) ([]*repo.Special, error) {
+	ret := _mock.Called(ctx, skip, limit)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetAllSpecials")
@@ -3209,18 +3209,18 @@ func (_mock *MockOrdersRepository) GetAllSpecials(ctx context.Context) ([]*repo.
 
 	var r0 []*repo.Special
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context) ([]*repo.Special, error)); ok {
-		return returnFunc(ctx)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int, int) ([]*repo.Special, error)); ok {
+		return returnFunc(ctx, skip, limit)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context) []*repo.Special); ok {
-		r0 = returnFunc(ctx)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int, int) []*repo.Special); ok {
+		r0 = returnFunc(ctx, skip, limit)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*repo.Special)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = returnFunc(ctx)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, int, int) error); ok {
+		r1 = returnFunc(ctx, skip, limit)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -3234,18 +3234,30 @@ type MockOrdersRepository_GetAllSpecials_Call struct {
 
 // GetAllSpecials is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockOrdersRepository_Expecter) GetAllSpecials(ctx any) *MockOrdersRepository_GetAllSpecials_Call {
-	return &MockOrdersRepository_GetAllSpecials_Call{Call: _e.mock.On("GetAllSpecials", ctx)}
+//   - skip int
+//   - limit int
+func (_e *MockOrdersRepository_Expecter) GetAllSpecials(ctx any, skip any, limit any) *MockOrdersRepository_GetAllSpecials_Call {
+	return &MockOrdersRepository_GetAllSpecials_Call{Call: _e.mock.On("GetAllSpecials", ctx, skip, limit)}
 }
 
-func (_c *MockOrdersRepository_GetAllSpecials_Call) Run(run func(ctx context.Context)) *MockOrdersRepository_GetAllSpecials_Call {
+func (_c *MockOrdersRepository_GetAllSpecials_Call) Run(run func(ctx context.Context, skip int, limit int)) *MockOrdersRepository_GetAllSpecials_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
+		var arg1 int
+		if args[1] != nil {
+			arg1 = args[1].(int)
+		}
+		var arg2 int
+		if args[2] != nil {
+			arg2 = args[2].(int)
+		}
 		run(
 			arg0,
+			arg1,
+			arg2,
 		)
 	})
 	return _c
@@ -3256,7 +3268,7 @@ func (_c *MockOrdersRepository_GetAllSpecials_Call) Return(specials []*repo.Spec
 	return _c
 }
 
-func (_c *MockOrdersRepository_GetAllSpecials_Call) RunAndReturn(run func(ctx context.Context) ([]*repo.Special, error)) *MockOrdersRepository_GetAllSpecials_Call {
+func (_c *MockOrdersRepository_GetAllSpecials_Call) RunAndReturn(run func(ctx context.Context, skip int, limit int) ([]*repo.Special, error)) *MockOrdersRepository_GetAllSpecials_Call {
 	_c.Call.Return(run)
 	return _c
 }

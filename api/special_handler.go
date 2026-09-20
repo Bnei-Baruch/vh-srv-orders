@@ -166,12 +166,40 @@ func (o *OrdersAPI) handleSpecialGetByKeycloakId(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": special, "success": true})
 }
 
+// defaultSpecialsPageSize bounds the listing without truncating any caller that
+// exists today. The house default for a paged endpoint is 10, which would have
+// made this one answer a request for every special with the first ten and no
+// sign that the rest were missing — the admin table renders whatever it gets.
+// A caller that wants pages can ask for them with skip/limit.
+const defaultSpecialsPageSize = 1000
+
 func (o *OrdersAPI) handleSpecialGetAll(c *gin.Context) {
 	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
 		return
 	}
 
-	special, err := o.repo.GetAllSpecials(c.Request.Context())
+	skip := c.Query("skip")
+	if skip == "" {
+		skip = "0"
+	}
+	limit := c.Query("limit")
+	if limit == "" {
+		limit = strconv.Itoa(defaultSpecialsPageSize)
+	}
+
+	intSkip, err := strconv.Atoi(skip)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid skip value! Accepted value is INTEGER", "success": false})
+		return
+	}
+
+	intLimit, err := strconv.Atoi(limit)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit value! Accepted value is INTEGER", "success": false})
+		return
+	}
+
+	special, err := o.repo.GetAllSpecials(c.Request.Context(), intSkip, intLimit)
 	if err != nil {
 		c.Status(http.StatusInternalServerError)
 		_ = c.Error(fmt.Errorf("repo.GetAllSpecials: %w", err))

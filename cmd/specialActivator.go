@@ -121,7 +121,11 @@ func (w *Worker) DoTask() error {
 		// `SET end_date = now()` — and it reaches rows that started at midnight
 		// today. Without this, revoking at 08:00 is undone by the next tick,
 		// which emits create_special carrying an end_date already in the past.
-		if special.EndDate.Valid && !special.EndDate.Time.After(now) {
+		//
+		// No EndDate.Valid guard: specials.end_date is NOT NULL (migration 19),
+		// so the check would never fail and would read as though an open-ended
+		// special were possible.
+		if !special.EndDate.Time.After(now) {
 			slog.Info("special already ended, not activating",
 				slog.Int("special_id", special.Id.Int), slog.Time("end_date", special.EndDate.Time))
 			continue

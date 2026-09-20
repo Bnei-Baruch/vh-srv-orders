@@ -132,9 +132,17 @@ func (o *OrdersDB) GetSpecialsByKeycloakId(ctx context.Context, keycloakID strin
 	return specials, nil
 }
 
-func (o *OrdersDB) GetAllSpecials(ctx context.Context) ([]*Special, error) {
+// GetAllSpecials returns a page of specials, newest first.
+//
+// Bounded because the table only grows: revoking is a soft update that rewrites
+// end_date, so nothing is ever removed, and the admin listing was reading every
+// row ever granted on each request. The ORDER BY is what makes skip/limit mean
+// anything — without it Postgres returns whatever the plan produces and two
+// pages can overlap or miss rows.
+func (o *OrdersDB) GetAllSpecials(ctx context.Context, skip, limit int) ([]*Special, error) {
 	var specials []*Special
-	rows, err := o.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory from specials`)
+	rows, err := o.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory from specials
+		 ORDER BY created_at DESC, id DESC LIMIT $1 OFFSET $2`, limit, skip)
 	if err != nil {
 		return specials, err
 	}

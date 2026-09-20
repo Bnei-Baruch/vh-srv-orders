@@ -1,13 +1,16 @@
 package importers
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/volatiletech/null/v9"
 
+	mocks "gitlab.bbdev.team/vh/pay/orders/internal/mocks"
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
@@ -137,4 +140,58 @@ func TestSpecialKeys_MatchingSubCategoriesStillCollapse(t *testing.T) {
 	sheet.SubCategory = null.StringFrom("rav")
 
 	assert.True(t, keys.has(sheet))
+}
+
+// existingSpecials is the only part of the dedup that Import reaches and no
+// test did: it derives the query window from the sheet's own rows.
+func TestExistingSpecials_AsksForTheWindowTheSheetMentions(t *testing.T) {
+	im := NewSpecialsImporter()
+	mockRepo := mocks.NewMockOrdersRepository(t)
+	im.repo = mockRepo
+
+	var gotFrom, gotTo time.Time
+	mockRepo.EXPECT().GetSpecialsStartingBetween(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, from, to time.Time) ([]*repo.Special, error) {
+			gotFrom, gotTo = from, to
+			return nil, nil
+		}).Once()
+
+	early := sheetRecord("a@example.com", "")
+	early.StartDate = time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	late := sheetRecord("b@example.com", "")
+	late.StartDate = time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+
+	_, err := im.existingSpecials(context.Background(), []*SpecialRecord{late, early})
+	require.NoError(t, err)
+
+	// A day either side of the sheet's own span, because the key compares local
+	// dates and the bounds are instants.
+	assert.Equal(t, early.StartDate.AddDate(0, 0, -1), gotFrom, "the window starts a day before the earliest row")
+	assert.Equal(t, late.StartDate.AddDate(0, 0, 1), gotTo, "and ends a day after the latest")
+}
+
+// An empty sheet must not turn into an unbounded read.
+func TestExistingSpecials_EmptySheetQueriesNothing(t *testing.T) {
+	im := NewSpecialsImporter()
+	im.repo = mocks.NewMockOrdersRepository(t) // no EXPECT: any call fails the test
+
+	keys, err := im.existingSpecials(context.Background(), nil)
+	require.NoError(t, err)
+	assert.Empty(t, keys)
+}
+
+// The index has to recognise a stored row through whichever identifier the
+// sheet line carries, which is what existingSpecials feeds it.
+func TestExistingSpecials_IndexesWhatTheRepoReturns(t *testing.T) {
+	im := NewSpecialsImporter()
+	mockRepo := mocks.NewMockOrdersRepository(t)
+	im.repo = mockRepo
+
+	stored := storedSpecial("a@example.com", "kc-1")
+	mockRepo.EXPECT().GetSpecialsStartingBetween(mock.Anything, mock.Anything, mock.Anything).
+		Return([]*repo.Special{stored}, nil).Once()
+
+	keys, err := im.existingSpecials(context.Background(), []*SpecialRecord{sheetRecord("a@example.com", "kc-1")})
+	require.NoError(t, err)
+	assert.True(t, keys.has(sheetRecord("a@example.com", "kc-1")))
 }

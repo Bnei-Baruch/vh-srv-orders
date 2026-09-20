@@ -102,7 +102,7 @@ type OrdersRepository interface {
 	GetSpecialsStartingBetween(ctx context.Context, from, to time.Time) ([]*Special, error)
 	GetSpecialsByKeycloakId(ctx context.Context, keycloakID string) ([]*Special, error)
 	GetSpecialsById(ctx context.Context, id string) ([]*Special, error)
-	GetAllSpecials(ctx context.Context) ([]*Special, error)
+	GetAllSpecials(ctx context.Context, skip, limit int) ([]*Special, error)
 	SetKeycloakIdByEmail(ctx context.Context, email string, keycloakID string) error
 
 	UpsertManualDiscount(ctx context.Context, req ManualDiscountReq) (*ManualDiscount, error)

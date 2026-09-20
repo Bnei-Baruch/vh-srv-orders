@@ -33,14 +33,31 @@ type importer interface {
 // non-zero exit. Skipping is better per row and worse per sheet: 30 rows
 // dropped out of 200 because someone switched the date column to DD/MM/YYYY
 // leaves 170 imported, exit 0, and the only trace a log line nobody reads.
-// Those 30 people silently never get their specials. A drop is now a Sentry
-// event at any ratio, not only when the whole sheet goes.
+// Those 30 people silently never get their specials. A drop is a Sentry event
+// at any ratio.
+//
+// Nothing survived is the same event at a higher level rather than a different
+// mechanism. It used to abort the import, which read "the sheet format
+// changed" off a condition that two operators typing GBP also satisfy — and
+// since the sheet is not cleared between runs, the cron then exited 1 on every
+// invocation until someone edited it. The distinction is worth an alert level,
+// not a dead importer.
 func reportDroppedRows(im importer, dropped, kept int) {
 	if dropped == 0 {
 		return
 	}
 	slog.Warn("importer dropped rows", slog.String("importer", im.String()), slog.Int("dropped", dropped), slog.Int("kept", kept))
-	sentry.CaptureMessage(fmt.Sprintf("%s: dropped %d of %d sheet rows as malformed", im.String(), dropped, dropped+kept))
+
+	level := sentry.LevelWarning
+	message := fmt.Sprintf("%s: dropped %d of %d sheet rows as malformed", im.String(), dropped, dropped+kept)
+	if kept == 0 {
+		level = sentry.LevelError
+		message = fmt.Sprintf("%s: dropped every one of %d sheet rows as malformed; the sheet format may have changed", im.String(), dropped)
+	}
+	sentry.WithScope(func(scope *sentry.Scope) {
+		scope.SetLevel(level)
+		sentry.CaptureMessage(message)
+	})
 }
 
 func doImport(im importer) {

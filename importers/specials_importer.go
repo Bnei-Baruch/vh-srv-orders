@@ -98,28 +98,39 @@ func (im *SpecialsImporter) getSheetValues() ([]*SpecialRecord, int, error) {
 		return nil, 0, fmt.Errorf("sheetsService.Spreadsheets.Values.Get: %w", err)
 	}
 
-	return parseSpecialRows(resp.Values)
+	records, dropped := parseSpecialRows(resp.Values)
+	return records, dropped, nil
 }
 
 // parseSpecialRows turns sheet rows into records, skipping the header. Split
 // out of getSheetValues, which builds its Sheets client inline and so cannot be
 // reached from a test.
 //
-// Returns the records it could read and the number of data rows it dropped.
-func parseSpecialRows(values [][]any) ([]*SpecialRecord, int, error) {
+// Returns the records it could read and the number of data rows it dropped. A
+// dropped row is never fatal: reportDroppedRows raises its level when nothing
+// survived, which says the same thing without killing a cron that will be
+// handed the same sheet a minute later.
+func parseSpecialRows(values [][]any) ([]*SpecialRecord, int) {
 	records := make([]*SpecialRecord, 0)
 	const layout = "2006-01-02"
 
 	// An empty sheet has no header to skip, and values[1:] panics on it rather
 	// than reporting an empty import.
 	if len(values) == 0 {
-		return records, 0, nil
+		return records, 0
 	}
 
 	dropped := 0
 	for i, row := range values[1:] {
 		// +2: i counts from the first data row, and the header is sheet row 1.
 		sheetRow := i + 2
+
+		// A spacer line between entries is not a malformed row; it is not a
+		// row. Counting it would report a drop on every run of a sheet nobody
+		// needs to fix.
+		if blankRow(row) {
+			continue
+		}
 
 		startDate, err := time.Parse(layout, cell(row, 2))
 		if err != nil {
@@ -186,12 +197,7 @@ func parseSpecialRows(values [][]any) ([]*SpecialRecord, int, error) {
 	// format or one inserted column drops all of them, and the run then logs
 	// count=0 with_errors=0 and exits 0 — indistinguishable from an empty
 	// sheet, and silent in Sentry. Say so instead.
-	dataRows := len(values) - 1
-	if dataRows >= minRowsForFormatBreak && dropped == dataRows {
-		return nil, dropped, fmt.Errorf("every data row was dropped (%d of %d); the sheet format has probably changed", dropped, dataRows)
-	}
-
-	return records, dropped, nil
+	return records, dropped
 }
 
 func (im *SpecialsImporter) createSpecial(rSpecial *SpecialRecord) error {
@@ -200,8 +206,16 @@ func (im *SpecialsImporter) createSpecial(rSpecial *SpecialRecord) error {
 		return fmt.Errorf("email & : KeycloakID can't be empty both")
 	}
 	var special repo.Special
-	special.Email = rSpecial.Email
-	special.KeycloakId = rSpecial.KeycloakID
+	// Written as empty strings rather than left unset. prepareSpecialCreateQuery
+	// omits a column whose field is not Valid, so an unset identifier inserts
+	// NULL — and DeleteSpecialById and GetUniqueEmailsFromSpecial scan email
+	// into a plain string, where pgx refuses NULL. GetUniqueEmailsFromSpecial
+	// is the first thing specialActivator does, so one such row stops specials
+	// activating for everyone. Every insert this importer made before carried a
+	// non-NULL email; keep it that way. The record's own fields stay unset,
+	// which is what the guard above and the account lookup below read.
+	special.Email = null.StringFrom(rSpecial.Email.String)
+	special.KeycloakId = null.StringFrom(rSpecial.KeycloakID.String)
 	special.StartDate = null.TimeFrom(rSpecial.StartDate)
 	special.EndDate = null.TimeFrom(rSpecial.EndDate)
 	special.Category = null.StringFrom(rSpecial.Category)

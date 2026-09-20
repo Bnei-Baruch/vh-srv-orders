@@ -39,6 +39,23 @@ func TestReportDroppedRows_PartialDropReachesSentry(t *testing.T) {
 	require.Len(t, transport.events, 1)
 	assert.Contains(t, transport.events[0].Message, "dropped 30 of 200")
 	assert.Contains(t, transport.events[0].Message, "importer specials")
+	assert.Equal(t, sentry.LevelWarning, transport.events[0].Level, "some rows landed")
+}
+
+// Nothing surviving used to abort the import, which doImport turns into
+// os.Exit(1) — and since the sheet is not cleared between runs, the cron then
+// exited 1 on every invocation until a human edited it. Two operators typing
+// GBP satisfy the same condition as a changed sheet format, so the distinction
+// is worth an alert level, not a dead importer.
+func TestReportDroppedRows_NothingSurvivedIsAnErrorLevelEvent(t *testing.T) {
+	transport := withCapturedSentry(t)
+
+	reportDroppedRows(NewSpecialsImporter(), 2, 0)
+	require.True(t, sentry.Flush(time.Second))
+
+	require.Len(t, transport.events, 1)
+	assert.Equal(t, sentry.LevelError, transport.events[0].Level)
+	assert.Contains(t, transport.events[0].Message, "every one of 2 sheet rows")
 }
 
 func TestReportDroppedRows_CleanRunIsSilent(t *testing.T) {

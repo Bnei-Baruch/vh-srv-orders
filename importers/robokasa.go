@@ -36,14 +36,12 @@ func (im *RobokasaImporter) String() string {
 // Import fetches all robokasa orders and import the ones we don't have.
 // Idempotency is guaranteed by robokasa order_id being stored in our DB as well.
 func (im *RobokasaImporter) Import() error {
-	var err error
-
-	var sheetValues []*RobokasaOrder
-	sheetValues, err = im.getSheetValues()
+	sheetValues, dropped, err := im.getSheetValues()
 	if err != nil {
 		return fmt.Errorf("importer.getSheetValues: %w", err)
 	}
-	slog.Info("importer.getSheetValues", slog.Int("count", len(sheetValues)))
+	slog.Info("importer.getSheetValues", slog.Int("count", len(sheetValues)), slog.Int("dropped", dropped))
+	reportDroppedRows(im, dropped, len(sheetValues))
 
 	var existingPayments map[string]*repo.OfflinePayment
 	existingPayments, err = im.getExistingPayments()
@@ -80,45 +78,69 @@ type RobokasaOrder struct {
 	Timestamp time.Time
 }
 
-func (im *RobokasaImporter) getSheetValues() ([]*RobokasaOrder, error) {
+func (im *RobokasaImporter) getSheetValues() ([]*RobokasaOrder, int, error) {
 	sheetsService, err := sheets.NewService(context.TODO(),
 		option.WithCredentialsFile(common.Config.GoogleAppCredentials),
 		option.WithScopes(sheets.SpreadsheetsReadonlyScope))
 	if err != nil {
-		return nil, fmt.Errorf("sheets.NewService: %w", err)
+		return nil, 0, fmt.Errorf("sheets.NewService: %w", err)
 	}
 
 	call := sheetsService.Spreadsheets.Values.Get("1w2kn2rHKMp63lcmYZcWZwEiEW5AgcwS6eGdyNEghNZU", "ArvutRus")
 	call.Context(context.TODO())
 	resp, err := call.Do()
 	if err != nil {
-		return nil, fmt.Errorf("sheetsService.Spreadsheets.Values.Get: %w", err)
+		return nil, 0, fmt.Errorf("sheetsService.Spreadsheets.Values.Get: %w", err)
 	}
 
-	orders := make([]*RobokasaOrder, 0)
-	for i, row := range resp.Values {
-		order := &RobokasaOrder{
-			OrderID: row[0].(string),
-			Email:   row[1].(string),
-		}
+	orders, dropped := parseRobokasaRows(resp.Values)
+	return orders, dropped, nil
+}
 
-		var err error
-		order.Amount, err = strconv.ParseFloat(row[2].(string), 64)
-		if err != nil {
-			slog.Warn("malformed row", slog.Int("row", i+1), slog.String("column", "amount"), slog.Any("err", err))
+// parseRobokasaRows turns sheet rows into orders. Split out of getSheetValues,
+// which builds its Sheets client inline and so cannot be reached from a test.
+//
+// This export has no header row, so sheet row 1 is the first order.
+func parseRobokasaRows(values [][]any) ([]*RobokasaOrder, int) {
+	orders := make([]*RobokasaOrder, 0)
+
+	dropped := 0
+	for i, row := range values {
+		sheetRow := i + 1
+
+		if blankRow(row) {
 			continue
 		}
 
-		order.Timestamp, err = time.Parse(time.DateTime, row[3].(string))
+		// cell(), not row[n].(string): this parser had both hazards
+		// sheet_row.go describes. A trailing blank shortens the row, so an
+		// export with an empty timestamp column gives len(row) == 3 and row[3]
+		// panics; and a cell the sheet stores as a number arrives as float64,
+		// where the assertion panics too. Either one killed the whole run.
+		order := &RobokasaOrder{
+			OrderID: cell(row, 0),
+			Email:   cell(row, 1),
+		}
+
+		var err error
+		order.Amount, err = strconv.ParseFloat(cell(row, 2), 64)
 		if err != nil {
-			slog.Warn("malformed row", slog.Int("row", i+1), slog.String("column", "timestamp"), slog.Any("err", err))
+			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "amount"), slog.Any("err", err))
+			dropped++
+			continue
+		}
+
+		order.Timestamp, err = time.Parse(time.DateTime, cell(row, 3))
+		if err != nil {
+			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "timestamp"), slog.Any("err", err))
+			dropped++
 			continue
 		}
 
 		orders = append(orders, order)
 	}
 
-	return orders, nil
+	return orders, dropped
 }
 
 func (im *RobokasaImporter) getExistingPayments() (map[string]*repo.OfflinePayment, error) {

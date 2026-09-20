@@ -38,10 +38,21 @@ func cell(row []any, i int) string {
 	}
 }
 
-// minRowsForFormatBreak is the smallest number of data rows from which "every
-// one of them was dropped" says something about the sheet rather than about a
-// row. Below it, a one-row sheet holding a single GBP donation would be read as
-// a changed format — and the consequence is LogFatal, so the cron would die on
-// every run until someone edited the sheet. A partial drop is reported to
-// Sentry either way, so nothing goes unseen by keeping this floor.
-const minRowsForFormatBreak = 2
+// blankRow reports whether a row holds nothing at all.
+//
+// The Sheets API returns an interior blank line as an empty array, and a row
+// spaced out with empty cells the same way. Parsed, such a row fails whichever
+// check comes first — currency in one importer, start_date in the other — so
+// counting it as a dropped row makes an ordinary sheet layout report a drop on
+// every run. A sheet laid out header / two donations / blank / two donations
+// would report dropped=1 for as long as it keeps that shape, which is the kind
+// of permanent alert that gets a Sentry rule muted and then hides the drops
+// this reporting exists for.
+func blankRow(row []any) bool {
+	for i := range row {
+		if cell(row, i) != "" {
+			return false
+		}
+	}
+	return true
+}

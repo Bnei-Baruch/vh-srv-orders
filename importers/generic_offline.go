@@ -93,21 +93,25 @@ func (im *GenericOfflineImporter) getSheetValues() ([]*GenericOrder, int, error)
 		return nil, 0, fmt.Errorf("sheetsService.Spreadsheets.Values.Get: %w", err)
 	}
 
-	return parseGenericRows(resp.Values)
+	orders, dropped := parseGenericRows(resp.Values)
+	return orders, dropped, nil
 }
 
 // parseGenericRows turns sheet rows into orders, skipping the header. Split out
 // of getSheetValues, which builds its Sheets client inline and so cannot be
 // reached from a test.
 //
-// Returns the orders it could read and the number of data rows it dropped.
-func parseGenericRows(values [][]any) ([]*GenericOrder, int, error) {
+// Returns the orders it could read and the number of data rows it dropped. A
+// dropped row is never fatal: reportDroppedRows raises its level when nothing
+// survived, which says the same thing without killing a cron that will be
+// handed the same sheet a minute later.
+func parseGenericRows(values [][]any) ([]*GenericOrder, int) {
 	orders := make([]*GenericOrder, 0)
 
 	// An empty sheet has no header to skip, and values[1:] panics on it rather
 	// than reporting an empty import.
 	if len(values) == 0 {
-		return orders, 0, nil
+		return orders, 0
 	}
 
 	dropped := 0
@@ -115,9 +119,29 @@ func parseGenericRows(values [][]any) ([]*GenericOrder, int, error) {
 		// +2: i counts from the first data row, and the header is sheet row 1.
 		sheetRow := i + 2
 
+		// A spacer line between entries is not a malformed row; it is not a
+		// row. Counting it would report a drop on every run of a sheet nobody
+		// needs to fix.
+		if blankRow(row) {
+			continue
+		}
+
+		// The account this order is attached to is looked up by email, and
+		// GetAccount with an empty one resolves to the most recently created
+		// account that has no email — so a blank cell would silently bill the
+		// order and its payment to an unrelated person. The specials parser
+		// grew this guard last round; this parser reaches the same lookup
+		// through getOrCreateAccount.
+		email := cell(row, 0)
+		if email == "" {
+			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "email"), slog.String("reason", "empty"))
+			dropped++
+			continue
+		}
+
 		order := &GenericOrder{
 			SheetRow:      sheetRow,
-			Email:         cell(row, 0),
+			Email:         email,
 			Currency:      cell(row, 2),
 			PaymentMethod: cell(row, 5),
 			Comment:       cell(row, 6),
@@ -174,12 +198,7 @@ func parseGenericRows(values [][]any) ([]*GenericOrder, int, error) {
 	// format or one inserted column drops all of them, and the run then logs
 	// count=0 with_errors=0 and exits 0 — indistinguishable from an empty
 	// sheet, and silent in Sentry. Say so instead.
-	dataRows := len(values) - 1
-	if dataRows >= minRowsForFormatBreak && dropped == dataRows {
-		return nil, dropped, fmt.Errorf("every data row was dropped (%d of %d); the sheet format has probably changed", dropped, dataRows)
-	}
-
-	return orders, dropped, nil
+	return orders, dropped
 }
 
 // createOrderAndPayments will create a fresh Order, Payment and OfflinePayment for the given order

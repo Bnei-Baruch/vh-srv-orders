@@ -7,13 +7,20 @@ import (
 	"strings"
 	"time"
 
+	"github.com/volatiletech/null/v9"
+
 	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/events"
 )
 
 func (o *OrdersDB) DeleteSpecialById(ctx context.Context, id int) error {
+	// null.String, not string: specials.email is nullable, and handleCreateSpecial
+	// binds repo.Special straight from the request with no email required, so
+	// rows with a NULL email exist. pgx refuses NULL into *string, and this
+	// function is on the revoke path — a row it cannot scan is a special that
+	// cannot be removed through the API or by DeleteSpecialsByKeycloakId.
 	var (
-		email string
+		email null.String
 		err   error
 	)
 	if err = o.QueryRow(ctx, `SELECT email FROM specials where id=$1`, id).Scan(&email); err != nil {
@@ -27,7 +34,7 @@ func (o *OrdersDB) DeleteSpecialById(ctx context.Context, id int) error {
 	if res.RowsAffected() == 0 {
 		return common.ErrNoRowsAffected
 	} else {
-		o.emitEvent(ctx, events.TypeDeleteSpecial, map[string]interface{}{"email": email})
+		o.emitEvent(ctx, events.TypeDeleteSpecial, map[string]interface{}{"email": email.String})
 	}
 	return nil
 }
@@ -250,11 +257,17 @@ func (o *OrdersDB) GetUniqueEmailsFromSpecial(ctx context.Context) ([]string, er
 	defer rows.Close()
 
 	for rows.Next() {
-		var email string
+		// Same reason as DeleteSpecialById: the column is nullable. This scan
+		// runs first in specialActivator.DoTask, so one unscannable row used to
+		// stop every special from activating, for every user.
+		var email null.String
 		if err := rows.Scan(&email); err != nil {
 			return nil, err
 		}
-		emails = append(emails, email)
+		if email.String == "" {
+			continue
+		}
+		emails = append(emails, email.String)
 	}
 
 	if err := rows.Err(); err != nil {

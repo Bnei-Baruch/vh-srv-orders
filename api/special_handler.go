@@ -166,12 +166,18 @@ func (o *OrdersAPI) handleSpecialGetByKeycloakId(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": special, "success": true})
 }
 
-// defaultSpecialsPageSize bounds the listing without truncating any caller that
-// exists today. The house default for a paged endpoint is 10, which would have
-// made this one answer a request for every special with the first ten and no
-// sign that the rest were missing — the admin table renders whatever it gets.
-// A caller that wants pages can ask for them with skip/limit.
-const defaultSpecialsPageSize = 1000
+// defaultSpecialsPageSize is what a caller that asks for no page gets, and
+// maxSpecialsPageSize is the most any caller can ask for.
+//
+// The default is not the house 10: at 10 a request for every special would
+// answer with the first ten and the admin table would render them as the whole
+// list. The maximum exists because a default alone bounds nothing — the point
+// of paging this endpoint is that `specials` only grows, and `?limit=2000000000`
+// walked straight past it.
+const (
+	defaultSpecialsPageSize = 1000
+	maxSpecialsPageSize     = 5000
+)
 
 func (o *OrdersAPI) handleSpecialGetAll(c *gin.Context) {
 	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
@@ -198,6 +204,15 @@ func (o *OrdersAPI) handleSpecialGetAll(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit value! Accepted value is INTEGER", "success": false})
 		return
 	}
+	// Postgres rejects a negative LIMIT or OFFSET, which would surface as a 500
+	// for what is a bad request.
+	if intSkip < 0 || intLimit < 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "skip and limit must not be negative", "success": false})
+		return
+	}
+	if intLimit == 0 || intLimit > maxSpecialsPageSize {
+		intLimit = maxSpecialsPageSize
+	}
 
 	special, err := o.repo.GetAllSpecials(c.Request.Context(), intSkip, intLimit)
 	if err != nil {
@@ -205,5 +220,17 @@ func (o *OrdersAPI) handleSpecialGetAll(c *gin.Context) {
 		_ = c.Error(fmt.Errorf("repo.GetAllSpecials: %w", err))
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": special, "success": true})
+
+	// total, so a full page is distinguishable from the whole table. Added
+	// alongside data rather than replacing it, so an existing consumer that
+	// reads only data is unaffected.
+	total, err := o.repo.CountSpecials(c.Request.Context())
+	if err != nil {
+		c.Status(http.StatusInternalServerError)
+		_ = c.Error(fmt.Errorf("repo.CountSpecials: %w", err))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": special, "total": total,
+		"skip": intSkip, "limit": intLimit, "success": true})
 }

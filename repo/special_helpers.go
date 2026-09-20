@@ -191,6 +191,17 @@ func (o *OrdersDB) GetSpecialsStartingBetween(ctx context.Context, from, to time
 	return specials, nil
 }
 
+// CountSpecials is how a caller tells a full page from the whole table. The
+// listing response carries no other marker, so without it a truncated answer
+// and a complete one are the same JSON.
+func (o *OrdersDB) CountSpecials(ctx context.Context) (int, error) {
+	total, err := o.count(ctx, `SELECT count(*) FROM specials`)
+	if err != nil {
+		return 0, fmt.Errorf("o.count: %w", err)
+	}
+	return int(total), nil
+}
+
 func (o *OrdersDB) HasSpecialMembership(ctx context.Context, email string) (bool, error) {
 	count, err := o.count(ctx, `select count(*) as total from specials where email = $1`, email)
 	if err != nil {
@@ -264,6 +275,14 @@ func prepareSpecialCreateQuery(req Special) (string, string, []interface{}) {
 	return concatedCreateString, concatedNumString, args
 }
 
+// GetAllSpecialsByEmail finds specials by the address they were granted to.
+//
+// A special the sheet supplied no email for stores NULL there, and `ilike` is
+// UNKNOWN against NULL, so those rows are not returned — not even for a
+// wildcard. That is the intended answer to "which specials belong to this
+// address": a keycloak-only grant belongs to no address, and it is reachable
+// through GetSpecialsByKeycloakId. It is worth stating because the rows used to
+// carry an empty string, which a wildcard did match.
 func (o *OrdersDB) GetAllSpecialsByEmail(ctx context.Context, email string) ([]*Special, error) {
 	var specials []*Special
 	rows, err := o.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory,created_at from specials where email ilike $1`, email)

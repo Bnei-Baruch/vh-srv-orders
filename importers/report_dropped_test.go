@@ -67,25 +67,51 @@ func TestReportDroppedRows_CleanRunIsSilent(t *testing.T) {
 	assert.Empty(t, transport.events, "a run that dropped nothing has nothing to report")
 }
 
-// The sheets are never cleared, so a row nobody will fix is dropped again on
-// every cron tick. Sentry groups by fingerprint, so without an explicit one the
-// message text — which carries the counts — makes each run a fresh issue, and
-// an alert that repeats forever is the one that gets muted, taking the real
-// 30-of-200 event with it.
-func TestReportDroppedRows_RepeatRunsShareAFingerprint(t *testing.T) {
+// The permanent nuisance and a real format break have to be separate Sentry
+// issues, or archiving the first swallows the second.
+//
+// 10 of 200 is the case the ratio bucketing got wrong: at a 10% boundary it
+// shared a bucket with the permanent single bad row, so ten people silently
+// losing their specials was archived along with a totals line.
+func TestReportDroppedRows_ASmallBreakIsNotTheSingleRowNuisance(t *testing.T) {
 	transport := withCapturedSentry(t)
 
-	reportDroppedRows(NewSpecialsImporter(), 1, 40)
-	reportDroppedRows(NewSpecialsImporter(), 1, 41)
+	reportDroppedRows(NewSpecialsImporter(), 1, 199)  // the row nobody will fix
+	reportDroppedRows(NewSpecialsImporter(), 10, 190) // ten rows suddenly unparseable
 
 	require.Len(t, transport.events, 2)
-	require.NotEmpty(t, transport.events[0].Fingerprint)
-	assert.Equal(t, transport.events[0].Fingerprint, transport.events[1].Fingerprint,
-		"the same recurring drop must group into one Sentry issue")
+	assert.NotEqual(t, transport.events[0].Fingerprint, transport.events[1].Fingerprint,
+		"archiving the permanent 1-of-200 must not archive a 10-row break")
 }
 
-// The escalation is still its own issue: a sheet where nothing survived should
-// not be buried in the group that has been firing all week.
+func TestReportDroppedRows_ALargeBreakIsItsOwnIssue(t *testing.T) {
+	transport := withCapturedSentry(t)
+
+	reportDroppedRows(NewSpecialsImporter(), 1, 199)
+	reportDroppedRows(NewSpecialsImporter(), 30, 170)
+
+	require.Len(t, transport.events, 2)
+	assert.NotEqual(t, transport.events[0].Fingerprint, transport.events[1].Fingerprint)
+}
+
+// …while the same nuisance keeps one issue however the sheet grows around it.
+// The bucket is the absolute count for exactly this reason: on a ratio, one bad
+// row of 10 and one bad row of 11 were different buckets.
+func TestReportDroppedRows_TheSameNuisanceGroupsAsTheSheetGrows(t *testing.T) {
+	transport := withCapturedSentry(t)
+
+	for _, kept := range []int{9, 10, 199, 250, 2000} {
+		reportDroppedRows(NewSpecialsImporter(), 1, kept)
+	}
+
+	require.Len(t, transport.events, 5)
+	for i := 1; i < len(transport.events); i++ {
+		assert.Equal(t, transport.events[0].Fingerprint, transport.events[i].Fingerprint,
+			"one unfixable row must stay one issue as the sheet grows")
+	}
+}
+
+// Nothing survived stays its own issue at its own level.
 func TestReportDroppedRows_TheErrorLevelIsItsOwnIssue(t *testing.T) {
 	transport := withCapturedSentry(t)
 
@@ -94,31 +120,5 @@ func TestReportDroppedRows_TheErrorLevelIsItsOwnIssue(t *testing.T) {
 
 	require.Len(t, transport.events, 2)
 	assert.NotEqual(t, transport.events[0].Fingerprint, transport.events[1].Fingerprint)
-}
-
-// The permanent nuisance and the real format break have to be separate Sentry
-// issues, or archiving the first swallows the second. Grouping on the importer
-// alone did exactly that: both are Warning.
-func TestReportDroppedRows_ARatioChangeIsItsOwnIssue(t *testing.T) {
-	transport := withCapturedSentry(t)
-
-	reportDroppedRows(NewSpecialsImporter(), 1, 199)  // the row nobody will fix
-	reportDroppedRows(NewSpecialsImporter(), 30, 170) // the date column changed format
-
-	require.Len(t, transport.events, 2)
-	assert.NotEqual(t, transport.events[0].Fingerprint, transport.events[1].Fingerprint,
-		"archiving the permanent 1-of-200 must not archive the 30-of-200")
-}
-
-// …while the same nuisance still groups as the sheet grows, which is what the
-// fingerprint exists for: the counts are in the message, so without it
-// 1-of-200 and 1-of-201 are two issues.
-func TestReportDroppedRows_TheSameNuisanceGroupsAsTheSheetGrows(t *testing.T) {
-	transport := withCapturedSentry(t)
-
-	reportDroppedRows(NewSpecialsImporter(), 1, 199)
-	reportDroppedRows(NewSpecialsImporter(), 1, 250)
-
-	require.Len(t, transport.events, 2)
-	assert.Equal(t, transport.events[0].Fingerprint, transport.events[1].Fingerprint)
+	assert.Equal(t, "error", string(transport.events[1].Level))
 }

@@ -54,36 +54,50 @@ func reportDroppedRows(im importer, dropped, kept int) {
 		level = sentry.LevelError
 		message = fmt.Sprintf("%s: dropped every one of %d sheet rows as malformed; the sheet format may have changed", im.String(), dropped)
 	}
-	// Grouped by a bucketed ratio, not by the exact counts and not by the
+	// Grouped by a bucketed drop count, not by the exact counts and not by the
 	// importer alone.
 	//
-	// The counts alone fragment: the sheets are never cleared, so the one row
-	// nobody will fix — a totals line, a half-typed entry — is dropped again
-	// every tick, and `1 of 200`, `1 of 201`, `1 of 202` open three issues as
-	// the sheet grows. The importer alone over-groups the other way: archiving
-	// that permanent nuisance would archive the 30-of-200 that means the date
-	// column just changed format. The ratio separates those two and is stable
-	// as the sheet grows.
+	// The exact counts fragment: the sheets are never cleared, so the one row
+	// nobody will fix is dropped again every tick, and `1 of 200`, `1 of 201`,
+	// `1 of 202` open three issues as the sheet grows. The importer alone
+	// over-groups the other way: archiving that permanent nuisance would
+	// archive the break that means the date column just changed format.
 	sentry.WithScope(func(scope *sentry.Scope) {
 		scope.SetLevel(level)
-		scope.SetFingerprint([]string{"importer-dropped-rows", im.String(), dropRatioBucket(dropped, kept)})
+		scope.SetFingerprint([]string{"importer-dropped-rows", im.String(), dropBucket(dropped, kept)})
 		sentry.CaptureMessage(message)
 	})
 }
 
-// dropRatioBucket names how much of the sheet was thrown away, coarsely enough
-// that one more row next week does not open a new Sentry issue.
-func dropRatioBucket(dropped, kept int) string {
-	total := dropped + kept
+// dropBucket names how much of the sheet was thrown away, coarsely enough that
+// the same recurring problem keeps one Sentry issue.
+//
+// On the absolute count, not the ratio. The nuisance this groups is a fixed
+// small number of rows — a totals line, one half-typed entry — and it stays
+// that number while the sheet grows around it, so an absolute bucket is what is
+// actually stable. A ratio moves with the denominator: one bad row of 10 and
+// one bad row of 11 fell in different buckets and opened a new issue every time
+// the sheet grew, and 10 bad rows of 200 shared a bucket with the permanent
+// single-row nuisance, so archiving that would have archived a break denying
+// specials to ten people.
+func dropBucket(dropped, kept int) string {
 	switch {
 	case kept == 0:
 		return "all"
-	case dropped*2 >= total:
-		return "most"
-	case dropped*10 >= total:
-		return "some"
+	case dropped <= 2:
+		return fmt.Sprintf("%d", dropped)
+	case dropped <= 5:
+		return "3-5"
+	case dropped <= 10:
+		return "6-10"
+	case dropped <= 20:
+		return "11-20"
+	case dropped <= 50:
+		return "21-50"
+	case dropped <= 100:
+		return "51-100"
 	default:
-		return "few"
+		return "100+"
 	}
 }
 

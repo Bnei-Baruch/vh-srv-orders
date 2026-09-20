@@ -699,6 +699,66 @@ func (_c *MockOrdersRepository_CountCouponRedemptions_Call) RunAndReturn(run fun
 	return _c
 }
 
+// CountSpecials provides a mock function for the type MockOrdersRepository
+func (_mock *MockOrdersRepository) CountSpecials(ctx context.Context) (int, error) {
+	ret := _mock.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CountSpecials")
+	}
+
+	var r0 int
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context) (int, error)); ok {
+		return returnFunc(ctx)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context) int); ok {
+		r0 = returnFunc(ctx)
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = returnFunc(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockOrdersRepository_CountSpecials_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CountSpecials'
+type MockOrdersRepository_CountSpecials_Call struct {
+	*mock.Call
+}
+
+// CountSpecials is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockOrdersRepository_Expecter) CountSpecials(ctx any) *MockOrdersRepository_CountSpecials_Call {
+	return &MockOrdersRepository_CountSpecials_Call{Call: _e.mock.On("CountSpecials", ctx)}
+}
+
+func (_c *MockOrdersRepository_CountSpecials_Call) Run(run func(ctx context.Context)) *MockOrdersRepository_CountSpecials_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockOrdersRepository_CountSpecials_Call) Return(n int, err error) *MockOrdersRepository_CountSpecials_Call {
+	_c.Call.Return(n, err)
+	return _c
+}
+
+func (_c *MockOrdersRepository_CountSpecials_Call) RunAndReturn(run func(ctx context.Context) (int, error)) *MockOrdersRepository_CountSpecials_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CountsAllOrders provides a mock function for the type MockOrdersRepository
 func (_mock *MockOrdersRepository) CountsAllOrders(ctx context.Context) (int64, error) {
 	ret := _mock.Called(ctx)

@@ -31,15 +31,15 @@ func (im *SpecialsImporter) String() string {
 	return "importer specials"
 }
 
-// Import reads the sheet and creates a special per row.
+// Import reads the sheet and creates a special per row, skipping rows that are
+// already in the table.
 //
-// No idempotency is guaranteed, as in the generic importer: createSpecial
-// always INSERTs and `specials` carries no unique key. That used to be masked
-// here by the parser aborting on the first unparseable date — nothing was
-// inserted, you fixed the sheet and ran again. Now that a bad row is skipped
-// instead, a run that drops 3 of 200 rows has already inserted the other 197,
-// and re-running after fixing those 3 inserts all 197 a second time.
-// Clear the imported rows from the sheet between runs, or de-duplicate first.
+// The importer is not idempotent on its own — CreateSpecial always INSERTs and
+// `specials` has no unique key — and the sheet is not cleared between runs. The
+// skip is what makes the fix-the-sheet-and-rerun loop safe now that a bad row
+// no longer aborts the whole import before anything is written. See
+// special_dedup.go; a unique index remains the durable answer and needs its own
+// migration.
 func (im *SpecialsImporter) Import() error {
 	sheetValues, dropped, err := im.getSheetValues()
 	if err != nil {
@@ -48,9 +48,19 @@ func (im *SpecialsImporter) Import() error {
 	slog.Info("importer.getSheetValues", slog.Int("count", len(sheetValues)), slog.Int("dropped", dropped))
 	reportDroppedRows(im, dropped, len(sheetValues))
 
+	existing, err := im.existingSpecials(context.WithValue(context.Background(), common.CtxEventBuilder, im))
+	if err != nil {
+		return fmt.Errorf("importer.existingSpecials: %w", err)
+	}
+
 	newRecords := 0
 	errRecords := 0
+	skippedRecords := 0
 	for _, row := range sheetValues {
+		if existing.has(row) {
+			skippedRecords++
+			continue
+		}
 		// row.SheetRow, not the loop index: sheetValues is the *filtered*
 		// slice, so with two rows dropped ahead of it the third survivor is
 		// index 0 and sheet row 4. Logging the index sends whoever is fixing
@@ -61,12 +71,16 @@ func (im *SpecialsImporter) Import() error {
 			errRecords++
 			continue
 		}
+		// Recorded as it goes, so a sheet that lists the same person twice
+		// imports them once.
+		existing.addImported(row)
 		newRecords++
 	}
 	// dropped is counted separately from with_errors: a row the parser threw
 	// away never reaches createSpecial, so without this line it is in no total
 	// and the summary adds up to fewer rows than the sheet holds.
-	slog.Info("import summary", slog.Int("new_specials", newRecords), slog.Int("with_errors", errRecords), slog.Int("dropped_by_parser", dropped))
+	slog.Info("import summary", slog.Int("new_specials", newRecords), slog.Int("already_present", skippedRecords),
+		slog.Int("with_errors", errRecords), slog.Int("dropped_by_parser", dropped))
 
 	return nil
 }

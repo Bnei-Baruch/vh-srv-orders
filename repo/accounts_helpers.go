@@ -57,8 +57,9 @@ func (o *OrdersDB) CreateAccount(ctx context.Context, a Account) (int, error) {
 func (o *OrdersDB) GetAllAccounts(ctx context.Context, skip int, limit int, email string) ([]Account, error) {
 	accounts := []Account{}
 
-	limitOffsetString := fmt.Sprintf(" LIMIT %d OFFSET %d", limit, skip)
-	whereQuery, orderByQuery := buildAndGetAccountsWhereQuery(email)
+	args := new(queryArgs)
+	whereQuery, orderByQuery := buildAndGetAccountsWhereQuery(args, email)
+	limitOffsetString := args.limitOffset(limit, skip)
 
 	rows, err := o.Query(ctx, `
 		SELECT
@@ -82,7 +83,7 @@ func (o *OrdersDB) GetAllAccounts(ctx context.Context, skip int, limit int, emai
 		created_at,
 		updated_at,
 		deleted_at
-			FROM accounts`+whereQuery+orderByQuery+limitOffsetString)
+			FROM accounts`+whereQuery+orderByQuery+limitOffsetString, args.all()...)
 	if err != nil {
 		return nil, fmt.Errorf("o.Query: %w", err)
 	}
@@ -592,7 +593,7 @@ func prepareAccountUpdateQuery(req Account) (string, []interface{}) {
 	return updateArgument, args
 }
 
-func buildAndGetAccountsWhereQuery(email string) (string, string) {
+func buildAndGetAccountsWhereQuery(args *queryArgs, email string) (string, string) {
 	var whereString strings.Builder
 	var orderBy strings.Builder
 	var whereCondition strings.Builder
@@ -603,7 +604,7 @@ func buildAndGetAccountsWhereQuery(email string) (string, string) {
 		if whereCondition.String() != "" {
 			whereCondition.WriteString(" AND")
 		}
-		whereCondition.WriteString(fmt.Sprintf(` LOWER("Email") = LOWER('%s')`, email))
+		whereCondition.WriteString(` LOWER("Email") = LOWER(` + args.next(email) + `)`)
 	}
 
 	orderBy.WriteString(fmt.Sprintf(" ORDER BY updated_at %s", "desc"))

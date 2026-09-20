@@ -90,3 +90,47 @@ func TestSpecialKeys_SecondCopyWithinTheSameSheet(t *testing.T) {
 	keys.addImported(row)
 	assert.True(t, keys.has(row))
 }
+
+// Revoking is a soft update that rewrites end_date (DeleteSpecialById:
+// `SET end_date = now()`). A key that included that column stopped matching the
+// sheet row the moment an admin revoked the grant, so the next hourly cron run
+// re-inserted it — the revoke silently undone, the only trace new_specials=1.
+func TestSpecialKeys_ARevokedSpecialIsStillRecognised(t *testing.T) {
+	keys := make(specialKeys)
+
+	revoked := storedSpecial("a@example.com", "kc-1")
+	revoked.EndDate = null.TimeFrom(time.Now()) // what the revoke wrote
+	keys.addExisting(revoked)
+
+	assert.True(t, keys.has(sheetRecord("a@example.com", "kc-1")),
+		"the sheet row must not be re-imported over a revoke")
+}
+
+// NULL and an empty sub-category are different rows: parseSpecialRows keeps
+// them apart because the cleanup queries compare the column, and
+// `where subcategory <> 'rav'` does not answer the same for both. The dedup has
+// to preserve the distinction or the empty string is never written.
+func TestSpecialKeys_NullAndEmptySubCategoryAreDifferentRows(t *testing.T) {
+	keys := make(specialKeys)
+
+	stored := storedSpecial("a@example.com", "kc-1") // SubCategory unset, i.e. NULL
+	keys.addExisting(stored)
+
+	sheet := sheetRecord("a@example.com", "kc-1")
+	sheet.SubCategory = null.StringFrom("") // column present, cell blank
+
+	assert.False(t, keys.has(sheet), "a blank cell is not the same stored value as NULL")
+}
+
+func TestSpecialKeys_MatchingSubCategoriesStillCollapse(t *testing.T) {
+	keys := make(specialKeys)
+
+	stored := storedSpecial("a@example.com", "kc-1")
+	stored.SubCategory = null.StringFrom("rav")
+	keys.addExisting(stored)
+
+	sheet := sheetRecord("a@example.com", "kc-1")
+	sheet.SubCategory = null.StringFrom("rav")
+
+	assert.True(t, keys.has(sheet))
+}

@@ -54,8 +54,14 @@ func reportDroppedRows(im importer, dropped, kept int) {
 		level = sentry.LevelError
 		message = fmt.Sprintf("%s: dropped every one of %d sheet rows as malformed; the sheet format may have changed", im.String(), dropped)
 	}
+	// One issue per importer and level, rather than one per distinct count:
+	// the sheets are never cleared, so a row nobody will fix — a totals line, a
+	// half-typed entry — is dropped again on every tick, and an alert that
+	// repeats forever is the one that gets muted, taking the real 30-of-200
+	// event with it.
 	sentry.WithScope(func(scope *sentry.Scope) {
 		scope.SetLevel(level)
+		scope.SetFingerprint([]string{"importer-dropped-rows", im.String(), string(level)})
 		sentry.CaptureMessage(message)
 	})
 }

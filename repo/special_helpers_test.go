@@ -7,6 +7,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/volatiletech/null/v9"
+
+	"gitlab.bbdev.team/vh/pay/orders/events"
+	"gitlab.bbdev.team/vh/pay/orders/events/eventstest"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/testutil"
 )
 
 // insertSpecial creates a specials row with the given activity window.
@@ -76,4 +81,53 @@ func TestDeleteSpecialsByKeycloakId_NoActiveSpan_Succeeds(t *testing.T) {
 	require.NoError(t, db.DeleteSpecialsByKeycloakId(ctx, "kc-spec-none"))
 
 	assert.Equal(t, pastEnd, specialEndDate(t, db, ctx, past))
+}
+
+// captureEmitter records what the repo emits instead of publishing it.
+type captureEmitter struct{ emitted []events.Event }
+
+func (c *captureEmitter) Emit(_ context.Context, evs ...events.Event) {
+	c.emitted = append(c.emitted, evs...)
+}
+
+func (c *captureEmitter) Close(context.Context) {}
+
+func newTestDBCapturingEvents(t *testing.T) (*OrdersDB, context.Context, *captureEmitter) {
+	t.Helper()
+	dbURL, err := testutil.NewTestOrdersDB(t, context.Background())
+	require.NoError(t, err)
+	emitter := &captureEmitter{}
+	db, err := NewOrdersDBUrl(context.Background(), dbURL, emitter)
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Close() })
+	return db, eventstest.WithTestEventBuilder(t, context.Background()), emitter
+}
+
+// delete_special is the only signal a downstream consumer gets that a grant
+// ended, and DeleteSpecialById is the single primitive that emits it —
+// DeleteSpecialsByKeycloakId funnels through it. A keycloak-only special stores
+// an empty email, so an email-only payload names nobody the consumer can act
+// on; against an ilike predicate it names everyone with an empty email.
+func TestDeleteSpecialById_EventCarriesTheKeycloakId(t *testing.T) {
+	db, ctx, emitter := newTestDBCapturingEvents(t)
+
+	id, err := db.CreateSpecial(ctx, Special{
+		KeycloakId: null.StringFrom("kc-revoked"),
+		Email:      null.StringFrom(""),
+		StartDate:  null.TimeFrom(time.Now().Add(-time.Hour)),
+		EndDate:    null.TimeFrom(time.Now().Add(24 * time.Hour)),
+		Category:   null.StringFrom("membership"),
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, db.DeleteSpecialById(ctx, id))
+
+	var payload map[string]interface{}
+	for _, e := range emitter.emitted {
+		if e.Type == events.TypeDeleteSpecial {
+			payload = e.Payload
+		}
+	}
+	require.NotNil(t, payload, "revoking must emit delete_special")
+	assert.Equal(t, "kc-revoked", payload["keycloak_id"], "the revoke must name who was revoked")
 }

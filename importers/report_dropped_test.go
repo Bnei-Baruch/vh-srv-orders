@@ -66,3 +66,32 @@ func TestReportDroppedRows_CleanRunIsSilent(t *testing.T) {
 
 	assert.Empty(t, transport.events, "a run that dropped nothing has nothing to report")
 }
+
+// The sheets are never cleared, so a row nobody will fix is dropped again on
+// every cron tick. Sentry groups by fingerprint, so without an explicit one the
+// message text — which carries the counts — makes each run a fresh issue, and
+// an alert that repeats forever is the one that gets muted, taking the real
+// 30-of-200 event with it.
+func TestReportDroppedRows_RepeatRunsShareAFingerprint(t *testing.T) {
+	transport := withCapturedSentry(t)
+
+	reportDroppedRows(NewSpecialsImporter(), 1, 40)
+	reportDroppedRows(NewSpecialsImporter(), 1, 41)
+
+	require.Len(t, transport.events, 2)
+	require.NotEmpty(t, transport.events[0].Fingerprint)
+	assert.Equal(t, transport.events[0].Fingerprint, transport.events[1].Fingerprint,
+		"the same recurring drop must group into one Sentry issue")
+}
+
+// The escalation is still its own issue: a sheet where nothing survived should
+// not be buried in the group that has been firing all week.
+func TestReportDroppedRows_TheErrorLevelIsItsOwnIssue(t *testing.T) {
+	transport := withCapturedSentry(t)
+
+	reportDroppedRows(NewSpecialsImporter(), 1, 40)
+	reportDroppedRows(NewSpecialsImporter(), 1, 0)
+
+	require.Len(t, transport.events, 2)
+	assert.NotEqual(t, transport.events[0].Fingerprint, transport.events[1].Fingerprint)
+}

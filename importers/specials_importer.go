@@ -48,7 +48,7 @@ func (im *SpecialsImporter) Import() error {
 	slog.Info("importer.getSheetValues", slog.Int("count", len(sheetValues)), slog.Int("dropped", dropped))
 	reportDroppedRows(im, dropped, len(sheetValues))
 
-	existing, err := im.existingSpecials(context.WithValue(context.Background(), common.CtxEventBuilder, im))
+	existing, err := im.existingSpecials(context.WithValue(context.Background(), common.CtxEventBuilder, im), sheetValues)
 	if err != nil {
 		return fmt.Errorf("importer.existingSpecials: %w", err)
 	}
@@ -243,11 +243,12 @@ func (im *SpecialsImporter) createSpecial(rSpecial *SpecialRecord) error {
 	// unrelated person. A row can legitimately carry a keycloak id and no
 	// email, so reaching here with an invalid Email is normal.
 	//
-	// UserKey.Valid because it is nullable too: overwriting with an invalid one
-	// drops the column from the insert, so keycloak_id lands NULL and
-	// DeleteSpecialsByKeycloakId can never find the row.
+	// The account's own UserKey has to be a real identifier: nullable, and
+	// stored empty on some rows. Either one overwrites a good id from the sheet
+	// with something DeleteSpecialsByKeycloakId (keycloak_id = $1) can never
+	// match.
 	if rSpecial.Email.Valid {
-		if account, err := im.repo.GetAccount(ctx, 0, rSpecial.Email.String); err == nil && account.UserKey.Valid {
+		if account, err := im.repo.GetAccount(ctx, 0, rSpecial.Email.String); err == nil && account.UserKey.String != "" {
 			special.KeycloakId = account.UserKey
 		}
 	}

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/volatiletech/null/v9"
+
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
@@ -29,7 +31,7 @@ import (
 type specialKeys map[string]bool
 
 // key identifies a special the way the sheet does: by whichever identifier the
-// row carries, plus the window and the categories.
+// row carries, plus the start of the window and the categories.
 //
 // Both identifiers are indexed for an existing row, because they do not survive
 // the import symmetrically — createSpecial replaces the keycloak id with the
@@ -37,15 +39,28 @@ type specialKeys map[string]bool
 // comes back carrying a keycloak id the sheet never had. Matching on the
 // identifier the sheet actually provides is what makes the second run
 // recognise the first run's work.
-func specialKey(identifier string, start, end time.Time, category, subCategory string) string {
+//
+// end_date is deliberately not part of the key. Revoking is a soft update that
+// rewrites exactly that column (DeleteSpecialById: `SET end_date = now()`), so
+// a key that included it stopped matching the sheet row the moment an admin
+// revoked the grant, and the next cron run silently re-granted it. The cost is
+// that editing only the end date in the sheet no longer creates a second,
+// longer row — an extension has to go through the API.
+func specialKey(identifier string, start time.Time, category string, subCategory null.String) string {
+	// NULL and an empty sub-category are different rows: parseSpecialRows keeps
+	// them apart because the cleanup queries compare the column, and
+	// `where subcategory <> 'rav'` does not answer the same for both.
+	sub := "\x01null"
+	if subCategory.Valid {
+		sub = strings.ToLower(subCategory.String)
+	}
 	return strings.Join([]string{
 		strings.ToLower(strings.TrimSpace(identifier)),
 		// The date, not the instant: these are stored as timestamptz and read
 		// back in the session's zone, and the sheet only ever says a date.
 		start.UTC().Format(time.DateOnly),
-		end.UTC().Format(time.DateOnly),
 		strings.ToLower(category),
-		strings.ToLower(subCategory),
+		sub,
 	}, "\x00")
 }
 
@@ -54,7 +69,7 @@ func (k specialKeys) addExisting(s *repo.Special) {
 		if strings.TrimSpace(identifier) == "" {
 			continue
 		}
-		k[specialKey(identifier, s.StartDate.Time, s.EndDate.Time, s.Category.String, s.SubCategory.String)] = true
+		k[specialKey(identifier, s.StartDate.Time, s.Category.String, s.SubCategory)] = true
 	}
 }
 
@@ -63,7 +78,7 @@ func (k specialKeys) addImported(r *SpecialRecord) {
 		if strings.TrimSpace(identifier) == "" {
 			continue
 		}
-		k[specialKey(identifier, r.StartDate, r.EndDate, r.Category, r.SubCategory.String)] = true
+		k[specialKey(identifier, r.StartDate, r.Category, r.SubCategory)] = true
 	}
 }
 
@@ -74,21 +89,42 @@ func (k specialKeys) has(r *SpecialRecord) bool {
 		if strings.TrimSpace(identifier) == "" {
 			continue
 		}
-		if k[specialKey(identifier, r.StartDate, r.EndDate, r.Category, r.SubCategory.String)] {
+		if k[specialKey(identifier, r.StartDate, r.Category, r.SubCategory)] {
 			return true
 		}
 	}
 	return false
 }
 
-func (im *SpecialsImporter) existingSpecials(ctx context.Context) (specialKeys, error) {
-	existing, err := im.repo.GetAllSpecials(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("repo.GetAllSpecials: %w", err)
+// existingSpecials indexes only the specials whose start date the sheet could
+// name. The table is append-only in practice — revoking moves end_date rather
+// than deleting — so reading all of it grows without bound, and a row whose
+// start is outside the sheet's range can never match a key that contains it.
+func (im *SpecialsImporter) existingSpecials(ctx context.Context, records []*SpecialRecord) (specialKeys, error) {
+	keys := make(specialKeys)
+	if len(records) == 0 {
+		return keys, nil
 	}
-	keys := make(specialKeys, len(existing))
-	for _, s := range existing {
-		keys.addExisting(s)
+
+	from, to := records[0].StartDate, records[0].StartDate
+	for _, record := range records {
+		if record.StartDate.Before(from) {
+			from = record.StartDate
+		}
+		if record.StartDate.After(to) {
+			to = record.StartDate
+		}
+	}
+
+	// A day either side: the column is timestamptz and the key compares UTC
+	// dates, so a row stored at a local midnight sits on the other side of an
+	// exact bound.
+	existing, err := im.repo.GetSpecialsStartingBetween(ctx, from.AddDate(0, 0, -1), to.AddDate(0, 0, 1))
+	if err != nil {
+		return nil, fmt.Errorf("repo.GetSpecialsStartingBetween: %w", err)
+	}
+	for _, special := range existing {
+		keys.addExisting(special)
 	}
 	return keys, nil
 }

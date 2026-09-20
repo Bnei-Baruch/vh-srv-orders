@@ -20,10 +20,11 @@ func (o *OrdersDB) DeleteSpecialById(ctx context.Context, id int) error {
 	// function is on the revoke path — a row it cannot scan is a special that
 	// cannot be removed through the API or by DeleteSpecialsByKeycloakId.
 	var (
-		email null.String
-		err   error
+		email      null.String
+		keycloakID null.String
+		err        error
 	)
-	if err = o.QueryRow(ctx, `SELECT email FROM specials where id=$1`, id).Scan(&email); err != nil {
+	if err = o.QueryRow(ctx, `SELECT email, keycloak_id FROM specials where id=$1`, id).Scan(&email, &keycloakID); err != nil {
 		return err
 	}
 	res, errUpdate := o.Exec(ctx, `UPDATE  specials SET end_date = now(), updated_at = now() WHERE  id = $1`, id)
@@ -34,7 +35,10 @@ func (o *OrdersDB) DeleteSpecialById(ctx context.Context, id int) error {
 	if res.RowsAffected() == 0 {
 		return common.ErrNoRowsAffected
 	} else {
-		o.emitEvent(ctx, events.TypeDeleteSpecial, map[string]interface{}{"email": email.String})
+		// keycloak_id alongside the email: a keycloak-only special stores an
+		// empty email, so email alone names nobody a consumer can revoke by —
+		// and against an ilike predicate it names everyone.
+		o.emitEvent(ctx, events.TypeDeleteSpecial, map[string]interface{}{"email": email.String, "keycloak_id": keycloakID.String})
 	}
 	return nil
 }
@@ -149,6 +153,36 @@ func (o *OrdersDB) GetAllSpecials(ctx context.Context) ([]*Special, error) {
 	return specials, nil
 }
 
+// GetSpecialsStartingBetween returns the specials whose window starts inside
+// the given range, ordered so the longest is last per identifier.
+//
+// Both callers want a narrow band of start dates: the activator wants today,
+// the importer's dedup index wants the span the sheet mentions. Reading the
+// whole table for either grows without bound, since revoking is a soft update
+// that rewrites end_date rather than removing the row.
+func (o *OrdersDB) GetSpecialsStartingBetween(ctx context.Context, from, to time.Time) ([]*Special, error) {
+	var specials []*Special
+	rows, err := o.Query(ctx,
+		`SELECT id, keycloak_id, email, start_date, end_date, category, subcategory FROM specials
+		 WHERE start_date >= $1 AND start_date <= $2`, from, to)
+	if err != nil {
+		return nil, fmt.Errorf("o.Query: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var spe Special
+		if err := rows.Scan(&spe.Id, &spe.KeycloakId, &spe.Email, &spe.StartDate, &spe.EndDate, &spe.Category, &spe.SubCategory); err != nil {
+			return nil, fmt.Errorf("rows.Scan: %w", err)
+		}
+		specials = append(specials, &spe)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows.Err: %w", err)
+	}
+	return specials, nil
+}
+
 func (o *OrdersDB) HasSpecialMembership(ctx context.Context, email string) (bool, error) {
 	count, err := o.count(ctx, `select count(*) as total from specials where email = $1`, email)
 	if err != nil {
@@ -245,36 +279,4 @@ func (o *OrdersDB) GetAllSpecialsByEmail(ctx context.Context, email string) ([]*
 
 	return specials, nil
 
-}
-
-func (o *OrdersDB) GetUniqueEmailsFromSpecial(ctx context.Context) ([]string, error) {
-	var emails []string
-	rows, err := o.Query(ctx, `SELECT DISTINCT specials.email from specials`)
-
-	if err != nil {
-		return emails, err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		// Nullable column, and this scan runs first in specialActivator.DoTask,
-		// so one unscannable row stopped specials activating for everyone.
-		// Skip on validity, not emptiness: a keycloak-only special is stored
-		// with an empty email, and that is the key GetAllSpecialsByEmail
-		// finds it under.
-		var email null.String
-		if err := rows.Scan(&email); err != nil {
-			return nil, err
-		}
-		if !email.Valid {
-			continue
-		}
-		emails = append(emails, email.String)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	return emails, nil
 }

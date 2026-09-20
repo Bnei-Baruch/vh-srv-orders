@@ -137,3 +137,30 @@ func TestCreateSpecial_AccountKeyResolvesAnEmailOnlyRow(t *testing.T) {
 
 	assert.Equal(t, "kc-resolved", got.KeycloakId.String)
 }
+
+// accounts."UserKey" is a plain nullable text column: a row holding the empty
+// string scans as Valid. Overwriting the sheet's id with that has the same
+// result as NULL — DeleteSpecialsByKeycloakId (keycloak_id = $1) can never
+// match the row again.
+func TestCreateSpecial_AccountWithAnEmptyKeyDoesNotClobberTheSheetsID(t *testing.T) {
+	im := NewSpecialsImporter()
+	mockRepo := mocks.NewMockOrdersRepository(t)
+	im.repo = mockRepo
+
+	mockRepo.EXPECT().GetAccount(mock.Anything, 0, "a@example.com").
+		Return(&repo.Account{ID: 7, UserKey: null.StringFrom("")}, nil).Once()
+
+	var got repo.Special
+	mockRepo.EXPECT().CreateSpecial(mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, s repo.Special) (int, error) {
+			got = s
+			return 1, nil
+		}).Once()
+
+	record := specialRecord()
+	record.Email = null.StringFrom("a@example.com")
+	record.KeycloakID = null.StringFrom("kc-from-sheet")
+	require.NoError(t, im.createSpecial(record))
+
+	assert.Equal(t, "kc-from-sheet", got.KeycloakId.String)
+}

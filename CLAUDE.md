@@ -369,3 +369,39 @@ Shared flags on `billing` parent: `--dry-run`, `--max-workers`.
 ### Priority contribution cache
 
 `pkg/priority/client.go` has an optional TTL cache (30 min) for `GetLastContributions` per email. **Disabled by default** — billing commands enable it via `SetCacheEnabled(true)`. `ErrNoActiveCustomers` sentinel error replaces string matching for "no active customers" responses.
+
+## Specials and Sheet Importers
+
+Three cron importers read Google Sheets and write orders or specials: `specials`, `generic_offline`, `robokasa` (`importers/`). `specialActivator` (`cmd/`) then emits one `create_special` event per person whose special begins today.
+
+### Sheet parsing
+
+The Sheets API does not return a rectangle. Read every cell through `cell(row, i)` (`importers/sheet_row.go`) — never `row[i].(string)`:
+
+- Trailing empty cells are **omitted**, so a row declared with 6 columns can arrive with 3 and `row[3]` panics.
+- A cell the sheet stores as a number arrives as `float64`. `fmt.Sprint` renders that with `%g`, so `1e6` becomes `"1e+06"` and every subsequent parse fails — `cell()` uses `strconv.FormatFloat(v, 'f', -1, 64)`.
+- Interior blank lines arrive as `[]`. `blankRow()` skips them so a spacer is not counted as a malformed row.
+
+A malformed row is dropped, not fatal — one bad date must not cost the other 199 rows. Every drop goes to `reportDroppedRows`, which is a Sentry Warning at any ratio and an Error when nothing survived. It carries an explicit fingerprint: the sheets are never cleared, so an unfixable row is re-dropped on every tick and an alert that repeats forever gets muted.
+
+Parsers return a `SheetRow` on each record and every log line uses it. The loop index counts survivors, so once one row is dropped it no longer names a line an operator can open.
+
+### Identity in `specials`
+
+The table has no unique key and `CreateSpecial` always INSERTs, so nothing about a rerun is idempotent on its own.
+
+- **Email is not an identity.** `handleCreateSpecial` requires neither identifier, and the importer writes `email = ''` for every keycloak-only sheet row. Anything keyed on email folds all of those into one person. `specialActivator` reads the specials directly and keys on the keycloak id.
+- **Both identity columns are written non-NULL** (`''` when the sheet supplies neither), because `prepareSpecialCreateQuery` omits an invalid field entirely and several readers scan into `*string`, where pgx refuses NULL.
+- **The account lookup may only add an identifier, never remove one.** `accounts."UserKey"` is nullable *and* empty on some rows; either value would overwrite a good id from the sheet with one `DeleteSpecialsByKeycloakId` can never match.
+- **Revoking is a soft update** — `DeleteSpecialById` rewrites `end_date` and emits `delete_special`. It is the single revoke primitive; `DeleteSpecialsByKeycloakId` funnels through it.
+- **`subcategory` NULL and `''` are different rows.** The cleanup queries compare the column, and `where subcategory <> 'rav'` does not answer the same for both.
+
+### Rerun safety
+
+`importers/special_dedup.go` indexes what the table already holds and skips sheet rows that match. The key is identifier + start date + category + subcategory validity — **not `end_date`**, which a revoke rewrites; including it meant the next cron run silently re-granted anything an admin had revoked.
+
+Both identifiers are indexed for a stored row, because they do not survive the import symmetrically: an email-only sheet line comes back carrying the keycloak id the account lookup resolved.
+
+Reads are bounded by `GetSpecialsStartingBetween` — the table only grows, since revoking never deletes.
+
+A unique index on `specials` is the durable answer and still needs its own migration plus a decision about the duplicates already in the table.

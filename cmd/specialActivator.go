@@ -93,42 +93,66 @@ func (w *Worker) Close() {
 	w.eventEmitter.Close(ctx)
 }
 
+// DoTask emits one activation per person whose special begins today.
+//
+// It reads the specials directly rather than walking the distinct emails. The
+// email was never a safe key: a special can carry a keycloak id and no email —
+// handleCreateSpecial requires neither, and the importer writes an empty email
+// for every keycloak-only sheet row — so an email-keyed loop skipped those rows
+// entirely, or, once the empty string was allowed through, treated every
+// keycloak-only special as one person and activated only the longest of them.
 func (w *Worker) DoTask() error {
-
-	emails, err := w.repo.GetUniqueEmailsFromSpecial(context.Background())
+	now := time.Now()
+	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	// A day either side of local midnight, then isBeginsToday decides: the
+	// column is timestamptz, so a row can sit on the far side of an exact bound
+	// and still be today's date locally.
+	specials, err := w.repo.GetSpecialsStartingBetween(context.Background(),
+		dayStart.AddDate(0, 0, -1), dayStart.AddDate(0, 0, 2))
 	if err != nil {
-		return fmt.Errorf("repo.GetUniqueEmailsFromSpecial: %w", err)
+		return fmt.Errorf("repo.GetSpecialsStartingBetween: %w", err)
 	}
-	for _, email := range emails {
 
-		specials, err := w.repo.GetAllSpecialsByEmail(context.Background(), email)
-		if err != nil {
-			return fmt.Errorf("repo.GetAllSpecials: %w", err)
+	// Keyed on the keycloak id where there is one, so two keycloak-only
+	// specials are two people rather than two rows sharing an empty email.
+	longest := make(map[string]*repo.Special)
+	var order []string
+	for _, special := range specials {
+		if !isBeginsToday(special) {
+			continue
 		}
-		var actualSpecial *repo.Special
-		for _, special := range specials {
-			if isBeginsToday(special) {
-				if actualSpecial == nil {
-					actualSpecial = special
-					continue
-				}
-				if special.EndDate.Time.After(actualSpecial.EndDate.Time) {
-					actualSpecial = special
-				}
-			}
+		key := special.KeycloakId.String
+		if key == "" {
+			key = "email\x00" + special.Email.String
 		}
-		if actualSpecial != nil {
-			ctx := context.WithValue(context.Background(), common.CtxEventBuilder, w)
-			w.emitEvent(ctx,
-				events.TypeCreateSpecial,
-				map[string]interface{}{
-					"email":       actualSpecial.Email,
-					"keycloak_id": actualSpecial.KeycloakId,
-					"start_date":  actualSpecial.StartDate,
-					"end_date":    actualSpecial.EndDate})
+		if key == "email\x00" {
+			slog.Warn("special with no identifier cannot be activated", slog.Int("special_id", special.Id.Int))
+			continue
 		}
 
+		current, ok := longest[key]
+		if !ok {
+			longest[key] = special
+			order = append(order, key)
+			continue
+		}
+		if special.EndDate.Time.After(current.EndDate.Time) {
+			longest[key] = special
+		}
 	}
+
+	ctx := context.WithValue(context.Background(), common.CtxEventBuilder, w)
+	for _, key := range order {
+		special := longest[key]
+		w.emitEvent(ctx,
+			events.TypeCreateSpecial,
+			map[string]interface{}{
+				"email":       special.Email,
+				"keycloak_id": special.KeycloakId,
+				"start_date":  special.StartDate,
+				"end_date":    special.EndDate})
+	}
+	slog.Info("activation summary", slog.Int("activated", len(order)), slog.Int("considered", len(specials)))
 	return nil
 }
 

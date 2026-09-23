@@ -225,7 +225,11 @@ func (o *OrdersDB) HardDeleteAllUserDataByAccountID(ctx context.Context, account
 		return fmt.Errorf("delete from payments_pelecard: %w", err)
 	}
 
-	_, err = tx.Exec(ctx, `DELETE FROM specials where email = (SELECT "Email" FROM accounts WHERE id = $1)`, accountID)
+	// NULLIF: an account whose "Email" is the empty string would otherwise match
+	// every special stored with an empty email — i.e. every keycloak-only grant
+	// in the table, for every user. Such accounts exist; GetAccount(ctx, 0, "")
+	// resolving to one is why createSpecial guards its lookup.
+	_, err = tx.Exec(ctx, `DELETE FROM specials where email = (SELECT NULLIF("Email", '') FROM accounts WHERE id = $1)`, accountID)
 	if err != nil {
 		return fmt.Errorf("delete from specials: %w", err)
 	}
@@ -260,13 +264,22 @@ func (o *OrdersDB) HardDeleteAllUserDataByAccountID(ctx context.Context, account
 }
 
 func (o *OrdersDB) GetAccount(ctx context.Context, id int, email string) (*Account, error) {
+	// $1, not an interpolated literal. Both importers reach here with a cell
+	// straight out of a Google Sheet, and the accounts handler with a query
+	// parameter, so the old fmt.Sprintf into the WHERE clause let an email of
+	// the right shape rewrite the predicate: a probe of the form
+	// `x') OR 1=1 --` returned an unrelated account where the plain lookup
+	// matched no rows.
 	var whereQuery string
 	var orderQuery string
+	var arg any
 	if id != 0 {
-		whereQuery = fmt.Sprintf("where id = %d", id)
+		whereQuery = `where id = $1`
+		arg = id
 	} else {
-		whereQuery = fmt.Sprintf("where LOWER(\"Email\") = LOWER('%s')", email)
+		whereQuery = `where LOWER("Email") = LOWER($1)`
 		orderQuery = " order by created_at desc limit 1"
+		arg = email
 	}
 
 	var acc Account
@@ -290,7 +303,7 @@ func (o *OrdersDB) GetAccount(ctx context.Context, id int, email string) (*Accou
 			"AuthNo",
 			created_at,
 			updated_at,
-			deleted_at from accounts `+whereQuery+orderQuery).Scan(
+			deleted_at from accounts `+whereQuery+orderQuery, arg).Scan(
 		&acc.ID, &acc.FirstName, &acc.LastName, &acc.Email, &acc.Phone, &acc.Street,
 		&acc.City, &acc.State, &acc.Postcode, &acc.Country, &acc.AccountType,
 		&acc.PaymentToken, &acc.PaymentCardID, &acc.PaymentCardExpMonth, &acc.PaymentCardExpYear,
@@ -378,7 +391,7 @@ func (o *OrdersDB) MergeAccountsOrders(ctx context.Context, req AccountMergeRequ
 		return fmt.Errorf("UPDATE transaction : %w", err)
 	}
 
-	_, err = tx.Exec(ctx, `DELETE FROM specials where email = (SELECT "Email" FROM accounts WHERE id = $1)`, sourceAccountID)
+	_, err = tx.Exec(ctx, `DELETE FROM specials where email = (SELECT NULLIF("Email", '') FROM accounts WHERE id = $1)`, sourceAccountID)
 	if err != nil {
 		return fmt.Errorf("delete from specials: %w", err)
 	}

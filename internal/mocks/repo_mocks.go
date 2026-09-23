@@ -699,6 +699,66 @@ func (_c *MockOrdersRepository_CountCouponRedemptions_Call) RunAndReturn(run fun
 	return _c
 }
 
+// CountSpecials provides a mock function for the type MockOrdersRepository
+func (_mock *MockOrdersRepository) CountSpecials(ctx context.Context) (int, error) {
+	ret := _mock.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CountSpecials")
+	}
+
+	var r0 int
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context) (int, error)); ok {
+		return returnFunc(ctx)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context) int); ok {
+		r0 = returnFunc(ctx)
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = returnFunc(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockOrdersRepository_CountSpecials_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CountSpecials'
+type MockOrdersRepository_CountSpecials_Call struct {
+	*mock.Call
+}
+
+// CountSpecials is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockOrdersRepository_Expecter) CountSpecials(ctx any) *MockOrdersRepository_CountSpecials_Call {
+	return &MockOrdersRepository_CountSpecials_Call{Call: _e.mock.On("CountSpecials", ctx)}
+}
+
+func (_c *MockOrdersRepository_CountSpecials_Call) Run(run func(ctx context.Context)) *MockOrdersRepository_CountSpecials_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockOrdersRepository_CountSpecials_Call) Return(n int, err error) *MockOrdersRepository_CountSpecials_Call {
+	_c.Call.Return(n, err)
+	return _c
+}
+
+func (_c *MockOrdersRepository_CountSpecials_Call) RunAndReturn(run func(ctx context.Context) (int, error)) *MockOrdersRepository_CountSpecials_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CountsAllOrders provides a mock function for the type MockOrdersRepository
 func (_mock *MockOrdersRepository) CountsAllOrders(ctx context.Context) (int64, error) {
 	ret := _mock.Called(ctx)
@@ -3200,8 +3260,8 @@ func (_c *MockOrdersRepository_GetAllPayments_Call) RunAndReturn(run func(ctx co
 }
 
 // GetAllSpecials provides a mock function for the type MockOrdersRepository
-func (_mock *MockOrdersRepository) GetAllSpecials(ctx context.Context) ([]*repo.Special, error) {
-	ret := _mock.Called(ctx)
+func (_mock *MockOrdersRepository) GetAllSpecials(ctx context.Context, skip int, limit int) ([]*repo.Special, error) {
+	ret := _mock.Called(ctx, skip, limit)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetAllSpecials")
@@ -3209,18 +3269,18 @@ func (_mock *MockOrdersRepository) GetAllSpecials(ctx context.Context) ([]*repo.
 
 	var r0 []*repo.Special
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context) ([]*repo.Special, error)); ok {
-		return returnFunc(ctx)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int, int) ([]*repo.Special, error)); ok {
+		return returnFunc(ctx, skip, limit)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context) []*repo.Special); ok {
-		r0 = returnFunc(ctx)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int, int) []*repo.Special); ok {
+		r0 = returnFunc(ctx, skip, limit)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*repo.Special)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = returnFunc(ctx)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, int, int) error); ok {
+		r1 = returnFunc(ctx, skip, limit)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -3234,18 +3294,30 @@ type MockOrdersRepository_GetAllSpecials_Call struct {
 
 // GetAllSpecials is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockOrdersRepository_Expecter) GetAllSpecials(ctx any) *MockOrdersRepository_GetAllSpecials_Call {
-	return &MockOrdersRepository_GetAllSpecials_Call{Call: _e.mock.On("GetAllSpecials", ctx)}
+//   - skip int
+//   - limit int
+func (_e *MockOrdersRepository_Expecter) GetAllSpecials(ctx any, skip any, limit any) *MockOrdersRepository_GetAllSpecials_Call {
+	return &MockOrdersRepository_GetAllSpecials_Call{Call: _e.mock.On("GetAllSpecials", ctx, skip, limit)}
 }
 
-func (_c *MockOrdersRepository_GetAllSpecials_Call) Run(run func(ctx context.Context)) *MockOrdersRepository_GetAllSpecials_Call {
+func (_c *MockOrdersRepository_GetAllSpecials_Call) Run(run func(ctx context.Context, skip int, limit int)) *MockOrdersRepository_GetAllSpecials_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
+		var arg1 int
+		if args[1] != nil {
+			arg1 = args[1].(int)
+		}
+		var arg2 int
+		if args[2] != nil {
+			arg2 = args[2].(int)
+		}
 		run(
 			arg0,
+			arg1,
+			arg2,
 		)
 	})
 	return _c
@@ -3256,7 +3328,7 @@ func (_c *MockOrdersRepository_GetAllSpecials_Call) Return(specials []*repo.Spec
 	return _c
 }
 
-func (_c *MockOrdersRepository_GetAllSpecials_Call) RunAndReturn(run func(ctx context.Context) ([]*repo.Special, error)) *MockOrdersRepository_GetAllSpecials_Call {
+func (_c *MockOrdersRepository_GetAllSpecials_Call) RunAndReturn(run func(ctx context.Context, skip int, limit int) ([]*repo.Special, error)) *MockOrdersRepository_GetAllSpecials_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -4741,6 +4813,80 @@ func (_c *MockOrdersRepository_GetSpecialsByKeycloakId_Call) RunAndReturn(run fu
 	return _c
 }
 
+// GetSpecialsStartingBetween provides a mock function for the type MockOrdersRepository
+func (_mock *MockOrdersRepository) GetSpecialsStartingBetween(ctx context.Context, from time.Time, to time.Time) ([]*repo.Special, error) {
+	ret := _mock.Called(ctx, from, to)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetSpecialsStartingBetween")
+	}
+
+	var r0 []*repo.Special
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, time.Time, time.Time) ([]*repo.Special, error)); ok {
+		return returnFunc(ctx, from, to)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, time.Time, time.Time) []*repo.Special); ok {
+		r0 = returnFunc(ctx, from, to)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*repo.Special)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, time.Time, time.Time) error); ok {
+		r1 = returnFunc(ctx, from, to)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockOrdersRepository_GetSpecialsStartingBetween_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetSpecialsStartingBetween'
+type MockOrdersRepository_GetSpecialsStartingBetween_Call struct {
+	*mock.Call
+}
+
+// GetSpecialsStartingBetween is a helper method to define mock.On call
+//   - ctx context.Context
+//   - from time.Time
+//   - to time.Time
+func (_e *MockOrdersRepository_Expecter) GetSpecialsStartingBetween(ctx any, from any, to any) *MockOrdersRepository_GetSpecialsStartingBetween_Call {
+	return &MockOrdersRepository_GetSpecialsStartingBetween_Call{Call: _e.mock.On("GetSpecialsStartingBetween", ctx, from, to)}
+}
+
+func (_c *MockOrdersRepository_GetSpecialsStartingBetween_Call) Run(run func(ctx context.Context, from time.Time, to time.Time)) *MockOrdersRepository_GetSpecialsStartingBetween_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 time.Time
+		if args[1] != nil {
+			arg1 = args[1].(time.Time)
+		}
+		var arg2 time.Time
+		if args[2] != nil {
+			arg2 = args[2].(time.Time)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockOrdersRepository_GetSpecialsStartingBetween_Call) Return(specials []*repo.Special, err error) *MockOrdersRepository_GetSpecialsStartingBetween_Call {
+	_c.Call.Return(specials, err)
+	return _c
+}
+
+func (_c *MockOrdersRepository_GetSpecialsStartingBetween_Call) RunAndReturn(run func(ctx context.Context, from time.Time, to time.Time) ([]*repo.Special, error)) *MockOrdersRepository_GetSpecialsStartingBetween_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetTokensForOrders provides a mock function for the type MockOrdersRepository
 func (_mock *MockOrdersRepository) GetTokensForOrders(ctx context.Context, orderIDs []int) (map[int]string, error) {
 	ret := _mock.Called(ctx, orderIDs)
@@ -4957,68 +5103,6 @@ func (_c *MockOrdersRepository_GetTransactionById_Call) Return(transaction *repo
 }
 
 func (_c *MockOrdersRepository_GetTransactionById_Call) RunAndReturn(run func(ctx context.Context, id int, accountId *int) (*repo.Transaction, error)) *MockOrdersRepository_GetTransactionById_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// GetUniqueEmailsFromSpecial provides a mock function for the type MockOrdersRepository
-func (_mock *MockOrdersRepository) GetUniqueEmailsFromSpecial(ctx context.Context) ([]string, error) {
-	ret := _mock.Called(ctx)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetUniqueEmailsFromSpecial")
-	}
-
-	var r0 []string
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context) ([]string, error)); ok {
-		return returnFunc(ctx)
-	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context) []string); ok {
-		r0 = returnFunc(ctx)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]string)
-		}
-	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = returnFunc(ctx)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// MockOrdersRepository_GetUniqueEmailsFromSpecial_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetUniqueEmailsFromSpecial'
-type MockOrdersRepository_GetUniqueEmailsFromSpecial_Call struct {
-	*mock.Call
-}
-
-// GetUniqueEmailsFromSpecial is a helper method to define mock.On call
-//   - ctx context.Context
-func (_e *MockOrdersRepository_Expecter) GetUniqueEmailsFromSpecial(ctx any) *MockOrdersRepository_GetUniqueEmailsFromSpecial_Call {
-	return &MockOrdersRepository_GetUniqueEmailsFromSpecial_Call{Call: _e.mock.On("GetUniqueEmailsFromSpecial", ctx)}
-}
-
-func (_c *MockOrdersRepository_GetUniqueEmailsFromSpecial_Call) Run(run func(ctx context.Context)) *MockOrdersRepository_GetUniqueEmailsFromSpecial_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 context.Context
-		if args[0] != nil {
-			arg0 = args[0].(context.Context)
-		}
-		run(
-			arg0,
-		)
-	})
-	return _c
-}
-
-func (_c *MockOrdersRepository_GetUniqueEmailsFromSpecial_Call) Return(strings []string, err error) *MockOrdersRepository_GetUniqueEmailsFromSpecial_Call {
-	_c.Call.Return(strings, err)
-	return _c
-}
-
-func (_c *MockOrdersRepository_GetUniqueEmailsFromSpecial_Call) RunAndReturn(run func(ctx context.Context) ([]string, error)) *MockOrdersRepository_GetUniqueEmailsFromSpecial_Call {
 	_c.Call.Return(run)
 	return _c
 }

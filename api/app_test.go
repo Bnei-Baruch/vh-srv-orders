@@ -93,6 +93,10 @@ func GET(t *testing.T, a *App, path string, expectedCode int) gin.H {
 	return do(t, a, "GET", path, nil, expectedCode, DoOptions{})
 }
 
+func GET_ROOT(t *testing.T, a *App, path string, expectedCode int) gin.H {
+	return do(t, a, "GET", path, nil, expectedCode, DoOptions{isRoot: true})
+}
+
 func POST_ROOT(t *testing.T, a *App, path string, request interface{}, expectedCode int) gin.H {
 	return do(t, a, "POST", path, request, expectedCode, DoOptions{isRoot: true})
 }

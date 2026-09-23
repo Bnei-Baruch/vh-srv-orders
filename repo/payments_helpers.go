@@ -46,14 +46,15 @@ func (o *OrdersDB) SoftDeletePayment(ctx context.Context, paymentID int) error {
 }
 
 func (o *OrdersDB) GetPaymentActivities(ctx context.Context, email string, productType string, paymentType string, skip int, limit int) ([]PaymentActivitiesRes, error) {
-	userDbWhereQuery, orderByQuery := buildAndGetWherePaymentActQuery(email, productType, paymentType)
+	args := new(queryArgs)
+	userDbWhereQuery, orderByQuery := buildAndGetWherePaymentActQuery(args, email, productType, paymentType)
 
 	rows, err := o.Query(ctx, `SELECT p.created_at,  p."Amount", p."PaymentType",  p."OrderID", 
 	p."ParamX", p."PaymentStatus", p."CCNumber", p."CCExpDate", 
 	o."ProductType", o."Type", o."Currency",
 	a."FirstName", a."LastName", a."Email", a."Country" 
 	from payments as p, orders as o, accounts as a`+
-		userDbWhereQuery+orderByQuery+" LIMIT $1 OFFSET $2", limit, skip)
+		userDbWhereQuery+orderByQuery+args.limitOffset(limit, skip), args.all()...)
 	if err != nil {
 		return nil, fmt.Errorf("o.Query: %w", err)
 	}
@@ -82,12 +83,13 @@ func (o *OrdersDB) GetAllPayments(ctx context.Context, skip int, limit int, from
 	paymentType string, paymentStatus string, orderType string, email string, accountID int, paymentsWithToken string,
 	intOrderID int, orderByCreatedAt string) ([]Payment, error) {
 
-	limitOffsetString := fmt.Sprintf(" LIMIT %d OFFSET %d", limit, skip)
-	whereQuery, orderByQuery, err := buildAndGetPaymentsWhereQuery(fromDate, toDate, paymentType, paymentStatus,
+	args := new(queryArgs)
+	whereQuery, orderByQuery, err := buildAndGetPaymentsWhereQuery(args, fromDate, toDate, paymentType, paymentStatus,
 		orderType, email, accountID, paymentsWithToken, intOrderID, orderByCreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("buildAndGetPaymentsWhereQuery: %w", err)
 	}
+	limitOffsetString := args.limitOffset(limit, skip)
 
 	fromQuery := " FROM payments as p"
 	if email != "" || accountID != 0 || orderType != "" {
@@ -103,7 +105,7 @@ func (o *OrdersDB) GetAllPayments(ctx context.Context, skip int, limit int, from
 	p."ErrorMsg", p."CardHebrewName", p."CCAbroadCard", p."CCBrand", p."CCCompanyClearer", p."CCCompanyIssuer", 
 	p.credit_type, p."CCExpDate", p."CCNumber", p."DebitCode", p."DebitCurrency", p."DebitTotal", p."DebitType", 
 	p."FirstPaymentTotal", p."FixedPaymentTotal", p."TotalPayments", p.j_param, p."TransactionInitTime", 
-	p."TransactionUpdateTime", p."VoucherID"`+fromQuery+whereQuery+orderByQuery+limitOffsetString)
+	p."TransactionUpdateTime", p."VoucherID"`+fromQuery+whereQuery+orderByQuery+limitOffsetString, args.all()...)
 	if err != nil {
 		return nil, fmt.Errorf("o.Query: %w", err)
 	}
@@ -136,8 +138,9 @@ func (o *OrdersDB) GetTotalParticipationStatusCount(ctx context.Context, email s
 	paymentType string) (int, error) {
 	var count int
 
-	userDbWhereQuery, _ := buildAndGetWherePaymentActQuery(email, productType, paymentType)
-	err := o.QueryRow(ctx, `SELECT COUNT(*) FROM payments as p, orders as o, accounts as a`+userDbWhereQuery).
+	args := new(queryArgs)
+	userDbWhereQuery, _ := buildAndGetWherePaymentActQuery(args, email, productType, paymentType)
+	err := o.QueryRow(ctx, `SELECT COUNT(*) FROM payments as p, orders as o, accounts as a`+userDbWhereQuery, args.all()...).
 		Scan(&count)
 	if err != nil {
 		return 0, err
@@ -180,15 +183,16 @@ func (o *OrdersDB) GetPaymentByEmail(ctx context.Context, email string) ([]Payme
 
 func (o *OrdersDB) GetOfflinePayments(ctx context.Context, skip int, limit int, method string, orderByCreatedAt string) ([]*OfflinePayment, error) {
 	fromQuery := " FROM payments_offline as p"
-	limitOffsetString := fmt.Sprintf(" LIMIT %d OFFSET %d", limit, skip)
-	whereQuery, orderByQuery, err := buildAndGetOfflinePaymentsWhereQuery(method, orderByCreatedAt)
+	args := new(queryArgs)
+	whereQuery, orderByQuery, err := buildAndGetOfflinePaymentsWhereQuery(args, method, orderByCreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("buildAndGetOfflinePaymentsWhereQuery: %w", err)
 	}
+	limitOffsetString := args.limitOffset(limit, skip)
 
 	rows, err := o.Query(ctx, `SELECT 
 	p.id, p.created_at, p.updated_at, p.deleted_at, p.payment_method, p.receipt, p.extra_info, p.status, p.payment_id,
-	p.properties`+fromQuery+whereQuery+orderByQuery+limitOffsetString)
+	p.properties`+fromQuery+whereQuery+orderByQuery+limitOffsetString, args.all()...)
 	if err != nil {
 		return nil, fmt.Errorf("o.Query: %w", err)
 	}
@@ -1079,7 +1083,7 @@ func prepareHelpHaverPaymentUpdateQuery(req PaymentUpdate) (string, []interface{
 	return updateArgument, args
 }
 
-func buildAndGetWherePaymentActQuery(email string, productType string, paymentType string) (string, string) {
+func buildAndGetWherePaymentActQuery(args *queryArgs, email string, productType string, paymentType string) (string, string) {
 
 	var whereString strings.Builder
 	var orderBy strings.Builder
@@ -1091,22 +1095,24 @@ func buildAndGetWherePaymentActQuery(email string, productType string, paymentTy
 
 	// WHERE query generation based on parameters
 	if email != "" {
-		whereCondition.WriteString(fmt.Sprintf(` AND LOWER(a."Email") LIKE LOWER('%%%s%%')`, email))
+		// The wildcards go into the bound value, so they stay wildcards and the
+		// email stays data.
+		whereCondition.WriteString(` AND LOWER(a."Email") LIKE LOWER(` + args.next("%"+email+"%") + `)`)
 	}
 
 	if productType != "" {
 		if whereCondition.String() != "" {
-			whereCondition.WriteString(fmt.Sprintf(` AND LOWER(o."ProductType")=LOWER('%s')`, productType))
+			whereCondition.WriteString(` AND LOWER(o."ProductType")=LOWER(` + args.next(productType) + `)`)
 		} else {
-			whereCondition.WriteString(fmt.Sprintf(` LOWER(o."ProductType")=LOWER('%s')`, productType))
+			whereCondition.WriteString(` LOWER(o."ProductType")=LOWER(` + args.next(productType) + `)`)
 		}
 	}
 
 	if paymentType != "" {
 		if whereCondition.String() != "" {
-			whereCondition.WriteString(fmt.Sprintf(` AND LOWER(p."PaymentType")=LOWER('%s')`, paymentType))
+			whereCondition.WriteString(` AND LOWER(p."PaymentType")=LOWER(` + args.next(paymentType) + `)`)
 		} else {
-			whereCondition.WriteString(fmt.Sprintf(` LOWER(p."PaymentType")=LOWER('%s')`, paymentType))
+			whereCondition.WriteString(` LOWER(p."PaymentType")=LOWER(` + args.next(paymentType) + `)`)
 		}
 	}
 
@@ -1120,7 +1126,7 @@ func buildAndGetWherePaymentActQuery(email string, productType string, paymentTy
 	return whereString.String(), orderBy.String()
 }
 
-func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentType string, paymentStatus string,
+func buildAndGetPaymentsWhereQuery(args *queryArgs, fromDate string, dateTo *time.Time, paymentType string, paymentStatus string,
 	orderType string, email string, accontID int, paymentsWithToken string, intOrderID int, orderByCreatedAt string) (string, string, error) {
 	var whereString strings.Builder
 	var orderBy strings.Builder
@@ -1129,7 +1135,7 @@ func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentTy
 	whereCondition.WriteString("")
 
 	if !dateTo.IsZero() {
-		whereCondition.WriteString(fmt.Sprintf(" p.updated_at <= '%s'", dateTo.Format("2006-01-02 15:04:05")))
+		whereCondition.WriteString(" p.updated_at <= " + args.next(dateTo.Format("2006-01-02 15:04:05")))
 	}
 
 	// WHERE query generation based on parameters
@@ -1141,25 +1147,25 @@ func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentTy
 			return "", "", err
 		}
 		if whereCondition.String() != "" {
-			whereCondition.WriteString(fmt.Sprintf(" AND p.updated_at >= '%s'", fromDateParsed.Format("2006-01-02 15:04:05")))
+			whereCondition.WriteString(" AND p.updated_at >= " + args.next(fromDateParsed.Format("2006-01-02 15:04:05")))
 		} else {
-			whereCondition.WriteString(fmt.Sprintf(" p.updated_at >= '%s'", fromDateParsed.Format("2006-01-02 15:04:05")))
+			whereCondition.WriteString(" p.updated_at >= " + args.next(fromDateParsed.Format("2006-01-02 15:04:05")))
 		}
 	}
 
 	if paymentType != "" {
 		if whereCondition.String() != "" {
-			whereCondition.WriteString(fmt.Sprintf(` AND LOWER(p."PaymentType")=LOWER('%s')`, paymentType))
+			whereCondition.WriteString(` AND LOWER(p."PaymentType")=LOWER(` + args.next(paymentType) + `)`)
 		} else {
-			whereCondition.WriteString(fmt.Sprintf(` LOWER(p."PaymentType")=LOWER('%s')`, paymentType))
+			whereCondition.WriteString(` LOWER(p."PaymentType")=LOWER(` + args.next(paymentType) + `)`)
 		}
 	}
 
 	if paymentStatus != "" {
 		if whereCondition.String() != "" {
-			whereCondition.WriteString(fmt.Sprintf(` AND LOWER(p."PaymentStatus")=LOWER('%s')`, paymentStatus))
+			whereCondition.WriteString(` AND LOWER(p."PaymentStatus")=LOWER(` + args.next(paymentStatus) + `)`)
 		} else {
-			whereCondition.WriteString(fmt.Sprintf(` LOWER(p."PaymentStatus")=LOWER('%s')`, paymentStatus))
+			whereCondition.WriteString(` LOWER(p."PaymentStatus")=LOWER(` + args.next(paymentStatus) + `)`)
 		}
 	}
 
@@ -1188,9 +1194,9 @@ func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentTy
 
 	if orderType != "" {
 		if whereCondition.String() != "" {
-			whereCondition.WriteString(fmt.Sprintf(` AND o.id = p."OrderID" AND LOWER(o."Type")=LOWER('%s')`, orderType))
+			whereCondition.WriteString(` AND o.id = p."OrderID" AND LOWER(o."Type")=LOWER(` + args.next(orderType) + `)`)
 		} else {
-			whereCondition.WriteString(fmt.Sprintf(` o.id = p."OrderID" AND LOWER(o."Type")=LOWER('%s')`, orderType))
+			whereCondition.WriteString(` o.id = p."OrderID" AND LOWER(o."Type")=LOWER(` + args.next(orderType) + `)`)
 		}
 
 	}
@@ -1198,32 +1204,32 @@ func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentTy
 	if email != "" || accontID != 0 {
 		if email != "" {
 			if whereCondition.String() != "" {
-				whereCondition.WriteString(fmt.Sprintf(` AND p."OrderID" = o.id AND a.id = o."AccountID" AND LOWER(a."Email")=LOWER('%s')`, email))
+				whereCondition.WriteString(` AND p."OrderID" = o.id AND a.id = o."AccountID" AND LOWER(a."Email")=LOWER(` + args.next(email) + `)`)
 			} else {
-				whereCondition.WriteString(fmt.Sprintf(` p."OrderID" = o.id AND a.id = o."AccountID" AND LOWER(a."Email")=LOWER('%s')`, email))
+				whereCondition.WriteString(` p."OrderID" = o.id AND a.id = o."AccountID" AND LOWER(a."Email")=LOWER(` + args.next(email) + `)`)
 			}
 		} else {
 			if whereCondition.String() != "" {
-				whereCondition.WriteString(fmt.Sprintf(` AND p."OrderID" = o.id AND a.id = o."AccountID" AND a.id=%d`, accontID))
+				whereCondition.WriteString(` AND p."OrderID" = o.id AND a.id = o."AccountID" AND a.id=` + args.next(accontID))
 			} else {
-				whereCondition.WriteString(fmt.Sprintf(` p."OrderID" = o.id AND a.id = o."AccountID" AND a.id=%d`, accontID))
+				whereCondition.WriteString(` p."OrderID" = o.id AND a.id = o."AccountID" AND a.id=` + args.next(accontID))
 			}
 		}
 	}
 
 	if intOrderID != 0 {
 		if whereCondition.String() != "" {
-			whereCondition.WriteString(fmt.Sprintf(` AND p."OrderID" = %d`, intOrderID))
+			whereCondition.WriteString(` AND p."OrderID" = ` + args.next(intOrderID))
 		} else {
-			whereCondition.WriteString(fmt.Sprintf(` p."OrderID" = %d`, intOrderID))
+			whereCondition.WriteString(` p."OrderID" = ` + args.next(intOrderID))
 		}
 	}
 
 	if orderType != "" {
 		if whereCondition.String() != "" {
-			whereCondition.WriteString(fmt.Sprintf(` AND o.id = p."OrderID" AND LOWER(o."Type")=LOWER('%s')`, orderType))
+			whereCondition.WriteString(` AND o.id = p."OrderID" AND LOWER(o."Type")=LOWER(` + args.next(orderType) + `)`)
 		} else {
-			whereCondition.WriteString(fmt.Sprintf(` o.id = p."OrderID" AND LOWER(o."Type")=LOWER('%s')`, orderType))
+			whereCondition.WriteString(` o.id = p."OrderID" AND LOWER(o."Type")=LOWER(` + args.next(orderType) + `)`)
 		}
 	}
 
@@ -1244,7 +1250,7 @@ func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentTy
 	return whereString.String(), orderBy.String(), nil
 }
 
-func buildAndGetOfflinePaymentsWhereQuery(method string, orderByCreatedAt string) (string, string, error) {
+func buildAndGetOfflinePaymentsWhereQuery(args *queryArgs, method string, orderByCreatedAt string) (string, string, error) {
 	var whereString strings.Builder
 	var orderBy strings.Builder
 	var whereCondition strings.Builder
@@ -1254,9 +1260,12 @@ func buildAndGetOfflinePaymentsWhereQuery(method string, orderByCreatedAt string
 	// WHERE query generation based on parameters
 	if method != "" {
 		if whereCondition.String() != "" {
-			whereCondition.WriteString(fmt.Sprintf(` AND p.payment_method='%s')`, method))
+			// The `)` this branch used to append was a syntax error waiting for a
+			// second condition to be added above it; method is the only one, so
+			// the branch has never run.
+			whereCondition.WriteString(` AND p.payment_method=` + args.next(method))
 		} else {
-			whereCondition.WriteString(fmt.Sprintf(` p.payment_method='%s'`, method))
+			whereCondition.WriteString(` p.payment_method=` + args.next(method))
 		}
 	}
 

@@ -57,8 +57,9 @@ func (o *OrdersDB) CreateAccount(ctx context.Context, a Account) (int, error) {
 func (o *OrdersDB) GetAllAccounts(ctx context.Context, skip int, limit int, email string) ([]Account, error) {
 	accounts := []Account{}
 
-	limitOffsetString := fmt.Sprintf(" LIMIT %d OFFSET %d", limit, skip)
-	whereQuery, orderByQuery := buildAndGetAccountsWhereQuery(email)
+	args := new(queryArgs)
+	whereQuery, orderByQuery := buildAndGetAccountsWhereQuery(args, email)
+	limitOffsetString := args.limitOffset(limit, skip)
 
 	rows, err := o.Query(ctx, `
 		SELECT
@@ -82,7 +83,7 @@ func (o *OrdersDB) GetAllAccounts(ctx context.Context, skip int, limit int, emai
 		created_at,
 		updated_at,
 		deleted_at
-			FROM accounts`+whereQuery+orderByQuery+limitOffsetString)
+			FROM accounts`+whereQuery+orderByQuery+limitOffsetString, args.all()...)
 	if err != nil {
 		return nil, fmt.Errorf("o.Query: %w", err)
 	}
@@ -260,13 +261,22 @@ func (o *OrdersDB) HardDeleteAllUserDataByAccountID(ctx context.Context, account
 }
 
 func (o *OrdersDB) GetAccount(ctx context.Context, id int, email string) (*Account, error) {
+	// $1, not an interpolated literal. Both importers reach here with a cell
+	// straight out of a Google Sheet, and the accounts handler with a query
+	// parameter, so the old fmt.Sprintf into the WHERE clause let an email of
+	// the right shape rewrite the predicate: a probe of the form
+	// `x') OR 1=1 --` returned an unrelated account where the plain lookup
+	// matched no rows.
 	var whereQuery string
 	var orderQuery string
+	var arg any
 	if id != 0 {
-		whereQuery = fmt.Sprintf("where id = %d", id)
+		whereQuery = `where id = $1`
+		arg = id
 	} else {
-		whereQuery = fmt.Sprintf("where LOWER(\"Email\") = LOWER('%s')", email)
+		whereQuery = `where LOWER("Email") = LOWER($1)`
 		orderQuery = " order by created_at desc limit 1"
+		arg = email
 	}
 
 	var acc Account
@@ -290,7 +300,7 @@ func (o *OrdersDB) GetAccount(ctx context.Context, id int, email string) (*Accou
 			"AuthNo",
 			created_at,
 			updated_at,
-			deleted_at from accounts `+whereQuery+orderQuery).Scan(
+			deleted_at from accounts `+whereQuery+orderQuery, arg).Scan(
 		&acc.ID, &acc.FirstName, &acc.LastName, &acc.Email, &acc.Phone, &acc.Street,
 		&acc.City, &acc.State, &acc.Postcode, &acc.Country, &acc.AccountType,
 		&acc.PaymentToken, &acc.PaymentCardID, &acc.PaymentCardExpMonth, &acc.PaymentCardExpYear,
@@ -583,7 +593,7 @@ func prepareAccountUpdateQuery(req Account) (string, []interface{}) {
 	return updateArgument, args
 }
 
-func buildAndGetAccountsWhereQuery(email string) (string, string) {
+func buildAndGetAccountsWhereQuery(args *queryArgs, email string) (string, string) {
 	var whereString strings.Builder
 	var orderBy strings.Builder
 	var whereCondition strings.Builder
@@ -594,7 +604,7 @@ func buildAndGetAccountsWhereQuery(email string) (string, string) {
 		if whereCondition.String() != "" {
 			whereCondition.WriteString(" AND")
 		}
-		whereCondition.WriteString(fmt.Sprintf(` LOWER("Email") = LOWER('%s')`, email))
+		whereCondition.WriteString(` LOWER("Email") = LOWER(` + args.next(email) + `)`)
 	}
 
 	orderBy.WriteString(fmt.Sprintf(" ORDER BY updated_at %s", "desc"))

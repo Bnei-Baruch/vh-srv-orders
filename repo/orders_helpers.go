@@ -311,13 +311,14 @@ func (o *OrdersDB) PatchOrderByID(ctx context.Context, order Order, orderId int)
 func (o *OrdersDB) GetAllOrders(ctx context.Context, skip int, limit int, fromDate string, toDate *time.Time, productType string,
 	currency string, status string, organisation string, email string, accountID int, keycloakID string, evaluateMembership string,
 	orderByPaymentDate string) (*[]Order, error) {
-	limitOffsetString := fmt.Sprintf(" LIMIT %d OFFSET %d", limit, skip)
-	whereQuery, orderByQuery, queryBuildErr := buildAndGetOrdersWhereQuery(fromDate, toDate, productType, currency, status,
+	args := new(queryArgs)
+	whereQuery, orderByQuery, queryBuildErr := buildAndGetOrdersWhereQuery(args, fromDate, toDate, productType, currency, status,
 		organisation, email, accountID, keycloakID, evaluateMembership, orderByPaymentDate)
 
 	if queryBuildErr != nil {
 		return nil, fmt.Errorf("buildAndGetOrdersWhereQuery: %w", queryBuildErr)
 	}
+	limitOffsetString := args.limitOffset(limit, skip)
 
 	fromQuery := " FROM orders as o"
 	if email != "" {
@@ -331,7 +332,7 @@ func (o *OrdersDB) GetAllOrders(ctx context.Context, skip int, limit int, fromDa
 	` + fromQuery + whereQuery + orderByQuery + limitOffsetString
 
 	// utils.LogFor(ctx).Info("GetAllOrders.query", slog.String("sql", query))
-	rows, err := o.Query(ctx, query)
+	rows, err := o.Query(ctx, query, args.all()...)
 	if err != nil {
 		return nil, fmt.Errorf("o.Query: %w", err)
 	}
@@ -547,7 +548,7 @@ func prepareOrderUpdateQuery(req Order) (string, []interface{}) {
 	return updateArgument, args
 }
 
-func buildAndGetOrdersWhereQuery(fromDate string, dateTo *time.Time, productType string, currency string, status string,
+func buildAndGetOrdersWhereQuery(args *queryArgs, fromDate string, dateTo *time.Time, productType string, currency string, status string,
 	organisation string, email string, accountID int, keycloakID string, evaluateMembership string, orderByPaymentDate string) (string, string, error) {
 
 	var whereString strings.Builder
@@ -557,7 +558,10 @@ func buildAndGetOrdersWhereQuery(fromDate string, dateTo *time.Time, productType
 	whereCondition.WriteString("")
 
 	// time format with timezone
-	whereCondition.WriteString(fmt.Sprintf(" o.updated_at <= '%s'", dateTo.Format(time.RFC3339Nano)))
+	// The formatted string is bound, not the time.Time: Postgres casts the same
+	// literal it was handed before, so the comparison keeps its old semantics
+	// while leaving the statement fixed.
+	whereCondition.WriteString(" o.updated_at <= " + args.next(dateTo.Format(time.RFC3339Nano)))
 
 	// WHERE query generation based on parameters
 	if fromDate != "" {
@@ -567,33 +571,33 @@ func buildAndGetOrdersWhereQuery(fromDate string, dateTo *time.Time, productType
 		if err != nil {
 			return "", "", err
 		}
-		whereCondition.WriteString(fmt.Sprintf(" AND o.updated_at >= '%s'", fromDateParsed.Format("2006-01-02 15:04:05")))
+		whereCondition.WriteString(" AND o.updated_at >= " + args.next(fromDateParsed.Format("2006-01-02 15:04:05")))
 	}
 
 	if currency != "" {
-		whereCondition.WriteString(fmt.Sprintf(" AND LOWER(o.\"Currency\")=LOWER('%s')", currency))
+		whereCondition.WriteString(" AND LOWER(o.\"Currency\")=LOWER(" + args.next(currency) + ")")
 	}
 
 	if status != "" {
-		whereCondition.WriteString(fmt.Sprintf(" AND LOWER(o.\"Status\")=LOWER('%s')", status))
+		whereCondition.WriteString(" AND LOWER(o.\"Status\")=LOWER(" + args.next(status) + ")")
 	}
 
 	if productType != "" {
-		whereCondition.WriteString(fmt.Sprintf(" AND LOWER(o.\"ProductType\")=LOWER('%s')", productType))
+		whereCondition.WriteString(" AND LOWER(o.\"ProductType\")=LOWER(" + args.next(productType) + ")")
 	}
 
 	if organisation != "" {
-		whereCondition.WriteString(fmt.Sprintf(" AND LOWER(o.\"Organization\")=LOWER('%s')", organisation))
+		whereCondition.WriteString(" AND LOWER(o.\"Organization\")=LOWER(" + args.next(organisation) + ")")
 	}
 	if accountID != 0 {
-		whereCondition.WriteString(fmt.Sprintf(" AND o.\"AccountID\" = %d", accountID))
+		whereCondition.WriteString(" AND o.\"AccountID\" = " + args.next(accountID))
 	}
 	if keycloakID != "" {
-		whereCondition.WriteString(fmt.Sprintf(" AND o.userkey = '%s'", keycloakID))
+		whereCondition.WriteString(" AND o.userkey = " + args.next(keycloakID))
 	}
 
 	if email != "" {
-		whereCondition.WriteString(fmt.Sprintf(" AND o.\"AccountID\" = a.id AND LOWER(a.\"Email\")=LOWER('%s')", email))
+		whereCondition.WriteString(" AND o.\"AccountID\" = a.id AND LOWER(a.\"Email\")=LOWER(" + args.next(email) + ")")
 	}
 
 	if evaluateMembership != "" {

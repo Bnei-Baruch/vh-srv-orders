@@ -279,11 +279,23 @@ func reachableHandle(t reflect.Type, forbidden map[reflect.Type]string, seen map
 //     from this directory's files, so common.Handles is an unknown selector
 //     pair and there is nothing to resolve it against. Closing it means
 //     resolving names across packages, which is the type checker this guard is
-//     built to avoid — and the cheap version of it, flagging any result type
-//     from another package of ours, would fire on most of what repo exports.
+//     built to avoid.
+//
+//     The cheap version — flag any result type from another package of ours —
+//     is not rejected for noise. Measured at this head it would fire on
+//     nothing: five exported free functions, no exported vars, and of 104
+//     exported methods on *OrdersDB the only module-package type in any
+//     signature is SetProfileService's parameter. It is rejected because it
+//     would flag on suspicion rather than evidence — it cannot tell a wrapper
+//     holding a pool from one holding a config — so it sits dormant until the
+//     first legitimate module-typed return and then fails it, which is the
+//     pgx.TxOptions failure two guards up, deferred rather than avoided.
+//
 //   - an import under another alias, since the match is on the pair as
 //     written.
+//
 //   - a var whose type is inferred from its value: var P = (*pgxpool.Pool)(nil).
+//
 //   - GetDBURL, which is exported on purpose and hands out a URL rather than a
 //     live handle.
 //

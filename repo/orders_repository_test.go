@@ -288,8 +288,10 @@ func reachableHandle(t reflect.Type, forbidden map[reflect.Type]string, seen map
 //     signature is SetProfileService's parameter. It is rejected because it
 //     would flag on suspicion rather than evidence — it cannot tell a wrapper
 //     holding a pool from one holding a config — so it sits dormant until the
-//     first legitimate module-typed return and then fails it, which is the
-//     pgx.TxOptions failure two guards up, deferred rather than avoided.
+//     first legitimate module-typed return and then fails it. That is this
+//     pass's own earlier bug, when it matched spellings as substrings and so
+//     failed a helper returning pgx.TxOptions; see the note on the selector
+//     pair where the match is made, below. Deferred rather than avoided.
 //
 //   - an import under another alias, since the match is on the pair as
 //     written.

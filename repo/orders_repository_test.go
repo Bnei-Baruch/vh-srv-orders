@@ -271,10 +271,25 @@ func reachableHandle(t reflect.Type, forbidden map[reflect.Type]string, seen map
 // declared in these files.
 //
 // It matches the spelling of an imported type rather than the type, so it is
-// the weakest of the three guards. A type alias, an import under another
-// alias, or a var whose type is inferred from its value all walk past — as
-// does GetDBURL, which is exported on purpose and hands out a URL rather than
-// a live handle.
+// the weakest of the three guards. What walks past it, in rough order of how
+// likely anyone is to write it:
+//
+//   - a wrapper type declared in another package of this module, returned from
+//     here: func NewHandles(o *OrdersDB) common.Handles. The index is built
+//     from this directory's files, so common.Handles is an unknown selector
+//     pair and there is nothing to resolve it against. Closing it means
+//     resolving names across packages, which is the type checker this guard is
+//     built to avoid — and the cheap version of it, flagging any result type
+//     from another package of ours, would fire on most of what repo exports.
+//   - an import under another alias, since the match is on the pair as
+//     written.
+//   - a var whose type is inferred from its value: var P = (*pgxpool.Pool)(nil).
+//   - GetDBURL, which is exported on purpose and hands out a URL rather than a
+//     live handle.
+//
+// A type alias does not walk past, though it reads like it should: an alias's
+// TypeSpec.Type is its right-hand side, so declared["PoolAlias"] holds the
+// pgxpool.Pool selector and the *ast.Ident case resolves onto it.
 //
 // Being weak is tolerable; being wrong is not. A guard that fails a legitimate
 // export teaches the next author to delete it, so the match is on the selector

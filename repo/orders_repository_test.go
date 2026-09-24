@@ -265,9 +265,13 @@ func reachableHandle(t reflect.Type, forbidden map[reflect.Type]string, seen map
 // This reads the package's own source for them. It matches the spelling of the
 // type, not the type, so it is the weakest of the three guards and its claim is
 // the narrowest: nobody added an obvious package-level accessor. A type alias,
-// a named wrapper, or a var whose type is inferred from its value all walk past
-// — as does GetDBURL, which is exported on purpose and hands out a URL rather
-// than a live handle.
+// a named wrapper, an import under another alias, or a var whose type is
+// inferred from its value all walk past — as does GetDBURL, which is exported
+// on purpose and hands out a URL rather than a live handle.
+//
+// Being weak is tolerable; being wrong is not. A guard that fails a legitimate
+// export teaches the next author to delete it, so the match is on the selector
+// pair and pgx.TxOptions is not pgx.Tx.
 //
 // Spelling-matching is the right weight here anyway: resolving types properly
 // means type-checking the package from a test inside it, which costs a
@@ -324,17 +328,40 @@ func TestRepoPackage_DeclaresNoPoolAccessor(t *testing.T) {
 func reportHandleSpelling(t *testing.T, fset *token.FileSet, file, what string, expr ast.Expr, spellings []string) {
 	t.Helper()
 
+	// Match the selector pair, not the rendered text. A substring test reads
+	// pgx.Tx inside pgx.TxOptions and pgx.Conn inside pgx.ConnConfig, and
+	// fails a helper handing out a transaction mode or a parsed DSN with a
+	// message about writing SQL — the false positive this file warns about
+	// two guards up. Walking the expression covers the wrappers that a
+	// prefix-strip would have to enumerate: *T, []T, map[K]T, func() T.
+	var found string
+	ast.Inspect(expr, func(n ast.Node) bool {
+		sel, ok := n.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		pkg, ok := sel.X.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		qualified := pkg.Name + "." + sel.Sel.Name
+		for _, spelling := range spellings {
+			if qualified == spelling {
+				found = qualified
+				return false
+			}
+		}
+		return true
+	})
+	if found == "" {
+		return
+	}
+
 	var buf bytes.Buffer
 	require.NoError(t, printer.Fprint(&buf, fset, expr))
-	rendered := buf.String()
 
-	for _, spelling := range spellings {
-		if strings.Contains(rendered, spelling) {
-			t.Errorf("%s:%d: repo.%s %s, so any package importing repo can write SQL "+
-				"past this layer and skip its events — keep the handle unexported and "+
-				"export the operation instead",
-				file, fset.Position(expr.Pos()).Line, what, rendered)
-			return
-		}
-	}
+	t.Errorf("%s:%d: repo.%s %s, so any package importing repo can write SQL "+
+		"past this layer and skip its events — keep the handle unexported and "+
+		"export the operation instead",
+		file, fset.Position(expr.Pos()).Line, what, buf.String())
 }

@@ -75,18 +75,25 @@ func TestOrdersDB_DoesNotExposeThePool(t *testing.T) {
 
 // Walks the exported surface of *OrdersDB and fails on anything that hands a
 // caller something it can write SQL through: an exported field of a handle
-// type, or a method returning one.
+// type, a method returning one, or either of those carrying one inside.
 //
 // The named-field refactor removed the promotion, not the possibility. Each of
 // these compiles, and the promotion test above stays green for all of them:
 //
-//	Pool *pgxpool.Pool                                    // exported field
-//	func (o *OrdersDB) PoolAccessor() *pgxpool.Pool       // accessor
-//	func (o *OrdersDB) BeginTx(ctx) (pgx.Tx, error)       // a transaction is a
-//	                                                      // writable handle too
+//	Pool *pgxpool.Pool                                  // exported field
+//	func (o *OrdersDB) PoolAccessor() *pgxpool.Pool     // accessor
+//	func (o *OrdersDB) BeginTx(ctx) (pgx.Tx, error)     // a tx writes too
+//	func (o *OrdersDB) RawPgConn(ctx) (*pgconn.PgConn, error)
+//	func (o *OrdersDB) DBHandles() Handles              // wrapper holding one
+//
+// So the walk recurses: through pointers, slices, maps and channels, and into
+// the exported fields of any struct it reaches. A handle three types deep is
+// still a handle the caller can get to. Unexported fields are skipped at every
+// level — the compiler already refuses those outside this package, which is
+// the same division of labour as between these two tests.
 //
 // The list is of concrete handle types, so it is exact rather than complete:
-// a method returning some interface that happens to carry Exec walks past.
+// a method returning an interface that happens to carry Exec walks past.
 // Extend the list rather than generalising it — a heuristic over method sets
 // would start failing on the repo's own legitimate returns.
 func TestOrdersDB_HandsOutNoWritableHandle(t *testing.T) {
@@ -94,6 +101,7 @@ func TestOrdersDB_HandsOutNoWritableHandle(t *testing.T) {
 		reflect.TypeOf((*pgxpool.Pool)(nil)):            "the pool itself",
 		reflect.TypeOf((*pgxpool.Conn)(nil)):            "a pooled connection",
 		reflect.TypeOf((*pgx.Conn)(nil)):                "a raw connection",
+		reflect.TypeOf((*pgconn.PgConn)(nil)):           "a raw connection",
 		reflect.TypeOf((*pgx.Tx)(nil)).Elem():           "a transaction",
 		reflect.TypeOf((*pgx.BatchResults)(nil)).Elem(): "a batch to execute",
 	}
@@ -105,20 +113,58 @@ func TestOrdersDB_HandsOutNoWritableHandle(t *testing.T) {
 		if !f.IsExported() {
 			continue
 		}
-		what, bad := forbidden[f.Type]
-		require.False(t, bad,
-			"*OrdersDB.%s is exported and is %s, so anything holding the concrete type "+
-				"can write SQL past the repo layer and skip its events", f.Name, what)
+		if where, what := reachableHandle(f.Type, forbidden, map[reflect.Type]bool{}); what != "" {
+			t.Errorf("*OrdersDB.%s%s is %s, so anything holding the concrete type can "+
+				"write SQL past the repo layer and skip its events", f.Name, where, what)
+		}
 	}
 
 	for i := 0; i < ptr.NumMethod(); i++ {
 		m := ptr.Method(i)
 		for j := 0; j < m.Type.NumOut(); j++ {
-			what, bad := forbidden[m.Type.Out(j)]
-			require.False(t, bad,
-				"*OrdersDB.%s returns %s, so its caller can write SQL past the repo layer "+
-					"and skip its events — keep the handle inside this package and export "+
-					"the operation instead", m.Name, what)
+			if where, what := reachableHandle(m.Type.Out(j), forbidden, map[reflect.Type]bool{}); what != "" {
+				t.Errorf("*OrdersDB.%s()%s is %s, so its caller can write SQL past the "+
+					"repo layer and skip its events — keep the handle inside this package "+
+					"and export the operation instead", m.Name, where, what)
+			}
 		}
 	}
+}
+
+// reachableHandle reports the first forbidden type reachable from t through
+// exported structure, as the path a caller would write to get at it ("" when
+// t is itself forbidden) and what it is. Both are empty when nothing is.
+//
+// seen breaks the cycle a self-referential type would otherwise cause; it is
+// per-walk rather than shared, so a handle is still reported once per field
+// and per method that leads to it.
+func reachableHandle(t reflect.Type, forbidden map[reflect.Type]string, seen map[reflect.Type]bool) (where, what string) {
+	if what, bad := forbidden[t]; bad {
+		return "", what
+	}
+	if seen[t] {
+		return "", ""
+	}
+	seen[t] = true
+
+	switch t.Kind() {
+	case reflect.Pointer, reflect.Slice, reflect.Array, reflect.Chan:
+		return reachableHandle(t.Elem(), forbidden, seen)
+	case reflect.Map:
+		if where, what := reachableHandle(t.Key(), forbidden, seen); what != "" {
+			return where, what
+		}
+		return reachableHandle(t.Elem(), forbidden, seen)
+	case reflect.Struct:
+		for i := 0; i < t.NumField(); i++ {
+			f := t.Field(i)
+			if !f.IsExported() {
+				continue
+			}
+			if where, what := reachableHandle(f.Type, forbidden, seen); what != "" {
+				return "." + f.Name + where, what
+			}
+		}
+	}
+	return "", ""
 }

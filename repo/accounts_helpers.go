@@ -26,7 +26,7 @@ func (o *OrdersDB) GetOrCreateAccount(ctx context.Context, a Account) (int, erro
 		return id, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
-		return 0, fmt.Errorf("o.QueryRow: %w", err)
+		return 0, fmt.Errorf("o.pool.QueryRow: %w", err)
 	}
 
 	id, err = o.CreateAccount(ctx, a)
@@ -84,7 +84,7 @@ func (o *OrdersDB) GetAllAccounts(ctx context.Context, skip int, limit int, emai
 		deleted_at
 			FROM accounts`+whereQuery+orderByQuery+limitOffsetString)
 	if err != nil {
-		return nil, fmt.Errorf("o.Query: %w", err)
+		return nil, fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 
@@ -131,7 +131,7 @@ func (o *OrdersDB) PatchAccount(ctx context.Context, req Account, accountID int)
 
 	updateRes, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE accounts SET %s WHERE id=%d`, toUpdate, accountID), toUpdateArgs...)
 	if err != nil {
-		return fmt.Errorf("o.Exec: %w", err)
+		return fmt.Errorf("o.pool.Exec: %w", err)
 	}
 	if updateRes.RowsAffected() == 0 {
 		return common.ErrNoRowsAffected
@@ -177,7 +177,7 @@ func (o *OrdersDB) HardDeleteAllUserDataByAccountID(ctx context.Context, account
 	// start transaction
 	tx, err := o.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("o.Begin: %w", err)
+		return fmt.Errorf("o.pool.Begin: %w", err)
 	}
 
 	defer tx.Rollback(ctx)
@@ -349,7 +349,7 @@ func (o *OrdersDB) MergeAccountsOrders(ctx context.Context, req AccountMergeRequ
 
 	tx, err := o.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("o.Begin: %w", err)
+		return fmt.Errorf("o.pool.Begin: %w", err)
 	}
 	defer tx.Rollback(ctx)
 

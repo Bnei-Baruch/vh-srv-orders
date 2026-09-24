@@ -44,7 +44,7 @@ func (o *OrdersDB) CreateCoupon(ctx context.Context, c Coupon) (*Coupon, error) 
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			return nil, common.ErrCouponCodeConflict
 		}
-		return nil, fmt.Errorf("o.QueryRow.Scan: %w", err)
+		return nil, fmt.Errorf("o.pool.QueryRow.Scan: %w", err)
 	}
 	return &c, nil
 }
@@ -55,7 +55,7 @@ func (o *OrdersDB) GetCouponByID(ctx context.Context, id int) (*Coupon, error) {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, common.ErrNoRowsAffected
 		}
-		return nil, fmt.Errorf("o.QueryRow.Scan: %w", err)
+		return nil, fmt.Errorf("o.pool.QueryRow.Scan: %w", err)
 	}
 	return &c, nil
 }
@@ -75,7 +75,7 @@ func (o *OrdersDB) ListCoupons(ctx context.Context) ([]CouponListItem, error) {
 		 ) r ON r.coupon_id = c.id
 		 ORDER BY c.id DESC`)
 	if err != nil {
-		return nil, fmt.Errorf("o.Query: %w", err)
+		return nil, fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 
@@ -113,7 +113,7 @@ func (o *OrdersDB) UpdateCoupon(ctx context.Context, c Coupon) (*Coupon, error) 
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			return nil, common.ErrCouponCodeConflict
 		}
-		return nil, fmt.Errorf("o.QueryRow.Scan: %w", err)
+		return nil, fmt.Errorf("o.pool.QueryRow.Scan: %w", err)
 	}
 	return &out, nil
 }
@@ -121,7 +121,7 @@ func (o *OrdersDB) UpdateCoupon(ctx context.Context, c Coupon) (*Coupon, error) 
 func (o *OrdersDB) CountCouponRedemptions(ctx context.Context, couponID int) (int, error) {
 	var n int
 	if err := o.pool.QueryRow(ctx, `SELECT COUNT(*) FROM coupon_redemptions WHERE coupon_id = $1`, couponID).Scan(&n); err != nil {
-		return 0, fmt.Errorf("o.QueryRow.Scan: %w", err)
+		return 0, fmt.Errorf("o.pool.QueryRow.Scan: %w", err)
 	}
 	return n, nil
 }
@@ -136,7 +136,7 @@ func (o *OrdersDB) ListCouponRedemptions(ctx context.Context, couponID int) ([]C
 		 LEFT JOIN accounts a ON a."UserKey" = r.keycloak_id
 		 WHERE r.coupon_id = $1 ORDER BY r.id DESC`, couponID)
 	if err != nil {
-		return nil, fmt.Errorf("o.Query: %w", err)
+		return nil, fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 
@@ -158,7 +158,7 @@ func (o *OrdersDB) RevokeRedemption(ctx context.Context, couponID, redemptionID 
 		`UPDATE coupon_redemptions SET revoked_at = now()
 		 WHERE id = $1 AND coupon_id = $2 AND revoked_at IS NULL`, redemptionID, couponID)
 	if err != nil {
-		return fmt.Errorf("o.Exec: %w", err)
+		return fmt.Errorf("o.pool.Exec: %w", err)
 	}
 	if res.RowsAffected() == 0 {
 		return common.ErrNoRowsAffected
@@ -175,7 +175,7 @@ func (o *OrdersDB) GetMyCoupons(ctx context.Context, keycloakID string) ([]MyCou
 		 WHERE r.keycloak_id = $1 AND r.revoked_at IS NULL AND c.enabled AND now() < r.benefit_end
 		 ORDER BY r.benefit_end`, keycloakID)
 	if err != nil {
-		return nil, fmt.Errorf("o.Query: %w", err)
+		return nil, fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 
@@ -199,7 +199,7 @@ func (o *OrdersDB) GetActiveCouponRedemptions(ctx context.Context, keycloakID st
 		 WHERE r.keycloak_id = $1 AND r.revoked_at IS NULL AND c.enabled
 			AND r.benefit_start <= now() AND now() < r.benefit_end`, keycloakID)
 	if err != nil {
-		return nil, fmt.Errorf("o.Query: %w", err)
+		return nil, fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 
@@ -220,7 +220,7 @@ func (o *OrdersDB) GetActiveCouponRedemptions(ctx context.Context, keycloakID st
 func (o *OrdersDB) RedeemCoupon(ctx context.Context, keycloakID, code, country string) (*CouponRedemption, error) {
 	tx, err := o.pool.Begin(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("o.Begin: %w", err)
+		return nil, fmt.Errorf("o.pool.Begin: %w", err)
 	}
 	defer tx.Rollback(ctx)
 

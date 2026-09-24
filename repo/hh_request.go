@@ -31,7 +31,7 @@ func scanHHRequest(row pgx.Row) (*HHRequest, error) {
 func (o *OrdersDB) CreateHHRequest(ctx context.Context, req HHRequestReq) (*HHRequest, error) {
 	tx, err := o.pool.Begin(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("o.Begin: %w", err)
+		return nil, fmt.Errorf("o.pool.Begin: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
@@ -94,7 +94,7 @@ func (o *OrdersDB) GetAllHHRequests(ctx context.Context, status, keycloakID stri
 
 	rows, err := o.pool.Query(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("o.Query: %w", err)
+		return nil, fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 
@@ -146,7 +146,7 @@ func (o *OrdersDB) ConcludeHHRequest(ctx context.Context, id int, c HHRequestCon
 
 	tx, err := o.pool.Begin(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("o.Begin: %w", err)
+		return nil, fmt.Errorf("o.pool.Begin: %w", err)
 	}
 	defer tx.Rollback(ctx)
 

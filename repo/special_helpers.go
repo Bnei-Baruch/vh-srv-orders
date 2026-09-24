@@ -21,7 +21,7 @@ func (o *OrdersDB) DeleteSpecialById(ctx context.Context, id int) error {
 	}
 	res, errUpdate := o.pool.Exec(ctx, `UPDATE  specials SET end_date = now(), updated_at = now() WHERE  id = $1`, id)
 	if errUpdate != nil {
-		return fmt.Errorf("o.Exec: %w", errUpdate)
+		return fmt.Errorf("o.pool.Exec: %w", errUpdate)
 	}
 
 	if res.RowsAffected() == 0 {
@@ -48,7 +48,7 @@ func (o *OrdersDB) DeleteSpecialsByKeycloakId(ctx context.Context, keycloakID st
 		`SELECT id FROM specials WHERE keycloak_id=$1 AND start_date <= now() AND end_date > now()`,
 		keycloakID)
 	if err != nil {
-		return fmt.Errorf("o.Query: %w", err)
+		return fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 

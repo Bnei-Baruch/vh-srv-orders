@@ -16,7 +16,7 @@ import (
 func (o *OrdersDB) UpsertManualDiscount(ctx context.Context, req ManualDiscountReq) (*ManualDiscount, error) {
 	tx, err := o.pool.Begin(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("o.Begin: %w", err)
+		return nil, fmt.Errorf("o.pool.Begin: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
@@ -69,7 +69,7 @@ func (o *OrdersDB) CancelManualDiscount(ctx context.Context, keycloakID string) 
 		keycloakID,
 	)
 	if err != nil {
-		return fmt.Errorf("o.Exec: %w", err)
+		return fmt.Errorf("o.pool.Exec: %w", err)
 	}
 	if res.RowsAffected() == 0 {
 		return common.ErrNoRowsAffected
@@ -92,7 +92,7 @@ func (o *OrdersDB) GetActiveManualDiscount(ctx context.Context, keycloakID strin
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("o.QueryRow.Scan: %w", err)
+		return nil, fmt.Errorf("o.pool.QueryRow.Scan: %w", err)
 	}
 	return &md, nil
 }
@@ -110,7 +110,7 @@ func (o *OrdersDB) GetAllManualDiscounts(ctx context.Context, search string) ([]
 
 	rows, err := o.pool.Query(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("o.Query: %w", err)
+		return nil, fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 

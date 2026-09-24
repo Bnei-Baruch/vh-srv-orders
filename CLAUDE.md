@@ -185,10 +185,10 @@ All methods on `*OrdersDB`, which holds the pool in an unexported field rather t
 ```go
 func (o *OrdersDB) GetOrderByID(ctx context.Context, orderID uint) (*Order, error) {
     var order Order
-    if err := o.QueryRow(ctx, `SELECT id, "Type", ... FROM orders WHERE id=$1`, orderID).Scan(
+    if err := o.pool.QueryRow(ctx, `SELECT id, "Type", ... FROM orders WHERE id=$1`, orderID).Scan(
         &order.ID, &order.Type, ...
     ); err != nil {
-        return nil, fmt.Errorf("o.QueryRow.Scan: %w", err)
+        return nil, fmt.Errorf("o.pool.QueryRow.Scan: %w", err)
     }
     return &order, nil
 }
@@ -197,9 +197,9 @@ func (o *OrdersDB) GetOrderByID(ctx context.Context, orderID uint) (*Order, erro
 ### Multiple rows
 
 ```go
-rows, err := o.Query(ctx, query)
+rows, err := o.pool.Query(ctx, query)
 if err != nil {
-    return nil, fmt.Errorf("o.Query: %w", err)
+    return nil, fmt.Errorf("o.pool.Query: %w", err)
 }
 defer rows.Close()
 
@@ -220,7 +220,7 @@ return &orders, nil
 ### Exec with rows-affected check
 
 ```go
-res, err := o.Exec(ctx, fmt.Sprintf(`UPDATE orders SET %s WHERE id=%d`, toUpdate, orderId), args...)
+res, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE orders SET %s WHERE id=%d`, toUpdate, orderId), args...)
 if err != nil {
     return fmt.Errorf("problem updating order: %w", err)
 }
@@ -232,9 +232,9 @@ if res.RowsAffected() == 0 {
 ### Transactions
 
 ```go
-tx, err := o.Begin(ctx)
+tx, err := o.pool.Begin(ctx)
 if err != nil {
-    return fmt.Errorf("o.Begin: %w", err)
+    return fmt.Errorf("o.pool.Begin: %w", err)
 }
 defer tx.Rollback(ctx)
 // ... tx.QueryRow, tx.Exec ...
@@ -302,6 +302,12 @@ func TestChargeOperations_ConcurrentFallbackToEMV(t *testing.T) { ... }
 ```
 
 **Integration tests:** Real PostgreSQL via `pgtestdb` (isolated migrated DBs per test). HTTP tests use `httptest` with helpers (`GET`, `POST`, `PATCH_ROOT`).
+
+A test that needs raw SQL — seeding a row, asserting one the repo has no method
+for — opens its own pool with `testutil.NewTestPool(t, dbURL)`, which registers
+its own `t.Cleanup`. It cannot borrow the repo's: `*OrdersDB` holds the pool in
+an unexported field, so `Exec`/`Query` are not reachable through it. Inside
+`api`, `a.testPool(t)` does the same against the App's URL.
 
 **Test context setup:** Use `eventstest.WithTestEventBuilder(t, ctx)` to inject a test event builder into context.
 

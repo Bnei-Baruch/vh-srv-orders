@@ -25,7 +25,6 @@ func TestMuhlafimCommand_Integration(t *testing.T) {
 	db, err := repo.NewOrdersDBUrl(context.Background(), dbURL, new(events.NoopEmitter))
 	require.NoError(t, err)
 	pool := testutil.NewTestPool(t, dbURL)
-	require.NoError(t, err)
 	defer db.Close()
 
 	ctx := eventstest.WithTestEventBuilder(t, context.Background())

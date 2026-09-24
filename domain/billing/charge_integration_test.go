@@ -7,11 +7,11 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/volatiletech/null/v9"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/domain/pricing"
 	"gitlab.bbdev.team/vh/pay/orders/events"
@@ -55,7 +55,6 @@ func newIntegrationDB(t *testing.T) (*repo.OrdersDB, *pgxpool.Pool, context.Cont
 	db, err := repo.NewOrdersDBUrl(context.Background(), dbURL, new(events.NoopEmitter))
 	require.NoError(t, err)
 	pool := testutil.NewTestPool(t, dbURL)
-	require.NoError(t, err)
 	t.Cleanup(func() { db.Close() })
 	ctx := eventstest.WithTestEventBuilder(t, context.Background())
 	return db, pool, ctx

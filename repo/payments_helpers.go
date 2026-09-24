@@ -55,7 +55,7 @@ func (o *OrdersDB) GetPaymentActivities(ctx context.Context, email string, produ
 	from payments as p, orders as o, accounts as a`+
 		userDbWhereQuery+orderByQuery+" LIMIT $1 OFFSET $2", limit, skip)
 	if err != nil {
-		return nil, fmt.Errorf("o.Query: %w", err)
+		return nil, fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 
@@ -105,7 +105,7 @@ func (o *OrdersDB) GetAllPayments(ctx context.Context, skip int, limit int, from
 	p."FirstPaymentTotal", p."FixedPaymentTotal", p."TotalPayments", p.j_param, p."TransactionInitTime", 
 	p."TransactionUpdateTime", p."VoucherID"`+fromQuery+whereQuery+orderByQuery+limitOffsetString)
 	if err != nil {
-		return nil, fmt.Errorf("o.Query: %w", err)
+		return nil, fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 
@@ -155,7 +155,7 @@ func (o *OrdersDB) GetPaymentByEmail(ctx context.Context, email string) ([]Payme
 	and o.id = p."OrderID"
 	order by p.created_at desc`, email)
 	if err != nil {
-		return nil, fmt.Errorf("o.Query: %w", err)
+		return nil, fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 
@@ -190,7 +190,7 @@ func (o *OrdersDB) GetOfflinePayments(ctx context.Context, skip int, limit int, 
 	p.id, p.created_at, p.updated_at, p.deleted_at, p.payment_method, p.receipt, p.extra_info, p.status, p.payment_id,
 	p.properties`+fromQuery+whereQuery+orderByQuery+limitOffsetString)
 	if err != nil {
-		return nil, fmt.Errorf("o.Query: %w", err)
+		return nil, fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 
@@ -239,7 +239,7 @@ func (o *OrdersDB) CreatePayment(ctx context.Context, req RequestOrder, orderID 
 
 	if err := o.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&p.ID); err != nil {
-		return nil, fmt.Errorf("o.QueryRow.Scan: %w", err)
+		return nil, fmt.Errorf("o.pool.QueryRow.Scan: %w", err)
 	}
 
 	if paymentType == common.PaymentTypeOffline {
@@ -317,7 +317,7 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 		&p.DebitTotal, &p.DebitType, &p.FirstPaymentTotal, &p.FixedPaymentTotal, &p.TotalPayments,
 		&p.JParam, &p.TransactionInitTime, &p.TransactionUpdateTime, &p.VoucherID,
 	); err != nil {
-		return nil, fmt.Errorf("o.QueryRow.Scan [payment]: %w", err)
+		return nil, fmt.Errorf("o.pool.QueryRow.Scan [payment]: %w", err)
 	}
 
 	if req.Success.String == "1" {
@@ -356,14 +356,14 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 	toUpdate, toUpdateArgs := preparePaymentUpdateQuery(p)
 	_, err = o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=%d`, toUpdate, uint(paymentid)), toUpdateArgs...)
 	if err != nil {
-		return nil, fmt.Errorf("o.Exec [update payment]: %w", err)
+		return nil, fmt.Errorf("o.pool.Exec [update payment]: %w", err)
 	}
 
 	toUpdatePelecard, toUpdateArgsPeleCard := preparePelecardPaymentUpdateViaPaymentStructQuery(p)
 	_, pelecardErr := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdatePelecard,
 		uint(paymentid)), toUpdateArgsPeleCard...)
 	if pelecardErr != nil {
-		return nil, fmt.Errorf("o.Exec [update pelecard]: %w", err)
+		return nil, fmt.Errorf("o.pool.Exec [update pelecard]: %w", err)
 	}
 
 	o.emitEvent(ctx, events.TypeUpdatePayment, map[string]interface{}{"payment_id": paymentid})
@@ -379,7 +379,7 @@ func (o *OrdersDB) createOfflinePayment(ctx context.Context, req RequestOrder, p
 
 	_, err := o.pool.Exec(ctx, fmt.Sprintf(`INSERT INTO payments_offline (%s) VALUES (%s)`, createString, numString), createQueryArgs...)
 	if err != nil {
-		return fmt.Errorf("o.Exec: %w", err)
+		return fmt.Errorf("o.pool.Exec: %w", err)
 	}
 
 	return nil
@@ -393,7 +393,7 @@ func (o *OrdersDB) createPelecardPayment(ctx context.Context, req RequestOrder, 
 
 	_, err := o.pool.Exec(ctx, fmt.Sprintf(`INSERT INTO payments_pelecard (%s) VALUES (%s)`, createString, numString), createQueryArgs...)
 	if err != nil {
-		return fmt.Errorf("o.Exec: %w", err)
+		return fmt.Errorf("o.pool.Exec: %w", err)
 	}
 
 	return nil
@@ -407,7 +407,7 @@ func (o *OrdersDB) createHelpHaverPayment(ctx context.Context, req RequestOrder,
 
 	_, err := o.pool.Exec(ctx, fmt.Sprintf(`INSERT INTO payments_helphaver (%s) VALUES (%s)`, createString, numString), createQueryArgs...)
 	if err != nil {
-		return fmt.Errorf("o.Exec: %w", err)
+		return fmt.Errorf("o.pool.Exec: %w", err)
 	}
 
 	return nil
@@ -421,7 +421,7 @@ func (o *OrdersDB) UpdatePelecardPayment(ctx context.Context, req PaymentUpdate)
 
 	updateRes, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdate, req.PaymentID.Int), toUpdateArgs...)
 	if err != nil {
-		return fmt.Errorf("o.Exec: %w", err)
+		return fmt.Errorf("o.pool.Exec: %w", err)
 	}
 	if updateRes.RowsAffected() == 0 {
 		return common.ErrNoRowsAffected
@@ -440,7 +440,7 @@ func (o *OrdersDB) UpdateOfflinePayment(ctx context.Context, req PaymentUpdate) 
 
 	updateRes, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments_offline SET %s WHERE payment_id=%d`, toUpdate, req.PaymentID.Int), toUpdateArgs...)
 	if err != nil {
-		return fmt.Errorf("o.Exec: %w", err)
+		return fmt.Errorf("o.pool.Exec: %w", err)
 	}
 	if updateRes.RowsAffected() == 0 {
 		return common.ErrNoRowsAffected
@@ -459,7 +459,7 @@ func (o *OrdersDB) UpdateHelpHavePayment(ctx context.Context, req PaymentUpdate)
 
 	updateRes, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments_helphaver SET %s WHERE payment_id=%d`, toUpdate, req.PaymentID.Int), toUpdateArgs...)
 	if err != nil {
-		return fmt.Errorf("o.Exec: %w", err)
+		return fmt.Errorf("o.pool.Exec: %w", err)
 	}
 	if updateRes.RowsAffected() == 0 {
 		return common.ErrNoRowsAffected

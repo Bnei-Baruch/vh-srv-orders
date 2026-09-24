@@ -22,7 +22,7 @@ func (o *OrdersDB) CancelHHGrant(ctx context.Context, keycloakID string) error {
 		keycloakID,
 	)
 	if err != nil {
-		return fmt.Errorf("o.Exec: %w", err)
+		return fmt.Errorf("o.pool.Exec: %w", err)
 	}
 	if res.RowsAffected() == 0 {
 		return common.ErrNoRowsAffected
@@ -45,7 +45,7 @@ func (o *OrdersDB) GetActiveHHGrant(ctx context.Context, keycloakID string) (*HH
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("o.QueryRow.Scan: %w", err)
+		return nil, fmt.Errorf("o.pool.QueryRow.Scan: %w", err)
 	}
 	return &g, nil
 }

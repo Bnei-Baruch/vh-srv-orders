@@ -59,7 +59,7 @@ func (o *OrdersDB) CreateOrderViaTransaction(ctx context.Context, req RequestOrd
 		createQueryArgs...).
 		Scan(&order.ID)
 	if err != nil {
-		return nil, fmt.Errorf("o.QueryRow.Scan: %w", err)
+		return nil, fmt.Errorf("o.pool.QueryRow.Scan: %w", err)
 	}
 
 	o.emitEvent(ctx, events.TypeCreateOrder, map[string]interface{}{"order_id": order.ID})
@@ -97,7 +97,7 @@ func (o *OrdersDB) UpdateOrderAfterPayment(ctx context.Context, p Payment) error
 
 	if err := o.pool.QueryRow(ctx, `SELECT id, "ProductType", "AccountID", "OrderLanguage" FROM orders WHERE id=$1`, p.OrderID.Int).
 		Scan(&order.ID, &order.ProductType, &order.AccountID, &order.OrderLanguage); err != nil {
-		return fmt.Errorf("o.QueryRow.Scan: %w", err)
+		return fmt.Errorf("o.pool.QueryRow.Scan: %w", err)
 	}
 
 	if p.Success.String == "1" {
@@ -107,14 +107,14 @@ func (o *OrdersDB) UpdateOrderAfterPayment(ctx context.Context, p Payment) error
 		_, err := o.pool.Exec(ctx, `UPDATE orders SET "Status"=$1, "PaymentDate"=$2, updated_at=$3 WHERE id = $4`,
 			order.Status.String, order.PaymentDate.Time, time.Now(), p.OrderID.Int)
 		if err != nil {
-			return fmt.Errorf("o.Exec [success]: %w", err)
+			return fmt.Errorf("o.pool.Exec [success]: %w", err)
 		}
 	} else {
 		order.Status = null.NewString(common.OrderStatusNoSuccess, true)
 		_, err := o.pool.Exec(ctx, `UPDATE orders SET "Status"=$1, updated_at=$2 WHERE id = $3`,
 			order.Status.String, time.Now(), p.OrderID.Int)
 		if err != nil {
-			return fmt.Errorf("o.Exec [%s]: %w", common.OrderStatusNoSuccess, err)
+			return fmt.Errorf("o.pool.Exec [%s]: %w", common.OrderStatusNoSuccess, err)
 		}
 	}
 
@@ -152,7 +152,7 @@ func (o *OrdersDB) GetOrderByID(ctx context.Context, orderID uint) (*Order, erro
 		&order.Currency, &order.Status, &order.OrderLanguage, &order.PaymentDate, &order.StartingDate, &order.Flag, &order.CardDetailsId, &order.Quantity, &order.AmountItem,
 		&order.CreatedAt, &order.UpdatedAt, &order.DeletedAt,
 	); err != nil {
-		return nil, fmt.Errorf("o.QueryRow.Scan: %w", err)
+		return nil, fmt.Errorf("o.pool.QueryRow.Scan: %w", err)
 	}
 
 	if !amount.Valid {
@@ -257,7 +257,7 @@ func (o *OrdersDB) GetAccountForOrderID(ctx context.Context, orderID uint) (*Acc
 		&a.AccountType, &a.PaymentToken, &a.PaymentCardID, &a.PaymentCardExpMonth, &a.PaymentCardExpYear, &a.UserKey,
 		&a.AuthNo, &a.CreatedAt, &a.UpdatedAt, &a.DeletedAt,
 	); err != nil {
-		return nil, fmt.Errorf("o.QueryRow.Scan: %w", err)
+		return nil, fmt.Errorf("o.pool.QueryRow.Scan: %w", err)
 	}
 
 	return &a, nil
@@ -333,7 +333,7 @@ func (o *OrdersDB) GetAllOrders(ctx context.Context, skip int, limit int, fromDa
 	// utils.LogFor(ctx).Info("GetAllOrders.query", slog.String("sql", query))
 	rows, err := o.pool.Query(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("o.Query: %w", err)
+		return nil, fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 
@@ -696,7 +696,7 @@ func (o *OrdersDB) GetTokensForOrders(ctx context.Context, orderIDs []int) (map[
 
 	orderRows, err := o.pool.Query(ctx, ordersQuery, args...)
 	if err != nil {
-		return nil, fmt.Errorf("o.Query [orders]: %w", err)
+		return nil, fmt.Errorf("o.pool.Query [orders]: %w", err)
 	}
 	defer orderRows.Close()
 
@@ -746,7 +746,7 @@ func (o *OrdersDB) GetTokensForOrders(ctx context.Context, orderIDs []int) (map[
 
 		cardRows, err := o.pool.Query(ctx, cardDetailsQuery, cardArgs...)
 		if err != nil {
-			return nil, fmt.Errorf("o.Query [card_details]: %w", err)
+			return nil, fmt.Errorf("o.pool.Query [card_details]: %w", err)
 		}
 		defer cardRows.Close()
 
@@ -797,7 +797,7 @@ func (o *OrdersDB) GetTokensForOrders(ctx context.Context, orderIDs []int) (map[
 
 		paymentRows, err := o.pool.Query(ctx, paymentsQuery, paymentArgs...)
 		if err != nil {
-			return nil, fmt.Errorf("o.Query [payments]: %w", err)
+			return nil, fmt.Errorf("o.pool.Query [payments]: %w", err)
 		}
 		defer paymentRows.Close()
 

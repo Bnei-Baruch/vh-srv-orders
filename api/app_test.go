@@ -1,19 +1,18 @@
 package api
 
 import (
-	"sync"
-
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"io"
 	"mime/multipart"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	"gitlab.bbdev.team/vh/pay/orders/api/middleware"

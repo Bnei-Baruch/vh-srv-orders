@@ -68,7 +68,7 @@ func (o *OrdersDB) PatchCardDetailsById(ctx context.Context, req CardDetails, id
 
 	updateRes, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE card_details SET %s WHERE id=%d`, toUpdate, id), toUpdateArgs...)
 	if err != nil {
-		return fmt.Errorf("o.Exec: %w", err)
+		return fmt.Errorf("o.pool.Exec: %w", err)
 	}
 	if updateRes.RowsAffected() == 0 {
 		return common.ErrNoRowsAffected
@@ -94,7 +94,7 @@ func (o *OrdersDB) GetAllCardDetails(ctx context.Context, skip int, limit int) (
 			updated_at,
 			deleted_at from card_details`+whereQuery+orderByQuery+limitOffsetString)
 	if err != nil {
-		return nil, fmt.Errorf("o.Query: %w", err)
+		return nil, fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 

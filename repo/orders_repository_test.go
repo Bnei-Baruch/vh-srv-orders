@@ -87,6 +87,11 @@ func TestOrdersDB_DoesNotExposeThePool(t *testing.T) {
 //	func (o *OrdersDB) DBHandles() Handles              // wrapper holding one
 //	func (o *OrdersDB) Session() Session                // wrapper with an accessor
 //	func (o *OrdersDB) PoolFunc() func() *pgxpool.Pool  // closure over one
+//	func (o *OrdersDB) NewTx(ctx) (Tx, error)           // pgx.Tx, renamed
+//	func (o *OrdersDB) Provider() PoolProvider          // interface handing
+//	                                                    // one back
+//	func (o *OrdersDB) Raw() *RawPool                   // defined over the
+//	                                                    // pool's own struct
 //
 // So the walk recurses through everything that can carry a value out:
 // pointers, slices, arrays, maps, channels, a func type's results, the
@@ -103,10 +108,14 @@ func TestOrdersDB_DoesNotExposeThePool(t *testing.T) {
 // same division of labour as between these two tests. An exported accessor on
 // that same type is not, which is why the method walk runs at every depth.
 //
-// The list is of concrete handle types, so it is exact rather than complete:
-// a method returning an interface that happens to carry Exec walks past.
-// Extend the list rather than generalising it — a heuristic over method sets
-// would start failing on the repo's own legitimate returns.
+// Matching is by identity first, then two widenings that keep it exact:
+// anything implementing one of the interface entries is that entry under
+// another name, and a pointer convertible to one of the pointer entries is
+// that handle after a one-token conversion.
+//
+// What still walks past: an interface nobody here names, carrying Exec by
+// structure alone. Extend the list rather than generalising it — a heuristic
+// over method sets would start failing on the repo's own legitimate returns.
 func TestOrdersDB_HandsOutNoWritableHandle(t *testing.T) {
 	forbidden := map[reflect.Type]string{
 		reflect.TypeOf((*pgxpool.Pool)(nil)):            "the pool itself",
@@ -162,6 +171,20 @@ func reachableHandle(t reflect.Type, forbidden map[reflect.Type]string, seen map
 	}
 	seen[t] = true
 
+	for ft, what := range forbidden {
+		// pgx.Tx under another name is still pgx.Tx, and so is any concrete
+		// type satisfying it.
+		if ft.Kind() == reflect.Interface && t.Implements(ft) {
+			return "", what
+		}
+		// A defined type over the same underlying struct converts back in one
+		// token: (*pgxpool.Pool)(o.repo.Raw()). Pointer conversion requires
+		// identical underlying types, so this does not over-match.
+		if t.Kind() == reflect.Pointer && ft.Kind() == reflect.Pointer && t.ConvertibleTo(ft) {
+			return "", what
+		}
+	}
+
 	switch t.Kind() {
 	case reflect.Pointer, reflect.Slice, reflect.Array, reflect.Chan:
 		if where, what := reachableHandle(t.Elem(), forbidden, seen); what != "" {
@@ -206,7 +229,12 @@ func reachableHandle(t reflect.Type, forbidden map[reflect.Type]string, seen map
 	// accessor crosses the boundary exactly as the top-level pass does.
 	// Pointer receivers are in the method set of *T, value receivers in both.
 	mt := t
-	if t.Kind() != reflect.Pointer {
+	switch t.Kind() {
+	case reflect.Pointer, reflect.Interface:
+		// reflect exposes an interface's methods on the interface type itself;
+		// a *pointer* to one has an empty method set, so wrapping it here
+		// would walk nothing.
+	default:
 		mt = reflect.PointerTo(t)
 	}
 	for i := 0; i < mt.NumMethod(); i++ {

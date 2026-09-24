@@ -308,21 +308,30 @@ func TestRepoPackage_DeclaresNoPoolAccessor(t *testing.T) {
 	// free constructor's result is the bare identifier Handles, and the
 	// selector that makes it a finding is in the type declaration elsewhere.
 	declared := map[string]ast.Expr{}
+	methods := map[string][]*ast.FuncDecl{}
 	for _, f := range files {
 		for _, decl := range f.Decls {
-			g, ok := decl.(*ast.GenDecl)
-			if !ok || g.Tok != token.TYPE {
-				continue
-			}
-			for _, spec := range g.Specs {
-				if ts, ok := spec.(*ast.TypeSpec); ok {
-					declared[ts.Name.Name] = ts.Type
+			switch d := decl.(type) {
+			case *ast.GenDecl:
+				if d.Tok != token.TYPE {
+					continue
+				}
+				for _, spec := range d.Specs {
+					if ts, ok := spec.(*ast.TypeSpec); ok {
+						declared[ts.Name.Name] = ts.Type
+					}
+				}
+			case *ast.FuncDecl:
+				// Methods on a type a free function hands out are this walk's
+				// too: the reflect walk only reaches what hangs off *OrdersDB.
+				if name := receiverType(d); name != "" {
+					methods[name] = append(methods[name], d)
 				}
 			}
 		}
 	}
 
-	src := sourceWalk{spellings: spellings, declared: declared}
+	src := sourceWalk{spellings: spellings, declared: declared, methods: methods}
 
 	for _, f := range files {
 		for _, decl := range f.Decls {
@@ -361,6 +370,22 @@ func TestRepoPackage_DeclaresNoPoolAccessor(t *testing.T) {
 type sourceWalk struct {
 	spellings map[string]bool
 	declared  map[string]ast.Expr
+	methods   map[string][]*ast.FuncDecl
+}
+
+// receiverType names the type a method is declared on, "" for a free function.
+func receiverType(d *ast.FuncDecl) string {
+	if d.Recv == nil || len(d.Recv.List) != 1 {
+		return ""
+	}
+	expr := d.Recv.List[0].Type
+	if star, ok := expr.(*ast.StarExpr); ok {
+		expr = star.X
+	}
+	if ident, ok := expr.(*ast.Ident); ok {
+		return ident.Name
+	}
+	return ""
 }
 
 func (w sourceWalk) report(t *testing.T, fset *token.FileSet, what string, expr ast.Expr) {
@@ -423,8 +448,16 @@ func (w sourceWalk) find(expr ast.Expr, seen map[string]bool) (where string, nod
 		}
 	case *ast.InterfaceType:
 		for _, m := range e.Methods.List {
+			if len(m.Names) == 0 {
+				// Embedded: type Tx interface{ pgx.Tx } is pgx.Tx under
+				// another name, the way an embedded struct field is its type.
+				if where, node := w.find(m.Type, seen); node != nil {
+					return where, node
+				}
+				continue
+			}
 			ft, ok := m.Type.(*ast.FuncType)
-			if !ok || ft.Results == nil || len(m.Names) == 0 {
+			if !ok || ft.Results == nil {
 				continue
 			}
 			for _, r := range ft.Results.List {
@@ -459,7 +492,21 @@ func (w sourceWalk) find(expr ast.Expr, seen map[string]bool) (where string, nod
 		}
 		seen[e.Name] = true
 		if def, ok := w.declared[e.Name]; ok {
-			return w.find(def, seen)
+			if where, node := w.find(def, seen); node != nil {
+				return where, node
+			}
+		}
+		// The method half, mirroring mt.NumMethod() in the reflect walk. A
+		// type whose own field is unexported can still carry an accessor.
+		for _, m := range w.methods[e.Name] {
+			if !m.Name.IsExported() || m.Type.Results == nil {
+				continue
+			}
+			for _, r := range m.Type.Results.List {
+				if where, node := w.find(r.Type, seen); node != nil {
+					return "." + m.Name.Name + "()" + where, node
+				}
+			}
 		}
 	}
 	return "", nil

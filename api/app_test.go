@@ -47,6 +47,9 @@ func NewTestApp(t *testing.T) *App {
 
 func CloseTestApp(a *App) {
 	a.Shutdown()
+	// Or the map keeps every test App and its pool reachable for the life of
+	// the test binary.
+	testPools.Delete(a)
 }
 
 func requestToMultipart(t *testing.T, request interface{}, files []AttachedFile) (io.Reader, string) {

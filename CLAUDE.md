@@ -35,7 +35,7 @@ Non-obvious placements: business logic orchestration lives in `domain/` (`billin
 ### Interfaces
 - **Declare an interface in the package that calls it, listing only the methods that package calls.** `*OrdersDB` satisfies it implicitly — nothing is added to `repo/`. See `domain.AccountsRepo` (4 methods), `domain/pricing`'s three providers (1 each), `api.couponRepo` (11)
 - Don't put `Close()` in a consumer interface. The pool's lifetime belongs to `App.Shutdown` and the `cmd` entrypoints
-- Unexported is the default for a consumer interface; export it only when its mock is generated or another package must name the type
+- Unexported is the default for a consumer interface; export it only when its mock is generated or another package must name the type. Mockery follows the interface's own visibility, so an unexported interface yields an unexported mock — which is unreachable from `internal/mocks` and therefore useless to the consumer's tests. That is why `domain.AccountsRepo` is exported and `domain/pricing`'s providers, which have no mocks, are not
 - `OrdersRepository` (`repo/orders_repository.go`) is the pre-existing fat interface. Add a new `*OrdersDB` method there only if `domain/billing`, `cmd` or `importers` calls it; if the caller is `api` or one of the narrow interfaces above, it does not belong in `OrdersRepository` at all
 - After changing any interface that has generated mocks, run `task mocks` — not a bare `mockery`, which is a different generator version and possibly a different Go
 - `PelecardAPI`, `ProfileService`, `TokenSource` are external-dependency interfaces and stay with their implementation: there the interface exists to swap the implementation, not to narrow it
@@ -98,7 +98,7 @@ Logger is enriched per-request in middleware with `request_id`. Workers add `wor
 
 `App.repo` and `OrdersAPI.repo` hold the concrete `*repo.OrdersDB`: nothing substitutes them (the api tests use real Postgres), and typing them as the interface is what forced every narrow interface's methods to stay on `OrdersRepository` too.
 
-Consumer-declared storage interfaces, each holding what one package calls: `domain.AccountsRepo` (4), `domain/pricing.ManualDiscountProvider` / `HHGrantProvider` / `CouponProvider` (1 each), `api.couponRepo` (11). `*OrdersDB` satisfies all of them implicitly.
+Consumer-declared storage interfaces, each holding what one package calls: `domain.AccountsRepo` (4), `domain/pricing`'s `manualDiscountProvider` / `hhGrantProvider` / `couponProvider` (1 each), `api.couponRepo` (11). `*OrdersDB` satisfies all of them implicitly. Only `AccountsRepo` is exported, because it is the only one with a generated mock.
 
 Small interfaces for external dependencies: `PelecardAPI` (1), `ProfileService` (3), `EventEmitter` (2), `EventHandler` (2), `ChargeExecutor` (1), `TokenSource` (2). Defined in the same package as their primary implementation — these exist to substitute the implementation, so they belong to it.
 

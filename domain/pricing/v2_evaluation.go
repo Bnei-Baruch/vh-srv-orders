@@ -137,9 +137,9 @@ func EvaluateV2Price(
 	primaryKeycloakID string,
 	primaryEmail string,
 	country string,
-	discountProvider ManualDiscountProvider,
-	hhProvider HHGrantProvider,
-	couponProvider CouponProvider,
+	discountProvider manualDiscountProvider,
+	hhProvider hhGrantProvider,
+	couponProvider couponProvider,
 ) (*V2PricingEvaluation, error) {
 	ctx = context.WithValue(ctx, common.CtxLogger, utils.LogFor(ctx).With(
 		slog.Int("account_id", primaryAccountID),

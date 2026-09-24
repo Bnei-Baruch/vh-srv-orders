@@ -171,7 +171,7 @@ func (o *OrdersDB) GetOrderByID(ctx context.Context, orderID uint) (*Order, erro
 }
 
 // Get Payment
-func (o *OrdersDB) GetPaymentForOrderID(ctx context.Context, orderID uint) (*Payment, error) {
+func (o *OrdersDB) getPaymentForOrderID(ctx context.Context, orderID uint) (*Payment, error) {
 	var p Payment
 	if err := o.QueryRow(ctx, `SELECT 
 	id,
@@ -785,8 +785,8 @@ func (o *OrdersDB) GetTokensForOrders(ctx context.Context, orderIDs []int) (map[
 			paymentArgs[i] = id
 		}
 
-		// Use DISTINCT ON to get the first payment for each order (matching GetPaymentForOrderID logic)
-		// GetPaymentForOrderID filters by "PaymentStatus"='success' and uses natural order (by id)
+		// Use DISTINCT ON to get the first payment for each order (matching getPaymentForOrderID logic)
+		// getPaymentForOrderID filters by "PaymentStatus"='success' and uses natural order (by id)
 		paymentsQuery := fmt.Sprintf(`
 			SELECT DISTINCT ON ("OrderID") "OrderID", pelecard_token
 			FROM payments

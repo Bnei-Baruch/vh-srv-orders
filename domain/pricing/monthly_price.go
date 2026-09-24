@@ -30,9 +30,9 @@ func GetMonthlyPrice(
 	keycloakID string,
 	email string,
 	country string,
-	discountProvider ManualDiscountProvider,
-	hhProvider HHGrantProvider,
-	couponProvider CouponProvider,
+	discountProvider manualDiscountProvider,
+	hhProvider hhGrantProvider,
+	couponProvider couponProvider,
 ) (*MonthlyPriceRes, error) {
 	v2eval, err := EvaluateV2Price(ctx, profileService, priorityClient, accountingService, quickbooksCompanyID, accountID, keycloakID, email, country, discountProvider, hhProvider, couponProvider)
 	if err != nil {

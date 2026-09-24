@@ -2,9 +2,12 @@ package repo
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	"gitlab.bbdev.team/vh/pay/orders/events"
@@ -35,17 +38,29 @@ func TestNewOrdersDBUrl_FailsOnUnreachableDB(t *testing.T) {
 	require.Nil(t, db, "a failed construction must not hand back a usable pool")
 }
 
-// The pool is held in a field, not embedded, so nothing outside this package
-// can reach the database except through a method declared here — which is
-// where the events are emitted. A raw write past that layer lands with no
-// event and nothing downstream hears about it.
+// The invariant both tests below hold: nothing outside this package can reach
+// the database except through a method declared here, which is where the
+// events are emitted. A raw write past that layer lands with no event and
+// nothing downstream hears about it.
 //
-// That used to be enforced by api/repo_surface_test.go, 494 lines of AST
-// analysis over the api package, because while *OrdersDB embedded
-// *pgxpool.Pool the methods were promoted onto every holder of the concrete
-// type. Embedding it again would restore the promotion silently: no call site
-// changes, nothing fails to build, and the barrier is simply gone. This is
-// what notices.
+// It used to be held by api/repo_surface_test.go — 494 lines of AST analysis
+// over the api package, matching call shapes. That was the wrong side to
+// stand on: it enumerated the ways api could spell a bypass, so every new
+// spelling was a hole until someone added it. These two stand on the repo
+// side, where the surface is finite and enumerable:
+//
+//   - the unexported half is the compiler's. pool is lowercase, so no code
+//     outside repo can name it, whatever it spells.
+//   - the exported half is these tests'. An exported field or a method
+//     handing back a live handle compiles fine and puts the bypass straight
+//     back, and the compiler has no opinion about it.
+//
+// Still not covered, by either: GetDBURL is exported, so a determined caller
+// can open its own pool. That is a separate hole and predates all of this.
+
+// Embedding *pgxpool.Pool again would restore the promoted Exec/Query/Begin
+// silently — no call site changes, nothing fails to build, and the barrier is
+// gone. This is what notices.
 //
 // Exec stands for the whole promoted set; they arrive and leave together.
 func TestOrdersDB_DoesNotExposeThePool(t *testing.T) {
@@ -56,4 +71,54 @@ func TestOrdersDB_DoesNotExposeThePool(t *testing.T) {
 	require.False(t, ok,
 		"*OrdersDB satisfies an Exec-shaped interface, so the pool is embedded again — "+
 			"every holder of the concrete type can now write SQL past the repo layer and skip its events")
+}
+
+// Walks the exported surface of *OrdersDB and fails on anything that hands a
+// caller something it can write SQL through: an exported field of a handle
+// type, or a method returning one.
+//
+// The named-field refactor removed the promotion, not the possibility. Each of
+// these compiles, and the promotion test above stays green for all of them:
+//
+//	Pool *pgxpool.Pool                                    // exported field
+//	func (o *OrdersDB) PoolAccessor() *pgxpool.Pool       // accessor
+//	func (o *OrdersDB) BeginTx(ctx) (pgx.Tx, error)       // a transaction is a
+//	                                                      // writable handle too
+//
+// The list is of concrete handle types, so it is exact rather than complete:
+// a method returning some interface that happens to carry Exec walks past.
+// Extend the list rather than generalising it — a heuristic over method sets
+// would start failing on the repo's own legitimate returns.
+func TestOrdersDB_HandsOutNoWritableHandle(t *testing.T) {
+	forbidden := map[reflect.Type]string{
+		reflect.TypeOf((*pgxpool.Pool)(nil)):            "the pool itself",
+		reflect.TypeOf((*pgxpool.Conn)(nil)):            "a pooled connection",
+		reflect.TypeOf((*pgx.Conn)(nil)):                "a raw connection",
+		reflect.TypeOf((*pgx.Tx)(nil)).Elem():           "a transaction",
+		reflect.TypeOf((*pgx.BatchResults)(nil)).Elem(): "a batch to execute",
+	}
+
+	ptr := reflect.TypeOf(&OrdersDB{})
+
+	for i := 0; i < ptr.Elem().NumField(); i++ {
+		f := ptr.Elem().Field(i)
+		if !f.IsExported() {
+			continue
+		}
+		what, bad := forbidden[f.Type]
+		require.False(t, bad,
+			"*OrdersDB.%s is exported and is %s, so anything holding the concrete type "+
+				"can write SQL past the repo layer and skip its events", f.Name, what)
+	}
+
+	for i := 0; i < ptr.NumMethod(); i++ {
+		m := ptr.Method(i)
+		for j := 0; j < m.Type.NumOut(); j++ {
+			what, bad := forbidden[m.Type.Out(j)]
+			require.False(t, bad,
+				"*OrdersDB.%s returns %s, so its caller can write SQL past the repo layer "+
+					"and skip its events — keep the handle inside this package and export "+
+					"the operation instead", m.Name, what)
+		}
+	}
 }

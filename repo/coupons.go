@@ -29,7 +29,7 @@ func scanCoupon(row pgx.Row, c *Coupon) error {
 }
 
 func (o *OrdersDB) CreateCoupon(ctx context.Context, c Coupon) (*Coupon, error) {
-	err := o.QueryRow(ctx,
+	err := o.pool.QueryRow(ctx,
 		`INSERT INTO coupons (code, description, type, properties, enabled, redeem_from, redeem_until,
 			benefit_start, benefit_end, benefit_months, countries, max_redemptions)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
@@ -44,18 +44,18 @@ func (o *OrdersDB) CreateCoupon(ctx context.Context, c Coupon) (*Coupon, error) 
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			return nil, common.ErrCouponCodeConflict
 		}
-		return nil, fmt.Errorf("o.QueryRow.Scan: %w", err)
+		return nil, fmt.Errorf("o.pool.QueryRow.Scan: %w", err)
 	}
 	return &c, nil
 }
 
 func (o *OrdersDB) GetCouponByID(ctx context.Context, id int) (*Coupon, error) {
 	var c Coupon
-	if err := scanCoupon(o.QueryRow(ctx, `SELECT `+couponColumns+` FROM coupons WHERE id = $1`, id), &c); err != nil {
+	if err := scanCoupon(o.pool.QueryRow(ctx, `SELECT `+couponColumns+` FROM coupons WHERE id = $1`, id), &c); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, common.ErrNoRowsAffected
 		}
-		return nil, fmt.Errorf("o.QueryRow.Scan: %w", err)
+		return nil, fmt.Errorf("o.pool.QueryRow.Scan: %w", err)
 	}
 	return &c, nil
 }
@@ -64,7 +64,7 @@ func (o *OrdersDB) GetCouponByID(ctx context.Context, id int) (*Coupon, error) {
 // included) and benefits_until (MAX non-revoked benefit_end), newest first.
 // No pagination: coupon counts are expected to stay small.
 func (o *OrdersDB) ListCoupons(ctx context.Context) ([]CouponListItem, error) {
-	rows, err := o.Query(ctx,
+	rows, err := o.pool.Query(ctx,
 		`SELECT `+couponColumnsC+`,
 			COALESCE(r.cnt, 0), r.benefits_until
 		 FROM coupons c
@@ -75,7 +75,7 @@ func (o *OrdersDB) ListCoupons(ctx context.Context) ([]CouponListItem, error) {
 		 ) r ON r.coupon_id = c.id
 		 ORDER BY c.id DESC`)
 	if err != nil {
-		return nil, fmt.Errorf("o.Query: %w", err)
+		return nil, fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 
@@ -98,7 +98,7 @@ func (o *OrdersDB) ListCoupons(ctx context.Context) ([]CouponListItem, error) {
 // responsible for rejecting field changes disallowed by the update rules (§4).
 func (o *OrdersDB) UpdateCoupon(ctx context.Context, c Coupon) (*Coupon, error) {
 	var out Coupon
-	err := scanCoupon(o.QueryRow(ctx,
+	err := scanCoupon(o.pool.QueryRow(ctx,
 		`UPDATE coupons SET code=$2, description=$3, type=$4, properties=$5, enabled=$6,
 			redeem_from=$7, redeem_until=$8, benefit_start=$9, benefit_end=$10, benefit_months=$11,
 			countries=$12, max_redemptions=$13, updated_at=now()
@@ -113,15 +113,15 @@ func (o *OrdersDB) UpdateCoupon(ctx context.Context, c Coupon) (*Coupon, error) 
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			return nil, common.ErrCouponCodeConflict
 		}
-		return nil, fmt.Errorf("o.QueryRow.Scan: %w", err)
+		return nil, fmt.Errorf("o.pool.QueryRow.Scan: %w", err)
 	}
 	return &out, nil
 }
 
 func (o *OrdersDB) CountCouponRedemptions(ctx context.Context, couponID int) (int, error) {
 	var n int
-	if err := o.QueryRow(ctx, `SELECT COUNT(*) FROM coupon_redemptions WHERE coupon_id = $1`, couponID).Scan(&n); err != nil {
-		return 0, fmt.Errorf("o.QueryRow.Scan: %w", err)
+	if err := o.pool.QueryRow(ctx, `SELECT COUNT(*) FROM coupon_redemptions WHERE coupon_id = $1`, couponID).Scan(&n); err != nil {
+		return 0, fmt.Errorf("o.pool.QueryRow.Scan: %w", err)
 	}
 	return n, nil
 }
@@ -129,14 +129,14 @@ func (o *OrdersDB) CountCouponRedemptions(ctx context.Context, couponID int) (in
 // ListCouponRedemptions returns the redemptions for a coupon with the member's
 // email joined from the orders account.
 func (o *OrdersDB) ListCouponRedemptions(ctx context.Context, couponID int) ([]CouponRedemptionDetail, error) {
-	rows, err := o.Query(ctx,
+	rows, err := o.pool.Query(ctx,
 		`SELECT r.id, r.coupon_id, r.keycloak_id, r.redeemed_at, r.benefit_start, r.benefit_end,
 			r.revoked_at, COALESCE(a."Email", '')
 		 FROM coupon_redemptions r
 		 LEFT JOIN accounts a ON a."UserKey" = r.keycloak_id
 		 WHERE r.coupon_id = $1 ORDER BY r.id DESC`, couponID)
 	if err != nil {
-		return nil, fmt.Errorf("o.Query: %w", err)
+		return nil, fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 
@@ -154,11 +154,11 @@ func (o *OrdersDB) ListCouponRedemptions(ctx context.Context, couponID int) ([]C
 
 // RevokeRedemption soft-revokes a redemption; the row and cap slot remain (§5).
 func (o *OrdersDB) RevokeRedemption(ctx context.Context, couponID, redemptionID int) error {
-	res, err := o.Exec(ctx,
+	res, err := o.pool.Exec(ctx,
 		`UPDATE coupon_redemptions SET revoked_at = now()
 		 WHERE id = $1 AND coupon_id = $2 AND revoked_at IS NULL`, redemptionID, couponID)
 	if err != nil {
-		return fmt.Errorf("o.Exec: %w", err)
+		return fmt.Errorf("o.pool.Exec: %w", err)
 	}
 	if res.RowsAffected() == 0 {
 		return common.ErrNoRowsAffected
@@ -169,13 +169,13 @@ func (o *OrdersDB) RevokeRedemption(ctx context.Context, couponID, redemptionID 
 // GetMyCoupons returns the caller's non-revoked redemptions on enabled coupons
 // whose benefit window has not ended, including not-yet-started mode-A windows.
 func (o *OrdersDB) GetMyCoupons(ctx context.Context, keycloakID string) ([]MyCoupon, error) {
-	rows, err := o.Query(ctx,
+	rows, err := o.pool.Query(ctx,
 		`SELECT c.code, COALESCE(c.description, ''), r.benefit_start, r.benefit_end
 		 FROM coupon_redemptions r JOIN coupons c ON c.id = r.coupon_id
 		 WHERE r.keycloak_id = $1 AND r.revoked_at IS NULL AND c.enabled AND now() < r.benefit_end
 		 ORDER BY r.benefit_end`, keycloakID)
 	if err != nil {
-		return nil, fmt.Errorf("o.Query: %w", err)
+		return nil, fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 
@@ -193,13 +193,13 @@ func (o *OrdersDB) GetMyCoupons(ctx context.Context, keycloakID string) ([]MyCou
 // GetActiveCouponRedemptions feeds the pricing evaluation: non-revoked redemptions
 // currently inside their benefit window on an enabled coupon.
 func (o *OrdersDB) GetActiveCouponRedemptions(ctx context.Context, keycloakID string) ([]ActiveCouponRedemption, error) {
-	rows, err := o.Query(ctx,
+	rows, err := o.pool.Query(ctx,
 		`SELECT r.id, c.id, c.code, c.type, c.properties, r.benefit_end
 		 FROM coupon_redemptions r JOIN coupons c ON c.id = r.coupon_id
 		 WHERE r.keycloak_id = $1 AND r.revoked_at IS NULL AND c.enabled
 			AND r.benefit_start <= now() AND now() < r.benefit_end`, keycloakID)
 	if err != nil {
-		return nil, fmt.Errorf("o.Query: %w", err)
+		return nil, fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 
@@ -218,9 +218,9 @@ func (o *OrdersDB) GetActiveCouponRedemptions(ctx context.Context, keycloakID st
 // (§5). country is the caller's account country ("" if unset). It returns the
 // coupon sentinel errors from common for the handler to map to messages.
 func (o *OrdersDB) RedeemCoupon(ctx context.Context, keycloakID, code, country string) (*CouponRedemption, error) {
-	tx, err := o.Begin(ctx)
+	tx, err := o.pool.Begin(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("o.Begin: %w", err)
+		return nil, fmt.Errorf("o.pool.Begin: %w", err)
 	}
 	defer tx.Rollback(ctx)
 

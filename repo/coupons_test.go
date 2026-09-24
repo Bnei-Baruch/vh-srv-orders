@@ -44,7 +44,7 @@ func insertRedemption(t *testing.T, db *OrdersDB, ctx context.Context, couponID 
 		revokedAt = "now()"
 	}
 	var id int
-	err := db.QueryRow(ctx,
+	err := db.pool.QueryRow(ctx,
 		`INSERT INTO coupon_redemptions (coupon_id, keycloak_id, benefit_start, benefit_end, revoked_at)
 		 VALUES ($1, $2, now() - ($3 * interval '1 day'), now() + ($4 * interval '1 day'), `+revokedAt+`)
 		 RETURNING id`, couponID, kc, startDaysAgo, endInDays).Scan(&id)
@@ -175,7 +175,7 @@ func TestGetActiveCouponRedemptions_WindowAndStateFilters(t *testing.T) {
 	insertRedemption(t, db, ctx, active.ID, kc+"-x", 1, 30, false) // other member, ignored by kc filter
 	future := active.ID
 	// not-yet-started: benefit_start in the future
-	_, err := db.Exec(ctx,
+	_, err := db.pool.Exec(ctx,
 		`INSERT INTO coupon_redemptions (coupon_id, keycloak_id, benefit_start, benefit_end)
 		 VALUES ($1, $2, now() + interval '5 days', now() + interval '40 days')`, future, kc+"-future")
 	require.NoError(t, err)

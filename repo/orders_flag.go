@@ -18,9 +18,9 @@ func (o *OrdersDB) FlagOrdersToRenew(ctx context.Context, month int64, year int6
 	order by qt desc
 	`
 
-	rows, err := o.Query(ctx, qOPotentialStr)
+	rows, err := o.pool.Query(ctx, qOPotentialStr)
 	if err != nil {
-		return 0, fmt.Errorf("o.Query [potential]: %w", err)
+		return 0, fmt.Errorf("o.pool.Query [potential]: %w", err)
 	}
 	defer rows.Close()
 
@@ -46,9 +46,9 @@ func (o *OrdersDB) FlagOrdersToRenew(ctx context.Context, month int64, year int6
 		limit 1
 		`
 
-		oselected, err := o.Query(ctx, qOSelectStr, *aOPotential.Userkey)
+		oselected, err := o.pool.Query(ctx, qOSelectStr, *aOPotential.Userkey)
 		if err != nil {
-			return 0, fmt.Errorf("o.Query [selected]: %w", err)
+			return 0, fmt.Errorf("o.pool.Query [selected]: %w", err)
 		}
 		defer oselected.Close()
 
@@ -100,9 +100,9 @@ group by "AccountID"
 having count(*) > 1
 order by duplicate desc`
 
-	rows, err := o.Query(ctx, req)
+	rows, err := o.pool.Query(ctx, req)
 	if err != nil {
-		return 0, fmt.Errorf("o.Query: %w", err)
+		return 0, fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 
@@ -127,9 +127,9 @@ order by duplicate desc`
 
 func (o *OrdersDB) flagOrdersByAccountID(ctx context.Context, aid int, flag string) (int, error) {
 	req := `select id from orders where "AccountID" = $1 and "Status" = 'paid'`
-	rows, err := o.Query(ctx, req, aid)
+	rows, err := o.pool.Query(ctx, req, aid)
 	if err != nil {
-		return 0, fmt.Errorf("o.Query: %w", err)
+		return 0, fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 
@@ -151,7 +151,7 @@ func (o *OrdersDB) flagOrdersByAccountID(ctx context.Context, aid int, flag stri
 }
 
 func (o *OrdersDB) FlagOrder(ctx context.Context, id int, flag string) error {
-	_, err := o.Exec(ctx, `UPDATE orders SET "Flag" = $2 where id = $1`, id, flag)
+	_, err := o.pool.Exec(ctx, `UPDATE orders SET "Flag" = $2 where id = $1`, id, flag)
 	return err
 }
 
@@ -164,9 +164,9 @@ func (o *OrdersDB) GetFlaggedOrders(ctx context.Context) ([]Order, error) {
 		WHERE "Flag" = $1
 	`
 
-	rows, err := o.Query(ctx, query, common.OrderFlagToRenew)
+	rows, err := o.pool.Query(ctx, query, common.OrderFlagToRenew)
 	if err != nil {
-		return nil, fmt.Errorf("o.Query: %w", err)
+		return nil, fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 
@@ -194,9 +194,9 @@ func (o *OrdersDB) GetOrderIDsToRenew(ctx context.Context) ([]uint, error) {
 	AND "Flag" = $3
 	`
 
-	rows, err := o.Query(ctx, sqlQuery, common.OrderStatusPaid, common.OrderStatusNoSuccess, common.OrderFlagToRenew)
+	rows, err := o.pool.Query(ctx, sqlQuery, common.OrderStatusPaid, common.OrderStatusNoSuccess, common.OrderFlagToRenew)
 	if err != nil {
-		return nil, fmt.Errorf("o.Query: %w", err)
+		return nil, fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 
@@ -226,12 +226,12 @@ func (o *OrdersDB) MarkResolvedForRenew(ctx context.Context, orderIDs []uint) er
 	for i := 0; i < len(orderIDs); i += batchSize {
 		end := min(i+batchSize, len(orderIDs))
 		batch := orderIDs[i:end]
-		_, err := o.Exec(ctx, `
+		_, err := o.pool.Exec(ctx, `
 			UPDATE orders SET "Flag" = $1
 			WHERE id = ANY($2) AND "Flag" = $3
 		`, common.OrderFlagToRenew, batch, common.OrderFlagPricingError)
 		if err != nil {
-			return fmt.Errorf("o.Exec (batch offset %d): %w", i, err)
+			return fmt.Errorf("o.pool.Exec (batch offset %d): %w", i, err)
 		}
 	}
 	return nil
@@ -239,13 +239,13 @@ func (o *OrdersDB) MarkResolvedForRenew(ctx context.Context, orderIDs []uint) er
 
 // GetOrderIDsWithPricingError returns IDs of recurring orders flagged as pricing_error.
 func (o *OrdersDB) GetOrderIDsWithPricingError(ctx context.Context) ([]uint, error) {
-	rows, err := o.Query(ctx, `
+	rows, err := o.pool.Query(ctx, `
 		SELECT id FROM orders
 		WHERE "Type" = 'recurring'
 		AND "Flag" = $1
 	`, common.OrderFlagPricingError)
 	if err != nil {
-		return nil, fmt.Errorf("o.Query: %w", err)
+		return nil, fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 
@@ -269,9 +269,9 @@ func (o *OrdersDB) GetOrderIDsWithPricingError(ctx context.Context) ([]uint, err
 // Note: We are not filtering by Flag here, so all flags will be cleared. On all orders.
 // This is intentional as all flags are billing related and should be cleared on all orders.
 func (o *OrdersDB) ClearAllFlags(ctx context.Context) error {
-	_, err := o.Exec(ctx, `UPDATE orders SET "Flag" = ''`)
+	_, err := o.pool.Exec(ctx, `UPDATE orders SET "Flag" = ''`)
 	if err != nil {
-		return fmt.Errorf("o.Exec: %w", err)
+		return fmt.Errorf("o.pool.Exec: %w", err)
 	}
 	// No need to check RowsAffected() as zero rows affected is not an error.
 	return nil

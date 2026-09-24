@@ -18,7 +18,7 @@ func (o *OrdersDB) GetPaymentByID(ctx context.Context, id int) (*Payment, error)
 		pay      Payment
 		addQuery string
 	)
-	if err := o.QueryRow(ctx, `SELECT
+	if err := o.pool.QueryRow(ctx, `SELECT
 	id, created_at, updated_at, deleted_at, "Amount", "Currency", "PaymentStatus", "PaymentType", "OrderID", "ParamX",
 	"Ordkey", "AuthNo", confirmation_key, success, pelecard_token, "TransactionID", "ErrorMsg", "CardHebrewName",
 	"CCAbroadCard", "CCBrand", "CCCompanyClearer", "CCCompanyIssuer", credit_type, "CCExpDate", "CCNumber", "DebitCode",
@@ -37,7 +37,7 @@ func (o *OrdersDB) GetPaymentByID(ctx context.Context, id int) (*Payment, error)
 }
 
 func (o *OrdersDB) SoftDeletePayment(ctx context.Context, paymentID int) error {
-	_, err := o.Exec(ctx, "UPDATE payments SET deleted_at = $1 WHERE id = $2", time.Now(), paymentID)
+	_, err := o.pool.Exec(ctx, "UPDATE payments SET deleted_at = $1 WHERE id = $2", time.Now(), paymentID)
 	if err != nil {
 		return err
 	}
@@ -48,14 +48,14 @@ func (o *OrdersDB) SoftDeletePayment(ctx context.Context, paymentID int) error {
 func (o *OrdersDB) GetPaymentActivities(ctx context.Context, email string, productType string, paymentType string, skip int, limit int) ([]PaymentActivitiesRes, error) {
 	userDbWhereQuery, orderByQuery := buildAndGetWherePaymentActQuery(email, productType, paymentType)
 
-	rows, err := o.Query(ctx, `SELECT p.created_at,  p."Amount", p."PaymentType",  p."OrderID", 
+	rows, err := o.pool.Query(ctx, `SELECT p.created_at,  p."Amount", p."PaymentType",  p."OrderID", 
 	p."ParamX", p."PaymentStatus", p."CCNumber", p."CCExpDate", 
 	o."ProductType", o."Type", o."Currency",
 	a."FirstName", a."LastName", a."Email", a."Country" 
 	from payments as p, orders as o, accounts as a`+
 		userDbWhereQuery+orderByQuery+" LIMIT $1 OFFSET $2", limit, skip)
 	if err != nil {
-		return nil, fmt.Errorf("o.Query: %w", err)
+		return nil, fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 
@@ -97,7 +97,7 @@ func (o *OrdersDB) GetAllPayments(ctx context.Context, skip int, limit int, from
 		}
 	}
 
-	rows, err := o.Query(ctx, `SELECT 
+	rows, err := o.pool.Query(ctx, `SELECT 
 	p.id, p.created_at, p.updated_at, p.deleted_at, p."Amount", p."Currency", p."PaymentStatus", p."PaymentType", 
 	p."OrderID", p."ParamX", p."Ordkey", p."AuthNo", p.confirmation_key, p.success, p.pelecard_token, p."TransactionID", 
 	p."ErrorMsg", p."CardHebrewName", p."CCAbroadCard", p."CCBrand", p."CCCompanyClearer", p."CCCompanyIssuer", 
@@ -105,7 +105,7 @@ func (o *OrdersDB) GetAllPayments(ctx context.Context, skip int, limit int, from
 	p."FirstPaymentTotal", p."FixedPaymentTotal", p."TotalPayments", p.j_param, p."TransactionInitTime", 
 	p."TransactionUpdateTime", p."VoucherID"`+fromQuery+whereQuery+orderByQuery+limitOffsetString)
 	if err != nil {
-		return nil, fmt.Errorf("o.Query: %w", err)
+		return nil, fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 
@@ -137,7 +137,7 @@ func (o *OrdersDB) GetTotalParticipationStatusCount(ctx context.Context, email s
 	var count int
 
 	userDbWhereQuery, _ := buildAndGetWherePaymentActQuery(email, productType, paymentType)
-	err := o.QueryRow(ctx, `SELECT COUNT(*) FROM payments as p, orders as o, accounts as a`+userDbWhereQuery).
+	err := o.pool.QueryRow(ctx, `SELECT COUNT(*) FROM payments as p, orders as o, accounts as a`+userDbWhereQuery).
 		Scan(&count)
 	if err != nil {
 		return 0, err
@@ -147,7 +147,7 @@ func (o *OrdersDB) GetTotalParticipationStatusCount(ctx context.Context, email s
 }
 
 func (o *OrdersDB) GetPaymentByEmail(ctx context.Context, email string) ([]PaymentByEmail, error) {
-	rows, err := o.Query(ctx, `select p."OrderID", p.created_at, o."PaymentDate", o."Type", o."ProductType", p."Amount", 
+	rows, err := o.pool.Query(ctx, `select p."OrderID", p.created_at, o."PaymentDate", o."Type", o."ProductType", p."Amount", 
 	p."Currency", p."CCNumber", p."ParamX", p."PaymentStatus"
 	from payments as p, orders as o, accounts as a
 	where a."Email" = $1
@@ -155,7 +155,7 @@ func (o *OrdersDB) GetPaymentByEmail(ctx context.Context, email string) ([]Payme
 	and o.id = p."OrderID"
 	order by p.created_at desc`, email)
 	if err != nil {
-		return nil, fmt.Errorf("o.Query: %w", err)
+		return nil, fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 
@@ -186,11 +186,11 @@ func (o *OrdersDB) GetOfflinePayments(ctx context.Context, skip int, limit int, 
 		return nil, fmt.Errorf("buildAndGetOfflinePaymentsWhereQuery: %w", err)
 	}
 
-	rows, err := o.Query(ctx, `SELECT 
+	rows, err := o.pool.Query(ctx, `SELECT 
 	p.id, p.created_at, p.updated_at, p.deleted_at, p.payment_method, p.receipt, p.extra_info, p.status, p.payment_id,
 	p.properties`+fromQuery+whereQuery+orderByQuery+limitOffsetString)
 	if err != nil {
-		return nil, fmt.Errorf("o.Query: %w", err)
+		return nil, fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 
@@ -237,9 +237,9 @@ func (o *OrdersDB) CreatePayment(ctx context.Context, req RequestOrder, orderID 
 
 	createString, numString, createQueryArgs := preparePaymentCreateQuery(p)
 
-	if err := o.QueryRow(ctx, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createString, numString),
+	if err := o.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&p.ID); err != nil {
-		return nil, fmt.Errorf("o.QueryRow.Scan: %w", err)
+		return nil, fmt.Errorf("o.pool.QueryRow.Scan: %w", err)
 	}
 
 	if paymentType == common.PaymentTypeOffline {
@@ -283,7 +283,7 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 	}
 
 	var p Payment
-	if err := o.QueryRow(ctx, `SELECT 
+	if err := o.pool.QueryRow(ctx, `SELECT 
 	"OrderID",
 	"PaymentStatus",
 	"PaymentType",
@@ -317,7 +317,7 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 		&p.DebitTotal, &p.DebitType, &p.FirstPaymentTotal, &p.FixedPaymentTotal, &p.TotalPayments,
 		&p.JParam, &p.TransactionInitTime, &p.TransactionUpdateTime, &p.VoucherID,
 	); err != nil {
-		return nil, fmt.Errorf("o.QueryRow.Scan [payment]: %w", err)
+		return nil, fmt.Errorf("o.pool.QueryRow.Scan [payment]: %w", err)
 	}
 
 	if req.Success.String == "1" {
@@ -354,16 +354,16 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 	}
 
 	toUpdate, toUpdateArgs := preparePaymentUpdateQuery(p)
-	_, err = o.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=%d`, toUpdate, uint(paymentid)), toUpdateArgs...)
+	_, err = o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=%d`, toUpdate, uint(paymentid)), toUpdateArgs...)
 	if err != nil {
-		return nil, fmt.Errorf("o.Exec [update payment]: %w", err)
+		return nil, fmt.Errorf("o.pool.Exec [update payment]: %w", err)
 	}
 
 	toUpdatePelecard, toUpdateArgsPeleCard := preparePelecardPaymentUpdateViaPaymentStructQuery(p)
-	_, pelecardErr := o.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdatePelecard,
+	_, pelecardErr := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdatePelecard,
 		uint(paymentid)), toUpdateArgsPeleCard...)
 	if pelecardErr != nil {
-		return nil, fmt.Errorf("o.Exec [update pelecard]: %w", err)
+		return nil, fmt.Errorf("o.pool.Exec [update pelecard]: %w", err)
 	}
 
 	o.emitEvent(ctx, events.TypeUpdatePayment, map[string]interface{}{"payment_id": paymentid})
@@ -377,9 +377,9 @@ func (o *OrdersDB) createOfflinePayment(ctx context.Context, req RequestOrder, p
 		return common.ErrInvalidValues
 	}
 
-	_, err := o.Exec(ctx, fmt.Sprintf(`INSERT INTO payments_offline (%s) VALUES (%s)`, createString, numString), createQueryArgs...)
+	_, err := o.pool.Exec(ctx, fmt.Sprintf(`INSERT INTO payments_offline (%s) VALUES (%s)`, createString, numString), createQueryArgs...)
 	if err != nil {
-		return fmt.Errorf("o.Exec: %w", err)
+		return fmt.Errorf("o.pool.Exec: %w", err)
 	}
 
 	return nil
@@ -391,9 +391,9 @@ func (o *OrdersDB) createPelecardPayment(ctx context.Context, req RequestOrder, 
 		return common.ErrInvalidValues
 	}
 
-	_, err := o.Exec(ctx, fmt.Sprintf(`INSERT INTO payments_pelecard (%s) VALUES (%s)`, createString, numString), createQueryArgs...)
+	_, err := o.pool.Exec(ctx, fmt.Sprintf(`INSERT INTO payments_pelecard (%s) VALUES (%s)`, createString, numString), createQueryArgs...)
 	if err != nil {
-		return fmt.Errorf("o.Exec: %w", err)
+		return fmt.Errorf("o.pool.Exec: %w", err)
 	}
 
 	return nil
@@ -405,9 +405,9 @@ func (o *OrdersDB) createHelpHaverPayment(ctx context.Context, req RequestOrder,
 		return common.ErrInvalidValues
 	}
 
-	_, err := o.Exec(ctx, fmt.Sprintf(`INSERT INTO payments_helphaver (%s) VALUES (%s)`, createString, numString), createQueryArgs...)
+	_, err := o.pool.Exec(ctx, fmt.Sprintf(`INSERT INTO payments_helphaver (%s) VALUES (%s)`, createString, numString), createQueryArgs...)
 	if err != nil {
-		return fmt.Errorf("o.Exec: %w", err)
+		return fmt.Errorf("o.pool.Exec: %w", err)
 	}
 
 	return nil
@@ -419,9 +419,9 @@ func (o *OrdersDB) UpdatePelecardPayment(ctx context.Context, req PaymentUpdate)
 		return common.ErrInvalidValues
 	}
 
-	updateRes, err := o.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdate, req.PaymentID.Int), toUpdateArgs...)
+	updateRes, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdate, req.PaymentID.Int), toUpdateArgs...)
 	if err != nil {
-		return fmt.Errorf("o.Exec: %w", err)
+		return fmt.Errorf("o.pool.Exec: %w", err)
 	}
 	if updateRes.RowsAffected() == 0 {
 		return common.ErrNoRowsAffected
@@ -438,9 +438,9 @@ func (o *OrdersDB) UpdateOfflinePayment(ctx context.Context, req PaymentUpdate) 
 		return common.ErrInvalidValues
 	}
 
-	updateRes, err := o.Exec(ctx, fmt.Sprintf(`UPDATE payments_offline SET %s WHERE payment_id=%d`, toUpdate, req.PaymentID.Int), toUpdateArgs...)
+	updateRes, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments_offline SET %s WHERE payment_id=%d`, toUpdate, req.PaymentID.Int), toUpdateArgs...)
 	if err != nil {
-		return fmt.Errorf("o.Exec: %w", err)
+		return fmt.Errorf("o.pool.Exec: %w", err)
 	}
 	if updateRes.RowsAffected() == 0 {
 		return common.ErrNoRowsAffected
@@ -457,9 +457,9 @@ func (o *OrdersDB) UpdateHelpHavePayment(ctx context.Context, req PaymentUpdate)
 		return common.ErrInvalidValues
 	}
 
-	updateRes, err := o.Exec(ctx, fmt.Sprintf(`UPDATE payments_helphaver SET %s WHERE payment_id=%d`, toUpdate, req.PaymentID.Int), toUpdateArgs...)
+	updateRes, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments_helphaver SET %s WHERE payment_id=%d`, toUpdate, req.PaymentID.Int), toUpdateArgs...)
 	if err != nil {
-		return fmt.Errorf("o.Exec: %w", err)
+		return fmt.Errorf("o.pool.Exec: %w", err)
 	}
 	if updateRes.RowsAffected() == 0 {
 		return common.ErrNoRowsAffected
@@ -472,7 +472,7 @@ func (o *OrdersDB) UpdateHelpHavePayment(ctx context.Context, req PaymentUpdate)
 
 func (o *OrdersDB) UpdateParentPaymentTableStatusAndReturnOrderId(ctx context.Context, status string, paymentID int) (int, error) {
 	var orderId int
-	if err := o.QueryRow(ctx, `UPDATE payments SET "PaymentStatus"=$1 WHERE id=$2 RETURNING "OrderID"`, status, paymentID).
+	if err := o.pool.QueryRow(ctx, `UPDATE payments SET "PaymentStatus"=$1 WHERE id=$2 RETURNING "OrderID"`, status, paymentID).
 		Scan(&orderId); err != nil {
 		return 0, err
 	}
@@ -1622,7 +1622,7 @@ func preparePaymentUpdateQuery(req Payment) (string, []interface{}) {
 func (o *OrdersDB) FetchPaymentByParamX(ctx context.Context, paramX string) (*PaymentWithFullName, error) {
 	var p PaymentWithFullName
 
-	if err := o.QueryRow(ctx, `select a."UserKey", a.id, a."FirstName", a."LastName", a."Email", a."Street", a."City", o."OrderLanguage", o."Amount", o."Currency", 
+	if err := o.pool.QueryRow(ctx, `select a."UserKey", a.id, a."FirstName", a."LastName", a."Email", a."Street", a."City", o."OrderLanguage", o."Amount", o."Currency", 
 	p.id, p."Amount", p."PaymentStatus", p."PaymentType", p."OrderID", p."ParamX", p."AuthNo", p.confirmation_key,
 	p.success, p.pelecard_token, p."TransactionID", p."ErrorMsg", p."CardHebrewName", p."CCAbroadCard", p."CCBrand",
 	p."CCCompanyClearer", p."CCCompanyIssuer", p.credit_type, p."CCExpDate", p."CCNumber", p."DebitCode", p."DebitCurrency",

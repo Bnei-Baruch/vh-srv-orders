@@ -8,9 +8,11 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	"gitlab.bbdev.team/vh/pay/orders/api/middleware"
@@ -31,6 +33,7 @@ func NewTestApp(t *testing.T) *App {
 	require.Nil(t, err)
 	a.repo, err = repo.NewOrdersDBUrl(context.Background(), dbURL, a.eventEmitter)
 	require.Nil(t, err)
+	testPools.Store(a, testutil.NewTestPool(t, dbURL))
 
 	a.gEngine = gin.Default()
 	a.gEngine.Use(
@@ -43,6 +46,9 @@ func NewTestApp(t *testing.T) *App {
 
 func CloseTestApp(a *App) {
 	a.Shutdown()
+	// Or the map keeps every test App and its pool reachable for the life of
+	// the test binary.
+	testPools.Delete(a)
 }
 
 func requestToMultipart(t *testing.T, request interface{}, files []AttachedFile) (io.Reader, string) {
@@ -157,4 +163,19 @@ func do(t *testing.T, a *App, method string, path string, request interface{}, e
 	err := json.Unmarshal(b, &payload)
 	require.NoError(t, err, "json.Unmarshal")
 	return payload
+}
+
+// testPools holds a raw pool per test App, for assertions about database state.
+//
+// *repo.OrdersDB deliberately does not expose its pool — that is what keeps a
+// handler from reaching past the repo layer and skipping its events — so tests
+// that need raw SQL open their own connection rather than the production type
+// growing an accessor for their benefit.
+var testPools sync.Map
+
+func (a *App) testPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	v, ok := testPools.Load(a)
+	require.True(t, ok, "app was not built by NewTestApp")
+	return v.(*pgxpool.Pool)
 }

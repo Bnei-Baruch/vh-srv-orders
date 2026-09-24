@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/volatiletech/null/v9"
@@ -17,6 +18,7 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/events/eventstest"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/pelecard"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/testutil"
+
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
@@ -46,15 +48,16 @@ func gatewayErrorExecutor() pelecard.ChargeExecutor {
 	return &staticChargeExecutor{err: fmt.Errorf("connection timeout")}
 }
 
-func newIntegrationDB(t *testing.T) (*repo.OrdersDB, context.Context) {
+func newIntegrationDB(t *testing.T) (*repo.OrdersDB, *pgxpool.Pool, context.Context) {
 	t.Helper()
 	dbURL, err := testutil.NewTestOrdersDB(t, context.Background())
 	require.NoError(t, err)
 	db, err := repo.NewOrdersDBUrl(context.Background(), dbURL, new(events.NoopEmitter))
 	require.NoError(t, err)
+	pool := testutil.NewTestPool(t, dbURL)
 	t.Cleanup(func() { db.Close() })
 	ctx := eventstest.WithTestEventBuilder(t, context.Background())
-	return db, ctx
+	return db, pool, ctx
 }
 
 // setupOrderSeq makes each setupOrder account unique, so multiple orders in one
@@ -62,7 +65,7 @@ func newIntegrationDB(t *testing.T) (*repo.OrdersDB, context.Context) {
 var setupOrderSeq atomic.Int64
 
 // setupOrder creates an account + recurring order + successful payment, returns order ID.
-func setupOrder(t *testing.T, db *repo.OrdersDB, ctx context.Context, country string) uint {
+func setupOrder(t *testing.T, db *repo.OrdersDB, pool *pgxpool.Pool, ctx context.Context, country string) uint {
 	t.Helper()
 
 	seq := setupOrderSeq.Add(1)
@@ -78,7 +81,7 @@ func setupOrder(t *testing.T, db *repo.OrdersDB, ctx context.Context, country st
 	require.NoError(t, err)
 
 	var orderID int
-	err = db.QueryRow(ctx,
+	err = pool.QueryRow(ctx,
 		`INSERT INTO orders ("AccountID", "Amount", "Currency", "Type", "Status", "Flag")
 		 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
 		accountID, 80.0, common.CurrencyNIS, "recurring", common.OrderStatusPaid, common.OrderFlagToRenew,
@@ -86,7 +89,7 @@ func setupOrder(t *testing.T, db *repo.OrdersDB, ctx context.Context, country st
 	require.NoError(t, err)
 
 	var paymentID int
-	err = db.QueryRow(ctx,
+	err = pool.QueryRow(ctx,
 		`INSERT INTO payments ("Amount", "Currency", "PaymentStatus", "OrderID", "AuthNo", pelecard_token, success)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
 		80.0, common.CurrencyNIS, common.PaymentStatusSuccess, orderID, "AUTH", "TOKEN", "1",
@@ -94,16 +97,16 @@ func setupOrder(t *testing.T, db *repo.OrdersDB, ctx context.Context, country st
 	require.NoError(t, err)
 
 	// payments_pelecard record required for finalization
-	_, err = db.Exec(ctx, `INSERT INTO payments_pelecard (payment_id) VALUES ($1)`, paymentID)
+	_, err = pool.Exec(ctx, `INSERT INTO payments_pelecard (payment_id) VALUES ($1)`, paymentID)
 	require.NoError(t, err)
 
 	return uint(orderID)
 }
 
 // readOrderState reads the current flag and status of an order.
-func readOrderState(t *testing.T, db *repo.OrdersDB, ctx context.Context, orderID uint) (flag, status string) {
+func readOrderState(t *testing.T, pool *pgxpool.Pool, ctx context.Context, orderID uint) (flag, status string) {
 	t.Helper()
-	err := db.QueryRow(ctx,
+	err := pool.QueryRow(ctx,
 		`SELECT COALESCE("Flag",''), COALESCE("Status",'') FROM orders WHERE id=$1`, orderID,
 	).Scan(&flag, &status)
 	require.NoError(t, err)
@@ -111,9 +114,9 @@ func readOrderState(t *testing.T, db *repo.OrdersDB, ctx context.Context, orderI
 }
 
 // readPaymentState reads the status and success of the LATEST payment for an order.
-func readPaymentState(t *testing.T, db *repo.OrdersDB, ctx context.Context, orderID uint) (status, success, pricingVersion string) {
+func readPaymentState(t *testing.T, pool *pgxpool.Pool, ctx context.Context, orderID uint) (status, success, pricingVersion string) {
 	t.Helper()
-	err := db.QueryRow(ctx,
+	err := pool.QueryRow(ctx,
 		`SELECT COALESCE("PaymentStatus",''), COALESCE(success,''), COALESCE(pricing_version,'')
 		 FROM payments WHERE "OrderID"=$1 ORDER BY id DESC LIMIT 1`, orderID,
 	).Scan(&status, &success, &pricingVersion)
@@ -126,8 +129,8 @@ func readPaymentState(t *testing.T, db *repo.OrdersDB, ctx context.Context, orde
 // ---------------------------------------------------------------------------
 
 func TestProcessOrderIntegration_SuccessfulCharge(t *testing.T) {
-	db, ctx := newIntegrationDB(t)
-	orderID := setupOrder(t, db, ctx, "US")
+	db, pool, ctx := newIntegrationDB(t)
+	orderID := setupOrder(t, db, pool, ctx, "US")
 
 	data, err := db.LoadRenewalData(ctx, orderID)
 	require.NoError(t, err)
@@ -140,19 +143,19 @@ func TestProcessOrderIntegration_SuccessfulCharge(t *testing.T) {
 	assert.Equal(t, "1", payment.Success.String)
 
 	// Verify DB state
-	flag, status := readOrderState(t, db, ctx, orderID)
+	flag, status := readOrderState(t, pool, ctx, orderID)
 	assert.Equal(t, common.OrderFlagRenewed, flag)
 	assert.Equal(t, common.OrderStatusPaid, status)
 
-	payStatus, paySuccess, payVersion := readPaymentState(t, db, ctx, orderID)
+	payStatus, paySuccess, payVersion := readPaymentState(t, pool, ctx, orderID)
 	assert.Equal(t, common.PaymentStatusSuccess, payStatus)
 	assert.Equal(t, "1", paySuccess)
 	assert.Equal(t, "v1", payVersion)
 }
 
 func TestProcessOrderIntegration_DeclinedCharge(t *testing.T) {
-	db, ctx := newIntegrationDB(t)
-	orderID := setupOrder(t, db, ctx, "US")
+	db, pool, ctx := newIntegrationDB(t)
+	orderID := setupOrder(t, db, pool, ctx, "US")
 
 	data, err := db.LoadRenewalData(ctx, orderID)
 	require.NoError(t, err)
@@ -165,18 +168,18 @@ func TestProcessOrderIntegration_DeclinedCharge(t *testing.T) {
 	assert.Equal(t, "0", payment.Success.String)
 
 	// Order flag should NOT change (still torenew), status should be nosuccess
-	flag, status := readOrderState(t, db, ctx, orderID)
+	flag, status := readOrderState(t, pool, ctx, orderID)
 	assert.Equal(t, common.OrderFlagToRenew, flag)
 	assert.Equal(t, common.OrderStatusNoSuccess, status)
 
-	payStatus, paySuccess, _ := readPaymentState(t, db, ctx, orderID)
+	payStatus, paySuccess, _ := readPaymentState(t, pool, ctx, orderID)
 	assert.Equal(t, common.PaymentStatusFailed, payStatus)
 	assert.Equal(t, "0", paySuccess)
 }
 
 func TestProcessOrderIntegration_GatewayError(t *testing.T) {
-	db, ctx := newIntegrationDB(t)
-	orderID := setupOrder(t, db, ctx, "US")
+	db, pool, ctx := newIntegrationDB(t)
+	orderID := setupOrder(t, db, pool, ctx, "US")
 
 	data, err := db.LoadRenewalData(ctx, orderID)
 	require.NoError(t, err)
@@ -190,14 +193,14 @@ func TestProcessOrderIntegration_GatewayError(t *testing.T) {
 	assert.Equal(t, "0", payment.Success.String)
 
 	// Payment should still be written to DB with failed status
-	payStatus, paySuccess, _ := readPaymentState(t, db, ctx, orderID)
+	payStatus, paySuccess, _ := readPaymentState(t, pool, ctx, orderID)
 	assert.Equal(t, common.PaymentStatusFailed, payStatus)
 	assert.Equal(t, "0", paySuccess)
 }
 
 func TestProcessOrderIntegration_V2PricingEvaluationInDB(t *testing.T) {
-	db, ctx := newIntegrationDB(t)
-	orderID := setupOrder(t, db, ctx, "US")
+	db, pool, ctx := newIntegrationDB(t)
+	orderID := setupOrder(t, db, pool, ctx, "US")
 
 	data, err := db.LoadRenewalData(ctx, orderID)
 	require.NoError(t, err)
@@ -219,7 +222,7 @@ func TestProcessOrderIntegration_V2PricingEvaluationInDB(t *testing.T) {
 
 	// Verify pricing evaluation is in the DB
 	var evalJSON *string
-	err = db.QueryRow(ctx,
+	err = pool.QueryRow(ctx,
 		`SELECT pricing_evaluation::text FROM payments WHERE "OrderID"=$1 ORDER BY id DESC LIMIT 1`, orderID,
 	).Scan(&evalJSON)
 	require.NoError(t, err)
@@ -230,8 +233,8 @@ func TestProcessOrderIntegration_V2PricingEvaluationInDB(t *testing.T) {
 }
 
 func TestProcessOrderIntegration_V1NoPricingEvaluation(t *testing.T) {
-	db, ctx := newIntegrationDB(t)
-	orderID := setupOrder(t, db, ctx, "US")
+	db, pool, ctx := newIntegrationDB(t)
+	orderID := setupOrder(t, db, pool, ctx, "US")
 
 	data, err := db.LoadRenewalData(ctx, orderID)
 	require.NoError(t, err)
@@ -243,7 +246,7 @@ func TestProcessOrderIntegration_V1NoPricingEvaluation(t *testing.T) {
 	require.NoError(t, err)
 
 	var evalJSON *string
-	err = db.QueryRow(ctx,
+	err = pool.QueryRow(ctx,
 		`SELECT pricing_evaluation::text FROM payments WHERE "OrderID"=$1 ORDER BY id DESC LIMIT 1`, orderID,
 	).Scan(&evalJSON)
 	require.NoError(t, err)
@@ -251,8 +254,8 @@ func TestProcessOrderIntegration_V1NoPricingEvaluation(t *testing.T) {
 }
 
 func TestProcessOrderIntegration_ResolvedPriceOverridesOrderAmount(t *testing.T) {
-	db, ctx := newIntegrationDB(t)
-	orderID := setupOrder(t, db, ctx, "US") // order has amount=80 NIS
+	db, pool, ctx := newIntegrationDB(t)
+	orderID := setupOrder(t, db, pool, ctx, "US") // order has amount=80 NIS
 
 	data, err := db.LoadRenewalData(ctx, orderID)
 	require.NoError(t, err)
@@ -267,7 +270,7 @@ func TestProcessOrderIntegration_ResolvedPriceOverridesOrderAmount(t *testing.T)
 	// Verify the payment has the resolved price, not the order's original amount
 	var payAmount int
 	var payCurrency string
-	err = db.QueryRow(ctx,
+	err = pool.QueryRow(ctx,
 		`SELECT "Amount", "Currency" FROM payments WHERE "OrderID"=$1 ORDER BY id DESC LIMIT 1`, orderID,
 	).Scan(&payAmount, &payCurrency)
 	require.NoError(t, err)
@@ -280,8 +283,8 @@ func TestProcessOrderIntegration_ResolvedPriceOverridesOrderAmount(t *testing.T)
 // ---------------------------------------------------------------------------
 
 func TestChargeWithPricingIntegration_SingleOrder(t *testing.T) {
-	db, ctx := newIntegrationDB(t)
-	orderID := setupOrder(t, db, ctx, "RU") // RU now on v2, resolved offline via offlineV2Resolver
+	db, pool, ctx := newIntegrationDB(t)
+	orderID := setupOrder(t, db, pool, ctx, "RU") // RU now on v2, resolved offline via offlineV2Resolver
 
 	resolver := offlineV2Resolver(t)
 	executor := successExecutor()
@@ -291,14 +294,14 @@ func TestChargeWithPricingIntegration_SingleOrder(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, count)
 
-	flag, status := readOrderState(t, db, ctx, orderID)
+	flag, status := readOrderState(t, pool, ctx, orderID)
 	assert.Equal(t, common.OrderFlagRenewed, flag)
 	assert.Equal(t, common.OrderStatusPaid, status)
 }
 
 func TestChargeWithPricingIntegration_TokenDeclined_EMVSucceeds(t *testing.T) {
-	db, ctx := newIntegrationDB(t)
-	orderID := setupOrder(t, db, ctx, "RU")
+	db, pool, ctx := newIntegrationDB(t)
+	orderID := setupOrder(t, db, pool, ctx, "RU")
 
 	resolver := offlineV2Resolver(t)
 
@@ -318,7 +321,7 @@ func TestChargeWithPricingIntegration_TokenDeclined_EMVSucceeds(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, count)
 
-	flag, status := readOrderState(t, db, ctx, orderID)
+	flag, status := readOrderState(t, pool, ctx, orderID)
 	assert.Equal(t, common.OrderFlagRenewed, flag)
 	assert.Equal(t, common.OrderStatusPaid, status)
 }
@@ -337,9 +340,9 @@ func (e *terminalSwitchExecutor) Execute(ctx context.Context, req *pelecard.Char
 }
 
 func TestChargeWithPricingIntegration_MultipleOrders(t *testing.T) {
-	db, ctx := newIntegrationDB(t)
-	order1 := setupOrder(t, db, ctx, "RU") // RU now on v2, resolved offline via offlineV2Resolver
-	order2 := setupOrder(t, db, ctx, "RU") // RU now on v2, resolved offline via offlineV2Resolver
+	db, pool, ctx := newIntegrationDB(t)
+	order1 := setupOrder(t, db, pool, ctx, "RU") // RU now on v2, resolved offline via offlineV2Resolver
+	order2 := setupOrder(t, db, pool, ctx, "RU") // RU now on v2, resolved offline via offlineV2Resolver
 
 	resolver := offlineV2Resolver(t)
 	executor := successExecutor()
@@ -349,18 +352,18 @@ func TestChargeWithPricingIntegration_MultipleOrders(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 2, count)
 
-	flag1, status1 := readOrderState(t, db, ctx, order1)
+	flag1, status1 := readOrderState(t, pool, ctx, order1)
 	assert.Equal(t, common.OrderFlagRenewed, flag1)
 	assert.Equal(t, common.OrderStatusPaid, status1)
 
-	flag2, status2 := readOrderState(t, db, ctx, order2)
+	flag2, status2 := readOrderState(t, pool, ctx, order2)
 	assert.Equal(t, common.OrderFlagRenewed, flag2)
 	assert.Equal(t, common.OrderStatusPaid, status2)
 }
 
 func TestChargeWithPricingIntegration_BothDeclined(t *testing.T) {
-	db, ctx := newIntegrationDB(t)
-	orderID := setupOrder(t, db, ctx, "RU")
+	db, pool, ctx := newIntegrationDB(t)
+	orderID := setupOrder(t, db, pool, ctx, "RU")
 
 	resolver := offlineV2Resolver(t)
 	executor := declinedExecutor()
@@ -370,7 +373,7 @@ func TestChargeWithPricingIntegration_BothDeclined(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0, count)
 
-	flag, status := readOrderState(t, db, ctx, orderID)
+	flag, status := readOrderState(t, pool, ctx, orderID)
 	assert.Equal(t, common.OrderFlagToRenew, flag, "should not be flagged renewed on decline")
 	assert.Equal(t, common.OrderStatusNoSuccess, status)
 }
@@ -380,16 +383,16 @@ func TestChargeWithPricingIntegration_BothDeclined(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // flagOrderAsPricingError sets the pricing_error flag directly in the DB.
-func flagOrderAsPricingError(t *testing.T, db *repo.OrdersDB, ctx context.Context, orderID uint) {
+func flagOrderAsPricingError(t *testing.T, pool *pgxpool.Pool, ctx context.Context, orderID uint) {
 	t.Helper()
-	_, err := db.Exec(ctx, `UPDATE orders SET "Flag" = $1 WHERE id = $2`, common.OrderFlagPricingError, orderID)
+	_, err := pool.Exec(ctx, `UPDATE orders SET "Flag" = $1 WHERE id = $2`, common.OrderFlagPricingError, orderID)
 	require.NoError(t, err)
 }
 
 func TestRetryPricingErrorsIntegration_NoPricingErrors(t *testing.T) {
-	db, ctx := newIntegrationDB(t)
+	db, pool, ctx := newIntegrationDB(t)
 	// Order has torenew flag, not pricing_error
-	setupOrder(t, db, ctx, "US")
+	setupOrder(t, db, pool, ctx, "US")
 
 	resolver := offlineV2Resolver(t)
 	service := NewBillingService(db, nil, &events.NoopEmitter{}, resolver, successExecutor())
@@ -400,11 +403,11 @@ func TestRetryPricingErrorsIntegration_NoPricingErrors(t *testing.T) {
 }
 
 func TestRetryPricingErrorsIntegration_SuccessfulRetry(t *testing.T) {
-	db, ctx := newIntegrationDB(t)
-	orderID := setupOrder(t, db, ctx, "RU") // RU now on v2, resolved offline via offlineV2Resolver
+	db, pool, ctx := newIntegrationDB(t)
+	orderID := setupOrder(t, db, pool, ctx, "RU") // RU now on v2, resolved offline via offlineV2Resolver
 
 	// Simulate a previous pricing failure by flagging the order
-	flagOrderAsPricingError(t, db, ctx, orderID)
+	flagOrderAsPricingError(t, pool, ctx, orderID)
 
 	resolver := offlineV2Resolver(t)
 	service := NewBillingService(db, nil, &events.NoopEmitter{}, resolver, successExecutor())
@@ -413,16 +416,16 @@ func TestRetryPricingErrorsIntegration_SuccessfulRetry(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, count)
 
-	flag, status := readOrderState(t, db, ctx, orderID)
+	flag, status := readOrderState(t, pool, ctx, orderID)
 	assert.Equal(t, common.OrderFlagRenewed, flag)
 	assert.Equal(t, common.OrderStatusPaid, status)
 }
 
 func TestRetryPricingErrorsIntegration_StillFailsPricing(t *testing.T) {
-	db, ctx := newIntegrationDB(t)
-	orderID := setupOrder(t, db, ctx, "IL") // IL = v2 → resolver below forces it to fail
+	db, pool, ctx := newIntegrationDB(t)
+	orderID := setupOrder(t, db, pool, ctx, "IL") // IL = v2 → resolver below forces it to fail
 
-	flagOrderAsPricingError(t, db, ctx, orderID)
+	flagOrderAsPricingError(t, pool, ctx, orderID)
 
 	resolver := pricing.NewPriceResolver(
 		&failingProfileService{err: errors.New("forced profile error")},
@@ -435,7 +438,7 @@ func TestRetryPricingErrorsIntegration_StillFailsPricing(t *testing.T) {
 	assert.Equal(t, 0, count)
 
 	// Flag should remain pricing_error (re-set by flagPricingError)
-	flag, _ := readOrderState(t, db, ctx, orderID)
+	flag, _ := readOrderState(t, pool, ctx, orderID)
 	assert.Equal(t, common.OrderFlagPricingError, flag)
 }
 
@@ -444,9 +447,9 @@ func TestRetryPricingErrorsIntegration_DeclinedOrderIsUnflagged(t *testing.T) {
 	// flag because FinalizeRenewal only touches Flag on charge success.
 	// After the fix, pricing_error → torenew happens right after resolution, so a
 	// subsequent decline leaves the order with torenew, not pricing_error.
-	db, ctx := newIntegrationDB(t)
-	orderID := setupOrder(t, db, ctx, "RU") // RU now on v2, resolved offline via offlineV2Resolver
-	flagOrderAsPricingError(t, db, ctx, orderID)
+	db, pool, ctx := newIntegrationDB(t)
+	orderID := setupOrder(t, db, pool, ctx, "RU") // RU now on v2, resolved offline via offlineV2Resolver
+	flagOrderAsPricingError(t, pool, ctx, orderID)
 
 	resolver := offlineV2Resolver(t)
 	service := NewBillingService(db, nil, &events.NoopEmitter{}, resolver, declinedExecutor())
@@ -455,20 +458,20 @@ func TestRetryPricingErrorsIntegration_DeclinedOrderIsUnflagged(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0, count, "declined orders don't count as charged")
 
-	flag, status := readOrderState(t, db, ctx, orderID)
+	flag, status := readOrderState(t, pool, ctx, orderID)
 	assert.Equal(t, common.OrderFlagToRenew, flag, "resolved-but-declined order must not keep pricing_error flag")
 	assert.Equal(t, common.OrderStatusNoSuccess, status)
 }
 
 func TestRetryPricingErrorsIntegration_MixedOrders(t *testing.T) {
-	db, ctx := newIntegrationDB(t)
+	db, pool, ctx := newIntegrationDB(t)
 
 	// Order 1: pricing_error, RU → will resolve (v2) and succeed
-	order1 := setupOrder(t, db, ctx, "RU")
-	flagOrderAsPricingError(t, db, ctx, order1)
+	order1 := setupOrder(t, db, pool, ctx, "RU")
+	flagOrderAsPricingError(t, pool, ctx, order1)
 
 	// Order 2: torenew (normal flow) → NOT picked up by retry
-	order2 := setupOrder(t, db, ctx, "RU")
+	order2 := setupOrder(t, db, pool, ctx, "RU")
 
 	resolver := offlineV2Resolver(t)
 	service := NewBillingService(db, nil, &events.NoopEmitter{}, resolver, successExecutor())
@@ -477,9 +480,9 @@ func TestRetryPricingErrorsIntegration_MixedOrders(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, count, "only the pricing_error order should be retried")
 
-	flag1, _ := readOrderState(t, db, ctx, order1)
+	flag1, _ := readOrderState(t, pool, ctx, order1)
 	assert.Equal(t, common.OrderFlagRenewed, flag1, "retried order should be renewed")
 
-	flag2, _ := readOrderState(t, db, ctx, order2)
+	flag2, _ := readOrderState(t, pool, ctx, order2)
 	assert.Equal(t, common.OrderFlagToRenew, flag2, "torenew order should not be touched")
 }

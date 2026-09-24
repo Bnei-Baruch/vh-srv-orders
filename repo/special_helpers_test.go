@@ -13,7 +13,7 @@ import (
 func insertSpecial(t *testing.T, db *OrdersDB, ctx context.Context, keycloakID, email string, startOffset, endOffset time.Duration) int {
 	t.Helper()
 	var id int
-	err := db.QueryRow(ctx,
+	err := db.pool.QueryRow(ctx,
 		`INSERT INTO specials (keycloak_id, email, start_date, end_date, category)
 		 VALUES ($1, $2, $3, $4, 'test') RETURNING id`,
 		keycloakID, email, time.Now().Add(startOffset), time.Now().Add(endOffset),
@@ -25,7 +25,7 @@ func insertSpecial(t *testing.T, db *OrdersDB, ctx context.Context, keycloakID, 
 func specialEndDate(t *testing.T, db *OrdersDB, ctx context.Context, id int) time.Time {
 	t.Helper()
 	var end time.Time
-	require.NoError(t, db.QueryRow(ctx, `SELECT end_date FROM specials WHERE id=$1`, id).Scan(&end))
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT end_date FROM specials WHERE id=$1`, id).Scan(&end))
 	return end
 }
 

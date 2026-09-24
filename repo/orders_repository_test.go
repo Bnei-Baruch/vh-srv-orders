@@ -261,13 +261,20 @@ func reachableHandle(t reflect.Type, forbidden map[reflect.Type]string, seen map
 //
 //	func PoolOf(o *OrdersDB) *pgxpool.Pool   // repo.PoolOf(o.repo).Exec(…)
 //	var SharedPool *pgxpool.Pool             // repo.SharedPool.Exec(…)
+//	type Handles struct{ Pool *pgxpool.Pool }
+//	func NewHandles(o *OrdersDB) Handles     // repo.NewHandles(o.repo).Pool…
 //
-// This reads the package's own source for them. It matches the spelling of the
-// type, not the type, so it is the weakest of the three guards and its claim is
-// the narrowest: nobody added an obvious package-level accessor. A type alias,
-// a named wrapper, an import under another alias, or a var whose type is
-// inferred from its value all walk past — as does GetDBURL, which is exported
-// on purpose and hands out a URL rather than a live handle.
+// This reads the package's own source for them, resolving the package's own
+// named types as it goes — a free constructor's result is the bare identifier
+// Handles, and the selector that makes it a finding is over in the type
+// declaration. Nothing here needs a type checker: every name it resolves is
+// declared in these files.
+//
+// It matches the spelling of an imported type rather than the type, so it is
+// the weakest of the three guards. A type alias, an import under another
+// alias, or a var whose type is inferred from its value all walk past — as
+// does GetDBURL, which is exported on purpose and hands out a URL rather than
+// a live handle.
 //
 // Being weak is tolerable; being wrong is not. A guard that fails a legitimate
 // export teaches the next author to delete it, so the match is on the selector
@@ -277,9 +284,9 @@ func reachableHandle(t reflect.Type, forbidden map[reflect.Type]string, seen map
 // means type-checking the package from a test inside it, which costs a
 // dependency and seconds per run to catch shapes nobody writes by accident.
 func TestRepoPackage_DeclaresNoPoolAccessor(t *testing.T) {
-	spellings := []string{
-		"pgxpool.Pool", "pgxpool.Conn", "pgx.Conn",
-		"pgconn.PgConn", "pgx.Tx", "pgx.BatchResults",
+	spellings := map[string]bool{
+		"pgxpool.Pool": true, "pgxpool.Conn": true, "pgx.Conn": true,
+		"pgconn.PgConn": true, "pgx.Tx": true, "pgx.BatchResults": true,
 	}
 
 	names, err := filepath.Glob("*.go")
@@ -287,13 +294,37 @@ func TestRepoPackage_DeclaresNoPoolAccessor(t *testing.T) {
 	require.NotEmpty(t, names, "no sources found: the test must run in the package directory")
 
 	fset := token.NewFileSet()
+	files := make([]*ast.File, 0, len(names))
 	for _, name := range names {
 		if strings.HasSuffix(name, "_test.go") {
 			continue
 		}
 		f, err := parser.ParseFile(fset, name, nil, 0)
 		require.NoError(t, err)
+		files = append(files, f)
+	}
 
+	// Named types are resolved through this rather than by a type checker: a
+	// free constructor's result is the bare identifier Handles, and the
+	// selector that makes it a finding is in the type declaration elsewhere.
+	declared := map[string]ast.Expr{}
+	for _, f := range files {
+		for _, decl := range f.Decls {
+			g, ok := decl.(*ast.GenDecl)
+			if !ok || g.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range g.Specs {
+				if ts, ok := spec.(*ast.TypeSpec); ok {
+					declared[ts.Name.Name] = ts.Type
+				}
+			}
+		}
+	}
+
+	src := sourceWalk{spellings: spellings, declared: declared}
+
+	for _, f := range files {
 		for _, decl := range f.Decls {
 			switch d := decl.(type) {
 			case *ast.FuncDecl:
@@ -302,7 +333,7 @@ func TestRepoPackage_DeclaresNoPoolAccessor(t *testing.T) {
 					continue
 				}
 				for _, r := range d.Type.Results.List {
-					reportHandleSpelling(t, fset, name, d.Name.Name+"() returns", r.Type, spellings)
+					src.report(t, fset, d.Name.Name+"()", r.Type)
 				}
 			case *ast.GenDecl:
 				if d.Tok != token.VAR {
@@ -314,10 +345,9 @@ func TestRepoPackage_DeclaresNoPoolAccessor(t *testing.T) {
 						continue
 					}
 					for _, n := range vs.Names {
-						if !n.IsExported() {
-							continue
+						if n.IsExported() {
+							src.report(t, fset, n.Name, vs.Type)
 						}
-						reportHandleSpelling(t, fset, name, n.Name+" is", vs.Type, spellings)
 					}
 				}
 			}
@@ -325,43 +355,121 @@ func TestRepoPackage_DeclaresNoPoolAccessor(t *testing.T) {
 	}
 }
 
-func reportHandleSpelling(t *testing.T, fset *token.FileSet, file, what string, expr ast.Expr, spellings []string) {
+// sourceWalk is the reflect walk's shape over syntax: same question, same
+// exported-only rule, asked of what leaves the package through a free function
+// or a var rather than through *OrdersDB.
+type sourceWalk struct {
+	spellings map[string]bool
+	declared  map[string]ast.Expr
+}
+
+func (w sourceWalk) report(t *testing.T, fset *token.FileSet, what string, expr ast.Expr) {
 	t.Helper()
 
-	// Match the selector pair, not the rendered text. A substring test reads
-	// pgx.Tx inside pgx.TxOptions and pgx.Conn inside pgx.ConnConfig, and
-	// fails a helper handing out a transaction mode or a parsed DSN with a
-	// message about writing SQL — the false positive this file warns about
-	// two guards up. Walking the expression covers the wrappers that a
-	// prefix-strip would have to enumerate: *T, []T, map[K]T, func() T.
-	var found string
-	ast.Inspect(expr, func(n ast.Node) bool {
-		sel, ok := n.(*ast.SelectorExpr)
-		if !ok {
-			return true
-		}
-		pkg, ok := sel.X.(*ast.Ident)
-		if !ok {
-			return true
-		}
-		qualified := pkg.Name + "." + sel.Sel.Name
-		for _, spelling := range spellings {
-			if qualified == spelling {
-				found = qualified
-				return false
-			}
-		}
-		return true
-	})
-	if found == "" {
+	where, node := w.find(expr, map[string]bool{})
+	if node == nil {
 		return
 	}
+	var rendered bytes.Buffer
+	require.NoError(t, printer.Fprint(&rendered, fset, node))
 
-	var buf bytes.Buffer
-	require.NoError(t, printer.Fprint(&buf, fset, expr))
-
-	t.Errorf("%s:%d: repo.%s %s, so any package importing repo can write SQL "+
+	t.Errorf("%s:%d: repo.%s%s is %s, so any package importing repo can write SQL "+
 		"past this layer and skip its events — keep the handle unexported and "+
 		"export the operation instead",
-		file, fset.Position(expr.Pos()).Line, what, buf.String())
+		filepath.Base(fset.Position(expr.Pos()).Filename),
+		fset.Position(expr.Pos()).Line, what, where, rendered.String())
+}
+
+// find returns the selector path a caller would write to reach a handle, and
+// the node to name in the message — the outermost type that is entirely the
+// handle, so a map of pools reports as the map. node is nil when there is none.
+func (w sourceWalk) find(expr ast.Expr, seen map[string]bool) (where string, node ast.Expr) {
+	switch e := expr.(type) {
+	case *ast.SelectorExpr:
+		// The pair, not the rendered text: a substring test reads pgx.Tx
+		// inside pgx.TxOptions and fails a helper handing out a transaction
+		// mode with a message about writing SQL.
+		if pkg, ok := e.X.(*ast.Ident); ok {
+			if qualified := pkg.Name + "." + e.Sel.Name; w.spellings[qualified] {
+				return "", e
+			}
+		}
+	case *ast.StarExpr:
+		where, node := w.find(e.X, seen)
+		return wrap(e, where, node)
+	case *ast.ArrayType:
+		where, node := w.find(e.Elt, seen)
+		return wrap(e, where, node)
+	case *ast.Ellipsis:
+		where, node := w.find(e.Elt, seen)
+		return wrap(e, where, node)
+	case *ast.ChanType:
+		where, node := w.find(e.Value, seen)
+		return wrap(e, where, node)
+	case *ast.MapType:
+		if where, node := w.find(e.Key, seen); node != nil {
+			return wrap(e, where, node)
+		}
+		where, node := w.find(e.Value, seen)
+		return wrap(e, where, node)
+	case *ast.FuncType:
+		// Results only. A func that takes a pool hands nothing out.
+		if e.Results != nil {
+			for _, r := range e.Results.List {
+				if where, node := w.find(r.Type, seen); node != nil {
+					return "()" + where, node
+				}
+			}
+		}
+	case *ast.InterfaceType:
+		for _, m := range e.Methods.List {
+			ft, ok := m.Type.(*ast.FuncType)
+			if !ok || ft.Results == nil || len(m.Names) == 0 {
+				continue
+			}
+			for _, r := range ft.Results.List {
+				if where, node := w.find(r.Type, seen); node != nil {
+					return "." + m.Names[0].Name + "()" + where, node
+				}
+			}
+		}
+	case *ast.StructType:
+		for _, f := range e.Fields.List {
+			if len(f.Names) == 0 { // embedded: promotes across the boundary
+				if where, node := w.find(f.Type, seen); node != nil {
+					return where, node
+				}
+				continue
+			}
+			for _, n := range f.Names {
+				if !n.IsExported() {
+					continue // the compiler's half
+				}
+				if where, node := w.find(f.Type, seen); node != nil {
+					return "." + n.Name + where, node
+				}
+			}
+		}
+	case *ast.Ident:
+		// A type this package declares. Unexported ones count: another package
+		// cannot name handles, but it can hold the value a free function
+		// returns and select the exported field off it.
+		if seen[e.Name] {
+			return "", nil
+		}
+		seen[e.Name] = true
+		if def, ok := w.declared[e.Name]; ok {
+			return w.find(def, seen)
+		}
+	}
+	return "", nil
+}
+
+// wrap names the whole type in the message when nothing was crossed to reach
+// the handle: map[string]*pgxpool.Pool, not pgxpool.Pool.
+func wrap(outer ast.Expr, where string, node ast.Expr) (string, ast.Expr) {
+	if node != nil && where == "" {
+		return "", outer
+	}
+	return where, node
 }

@@ -85,12 +85,23 @@ func TestOrdersDB_DoesNotExposeThePool(t *testing.T) {
 //	func (o *OrdersDB) BeginTx(ctx) (pgx.Tx, error)     // a tx writes too
 //	func (o *OrdersDB) RawPgConn(ctx) (*pgconn.PgConn, error)
 //	func (o *OrdersDB) DBHandles() Handles              // wrapper holding one
+//	func (o *OrdersDB) Session() Session                // wrapper with an accessor
+//	func (o *OrdersDB) PoolFunc() func() *pgxpool.Pool  // closure over one
 //
-// So the walk recurses: through pointers, slices, maps and channels, and into
-// the exported fields of any struct it reaches. A handle three types deep is
-// still a handle the caller can get to. Unexported fields are skipped at every
-// level — the compiler already refuses those outside this package, which is
-// the same division of labour as between these two tests.
+// So the walk recurses through everything that can carry a value out:
+// pointers, slices, arrays, maps, channels, a func type's results, the
+// exported fields of any struct it reaches, and the exported methods of every
+// type it reaches — not only of *OrdersDB. A handle three types deep is still
+// a handle the caller can get to.
+//
+// Unexported fields are skipped, but only when they are not embedded: an
+// embedded unexported type promotes its exported fields across the package
+// boundary, and the selector another package writes never names it. reflect
+// reports such a field as unexported, because its name is the type's.
+//
+// An unexported field that is not embedded is genuinely the compiler's — the
+// same division of labour as between these two tests. An exported accessor on
+// that same type is not, which is why the method walk runs at every depth.
 //
 // The list is of concrete handle types, so it is exact rather than complete:
 // a method returning an interface that happens to carry Exec walks past.
@@ -110,12 +121,16 @@ func TestOrdersDB_HandsOutNoWritableHandle(t *testing.T) {
 
 	for i := 0; i < ptr.Elem().NumField(); i++ {
 		f := ptr.Elem().Field(i)
-		if !f.IsExported() {
+		if !f.IsExported() && !f.Anonymous {
 			continue
 		}
+		sel := "." + f.Name
+		if f.Anonymous {
+			sel = "" // Promoted: the selector a caller writes skips the name.
+		}
 		if where, what := reachableHandle(f.Type, forbidden, map[reflect.Type]bool{}); what != "" {
-			t.Errorf("*OrdersDB.%s%s is %s, so anything holding the concrete type can "+
-				"write SQL past the repo layer and skip its events", f.Name, where, what)
+			t.Errorf("*OrdersDB%s%s is %s, so anything holding the concrete type can "+
+				"write SQL past the repo layer and skip its events", sel, where, what)
 		}
 	}
 
@@ -149,20 +164,56 @@ func reachableHandle(t reflect.Type, forbidden map[reflect.Type]string, seen map
 
 	switch t.Kind() {
 	case reflect.Pointer, reflect.Slice, reflect.Array, reflect.Chan:
-		return reachableHandle(t.Elem(), forbidden, seen)
+		if where, what := reachableHandle(t.Elem(), forbidden, seen); what != "" {
+			return where, what
+		}
 	case reflect.Map:
 		if where, what := reachableHandle(t.Key(), forbidden, seen); what != "" {
 			return where, what
 		}
-		return reachableHandle(t.Elem(), forbidden, seen)
+		if where, what := reachableHandle(t.Elem(), forbidden, seen); what != "" {
+			return where, what
+		}
+	case reflect.Func:
+		// Results only. A func that takes a pool hands nothing out.
+		for i := 0; i < t.NumOut(); i++ {
+			if where, what := reachableHandle(t.Out(i), forbidden, seen); what != "" {
+				return "()" + where, what
+			}
+		}
 	case reflect.Struct:
 		for i := 0; i < t.NumField(); i++ {
 			f := t.Field(i)
-			if !f.IsExported() {
+			// An embedded unexported type still promotes its exported fields
+			// across the package boundary: the selector another package writes
+			// never names the embedded type. reflect reports the field itself
+			// as unexported, because its name is the type's.
+			if !f.IsExported() && !f.Anonymous {
 				continue
 			}
 			if where, what := reachableHandle(f.Type, forbidden, seen); what != "" {
+				if f.Anonymous {
+					// Promoted: the selector a caller writes skips the name.
+					return where, what
+				}
 				return "." + f.Name + where, what
+			}
+		}
+	}
+
+	// Methods, of every type reached and not only of *OrdersDB. A type whose
+	// own field is unexported can still have an exported accessor, and that
+	// accessor crosses the boundary exactly as the top-level pass does.
+	// Pointer receivers are in the method set of *T, value receivers in both.
+	mt := t
+	if t.Kind() != reflect.Pointer {
+		mt = reflect.PointerTo(t)
+	}
+	for i := 0; i < mt.NumMethod(); i++ {
+		m := mt.Method(i)
+		for j := 0; j < m.Type.NumOut(); j++ {
+			if where, what := reachableHandle(m.Type.Out(j), forbidden, seen); what != "" {
+				return "." + m.Name + "()" + where, what
 			}
 		}
 	}

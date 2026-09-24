@@ -1,8 +1,15 @@
 package repo
 
 import (
+	"bytes"
 	"context"
+	"go/ast"
+	"go/parser"
+	"go/printer"
+	"go/token"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -246,4 +253,88 @@ func reachableHandle(t reflect.Type, forbidden map[reflect.Type]string, seen map
 		}
 	}
 	return "", ""
+}
+
+// The reflect walk above starts from a type, so it sees *OrdersDB's surface and
+// nothing else. A package-level declaration hands the same pool across the same
+// boundary and is invisible from there:
+//
+//	func PoolOf(o *OrdersDB) *pgxpool.Pool   // repo.PoolOf(o.repo).Exec(…)
+//	var SharedPool *pgxpool.Pool             // repo.SharedPool.Exec(…)
+//
+// This reads the package's own source for them. It matches the spelling of the
+// type, not the type, so it is the weakest of the three guards and its claim is
+// the narrowest: nobody added an obvious package-level accessor. A type alias,
+// a named wrapper, or a var whose type is inferred from its value all walk past
+// — as does GetDBURL, which is exported on purpose and hands out a URL rather
+// than a live handle.
+//
+// Spelling-matching is the right weight here anyway: resolving types properly
+// means type-checking the package from a test inside it, which costs a
+// dependency and seconds per run to catch shapes nobody writes by accident.
+func TestRepoPackage_DeclaresNoPoolAccessor(t *testing.T) {
+	spellings := []string{
+		"pgxpool.Pool", "pgxpool.Conn", "pgx.Conn",
+		"pgconn.PgConn", "pgx.Tx", "pgx.BatchResults",
+	}
+
+	names, err := filepath.Glob("*.go")
+	require.NoError(t, err)
+	require.NotEmpty(t, names, "no sources found: the test must run in the package directory")
+
+	fset := token.NewFileSet()
+	for _, name := range names {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, name, nil, 0)
+		require.NoError(t, err)
+
+		for _, decl := range f.Decls {
+			switch d := decl.(type) {
+			case *ast.FuncDecl:
+				// Methods are the reflect walk's; only free functions here.
+				if d.Recv != nil || !d.Name.IsExported() || d.Type.Results == nil {
+					continue
+				}
+				for _, r := range d.Type.Results.List {
+					reportHandleSpelling(t, fset, name, d.Name.Name+"() returns", r.Type, spellings)
+				}
+			case *ast.GenDecl:
+				if d.Tok != token.VAR {
+					continue
+				}
+				for _, spec := range d.Specs {
+					vs, ok := spec.(*ast.ValueSpec)
+					if !ok || vs.Type == nil {
+						continue
+					}
+					for _, n := range vs.Names {
+						if !n.IsExported() {
+							continue
+						}
+						reportHandleSpelling(t, fset, name, n.Name+" is", vs.Type, spellings)
+					}
+				}
+			}
+		}
+	}
+}
+
+func reportHandleSpelling(t *testing.T, fset *token.FileSet, file, what string, expr ast.Expr, spellings []string) {
+	t.Helper()
+
+	var buf bytes.Buffer
+	require.NoError(t, printer.Fprint(&buf, fset, expr))
+	rendered := buf.String()
+
+	for _, spelling := range spellings {
+		if strings.Contains(rendered, spelling) {
+			t.Errorf("%s:%d: repo.%s %s, so any package importing repo can write SQL "+
+				"past this layer and skip its events — keep the handle unexported and "+
+				"export the operation instead",
+				file, fset.Position(expr.Pos()).Line, what, rendered)
+			return
+		}
+	}
 }

@@ -77,13 +77,13 @@ func (o *OrdersDB) CreateRenewalPayment(ctx context.Context, data *RenewalData, 
 	}
 
 	createString, numString, createQueryArgs := preparePaymentCreateQuery(p)
-	if err := o.QueryRow(ctx, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createString, numString),
+	if err := o.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&p.ID); err != nil {
 		return nil, fmt.Errorf("o.QueryRow.Scan [insert payment]: %w", err)
 	}
 
 	createPelecardString, numPelecardString, createPelecardQueryArgs := preparePelecardPaymentCreateQuery(p, p.ID)
-	_, err := o.Exec(ctx, fmt.Sprintf(`INSERT INTO payments_pelecard (%s) VALUES (%s)`, createPelecardString, numPelecardString),
+	_, err := o.pool.Exec(ctx, fmt.Sprintf(`INSERT INTO payments_pelecard (%s) VALUES (%s)`, createPelecardString, numPelecardString),
 		createPelecardQueryArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("o.Exec [insert pelecard]: %w", err)
@@ -104,7 +104,7 @@ func (o *OrdersDB) CreateRenewalPayment(ctx context.Context, data *RenewalData, 
 	}
 
 	toUpdate, toUpdateArgs := preparePaymentUpdateQuery(p)
-	_, err = o.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=%d`, toUpdate, p.ID), toUpdateArgs...)
+	_, err = o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=%d`, toUpdate, p.ID), toUpdateArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("o.Exec [update payment]: %w", err)
 	}
@@ -116,7 +116,7 @@ func (o *OrdersDB) CreateRenewalPayment(ctx context.Context, data *RenewalData, 
 // Updates payment status, order flag/status, and pelecard_payment record.
 // Does NOT emit events — the billing domain is responsible for that.
 func (o *OrdersDB) FinalizeRenewal(ctx context.Context, orderID uint, payment *Payment) error {
-	tx, err := o.Begin(ctx)
+	tx, err := o.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("%w: o.Begin: %w", common.ErrPostPayment, err)
 	}

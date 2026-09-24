@@ -34,12 +34,12 @@ func TestCreateOrder_AmountItemFloat(t *testing.T) {
 		AmountItem: null.Float64From(24.75),
 	}
 	createString, numString, createQueryArgs := prepareOrderCreateQuery(order)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order.ID)
 	require.NoError(t, err)
 
 	var amountItem null.Float64
-	err = db.QueryRow(ctx, `SELECT amount_item FROM orders WHERE id = $1`, order.ID).Scan(&amountItem)
+	err = db.pool.QueryRow(ctx, `SELECT amount_item FROM orders WHERE id = $1`, order.ID).Scan(&amountItem)
 	require.NoError(t, err)
 	assert.True(t, amountItem.Valid)
 	assert.Equal(t, 24.75, amountItem.Float64)
@@ -62,7 +62,7 @@ func TestUpdateOrder_AmountItemFloat(t *testing.T) {
 		Amount:    null.Float64From(55.0),
 	}
 	createString, numString, createQueryArgs := prepareOrderCreateQuery(order)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order.ID)
 	require.NoError(t, err)
 
@@ -70,7 +70,7 @@ func TestUpdateOrder_AmountItemFloat(t *testing.T) {
 	require.NoError(t, err)
 
 	var amountItem null.Float64
-	err = db.QueryRow(ctx, `SELECT amount_item FROM orders WHERE id = $1`, order.ID).Scan(&amountItem)
+	err = db.pool.QueryRow(ctx, `SELECT amount_item FROM orders WHERE id = $1`, order.ID).Scan(&amountItem)
 	require.NoError(t, err)
 	assert.True(t, amountItem.Valid)
 	assert.Equal(t, 49.99, amountItem.Float64)
@@ -97,7 +97,7 @@ func TestGetTokensForOrders(t *testing.T) {
 		Amount:    null.Float64From(100.0),
 	}
 	createString, numString, createQueryArgs := prepareOrderCreateQuery(order1)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order1.ID)
 	require.NoError(t, err)
 
@@ -106,7 +106,7 @@ func TestGetTokensForOrders(t *testing.T) {
 		Amount:    null.Float64From(200.0),
 	}
 	createString, numString, createQueryArgs = prepareOrderCreateQuery(order2)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order2.ID)
 	require.NoError(t, err)
 
@@ -115,7 +115,7 @@ func TestGetTokensForOrders(t *testing.T) {
 		Amount:    null.Float64From(300.0),
 	}
 	createString, numString, createQueryArgs = prepareOrderCreateQuery(order3)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order3.ID)
 	require.NoError(t, err)
 
@@ -126,7 +126,7 @@ func TestGetTokensForOrders(t *testing.T) {
 		PaymentStatus: null.StringFrom("success"),
 	}
 	createPString, numPString, createPArgs := preparePaymentCreateQuery(payment1)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createPString, numPString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createPString, numPString),
 		createPArgs...).Scan(&payment1.ID)
 	require.NoError(t, err)
 
@@ -137,7 +137,7 @@ func TestGetTokensForOrders(t *testing.T) {
 		PaymentStatus: null.StringFrom("success"),
 	}
 	createPString, numPString, createPArgs = preparePaymentCreateQuery(payment1b)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createPString, numPString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createPString, numPString),
 		createPArgs...).Scan(&payment1b.ID)
 	require.NoError(t, err)
 
@@ -147,7 +147,7 @@ func TestGetTokensForOrders(t *testing.T) {
 		PaymentStatus: null.StringFrom("success"),
 	}
 	createPString, numPString, createPArgs = preparePaymentCreateQuery(payment2)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createPString, numPString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createPString, numPString),
 		createPArgs...).Scan(&payment2.ID)
 	require.NoError(t, err)
 
@@ -191,7 +191,7 @@ func TestGetTokensForOrdersWithCardDetailsFallback(t *testing.T) {
 		Amount:    null.Float64From(100.0),
 	}
 	createString, numString, createQueryArgs := prepareOrderCreateQuery(orderWithCard)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&orderWithCard.ID)
 	require.NoError(t, err)
 
@@ -208,7 +208,7 @@ func TestGetTokensForOrdersWithCardDetailsFallback(t *testing.T) {
 	require.NoError(t, err)
 
 	// Link card to order
-	_, err = db.Exec(ctx, `UPDATE orders SET card_details_id = $1 WHERE id = $2`, cardDetailsID1, orderWithCard.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET card_details_id = $1 WHERE id = $2`, cardDetailsID1, orderWithCard.ID)
 	require.NoError(t, err)
 
 	// Create a payment for this order (should be ignored in favor of card token)
@@ -218,7 +218,7 @@ func TestGetTokensForOrdersWithCardDetailsFallback(t *testing.T) {
 		PaymentStatus: null.StringFrom("success"),
 	}
 	createPString, numPString, createPArgs := preparePaymentCreateQuery(paymentWithCard)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createPString, numPString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createPString, numPString),
 		createPArgs...).Scan(&paymentWithCard.ID)
 	require.NoError(t, err)
 
@@ -228,7 +228,7 @@ func TestGetTokensForOrdersWithCardDetailsFallback(t *testing.T) {
 		Amount:    null.Float64From(200.0),
 	}
 	createString, numString, createQueryArgs = prepareOrderCreateQuery(orderWithInactiveCard)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&orderWithInactiveCard.ID)
 	require.NoError(t, err)
 
@@ -243,7 +243,7 @@ func TestGetTokensForOrdersWithCardDetailsFallback(t *testing.T) {
 	cardDetailsID2, err := db.CreateCardDetailsAndGetId(ctx, cardDetails2)
 	require.NoError(t, err)
 
-	_, err = db.Exec(ctx, `UPDATE orders SET card_details_id = $1 WHERE id = $2`, cardDetailsID2, orderWithInactiveCard.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET card_details_id = $1 WHERE id = $2`, cardDetailsID2, orderWithInactiveCard.ID)
 	require.NoError(t, err)
 
 	paymentInactiveCard := Payment{
@@ -252,7 +252,7 @@ func TestGetTokensForOrdersWithCardDetailsFallback(t *testing.T) {
 		PaymentStatus: null.StringFrom("success"),
 	}
 	createPString, numPString, createPArgs = preparePaymentCreateQuery(paymentInactiveCard)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createPString, numPString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createPString, numPString),
 		createPArgs...).Scan(&paymentInactiveCard.ID)
 	require.NoError(t, err)
 
@@ -262,7 +262,7 @@ func TestGetTokensForOrdersWithCardDetailsFallback(t *testing.T) {
 		Amount:    null.Float64From(300.0),
 	}
 	createString, numString, createQueryArgs = prepareOrderCreateQuery(orderWithNoTokenCard)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&orderWithNoTokenCard.ID)
 	require.NoError(t, err)
 
@@ -277,7 +277,7 @@ func TestGetTokensForOrdersWithCardDetailsFallback(t *testing.T) {
 	cardDetailsID3, err := db.CreateCardDetailsAndGetId(ctx, cardDetails3)
 	require.NoError(t, err)
 
-	_, err = db.Exec(ctx, `UPDATE orders SET card_details_id = $1 WHERE id = $2`, cardDetailsID3, orderWithNoTokenCard.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET card_details_id = $1 WHERE id = $2`, cardDetailsID3, orderWithNoTokenCard.ID)
 	require.NoError(t, err)
 
 	paymentNoTokenCard := Payment{
@@ -286,7 +286,7 @@ func TestGetTokensForOrdersWithCardDetailsFallback(t *testing.T) {
 		PaymentStatus: null.StringFrom("success"),
 	}
 	createPString, numPString, createPArgs = preparePaymentCreateQuery(paymentNoTokenCard)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createPString, numPString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createPString, numPString),
 		createPArgs...).Scan(&paymentNoTokenCard.ID)
 	require.NoError(t, err)
 
@@ -296,7 +296,7 @@ func TestGetTokensForOrdersWithCardDetailsFallback(t *testing.T) {
 		Amount:    null.Float64From(400.0),
 	}
 	createString, numString, createQueryArgs = prepareOrderCreateQuery(orderWithDeletedCard)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&orderWithDeletedCard.ID)
 	require.NoError(t, err)
 
@@ -311,7 +311,7 @@ func TestGetTokensForOrdersWithCardDetailsFallback(t *testing.T) {
 	cardDetailsID4, err := db.CreateCardDetailsAndGetId(ctx, cardDetails4)
 	require.NoError(t, err)
 
-	_, err = db.Exec(ctx, `UPDATE orders SET card_details_id = $1 WHERE id = $2`, cardDetailsID4, orderWithDeletedCard.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET card_details_id = $1 WHERE id = $2`, cardDetailsID4, orderWithDeletedCard.ID)
 	require.NoError(t, err)
 
 	// Soft delete the card
@@ -324,7 +324,7 @@ func TestGetTokensForOrdersWithCardDetailsFallback(t *testing.T) {
 		PaymentStatus: null.StringFrom("success"),
 	}
 	createPString, numPString, createPArgs = preparePaymentCreateQuery(paymentDeletedCard)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createPString, numPString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createPString, numPString),
 		createPArgs...).Scan(&paymentDeletedCard.ID)
 	require.NoError(t, err)
 
@@ -334,7 +334,7 @@ func TestGetTokensForOrdersWithCardDetailsFallback(t *testing.T) {
 		Amount:    null.Float64From(500.0),
 	}
 	createString, numString, createQueryArgs = prepareOrderCreateQuery(orderWithoutCard)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&orderWithoutCard.ID)
 	require.NoError(t, err)
 
@@ -344,7 +344,7 @@ func TestGetTokensForOrdersWithCardDetailsFallback(t *testing.T) {
 		PaymentStatus: null.StringFrom("success"),
 	}
 	createPString, numPString, createPArgs = preparePaymentCreateQuery(paymentNoCard)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createPString, numPString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createPString, numPString),
 		createPArgs...).Scan(&paymentNoCard.ID)
 	require.NoError(t, err)
 
@@ -354,7 +354,7 @@ func TestGetTokensForOrdersWithCardDetailsFallback(t *testing.T) {
 		Amount:    null.Float64From(600.0),
 	}
 	createString, numString, createQueryArgs = prepareOrderCreateQuery(orderNoCardNoPayment)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&orderNoCardNoPayment.ID)
 	require.NoError(t, err)
 
@@ -364,7 +364,7 @@ func TestGetTokensForOrdersWithCardDetailsFallback(t *testing.T) {
 		Amount:    null.Float64From(700.0),
 	}
 	createString, numString, createQueryArgs = prepareOrderCreateQuery(orderWithFailedPayment)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&orderWithFailedPayment.ID)
 	require.NoError(t, err)
 
@@ -374,7 +374,7 @@ func TestGetTokensForOrdersWithCardDetailsFallback(t *testing.T) {
 		PaymentStatus: null.StringFrom("failed"), // non-success status
 	}
 	createPString, numPString, createPArgs = preparePaymentCreateQuery(paymentFailed)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createPString, numPString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createPString, numPString),
 		createPArgs...).Scan(&paymentFailed.ID)
 	require.NoError(t, err)
 
@@ -424,7 +424,7 @@ func TestClearAllFlags(t *testing.T) {
 		Flag:      null.StringFrom(common.OrderFlagToRenew),
 	}
 	createString, numString, createQueryArgs := prepareOrderCreateQuery(order1)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order1.ID)
 	require.NoError(t, err)
 
@@ -434,7 +434,7 @@ func TestClearAllFlags(t *testing.T) {
 		Flag:      null.StringFrom(common.OrderFlagSkip),
 	}
 	createString, numString, createQueryArgs = prepareOrderCreateQuery(order2)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order2.ID)
 	require.NoError(t, err)
 
@@ -444,21 +444,21 @@ func TestClearAllFlags(t *testing.T) {
 		Flag:      null.StringFrom("other_flag"),
 	}
 	createString, numString, createQueryArgs = prepareOrderCreateQuery(order3)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order3.ID)
 	require.NoError(t, err)
 
 	// Verify flags are set
 	var flag1, flag2, flag3 null.String
-	err = db.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order1.ID).Scan(&flag1)
+	err = db.pool.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order1.ID).Scan(&flag1)
 	require.NoError(t, err)
 	assert.Equal(t, common.OrderFlagToRenew, flag1.String)
 
-	err = db.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order2.ID).Scan(&flag2)
+	err = db.pool.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order2.ID).Scan(&flag2)
 	require.NoError(t, err)
 	assert.Equal(t, common.OrderFlagSkip, flag2.String)
 
-	err = db.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order3.ID).Scan(&flag3)
+	err = db.pool.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order3.ID).Scan(&flag3)
 	require.NoError(t, err)
 	assert.Equal(t, "other_flag", flag3.String)
 
@@ -467,15 +467,15 @@ func TestClearAllFlags(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify all flags are cleared
-	err = db.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order1.ID).Scan(&flag1)
+	err = db.pool.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order1.ID).Scan(&flag1)
 	require.NoError(t, err)
 	assert.Equal(t, "", flag1.String)
 
-	err = db.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order2.ID).Scan(&flag2)
+	err = db.pool.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order2.ID).Scan(&flag2)
 	require.NoError(t, err)
 	assert.Equal(t, "", flag2.String)
 
-	err = db.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order3.ID).Scan(&flag3)
+	err = db.pool.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order3.ID).Scan(&flag3)
 	require.NoError(t, err)
 	assert.Equal(t, "", flag3.String)
 }
@@ -510,12 +510,12 @@ func TestUpdateOrdersUserKeyFromAccounts(t *testing.T) {
 		Amount:    null.Float64From(100.0),
 	}
 	createString, numString, createQueryArgs := prepareOrderCreateQuery(order1)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order1.ID)
 	require.NoError(t, err)
 
 	// Set order1's userkey to something different
-	_, err = db.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, "old_userkey1", order1.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, "old_userkey1", order1.ID)
 	require.NoError(t, err)
 
 	order2 := Order{
@@ -523,17 +523,17 @@ func TestUpdateOrdersUserKeyFromAccounts(t *testing.T) {
 		Amount:    null.Float64From(200.0),
 	}
 	createString, numString, createQueryArgs = prepareOrderCreateQuery(order2)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order2.ID)
 	require.NoError(t, err)
 
 	// Verify initial state
 	var userkey1, userkey2 null.String
-	err = db.QueryRow(ctx, `SELECT userkey FROM orders WHERE id = $1`, order1.ID).Scan(&userkey1)
+	err = db.pool.QueryRow(ctx, `SELECT userkey FROM orders WHERE id = $1`, order1.ID).Scan(&userkey1)
 	require.NoError(t, err)
 	assert.Equal(t, "old_userkey1", userkey1.String)
 
-	err = db.QueryRow(ctx, `SELECT userkey FROM orders WHERE id = $1`, order2.ID).Scan(&userkey2)
+	err = db.pool.QueryRow(ctx, `SELECT userkey FROM orders WHERE id = $1`, order2.ID).Scan(&userkey2)
 	require.NoError(t, err)
 	// order2 might have null or empty userkey initially
 
@@ -542,11 +542,11 @@ func TestUpdateOrdersUserKeyFromAccounts(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify userkeys were updated
-	err = db.QueryRow(ctx, `SELECT userkey FROM orders WHERE id = $1`, order1.ID).Scan(&userkey1)
+	err = db.pool.QueryRow(ctx, `SELECT userkey FROM orders WHERE id = $1`, order1.ID).Scan(&userkey1)
 	require.NoError(t, err)
 	assert.Equal(t, "userkey1", userkey1.String, "Order1 userkey should be updated from account1")
 
-	err = db.QueryRow(ctx, `SELECT userkey FROM orders WHERE id = $1`, order2.ID).Scan(&userkey2)
+	err = db.pool.QueryRow(ctx, `SELECT userkey FROM orders WHERE id = $1`, order2.ID).Scan(&userkey2)
 	require.NoError(t, err)
 	assert.Equal(t, "userkey2", userkey2.String, "Order2 userkey should be updated from account2")
 }
@@ -580,7 +580,7 @@ func TestGetPaidOrdersCount(t *testing.T) {
 		PaymentDate: null.TimeFrom(time.Date(year, time.Month(month), 15, 12, 0, 0, 0, time.UTC)),
 	}
 	createString, numString, createQueryArgs := prepareOrderCreateQuery(order1)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order1.ID)
 	require.NoError(t, err)
 
@@ -592,7 +592,7 @@ func TestGetPaidOrdersCount(t *testing.T) {
 		PaymentDate: null.TimeFrom(time.Date(year, time.Month(month), 20, 12, 0, 0, 0, time.UTC)),
 	}
 	createString, numString, createQueryArgs = prepareOrderCreateQuery(order2)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order2.ID)
 	require.NoError(t, err)
 
@@ -605,7 +605,7 @@ func TestGetPaidOrdersCount(t *testing.T) {
 		PaymentDate: null.TimeFrom(time.Date(year, time.Month(month-1), 28, 12, 0, 0, 0, time.UTC)), // Previous month
 	}
 	createString, numString, createQueryArgs = prepareOrderCreateQuery(order3)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order3.ID)
 	require.NoError(t, err)
 
@@ -618,7 +618,7 @@ func TestGetPaidOrdersCount(t *testing.T) {
 		PaymentDate: null.TimeFrom(time.Date(year, time.Month(month), 25, 12, 0, 0, 0, time.UTC)),
 	}
 	createString, numString, createQueryArgs = prepareOrderCreateQuery(order4)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order4.ID)
 	require.NoError(t, err)
 
@@ -631,7 +631,7 @@ func TestGetPaidOrdersCount(t *testing.T) {
 		PaymentDate: null.TimeFrom(time.Date(year, time.Month(month), 18, 12, 0, 0, 0, time.UTC)),
 	}
 	createString, numString, createQueryArgs = prepareOrderCreateQuery(order5)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order5.ID)
 	require.NoError(t, err)
 
@@ -671,10 +671,10 @@ func TestGetOrdersToSkipDouble(t *testing.T) {
 		PaymentDate: null.TimeFrom(time.Date(year, time.Month(month), 15, 12, 0, 0, 0, time.UTC)),
 	}
 	createString, numString, createQueryArgs := prepareOrderCreateQuery(order1)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order1.ID)
 	require.NoError(t, err)
-	_, err = db.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey1, order1.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey1, order1.ID)
 	require.NoError(t, err)
 
 	order2 := Order{
@@ -685,10 +685,10 @@ func TestGetOrdersToSkipDouble(t *testing.T) {
 		PaymentDate: null.TimeFrom(time.Date(year, time.Month(month), 20, 12, 0, 0, 0, time.UTC)),
 	}
 	createString, numString, createQueryArgs = prepareOrderCreateQuery(order2)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order2.ID)
 	require.NoError(t, err)
-	_, err = db.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey1, order2.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey1, order2.ID)
 	require.NoError(t, err)
 
 	// User with one paid and one cancelled order (should be included - 2 total)
@@ -701,10 +701,10 @@ func TestGetOrdersToSkipDouble(t *testing.T) {
 		PaymentDate: null.TimeFrom(time.Date(year, time.Month(month), 10, 12, 0, 0, 0, time.UTC)),
 	}
 	createString, numString, createQueryArgs = prepareOrderCreateQuery(order3)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order3.ID)
 	require.NoError(t, err)
-	_, err = db.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey2, order3.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey2, order3.ID)
 	require.NoError(t, err)
 
 	order4 := Order{
@@ -715,10 +715,10 @@ func TestGetOrdersToSkipDouble(t *testing.T) {
 		PaymentDate: null.TimeFrom(time.Date(year, time.Month(month), 12, 12, 0, 0, 0, time.UTC)),
 	}
 	createString, numString, createQueryArgs = prepareOrderCreateQuery(order4)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order4.ID)
 	require.NoError(t, err)
-	_, err = db.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey2, order4.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey2, order4.ID)
 	require.NoError(t, err)
 
 	// User with only one paid order (should NOT be included)
@@ -731,10 +731,10 @@ func TestGetOrdersToSkipDouble(t *testing.T) {
 		PaymentDate: null.TimeFrom(time.Date(year, time.Month(month), 18, 12, 0, 0, 0, time.UTC)),
 	}
 	createString, numString, createQueryArgs = prepareOrderCreateQuery(order5)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order5.ID)
 	require.NoError(t, err)
-	_, err = db.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey3, order5.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey3, order5.ID)
 	require.NoError(t, err)
 
 	// User with orders outside the month (should NOT be included)
@@ -747,10 +747,10 @@ func TestGetOrdersToSkipDouble(t *testing.T) {
 		PaymentDate: null.TimeFrom(time.Date(year, time.Month(month-1), 28, 12, 0, 0, 0, time.UTC)), // Previous month
 	}
 	createString, numString, createQueryArgs = prepareOrderCreateQuery(order6)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order6.ID)
 	require.NoError(t, err)
-	_, err = db.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey4, order6.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey4, order6.ID)
 	require.NoError(t, err)
 
 	order7 := Order{
@@ -761,10 +761,10 @@ func TestGetOrdersToSkipDouble(t *testing.T) {
 		PaymentDate: null.TimeFrom(time.Date(year, time.Month(month-1), 29, 12, 0, 0, 0, time.UTC)), // Previous month
 	}
 	createString, numString, createQueryArgs = prepareOrderCreateQuery(order7)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order7.ID)
 	require.NoError(t, err)
-	_, err = db.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey4, order7.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey4, order7.ID)
 	require.NoError(t, err)
 
 	// Get userkeys to skip
@@ -810,10 +810,10 @@ func TestGetOrdersToSkipFresh(t *testing.T) {
 		Flag:        null.StringFrom(""), // Empty flag
 	}
 	createString, numString, createQueryArgs := prepareOrderCreateQuery(order1)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order1.ID)
 	require.NoError(t, err)
-	_, err = db.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey1, order1.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey1, order1.ID)
 	require.NoError(t, err)
 
 	// User with cancelled order and empty flag (should be included)
@@ -827,10 +827,10 @@ func TestGetOrdersToSkipFresh(t *testing.T) {
 		Flag:        null.StringFrom(""), // Empty flag
 	}
 	createString, numString, createQueryArgs = prepareOrderCreateQuery(order2)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order2.ID)
 	require.NoError(t, err)
-	_, err = db.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey2, order2.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey2, order2.ID)
 	require.NoError(t, err)
 
 	// User with paid order but non-empty flag (should NOT be included)
@@ -844,10 +844,10 @@ func TestGetOrdersToSkipFresh(t *testing.T) {
 		Flag:        null.StringFrom(common.OrderFlagSkip), // Non-empty flag
 	}
 	createString, numString, createQueryArgs = prepareOrderCreateQuery(order3)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order3.ID)
 	require.NoError(t, err)
-	_, err = db.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey3, order3.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey3, order3.ID)
 	require.NoError(t, err)
 
 	// User with order outside the month (should NOT be included)
@@ -861,10 +861,10 @@ func TestGetOrdersToSkipFresh(t *testing.T) {
 		Flag:        null.StringFrom(""),                                                            // Empty flag
 	}
 	createString, numString, createQueryArgs = prepareOrderCreateQuery(order4)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order4.ID)
 	require.NoError(t, err)
-	_, err = db.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey4, order4.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey4, order4.ID)
 	require.NoError(t, err)
 
 	// User with different product type (should NOT be included)
@@ -878,10 +878,10 @@ func TestGetOrdersToSkipFresh(t *testing.T) {
 		Flag:        null.StringFrom(""), // Empty flag
 	}
 	createString, numString, createQueryArgs = prepareOrderCreateQuery(order5)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order5.ID)
 	require.NoError(t, err)
-	_, err = db.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey5, order5.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey5, order5.ID)
 	require.NoError(t, err)
 
 	// Get userkeys to skip
@@ -921,10 +921,10 @@ func TestSkipOrdersByUserKey(t *testing.T) {
 		Flag:      null.StringFrom(common.OrderFlagToRenew),
 	}
 	createString, numString, createQueryArgs := prepareOrderCreateQuery(order1)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order1.ID)
 	require.NoError(t, err)
-	_, err = db.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey, order1.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey, order1.ID)
 	require.NoError(t, err)
 
 	order2 := Order{
@@ -933,10 +933,10 @@ func TestSkipOrdersByUserKey(t *testing.T) {
 		Flag:      null.StringFrom(common.OrderFlagToRenew),
 	}
 	createString, numString, createQueryArgs = prepareOrderCreateQuery(order2)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order2.ID)
 	require.NoError(t, err)
-	_, err = db.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey, order2.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey, order2.ID)
 	require.NoError(t, err)
 
 	// Create order with "torenew" flag but different userkey (should NOT be updated)
@@ -946,10 +946,10 @@ func TestSkipOrdersByUserKey(t *testing.T) {
 		Flag:      null.StringFrom(common.OrderFlagToRenew),
 	}
 	createString, numString, createQueryArgs = prepareOrderCreateQuery(order3)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order3.ID)
 	require.NoError(t, err)
-	_, err = db.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, "different_userkey", order3.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, "different_userkey", order3.ID)
 	require.NoError(t, err)
 
 	// Create order with same userkey but different flag (should NOT be updated)
@@ -959,27 +959,27 @@ func TestSkipOrdersByUserKey(t *testing.T) {
 		Flag:      null.StringFrom(common.OrderFlagSkip),
 	}
 	createString, numString, createQueryArgs = prepareOrderCreateQuery(order4)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order4.ID)
 	require.NoError(t, err)
-	_, err = db.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey, order4.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey, order4.ID)
 	require.NoError(t, err)
 
 	// Verify initial state
 	var flag1, flag2, flag3, flag4 null.String
-	err = db.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order1.ID).Scan(&flag1)
+	err = db.pool.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order1.ID).Scan(&flag1)
 	require.NoError(t, err)
 	assert.Equal(t, common.OrderFlagToRenew, flag1.String)
 
-	err = db.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order2.ID).Scan(&flag2)
+	err = db.pool.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order2.ID).Scan(&flag2)
 	require.NoError(t, err)
 	assert.Equal(t, common.OrderFlagToRenew, flag2.String)
 
-	err = db.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order3.ID).Scan(&flag3)
+	err = db.pool.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order3.ID).Scan(&flag3)
 	require.NoError(t, err)
 	assert.Equal(t, common.OrderFlagToRenew, flag3.String)
 
-	err = db.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order4.ID).Scan(&flag4)
+	err = db.pool.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order4.ID).Scan(&flag4)
 	require.NoError(t, err)
 	assert.Equal(t, common.OrderFlagSkip, flag4.String)
 
@@ -989,19 +989,19 @@ func TestSkipOrdersByUserKey(t *testing.T) {
 	assert.Equal(t, 2, rowsAffected, "Should update 2 orders")
 
 	// Verify orders were updated correctly
-	err = db.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order1.ID).Scan(&flag1)
+	err = db.pool.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order1.ID).Scan(&flag1)
 	require.NoError(t, err)
 	assert.Equal(t, common.OrderFlagSkip, flag1.String, "Order1 should be updated to skip")
 
-	err = db.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order2.ID).Scan(&flag2)
+	err = db.pool.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order2.ID).Scan(&flag2)
 	require.NoError(t, err)
 	assert.Equal(t, common.OrderFlagSkip, flag2.String, "Order2 should be updated to skip")
 
-	err = db.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order3.ID).Scan(&flag3)
+	err = db.pool.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order3.ID).Scan(&flag3)
 	require.NoError(t, err)
 	assert.Equal(t, common.OrderFlagToRenew, flag3.String, "Order3 should NOT be updated (different userkey)")
 
-	err = db.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order4.ID).Scan(&flag4)
+	err = db.pool.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order4.ID).Scan(&flag4)
 	require.NoError(t, err)
 	assert.Equal(t, common.OrderFlagSkip, flag4.String, "Order4 should NOT be updated (different flag)")
 

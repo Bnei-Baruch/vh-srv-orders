@@ -16,7 +16,7 @@ import (
 func insertHHGrant(t *testing.T, db *OrdersDB, ctx context.Context, keycloakID string, startOffset, endOffset time.Duration) int {
 	t.Helper()
 	var requestID int
-	err := db.QueryRow(ctx,
+	err := db.pool.QueryRow(ctx,
 		`INSERT INTO hh_requests (keycloak_id, type, requested_pct, months, status)
 		 VALUES ($1, $2, 100, 6, $3) RETURNING id`,
 		keycloakID, common.HHGrantTypeOther, common.HHRequestStatusApproved,
@@ -24,7 +24,7 @@ func insertHHGrant(t *testing.T, db *OrdersDB, ctx context.Context, keycloakID s
 	require.NoError(t, err)
 
 	var id int
-	err = db.QueryRow(ctx,
+	err = db.pool.QueryRow(ctx,
 		`INSERT INTO hh_grants (request_id, keycloak_id, type, discount_pct, start_date, end_date)
 		 VALUES ($1, $2, $3, 100, $4, $5) RETURNING id`,
 		requestID, keycloakID, common.HHGrantTypeOther, time.Now().Add(startOffset), time.Now().Add(endOffset),

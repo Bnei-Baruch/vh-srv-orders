@@ -178,7 +178,7 @@ if !isAuthUser {
 
 ## Repo Patterns
 
-All methods on `*OrdersDB` (embeds `*pgxpool.Pool`). Context always first param. Raw SQL, no ORM.
+All methods on `*OrdersDB`, which holds the pool in an unexported field rather than embedding it. Nothing outside `repo` can reach `Exec`/`Query`/`Begin`, so a handler cannot write SQL past the repo layer and skip the events it emits — the compiler enforces that, and tests needing raw SQL open their own pool via `testutil.NewTestPool`. Context always first param. Raw SQL, no ORM.
 
 ### Single row
 

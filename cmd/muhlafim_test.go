@@ -24,6 +24,8 @@ func TestMuhlafimCommand_Integration(t *testing.T) {
 	require.NoError(t, err)
 	db, err := repo.NewOrdersDBUrl(context.Background(), dbURL, new(events.NoopEmitter))
 	require.NoError(t, err)
+	pool := testutil.NewTestPool(t, dbURL)
+	require.NoError(t, err)
 	defer db.Close()
 
 	ctx := eventstest.WithTestEventBuilder(t, context.Background())
@@ -36,33 +38,33 @@ func TestMuhlafimCommand_Integration(t *testing.T) {
 
 	// Create test orders with Flag='torenew'
 	var order1 repo.Order
-	err = db.QueryRow(ctx, `INSERT INTO orders ("AccountID", "Amount", "Flag") VALUES ($1, $2, $3) RETURNING id`,
+	err = pool.QueryRow(ctx, `INSERT INTO orders ("AccountID", "Amount", "Flag") VALUES ($1, $2, $3) RETURNING id`,
 		accountID, 100.0, common.OrderFlagToRenew).Scan(&order1.ID)
 	require.NoError(t, err)
 
 	var order2 repo.Order
-	err = db.QueryRow(ctx, `INSERT INTO orders ("AccountID", "Amount", "Flag") VALUES ($1, $2, $3) RETURNING id`,
+	err = pool.QueryRow(ctx, `INSERT INTO orders ("AccountID", "Amount", "Flag") VALUES ($1, $2, $3) RETURNING id`,
 		accountID, 200.0, common.OrderFlagToRenew).Scan(&order2.ID)
 	require.NoError(t, err)
 
 	var order3 repo.Order
-	err = db.QueryRow(ctx, `INSERT INTO orders ("AccountID", "Amount", "Flag") VALUES ($1, $2, $3) RETURNING id`,
+	err = pool.QueryRow(ctx, `INSERT INTO orders ("AccountID", "Amount", "Flag") VALUES ($1, $2, $3) RETURNING id`,
 		accountID, 300.0, common.OrderFlagToRenew).Scan(&order3.ID)
 	require.NoError(t, err)
 
 	// Create payments with tokens (must have "success" status to match GetTokensForOrders logic)
 	var payment1 repo.Payment
-	err = db.QueryRow(ctx, `INSERT INTO payments ("OrderID", pelecard_token, "PaymentStatus") VALUES ($1, $2, $3) RETURNING id`,
+	err = pool.QueryRow(ctx, `INSERT INTO payments ("OrderID", pelecard_token, "PaymentStatus") VALUES ($1, $2, $3) RETURNING id`,
 		order1.ID, "token_hiyuv_niklat", "success").Scan(&payment1.ID)
 	require.NoError(t, err)
 
 	var payment2 repo.Payment
-	err = db.QueryRow(ctx, `INSERT INTO payments ("OrderID", pelecard_token, "PaymentStatus") VALUES ($1, $2, $3) RETURNING id`,
+	err = pool.QueryRow(ctx, `INSERT INTO payments ("OrderID", pelecard_token, "PaymentStatus") VALUES ($1, $2, $3) RETURNING id`,
 		order2.ID, "token_nidha", "success").Scan(&payment2.ID)
 	require.NoError(t, err)
 
 	var payment3 repo.Payment
-	err = db.QueryRow(ctx, `INSERT INTO payments ("OrderID", pelecard_token, "PaymentStatus") VALUES ($1, $2, $3) RETURNING id`,
+	err = pool.QueryRow(ctx, `INSERT INTO payments ("OrderID", pelecard_token, "PaymentStatus") VALUES ($1, $2, $3) RETURNING id`,
 		order3.ID, "token_bitul_newcard", "success").Scan(&payment3.ID)
 	require.NoError(t, err)
 
@@ -180,19 +182,19 @@ func TestMuhlafimCommand_Integration(t *testing.T) {
 
 	// Verify order1 flag was updated
 	var flag1 null.String
-	err = db.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order1.ID).Scan(&flag1)
+	err = pool.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order1.ID).Scan(&flag1)
 	require.NoError(t, err)
 	assert.Equal(t, common.OrderFlagMuhHiyuvNiklat, flag1.String)
 
 	// Verify order2 flag was updated
 	var flag2 null.String
-	err = db.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order2.ID).Scan(&flag2)
+	err = pool.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order2.ID).Scan(&flag2)
 	require.NoError(t, err)
 	assert.Equal(t, common.OrderFlagMuhNidha, flag2.String)
 
 	// Verify order3 flag was NOT updated (has new card)
 	var flag3 null.String
-	err = db.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order3.ID).Scan(&flag3)
+	err = pool.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order3.ID).Scan(&flag3)
 	require.NoError(t, err)
 	assert.Equal(t, common.OrderFlagToRenew, flag3.String, "Order3 should not be updated because it has a new card")
 

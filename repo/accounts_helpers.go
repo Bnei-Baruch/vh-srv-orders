@@ -20,7 +20,7 @@ import (
 func (o *OrdersDB) GetOrCreateAccount(ctx context.Context, a Account) (int, error) {
 
 	var id int
-	err := o.QueryRow(ctx, `select id from accounts where "UserKey" = $1 ORDER BY id DESC LIMIT 1`, a.UserKey.String).
+	err := o.pool.QueryRow(ctx, `select id from accounts where "UserKey" = $1 ORDER BY id DESC LIMIT 1`, a.UserKey.String).
 		Scan(&id)
 	if err == nil {
 		return id, nil
@@ -44,7 +44,7 @@ func (o *OrdersDB) CreateAccount(ctx context.Context, a Account) (int, error) {
 	}
 
 	var ID int
-	if err := o.QueryRow(ctx, fmt.Sprintf(`INSERT INTO accounts (%s) VALUES (%s) RETURNING id`, createString, numString),
+	if err := o.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO accounts (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&ID); err != nil {
 		return 0, err
 	}
@@ -60,7 +60,7 @@ func (o *OrdersDB) GetAllAccounts(ctx context.Context, skip int, limit int, emai
 	limitOffsetString := fmt.Sprintf(" LIMIT %d OFFSET %d", limit, skip)
 	whereQuery, orderByQuery := buildAndGetAccountsWhereQuery(email)
 
-	rows, err := o.Query(ctx, `
+	rows, err := o.pool.Query(ctx, `
 		SELECT
 		id,
 		"FirstName",
@@ -129,7 +129,7 @@ func (o *OrdersDB) PatchAccount(ctx context.Context, req Account, accountID int)
 		return common.ErrInvalidValues
 	}
 
-	updateRes, err := o.Exec(ctx, fmt.Sprintf(`UPDATE accounts SET %s WHERE id=%d`, toUpdate, accountID), toUpdateArgs...)
+	updateRes, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE accounts SET %s WHERE id=%d`, toUpdate, accountID), toUpdateArgs...)
 	if err != nil {
 		return fmt.Errorf("o.Exec: %w", err)
 	}
@@ -165,7 +165,7 @@ func (o *OrdersDB) PatchOrCreateAccount(ctx context.Context, a Account) (int, er
 }
 
 func (o *OrdersDB) SoftDeleteAccount(ctx context.Context, accountID int) error {
-	_, err := o.Exec(ctx, "UPDATE accounts SET deleted_at = $1 WHERE id = $2", time.Now(), accountID)
+	_, err := o.pool.Exec(ctx, "UPDATE accounts SET deleted_at = $1 WHERE id = $2", time.Now(), accountID)
 	if err != nil {
 		return err
 	}
@@ -175,7 +175,7 @@ func (o *OrdersDB) SoftDeleteAccount(ctx context.Context, accountID int) error {
 
 func (o *OrdersDB) HardDeleteAllUserDataByAccountID(ctx context.Context, accountID int, kc_id string) error {
 	// start transaction
-	tx, err := o.Begin(ctx)
+	tx, err := o.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("o.Begin: %w", err)
 	}
@@ -270,7 +270,7 @@ func (o *OrdersDB) GetAccount(ctx context.Context, id int, email string) (*Accou
 	}
 
 	var acc Account
-	if err := o.QueryRow(ctx, `SELECT 
+	if err := o.pool.QueryRow(ctx, `SELECT 
 			id,
 			"FirstName",
 			"LastName",
@@ -304,7 +304,7 @@ func (o *OrdersDB) GetAccount(ctx context.Context, id int, email string) (*Accou
 
 func (o *OrdersDB) GetAccountIDByKeycloakID(ctx context.Context, keycloakId string) (int, error) {
 	var accountID int
-	if err := o.QueryRow(ctx, `SELECT id FROM accounts WHERE "UserKey"=$1`, keycloakId).Scan(&accountID); err != nil {
+	if err := o.pool.QueryRow(ctx, `SELECT id FROM accounts WHERE "UserKey"=$1`, keycloakId).Scan(&accountID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return 0, common.ErrNoRowsAffected
 		}
@@ -315,7 +315,7 @@ func (o *OrdersDB) GetAccountIDByKeycloakID(ctx context.Context, keycloakId stri
 
 func (o *OrdersDB) GetEmailByKeycloakID(ctx context.Context, keycloakId string) (string, error) {
 	var email string
-	if err := o.QueryRow(ctx, `SELECT "Email" FROM accounts WHERE "UserKey"=$1`, keycloakId).Scan(&email); err != nil {
+	if err := o.pool.QueryRow(ctx, `SELECT "Email" FROM accounts WHERE "UserKey"=$1`, keycloakId).Scan(&email); err != nil {
 		return "", err
 	}
 	return email, nil
@@ -336,18 +336,18 @@ func (o *OrdersDB) MergeAccountsOrders(ctx context.Context, req AccountMergeRequ
 		return fmt.Errorf("o.GetAccountIDByKeycloakID: %w", err)
 	}
 	var sourceAccountEmail string
-	err = o.QueryRow(ctx, `SELECT  "Email" FROM accounts WHERE id = $1`, sourceAccountID).Scan(&sourceAccountEmail)
+	err = o.pool.QueryRow(ctx, `SELECT  "Email" FROM accounts WHERE id = $1`, sourceAccountID).Scan(&sourceAccountEmail)
 	if err != nil {
 		return fmt.Errorf("Email from source account.id: %w", err)
 	}
 
 	var destinationAccountEmail string
-	err = o.QueryRow(ctx, `SELECT "Email" FROM accounts WHERE id = $1`, destinationAccountID).Scan(&destinationAccountEmail)
+	err = o.pool.QueryRow(ctx, `SELECT "Email" FROM accounts WHERE id = $1`, destinationAccountID).Scan(&destinationAccountEmail)
 	if err != nil {
 		return fmt.Errorf("Email from destaination account.id: %w", err)
 	}
 
-	tx, err := o.Begin(ctx)
+	tx, err := o.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("o.Begin: %w", err)
 	}
@@ -609,7 +609,7 @@ func buildAndGetAccountsWhereQuery(email string) (string, string) {
 }
 
 func (o *OrdersDB) IsSubjectID(ctx context.Context, keycloakID, accountID string) (bool, error) {
-	row := o.QueryRow(ctx, `SELECT 1 FROM accounts WHERE "UserKey" = $1 AND id = $2`, keycloakID, accountID)
+	row := o.pool.QueryRow(ctx, `SELECT 1 FROM accounts WHERE "UserKey" = $1 AND id = $2`, keycloakID, accountID)
 	var x int
 	if err := row.Scan(&x); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

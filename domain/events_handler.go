@@ -120,7 +120,7 @@ func (eh *EventsHandler) onCreateProfile(ctx context.Context, event profiles.Eve
 
 	_, err := eh.repo.GetOrCreateAccountFromProfile(ctx, keycloakID.(string))
 	if err != nil {
-		return fmt.Errorf("eh.repo.GetOrCreateAccount: %w", err)
+		return fmt.Errorf("eh.repo.GetOrCreateAccountFromProfile: %w", err)
 	}
 
 	return nil

@@ -12,7 +12,7 @@ import (
 func (o *OrdersDB) GetCardDetailById(ctx context.Context, id int) (*CardDetails, error) {
 	var card CardDetails
 
-	if err := o.QueryRow(ctx, `SELECT 
+	if err := o.pool.QueryRow(ctx, `SELECT 
 			id,
 			account_id,
 			gateway_provider,
@@ -47,7 +47,7 @@ func (o *OrdersDB) CreateCardDetailsAndGetId(ctx context.Context, p CardDetails)
 	}
 
 	var ID int
-	if err := o.QueryRow(ctx, fmt.Sprintf(`INSERT INTO card_details (%s) VALUES (%s) RETURNING id`, createString, numString),
+	if err := o.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO card_details (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&ID); err != nil {
 		return 0, err
 	}
@@ -56,7 +56,7 @@ func (o *OrdersDB) CreateCardDetailsAndGetId(ctx context.Context, p CardDetails)
 }
 
 func (o *OrdersDB) SoftDeleteCardDetailById(ctx context.Context, id int) error {
-	_, err := o.Exec(ctx, "UPDATE card_details SET deleted_at = $1 WHERE id = $2", time.Now(), id)
+	_, err := o.pool.Exec(ctx, "UPDATE card_details SET deleted_at = $1 WHERE id = $2", time.Now(), id)
 	return err
 }
 
@@ -66,7 +66,7 @@ func (o *OrdersDB) PatchCardDetailsById(ctx context.Context, req CardDetails, id
 		return common.ErrInvalidValues
 	}
 
-	updateRes, err := o.Exec(ctx, fmt.Sprintf(`UPDATE card_details SET %s WHERE id=%d`, toUpdate, id), toUpdateArgs...)
+	updateRes, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE card_details SET %s WHERE id=%d`, toUpdate, id), toUpdateArgs...)
 	if err != nil {
 		return fmt.Errorf("o.Exec: %w", err)
 	}
@@ -81,7 +81,7 @@ func (o *OrdersDB) GetAllCardDetails(ctx context.Context, skip int, limit int) (
 	limitOffsetString := fmt.Sprintf(" LIMIT %d OFFSET %d", limit, skip)
 	whereQuery, orderByQuery := buildAndGetCardDetailsWhereQuery()
 
-	rows, err := o.Query(ctx, `
+	rows, err := o.pool.Query(ctx, `
 		SELECT 
 			id,
 			account_id,

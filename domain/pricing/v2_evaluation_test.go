@@ -1352,7 +1352,7 @@ func TestV2PricingEvaluation_Public_PreservesNonSensitiveFields(t *testing.T) {
 	assert.Equal(t, eval.FinalPrice, pub.FinalPrice)
 }
 
-// --- ManualDiscountProvider integration ---
+// --- manualDiscountProvider integration ---
 
 func TestEvaluateV2Price_WithDiscountProvider_Applied(t *testing.T) {
 	// No donations → final price = base (180 NIS). Manual 50% off = 90 NIS < 180 NIS → applied.

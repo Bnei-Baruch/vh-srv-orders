@@ -227,14 +227,17 @@ func (im *SpecialsImporter) createSpecial(rSpecial *SpecialRecord) error {
 		return fmt.Errorf("email & : KeycloakID can't be empty both")
 	}
 	var special repo.Special
-	// An identifier the sheet does not carry is left unset, so the column
-	// inserts NULL rather than an empty string. Every reader of specials.email
-	// scans null.String, so NULL costs nothing — and an empty one is not inert:
-	// DeleteAccount and MergeAccounts delete specials by
-	// `email = (SELECT "Email" FROM accounts WHERE id = $1)`, so an account
-	// whose own email is empty would match every keycloak-only grant in the
-	// table. That query is guarded now, but writing NULL is what keeps this row
-	// out of reach of the next such predicate.
+	// An identifier the sheet does not carry is left unset, so
+	// prepareSpecialCreateQuery omits the column and the row takes its default
+	// — NULL today, since both identifier columns are nullable with no
+	// default. What matters is that nothing here writes '' on purpose. Every
+	// reader scans null.String, so either spelling costs the readers nothing,
+	// but an empty string is not inert in SQL: DeleteAccount and MergeAccounts
+	// delete specials by `email = (SELECT "Email" FROM accounts WHERE id =
+	// $1)`, so an account whose own email is empty would match every
+	// keycloak-only grant in the table. Those queries use NULLIF now; leaving
+	// the column out is what keeps this row away from the next such predicate,
+	// whatever the column's default becomes.
 	special.Email = rSpecial.Email
 	special.KeycloakId = rSpecial.KeycloakID
 	special.StartDate = null.TimeFrom(rSpecial.StartDate)

@@ -563,8 +563,8 @@ func TestGetLastContributionsBatch_NoActiveCustomer_EmptyResultNoError(t *testin
 }
 
 func TestGetLastContributionsBatch_UnconditionalDebitSum_IncludesNegative(t *testing.T) {
-	// Regression: batch's $filter must not exclude DEBIT<=0 rows -- GetLastContributions
-	// sums every matching row unconditionally, including negative-DEBIT reversal rows.
+	// Regression: batch's $filter must not exclude DEBIT<=0 rows -- negative-DEBIT reversal
+	// rows cancel an earlier contribution and must be summed with it.
 	validDate := time.Now().AddDate(0, -3, 0).Format(time.RFC3339)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -686,8 +686,8 @@ func TestGetLastContributionsBatch_ExpandSelectIncludesFNCNUM(t *testing.T) {
 }
 
 func TestGetLastContributionsBatch_BoundaryDateExactly12MonthsAgo(t *testing.T) {
-	// Mirrors TestGetLastContributions_BoundaryDateExactly12MonthsAgo exactly: batch must
-	// apply the same precise-instant cutoff as the legacy fetch, not a day-rounded one.
+	// The 12-month cutoff is a precise instant (now minus 12 months), not a day-rounded
+	// date: a row one day past it is excluded, rows inside it are summed.
 	now := time.Now()
 	olderThan12Months := now.AddDate(0, -12, -1).Format(time.RFC3339)
 	elevenMonthsAgo := now.AddDate(0, -11, 0).Format(time.RFC3339)

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -219,38 +220,39 @@ func newPriorityTestClient(serverURL string) *priority.Client {
 }
 
 func TestFetchDonationSums_RequestErrorIsNeverDowngradedToNoRecord(t *testing.T) {
-	// The batch has no per-email failure: every email rides one OR-filtered CUSTOMERS
-	// request. What this pins is that a failed request stays an error even when the
-	// same request also covers an email that would have resolved — there is no partial
-	// result. Downgrading it to "no Priority record" would price a donor as if they had
-	// never given.
-	validDate := time.Now().AddDate(0, -3, 0).Format(time.RFC3339)
+	// Emails are resolved in chunks of 40, so good@x.com and bad@x.com are put in
+	// different chunks: the first chunk succeeds and resolves good@x.com to a customer
+	// with contributions, the second fails. What this pins is that the failed chunk still
+	// fails the whole fetch — there is no partial result. Returning good@x.com's sums
+	// while bad@x.com silently becomes "no Priority record" would price a donor as if
+	// they had never given.
+	emails := []string{"good@x.com"}
+	for i := range 40 {
+		emails = append(emails, fmt.Sprintf("filler%d@x.com", i))
+	}
+	emails = append(emails, "bad@x.com")
 
+	var goodResolved atomic.Bool
+	contributions := priorityServerWithContributions(100)
+	defer contributions.Close()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.URL.Path == "/CUSTOMERS" {
-			email := r.URL.Query().Get("$filter")
-			if strings.Contains(email, "bad@x.com") {
-				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprint(w, "internal error")
-				return
-			}
-			json.NewEncoder(w).Encode(priority.CustomerODataResponse{
-				Value: []priority.Customer{{CustName: "CUST001"}},
-			})
-		} else {
-			json.NewEncoder(w).Encode(priority.AccountReceivableODataResponse{
-				Value: []priority.AccountReceivableItem{
-					{ACCNAME: "40001", DEBIT: 100, CODE: common.CurrencyNIS, FNCDATE: validDate},
-				},
-			})
+		filter := r.URL.Query().Get("$filter")
+		if r.URL.Path == "/CUSTOMERS" && strings.Contains(filter, "bad@x.com") {
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprint(w, "internal error")
+			return
 		}
+		if r.URL.Path == "/CUSTOMERS" && strings.Contains(filter, "good@x.com") {
+			goodResolved.Store(true)
+		}
+		contributions.Config.Handler.ServeHTTP(w, r)
 	}))
 	defer server.Close()
 
 	client := newPriorityTestClient(server.URL)
-	_, err := fetchDonationSums(context.Background(), client, notFoundAccountingClient(t), testQuickbooksCompanyID, []string{"good@x.com", "bad@x.com"}, 3.1, 3.6)
+	_, err := fetchDonationSums(context.Background(), client, notFoundAccountingClient(t), testQuickbooksCompanyID, emails, 3.1, 3.6)
 
+	require.True(t, goodResolved.Load(), "precondition: the chunk holding good@x.com must have succeeded")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrDonationFetch)
 }

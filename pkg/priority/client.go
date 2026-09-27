@@ -138,7 +138,6 @@ func (c *Client) GetCustomerByID(ctx context.Context, customerID string) (*Custo
 }
 
 // GetActiveCustomersByEmail returns only active customers for the given email.
-// An optional *RequestStats can be passed to accumulate request-count/byte diagnostics.
 func (c *Client) GetActiveCustomersByEmail(ctx context.Context, email string) ([]Customer, error) {
 	customers, err := c.GetCustomersByEmail(ctx, email)
 	if err != nil {
@@ -156,7 +155,6 @@ func (c *Client) GetActiveCustomersByEmail(ctx context.Context, email string) ([
 
 // GetAccountReceivables fetches account receivables for a given customer ID from Priority ERP
 // The API path is: /ACCOUNTS_RECEIVABLE('{customerID}')/ACCFNCITEMS2_SUBFORM
-// An optional *RequestStats can be passed to accumulate request-count/byte diagnostics.
 func (c *Client) GetAccountReceivables(ctx context.Context, customerID string) ([]AccountReceivableItem, error) {
 	// Build the API path with the customer ID
 	path := fmt.Sprintf("ACCOUNTS_RECEIVABLE('%s')/ACCFNCITEMS2_SUBFORM", customerID)
@@ -284,10 +282,9 @@ func sortedKeys(m map[string]struct{}) []string {
 // $filter/$select/$expand, so both the request count and the bytes transferred stay flat as
 // the batch grows.
 //
-// Deliberately uncached: EvaluateV2Price calls this once per household, and PriceResolver
-// already caches per account ID above it, so there is nothing left for a second cache to buy.
-// The per-email TTL cache that used to sit here belonged to the removed per-email fetch and
-// went with it.
+// Uncached: EvaluateV2Price calls this once per household per price evaluation, and each
+// call is one small fixed set of requests. The per-email TTL cache that used to sit here
+// belonged to the removed per-email fetch and went with it.
 //
 // The whole batch is fetched exactly once and returned keyed by customer (ContributionsBatchResult).
 // Callers group the requested emails into whatever logical units they need (e.g. one group per

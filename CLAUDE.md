@@ -349,7 +349,7 @@ Monthly billing uses a two-phase architecture:
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| `PriceResolver` | `domain/pricing/resolver.go` | Routes v1/v2 by country, caches per account ID |
+| `PriceResolver` | `domain/pricing/resolver.go` | Routes v1/v2 by country |
 | `EvaluateV2Price` | `domain/pricing/v2_evaluation.go` | Profiles + Priority/QuickBooks/Europe donations → discount calculation |
 | `V2Eligible` | `domain/pricing/v2_rollout.go` | Country exclusion list (RU only) |
 | `processOrder` | `domain/billing/renewal.go` | Single order: create payment → charge → finalize |
@@ -377,8 +377,8 @@ Shared flags on `billing` parent: `--dry-run`, `--max-workers`.
 
 ### Priority contribution fetching
 
-`GetLastContributionsBatch` (`pkg/priority/client.go`) is the only way contributions are fetched. It resolves many emails to Priority customers and pulls their last-12-months DEBIT sums in a fixed number of chunked OData requests — date range, category filter and field selection all pushed server-side via `$filter`/`$select`/`$expand` — so request count and bytes stay flat as the email count grows.
+`GetLastContributionsBatch` (`pkg/priority/client.go`) is the only way Priority contributions are fetched (QuickBooks and European ones come from `pkg/accounting`, in the same `fetchDonationSums`). It resolves many emails to Priority customers and pulls their last-12-months DEBIT sums in a fixed number of chunked OData requests — date range, category filter and field selection all pushed server-side via `$filter`/`$select`/`$expand` — so request count and bytes stay flat as the email count grows.
 
-Deliberately uncached. `EvaluateV2Price` calls it once per household and `PriceResolver` caches per account ID above it. The per-email TTL cache that used to sit here belonged to the removed per-email fetch and went with it; `pkg/accounting` keeps its own, enabled by the billing commands.
+Uncached. `EvaluateV2Price` calls it once per household per price evaluation, and each call is a small fixed set of requests. The per-email TTL cache that used to sit here belonged to the removed per-email fetch and went with it; `pkg/accounting` keeps its own, enabled by the billing commands.
 
-There is no per-email failure: every email rides one request, and a failed request fails the whole fetch rather than degrading to "no Priority record" — pricing a donor as if they had never given is the outcome that must not happen.
+There is no per-email failure: emails are resolved in chunks of 40 (`batchEmailChunkSize`), and any failed request fails the whole fetch — no partial result for the chunks that succeeded — rather than degrading to "no Priority record" — pricing a donor as if they had never given is the outcome that must not happen.

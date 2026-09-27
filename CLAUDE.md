@@ -375,6 +375,10 @@ Shared flags on `billing` parent: `--dry-run`, `--max-workers`.
 - `pricing_error` flag — set on orders where `LoadRenewalData` or `Resolve` fails. Retried via `billing retry-pricing-errors`.
 - `ErrPrePayment` / `ErrPostPayment` — sentinel errors controlling terminal fallback behavior.
 
-### Priority contribution cache
+### Priority contribution fetching
 
-`pkg/priority/client.go` has an optional TTL cache (30 min) for `GetLastContributions` per email. **Disabled by default** — billing commands enable it via `SetCacheEnabled(true)`. `ErrNoActiveCustomers` sentinel error replaces string matching for "no active customers" responses.
+`GetLastContributionsBatch` (`pkg/priority/client.go`) is the only way contributions are fetched. It resolves many emails to Priority customers and pulls their last-12-months DEBIT sums in a fixed number of chunked OData requests — date range, category filter and field selection all pushed server-side via `$filter`/`$select`/`$expand` — so request count and bytes stay flat as the email count grows.
+
+Deliberately uncached. `EvaluateV2Price` calls it once per household and `PriceResolver` caches per account ID above it. The per-email TTL cache that used to sit here belonged to the removed per-email fetch and went with it; `pkg/accounting` keeps its own, enabled by the billing commands.
+
+There is no per-email failure: every email rides one request, and a failed request fails the whole fetch rather than degrading to "no Priority record" — pricing a donor as if they had never given is the outcome that must not happen.

@@ -238,8 +238,8 @@ type accountsReceivableExpandResponse struct {
 	ODataNextLink string                         `json:"@odata.nextLink,omitempty"`
 }
 
-// RequestStats captures diagnostic metrics (PoC instrumentation) for the OData requests
-// issued by a single GetLastContributionsBatch call.
+// RequestStats captures diagnostic metrics for the OData requests issued by a single
+// GetLastContributionsBatch call, reported by the last-contributions CLI command.
 type RequestStats struct {
 	Requests int           // number of HTTP requests made to Priority (incl. pagination)
 	Bytes    int           // total response body bytes received

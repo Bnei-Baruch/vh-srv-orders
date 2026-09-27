@@ -196,7 +196,7 @@ func EvaluateV2Price(
 	// Amounts stay in local variable only — never persisted or returned.
 	emails := deduplicateEmails(primaryEmails, spouseEmails)
 	log.Info("EvaluateV2Price: fetching donations", slog.Int("email_count", len(emails)))
-	sums, fetchErr := fetchDonationSums(ctx, priorityClient, accountingService, quickbooksCompanyID, emails, USDToNIS, EURToNIS, addPriorityContributionsBatch)
+	sums, fetchErr := fetchDonationSums(ctx, priorityClient, accountingService, quickbooksCompanyID, emails, USDToNIS, EURToNIS)
 
 	var donationsDiscount Discount
 	var primaryGetsDiscount bool
@@ -382,20 +382,6 @@ func collectProfileEmails(profile *profiles.Profile, fallbackEmail string) []str
 	return emails
 }
 
-// addPriorityContributionsFunc is the shape shared by addPriorityContributions and
-// addPriorityContributionsBatch, so fetchDonationSums can be parameterized over which
-// Priority-fetch strategy to use instead of duplicating the QuickBooks/Europe/notes/NIS-
-// conversion logic around it (that duplication is the real risk in a package CLAUDE.md
-// singles out as money-critical: a change to one copy silently drifts from the other, and
-// compare-contributions can't catch it since it only exercises the Priority step).
-type addPriorityContributionsFunc func(
-	ctx context.Context,
-	client *priority.Client,
-	emails []string,
-	perCurrency map[string]float64,
-	successSet map[string]struct{},
-) ([]string, error)
-
 // fetchDonationSums aggregates donations across all configured sources (Priority ERP
 // and vh-srv-accounting: QuickBooks and European donations) for the given emails.
 // "User not found" responses from any source are treated as zero donations. Any real API error from any source is
@@ -404,11 +390,6 @@ type addPriorityContributionsFunc func(
 //
 // Sources are queried in sequence so each block can be removed cleanly when its source
 // is decommissioned (Priority will eventually migrate behind vh-srv-accounting).
-//
-// addPriority selects the Priority-fetch strategy; it's variadic purely so every existing
-// call site (in particular every direct test) keeps compiling unchanged and keeps exercising
-// the legacy addPriorityContributions by default. EvaluateV2Price is the one caller that
-// passes addPriorityContributionsBatch explicitly, to use the batched fetch in production.
 func fetchDonationSums(
 	ctx context.Context,
 	priorityClient *priority.Client,
@@ -416,19 +397,13 @@ func fetchDonationSums(
 	quickbooksCompanyID string,
 	emails []string,
 	usdRate, eurRate float64,
-	addPriority ...addPriorityContributionsFunc,
 ) (donationSums, error) {
-	fetchPriority := addPriorityContributionsFunc(addPriorityContributions)
-	if len(addPriority) > 0 && addPriority[0] != nil {
-		fetchPriority = addPriority[0]
-	}
-
 	result := donationSums{perCurrency: make(map[string]float64)}
 	successSet := make(map[string]struct{})
 	var notes []string
 
 	// Source: Priority ERP. (TODO: remove when Priority migrates into vh-srv-accounting.)
-	priorityNotFound, err := fetchPriority(ctx, priorityClient, emails, result.perCurrency, successSet)
+	priorityNotFound, err := addPriorityContributionsBatch(ctx, priorityClient, emails, result.perCurrency, successSet)
 	if err != nil {
 		return donationSums{}, err
 	}
@@ -467,33 +442,6 @@ func fetchDonationSums(
 	}
 
 	return result, nil
-}
-
-// addPriorityContributions queries Priority for each email and accumulates currency sums.
-// Returns the list of emails with no Priority record (ErrNoActiveCustomers).
-func addPriorityContributions(
-	ctx context.Context,
-	client *priority.Client,
-	emails []string,
-	perCurrency map[string]float64,
-	successSet map[string]struct{},
-) ([]string, error) {
-	var notFound []string
-	for _, email := range emails {
-		contributions, err := client.GetLastContributions(ctx, email)
-		if err != nil {
-			if errors.Is(err, priority.ErrNoActiveCustomers) {
-				notFound = append(notFound, email)
-				continue
-			}
-			return nil, fmt.Errorf("priorityClient.GetLastContributions %w: %s: %v", ErrDonationFetch, email, err)
-		}
-		successSet[email] = struct{}{}
-		for currency, amount := range contributions {
-			perCurrency[currency] += amount
-		}
-	}
-	return notFound, nil
 }
 
 // normalizeEmail trims and lower-cases an email. Mirrors pkg/priority's own normalizeEmail

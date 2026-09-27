@@ -3,7 +3,6 @@ package priority
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -16,9 +15,6 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 )
-
-// ErrNoActiveCustomers is returned when no active Priority customers are found for an email.
-var ErrNoActiveCustomers = errors.New("no active customers found")
 
 // currencyCodeMap maps Priority ERP CODE values to ISO currency codes.
 // Priority returns Hebrew abbreviations (e.g. ש"ח for NIS) — callers expect ISO.
@@ -50,8 +46,6 @@ var contributionACCNAMEs = map[string]struct{}{
 // contributionACCNAMEFilter is the OData $filter clause matching contributionACCNAMEs, built once.
 var contributionACCNAMEFilter = "(" + buildOrFilter("ACCNAME", sortedKeys(contributionACCNAMEs)) + ")"
 
-const contributionCacheTTL = 30 * time.Minute
-
 // Chunk sizes for GetLastContributionsBatch, chosen to keep OData $filter query strings
 // well under typical gateway URL-length limits while still batching many customers per request.
 const (
@@ -59,20 +53,12 @@ const (
 	batchCustNameChunkSize = 60
 )
 
-// contributionResult caches both success and "no active customers" outcomes.
-type contributionResult struct {
-	sums              map[string]float64
-	noActiveCustomers bool
-}
-
 // Client is a client for interacting with Priority ERP Cloud API
 type Client struct {
-	client            *resty.Client
-	contributionCache *utils.TTLCache[string, contributionResult]
+	client *resty.Client
 }
 
 // NewClient creates a new Priority ERP client with basic authentication.
-// Contribution cache is disabled by default — call SetCacheEnabled(true) to enable.
 func NewClient() *Client {
 	client := resty.New()
 	client.SetBaseURL(common.Config.PriorityBaseURL)
@@ -88,34 +74,13 @@ func NewClient() *Client {
 	return &Client{client: client}
 }
 
-// SetCacheEnabled enables or disables the contribution cache.
-// Disabling clears any cached data. Enabling creates a fresh empty cache.
-func (c *Client) SetCacheEnabled(enabled bool) {
-	if enabled {
-		c.contributionCache = utils.NewTTLCache[string, contributionResult](contributionCacheTTL)
-	} else {
-		c.contributionCache = nil
-	}
-}
-
-// recordStats adds one request's metrics into stats, if a non-nil collector was passed.
-// stats is variadic at call sites so it stays an optional, backward-compatible parameter.
-func recordStats(stats []*RequestStats, resp *resty.Response) {
-	if len(stats) == 0 || stats[0] == nil {
-		return
-	}
-	stats[0].Requests++
-	stats[0].Bytes += len(resp.Body())
-}
-
 // GetCustomersByEmail fetches all customers matching the given email from Priority ERP.
 // Returns an empty slice (no error) when the filter matches nothing -- confirmed empirically
 // against Priority that a zero-match CUSTOMERS filter query returns 200 + an empty value
 // array, not 404. A 404 here is a real error (proxy hiccup, maintenance window, etc.), not
 // "no such customer" -- unlike GetCustomerByID, which looks up a single entity by key, where
 // 404 genuinely does mean "no such entity".
-// An optional *RequestStats can be passed to accumulate request-count/byte diagnostics.
-func (c *Client) GetCustomersByEmail(ctx context.Context, email string, stats ...*RequestStats) ([]Customer, error) {
+func (c *Client) GetCustomersByEmail(ctx context.Context, email string) ([]Customer, error) {
 	filter := fmt.Sprintf("EMAIL eq '%s'", email)
 
 	req := c.client.NewRequest()
@@ -129,7 +94,6 @@ func (c *Client) GetCustomersByEmail(ctx context.Context, email string, stats ..
 	if err != nil {
 		return nil, fmt.Errorf("priority client request failed: %w", err)
 	}
-	recordStats(stats, resp)
 
 	if resp.IsError() {
 		return nil, fmt.Errorf("priority API error [%d]: %s", resp.StatusCode(), resp.String())
@@ -175,8 +139,8 @@ func (c *Client) GetCustomerByID(ctx context.Context, customerID string) (*Custo
 
 // GetActiveCustomersByEmail returns only active customers for the given email.
 // An optional *RequestStats can be passed to accumulate request-count/byte diagnostics.
-func (c *Client) GetActiveCustomersByEmail(ctx context.Context, email string, stats ...*RequestStats) ([]Customer, error) {
-	customers, err := c.GetCustomersByEmail(ctx, email, stats...)
+func (c *Client) GetActiveCustomersByEmail(ctx context.Context, email string) ([]Customer, error) {
+	customers, err := c.GetCustomersByEmail(ctx, email)
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +157,7 @@ func (c *Client) GetActiveCustomersByEmail(ctx context.Context, email string, st
 // GetAccountReceivables fetches account receivables for a given customer ID from Priority ERP
 // The API path is: /ACCOUNTS_RECEIVABLE('{customerID}')/ACCFNCITEMS2_SUBFORM
 // An optional *RequestStats can be passed to accumulate request-count/byte diagnostics.
-func (c *Client) GetAccountReceivables(ctx context.Context, customerID string, stats ...*RequestStats) ([]AccountReceivableItem, error) {
+func (c *Client) GetAccountReceivables(ctx context.Context, customerID string) ([]AccountReceivableItem, error) {
 	// Build the API path with the customer ID
 	path := fmt.Sprintf("ACCOUNTS_RECEIVABLE('%s')/ACCFNCITEMS2_SUBFORM", customerID)
 
@@ -208,7 +172,6 @@ func (c *Client) GetAccountReceivables(ctx context.Context, customerID string, s
 	if err != nil {
 		return nil, fmt.Errorf("priority client request failed: %w", err)
 	}
-	recordStats(stats, resp)
 
 	if resp.IsError() {
 		if resp.StatusCode() == http.StatusNotFound {
@@ -239,7 +202,6 @@ func (c *Client) GetAccountReceivables(ctx context.Context, customerID string, s
 			// Log warning but return what we have
 			return allItems, fmt.Errorf("error fetching next page (returning partial results): %w", err)
 		}
-		recordStats(stats, nextResp)
 
 		if nextResp.IsError() {
 			// Log warning but return what we have
@@ -257,107 +219,6 @@ func (c *Client) GetAccountReceivables(ctx context.Context, customerID string, s
 	}
 
 	return allItems, nil
-}
-
-func (c *Client) GetLastContributions(ctx context.Context, email string) (map[string]float64, error) {
-	cacheKey := strings.ToLower(email)
-
-	// Check cache
-	if c.contributionCache != nil {
-		if cached, ok := c.contributionCache.Get(cacheKey); ok {
-			if cached.noActiveCustomers {
-				return nil, fmt.Errorf("%w: %s", ErrNoActiveCustomers, email)
-			}
-			slog.DebugContext(ctx, "contribution cache hit", slog.String("email", email))
-			return cached.sums, nil
-		}
-	}
-
-	sums, _, err := c.fetchLastContributions(ctx, email, nil)
-	if err != nil {
-		if errors.Is(err, ErrNoActiveCustomers) && c.contributionCache != nil {
-			c.contributionCache.Put(cacheKey, contributionResult{noActiveCustomers: true})
-		}
-		return nil, err
-	}
-
-	if c.contributionCache != nil {
-		c.contributionCache.Put(cacheKey, contributionResult{sums: sums})
-	}
-	return sums, nil
-}
-
-// GetLastContributionsWithStats behaves like GetLastContributions but also returns
-// diagnostic request-count/byte/duration metrics, for comparison against
-// GetLastContributionsBatch. It always hits Priority directly, bypassing the cache,
-// so the numbers reflect real request traffic.
-func (c *Client) GetLastContributionsWithStats(ctx context.Context, email string) (map[string]float64, RequestStats, error) {
-	start := time.Now()
-	sums, stats, err := c.fetchLastContributions(ctx, email, &RequestStats{})
-	stats.Duration = time.Since(start)
-	return sums, stats, err
-}
-
-// fetchLastContributions does the actual full-history-per-customer fetch behind
-// GetLastContributions / GetLastContributionsWithStats. If stats is non-nil, request
-// count and response bytes are accumulated into it.
-func (c *Client) fetchLastContributions(ctx context.Context, email string, stats *RequestStats) (map[string]float64, RequestStats, error) {
-	if stats == nil {
-		stats = &RequestStats{}
-	}
-
-	// 1. Fetch active customers by email.
-	activeCustomers, err := c.GetActiveCustomersByEmail(ctx, email, stats)
-	if err != nil {
-		return nil, *stats, fmt.Errorf("c.GetActiveCustomersByEmail: %w", err)
-	}
-
-	// Filter to customers with a usable CustName.
-	usable := make([]Customer, 0, len(activeCustomers))
-	for _, cust := range activeCustomers {
-		if cust.CustName != "" {
-			usable = append(usable, cust)
-		}
-	}
-	if len(usable) == 0 {
-		return nil, *stats, fmt.Errorf("%w: %s", ErrNoActiveCustomers, email)
-	}
-
-	// 2. For each active customer, fetch receivables and accumulate sums.
-	now := time.Now()
-	twelveMonthsAgo := now.AddDate(0, -12, 0)
-	sums := make(map[string]float64)
-
-	for _, customer := range usable {
-		accountReceivables, err := c.GetAccountReceivables(ctx, customer.CustName, stats)
-		if err != nil {
-			return nil, *stats, fmt.Errorf("c.GetAccountReceivables: %w", err)
-		}
-
-		for _, item := range accountReceivables {
-			if _, ok := contributionACCNAMEs[item.ACCNAME]; !ok {
-				continue
-			}
-			fncDate, err := time.Parse(time.RFC3339, item.FNCDATE)
-			if err != nil {
-				continue
-			}
-			if fncDate.Before(twelveMonthsAgo) {
-				continue
-			}
-			iso, ok := currencyCodeMap[item.CODE]
-			if !ok {
-				utils.LogFor(ctx).Warn("unknown priority currency code, treating as NIS",
-					slog.String("code", item.CODE),
-					slog.String("cust_name", customer.CustName),
-					slog.String("fnc_num", item.FNCNUM))
-				iso = common.CurrencyNIS
-			}
-			sums[iso] += item.DEBIT
-		}
-	}
-
-	return sums, *stats, nil
 }
 
 // isJSONResponse reports whether resp's Content-Type indicates a JSON body. resty only
@@ -418,18 +279,15 @@ func sortedKeys(m map[string]struct{}) []string {
 
 // GetLastContributionsBatch fetches last-12-months DEBIT contribution sums (by ISO currency)
 // for every Priority customer resolved from the given emails, in a small, fixed number of
-// chunked requests regardless of how many emails/customers are involved. Unlike
-// GetLastContributions (which does a full, unfiltered history fetch per customer), this
-// pushes the date range, contribution-category filter, and field selection down to Priority
-// via $filter/$select/$expand, so both the request count and the bytes transferred stay flat
-// as the batch grows.
+// chunked requests regardless of how many emails/customers are involved. It pushes the date
+// range, contribution-category filter, and field selection down to Priority via
+// $filter/$select/$expand, so both the request count and the bytes transferred stay flat as
+// the batch grows.
 //
-// Deliberately uncached, unlike GetLastContributions's contributionCache: EvaluateV2Price
-// calls this once per household, and PriceResolver already caches per account ID above it, so
-// there's nothing left for a second cache to buy here. contributionCache/contributionCacheTTL/
-// SetCacheEnabled (and cmd/billing.go's SetCacheEnabled(true) call) exist only for
-// GetLastContributions -- when that function is eventually removed, remove them with it; don't
-// leave them behind as dead code nobody remembers is now unused.
+// Deliberately uncached: EvaluateV2Price calls this once per household, and PriceResolver
+// already caches per account ID above it, so there is nothing left for a second cache to buy.
+// The per-email TTL cache that used to sit here belonged to the removed per-email fetch and
+// went with it.
 //
 // The whole batch is fetched exactly once and returned keyed by customer (ContributionsBatchResult).
 // Callers group the requested emails into whatever logical units they need (e.g. one group per
@@ -553,10 +411,8 @@ func (c *Client) resolveActiveCustNames(ctx context.Context, emails []string, st
 			cr := resp.Result().(*CustomerODataResponse)
 			for _, cust := range cr.Value {
 				// CUSTNAME is the CUSTOMERS entity key and shouldn't come back blank, but
-				// it's tagged omitempty and the legacy path guards it explicitly
-				// (fetchLastContributions filters to "usable" customers before using any of
-				// them) -- so a blank one (partially-honoured $select, a stub record) isn't
-				// impossible, just unexpected. Without this, a blank CustName still gets
+				// it's tagged omitempty, so a blank one (partially-honoured $select, a stub
+				// record) isn't impossible, just unexpected. Without this, a blank CustName still gets
 				// appended below, custNamesByEmail[key] becomes non-empty, and
 				// addPriorityContributionsBatch reads that as "matched a Priority customer,
 				// contributed nothing" instead of "no Priority record" -- silently pointing
@@ -599,17 +455,16 @@ func (c *Client) resolveActiveCustNames(ctx context.Context, emails []string, st
 // chunks and adds each item's DEBIT (converted to ISO currency) into byCustomer, keyed by
 // CUSTNAME.
 func (c *Client) fetchContributionsByCustomer(ctx context.Context, custNames []string, byCustomer map[string]map[string]float64, stats *RequestStats) error {
-	// No DEBIT filter here: the legacy fetch sums every ACCNAME-matching, in-range row
-	// unconditionally (including negative-DEBIT reversal/correction rows), so the batch
-	// query must fetch the same rows or its sum silently diverges from legacy's.
+	// No DEBIT filter here: every ACCNAME-matching, in-range row counts, negative-DEBIT
+	// reversal and correction rows included. Filtering DEBIT>0 server-side would drop the
+	// corrections and silently overstate a donor whose gift was partly reversed.
 	//
-	// cutoff is the exact same precise-instant cutoff GetLastContributions uses. FNCDATE is
-	// a Priority "Date"-typed field, so the server compares it at whole-day granularity --
-	// asking it for "ge cutoff" directly could include or exclude the entire boundary day
-	// depending on server-side rounding we don't control. To match GetLastContributions
-	// exactly regardless of that rounding, the server-side filter asks for one extra day
-	// (serverCutoff) and the precise cutoff check is re-applied client-side per item below,
-	// identically to GetLastContributions's own fncDate.Before(cutoff) check.
+	// FNCDATE is a Priority "Date"-typed field, so the server compares it at whole-day
+	// granularity -- asking it for "ge cutoff" directly could include or exclude the entire
+	// boundary day depending on server-side rounding we don't control. So the server-side
+	// filter deliberately asks for one extra day (serverCutoff) and the precise-instant
+	// cutoff is re-applied client-side per item below. The boundary is therefore ours, not
+	// Priority's date-rounding behaviour.
 	cutoff := time.Now().AddDate(0, -12, 0)
 	serverCutoff := cutoff.AddDate(0, 0, -1).UTC().Format("2006-01-02T15:04:05Z")
 	itemFilter := fmt.Sprintf("FNCDATE ge %s and %s", serverCutoff, contributionACCNAMEFilter)

@@ -17,6 +17,14 @@ func (c *Customer) IsActive() bool {
 	return true
 }
 
+// Usable reports whether the customer can be looked up and priced: active, and with a
+// CUSTNAME. CUSTNAME is the CUSTOMERS entity key and should never come back blank, but it's
+// tagged omitempty, so a blank one (partially-honoured $select, a stub record) isn't
+// impossible. Such a record has no key to fetch receivables by, so it's no customer at all.
+func (c *Customer) Usable() bool {
+	return c.CustName != "" && c.IsActive()
+}
+
 // Customer represents a customer record from Priority ERP
 // Fields match the actual OData entity fields from Priority ERP API response
 type Customer struct {

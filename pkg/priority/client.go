@@ -137,7 +137,8 @@ func (c *Client) GetCustomerByID(ctx context.Context, customerID string) (*Custo
 	return customer, nil
 }
 
-// GetActiveCustomersByEmail returns only active customers for the given email.
+// GetActiveCustomersByEmail returns only usable (active, non-blank CUSTNAME) customers for
+// the given email.
 func (c *Client) GetActiveCustomersByEmail(ctx context.Context, email string) ([]Customer, error) {
 	customers, err := c.GetCustomersByEmail(ctx, email)
 	if err != nil {
@@ -146,7 +147,7 @@ func (c *Client) GetActiveCustomersByEmail(ctx context.Context, email string) ([
 
 	active := make([]Customer, 0, len(customers))
 	for _, customer := range customers {
-		if customer.IsActive() {
+		if customer.Usable() {
 			active = append(active, customer)
 		}
 	}
@@ -355,7 +356,7 @@ func (c *Client) resolveActiveCustNames(ctx context.Context, emails []string, st
 		// SQL-backed, and SQL's three-valued logic means "INACTIVEFLAG ne 'Y'" evaluates
 		// UNKNOWN (excluded) when the column is NULL -- which is the *normal* state for an
 		// active customer (the flag only gets stamped on deactivation). A naive server-side
-		// pushdown would exclude exactly the customers it's meant to include. IsActive()
+		// pushdown would exclude exactly the customers it's meant to include. Usable()
 		// below is the only correctness check; $select is where the real byte win is.
 		filter := buildOrFilter("EMAIL", chunk)
 
@@ -407,17 +408,12 @@ func (c *Client) resolveActiveCustNames(ctx context.Context, emails []string, st
 
 			cr := resp.Result().(*CustomerODataResponse)
 			for _, cust := range cr.Value {
-				// CUSTNAME is the CUSTOMERS entity key and shouldn't come back blank, but
-				// it's tagged omitempty, so a blank one (partially-honoured $select, a stub
-				// record) isn't impossible, just unexpected. Without this, a blank CustName still gets
-				// appended below, custNamesByEmail[key] becomes non-empty, and
-				// addPriorityContributionsBatch reads that as "matched a Priority customer,
-				// contributed nothing" instead of "no Priority record" -- silently pointing
-				// any later investigation the wrong way.
-				if cust.CustName == "" {
-					continue
-				}
-				if !cust.IsActive() {
+				// Without the blank-CUSTNAME half of Usable, a blank CustName would still be
+				// appended below, custNamesByEmail[key] would become non-empty, and
+				// addPriorityContributionsBatch would read that as "matched a Priority
+				// customer, contributed nothing" instead of "no Priority record" --
+				// silently pointing any later investigation the wrong way.
+				if !cust.Usable() {
 					continue
 				}
 				requested, ok := requestedByNormalizedEmail[normalizeEmail(cust.Email)]

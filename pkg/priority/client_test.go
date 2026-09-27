@@ -248,6 +248,31 @@ func TestGetActiveCustomersByEmail_FiltersInactiveFlag(t *testing.T) {
 	assert.Empty(t, result)
 }
 
+func TestGetActiveCustomersByEmail_FiltersBlankCustName(t *testing.T) {
+	// A blank CUSTNAME is no key to fetch receivables by: the CLI would otherwise query
+	// ACCOUNTS_RECEIVABLE(''), get a 404-as-empty, and report "no receivables" for a
+	// record that isn't a customer. The batch path already treats it as no record.
+	response := CustomerODataResponse{
+		Value: []Customer{
+			{CustName: "", Email: "test@example.com"},
+			{CustName: "CUST002", Email: "test@example.com"},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	result, err := client.GetActiveCustomersByEmail(context.Background(), "test@example.com")
+
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+	assert.Equal(t, "CUST002", result[0].CustName)
+}
+
 func TestGetActiveCustomersByEmail_FiltersStatDes(t *testing.T) {
 	response := CustomerODataResponse{
 		Value: []Customer{

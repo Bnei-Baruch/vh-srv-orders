@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -218,8 +219,48 @@ func newPriorityTestClient(serverURL string) *priority.Client {
 	return priority.NewClient()
 }
 
+func TestFetchDonationSums_RequestErrorIsNeverDowngradedToNoRecord(t *testing.T) {
+	// Emails are resolved in chunks of 40, so good@x.com and bad@x.com are put in
+	// different chunks: the first chunk succeeds and resolves good@x.com to a customer
+	// with contributions, the second fails. What this pins is that the failed chunk still
+	// fails the whole fetch — there is no partial result. Returning good@x.com's sums
+	// while bad@x.com silently becomes "no Priority record" would price a donor as if
+	// they had never given.
+	emails := []string{"good@x.com"}
+	for i := range 40 {
+		emails = append(emails, fmt.Sprintf("filler%d@x.com", i))
+	}
+	emails = append(emails, "bad@x.com")
+
+	var goodResolved atomic.Bool
+	contributions := priorityServerWithContributions(100)
+	defer contributions.Close()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		filter := r.URL.Query().Get("$filter")
+		if r.URL.Path == "/CUSTOMERS" && strings.Contains(filter, "bad@x.com") {
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprint(w, "internal error")
+			return
+		}
+		if r.URL.Path == "/CUSTOMERS" && strings.Contains(filter, "good@x.com") {
+			goodResolved.Store(true)
+		}
+		contributions.Config.Handler.ServeHTTP(w, r)
+	}))
+	defer server.Close()
+
+	client := newPriorityTestClient(server.URL)
+	_, err := fetchDonationSums(context.Background(), client, notFoundAccountingClient(t), testQuickbooksCompanyID, emails, 3.1, 3.6)
+
+	require.True(t, goodResolved.Load(), "precondition: the chunk holding good@x.com must have succeeded")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDonationFetch)
+}
+
+// --- addPriorityContributionsBatch ---
+// The Priority half of fetchDonationSums, tested directly as well as through it.
+
 func TestFetchDonationSums_NoAccount_TreatedAsZero(t *testing.T) {
-	// Empty customers list → GetLastContributions returns "no active customers found for email: ..."
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(priority.CustomerODataResponse{Value: []priority.Customer{}})
@@ -230,12 +271,11 @@ func TestFetchDonationSums_NoAccount_TreatedAsZero(t *testing.T) {
 	result, err := fetchDonationSums(context.Background(), client, notFoundAccountingClient(t), testQuickbooksCompanyID, []string{"unknown@x.com"}, 3.1, 3.6)
 
 	require.NoError(t, err)
-	assert.Contains(t, result.fetchNote, "unknown@x.com") // recorded as "no Priority account"
+	assert.Contains(t, result.fetchNote, "unknown@x.com")
 	assert.Equal(t, 0.0, result.totalNIS)
 }
 
 func TestFetchDonationSums_APIError_ReturnsError(t *testing.T) {
-	// Real API error (not "customer not found") on first email → fail immediately
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprint(w, "internal error")
@@ -247,131 +287,16 @@ func TestFetchDonationSums_APIError_ReturnsError(t *testing.T) {
 
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrDonationFetch)
-	assert.Contains(t, err.Error(), "bad@x.com")
-}
-
-func TestFetchDonationSums_PartialAPIError_ReturnsError(t *testing.T) {
-	// Good email succeeds, bad email errors → still returns error (fail-fast on second)
-	validDate := time.Now().AddDate(0, -3, 0).Format(time.RFC3339)
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.URL.Path == "/CUSTOMERS" {
-			email := r.URL.Query().Get("$filter")
-			if strings.Contains(email, "bad@x.com") {
-				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprint(w, "internal error")
-				return
-			}
-			json.NewEncoder(w).Encode(priority.CustomerODataResponse{
-				Value: []priority.Customer{{CustName: "CUST001"}},
-			})
-		} else {
-			json.NewEncoder(w).Encode(priority.AccountReceivableODataResponse{
-				Value: []priority.AccountReceivableItem{
-					{ACCNAME: "40001", DEBIT: 100, CODE: common.CurrencyNIS, FNCDATE: validDate},
-				},
-			})
-		}
-	}))
-	defer server.Close()
-
-	client := newPriorityTestClient(server.URL)
-	// good@x.com first (succeeds), bad@x.com second (errors) — result must still be an error
-	_, err := fetchDonationSums(context.Background(), client, notFoundAccountingClient(t), testQuickbooksCompanyID, []string{"good@x.com", "bad@x.com"}, 3.1, 3.6)
-
-	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrDonationFetch)
-	assert.Contains(t, err.Error(), "bad@x.com")
 }
 
 func TestFetchDonationSums_AggregatesAcrossEmails(t *testing.T) {
-	// Two emails: first has 100 USD, second has 200 NIS
-	validDate := time.Now().AddDate(0, -3, 0).Format(time.RFC3339)
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.URL.Path == "/CUSTOMERS" {
-			email := r.URL.Query().Get("$filter")
-			if strings.Contains(email, "usd@x.com") {
-				json.NewEncoder(w).Encode(priority.CustomerODataResponse{
-					Value: []priority.Customer{{CustName: "CUST_USD"}},
-				})
-			} else {
-				json.NewEncoder(w).Encode(priority.CustomerODataResponse{
-					Value: []priority.Customer{{CustName: "CUST_NIS"}},
-				})
-			}
-		} else if strings.Contains(r.URL.Path, "CUST_USD") {
-			json.NewEncoder(w).Encode(priority.AccountReceivableODataResponse{
-				Value: []priority.AccountReceivableItem{
-					{ACCNAME: "40001", DEBIT: 100, CODE: common.CurrencyUSD, FNCDATE: validDate},
-				},
-			})
-		} else {
-			json.NewEncoder(w).Encode(priority.AccountReceivableODataResponse{
-				Value: []priority.AccountReceivableItem{
-					{ACCNAME: "40001", DEBIT: 200, CODE: common.CurrencyNIS, FNCDATE: validDate},
-				},
-			})
-		}
-	}))
-	defer server.Close()
-
-	client := newPriorityTestClient(server.URL)
-	// usdRate=3.1: 100 USD = 310 NIS; plus 200 NIS = 510 NIS total
-	result, err := fetchDonationSums(context.Background(), client, notFoundAccountingClient(t), testQuickbooksCompanyID, []string{"usd@x.com", "nis@x.com"}, 3.1, 3.6)
-
-	require.NoError(t, err)
-	// Priority found both emails; accounting mock returns Found:false for both → note records the QB miss.
-	assert.NotContains(t, result.fetchNote, "Priority")
-	assert.Contains(t, result.fetchNote, "no QuickBooks record")
-	assert.InDelta(t, 510.0, result.totalNIS, 0.001)
-}
-
-// --- fetchDonationSums(..., addPriorityContributionsBatch) / addPriorityContributionsBatch ---
-// Direct tests for the batch-fetch strategy wired into EvaluateV2Price, exercised through the
-// same fetchDonationSums the tests above use, just with the batch Priority-fetch function
-// passed explicitly. fetchDonationSums's default (legacy addPriorityContributions) and its own
-// tests above are untouched -- see their own tests.
-
-func TestFetchDonationSumsBatch_NoAccount_TreatedAsZero(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(priority.CustomerODataResponse{Value: []priority.Customer{}})
-	}))
-	defer server.Close()
-
-	client := newPriorityTestClient(server.URL)
-	result, err := fetchDonationSums(context.Background(), client, notFoundAccountingClient(t), testQuickbooksCompanyID, []string{"unknown@x.com"}, 3.1, 3.6, addPriorityContributionsBatch)
-
-	require.NoError(t, err)
-	assert.Contains(t, result.fetchNote, "unknown@x.com")
-	assert.Equal(t, 0.0, result.totalNIS)
-}
-
-func TestFetchDonationSumsBatch_APIError_ReturnsError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprint(w, "internal error")
-	}))
-	defer server.Close()
-
-	client := newPriorityTestClient(server.URL)
-	_, err := fetchDonationSums(context.Background(), client, notFoundAccountingClient(t), testQuickbooksCompanyID, []string{"bad@x.com"}, 3.1, 3.6, addPriorityContributionsBatch)
-
-	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrDonationFetch)
-}
-
-func TestFetchDonationSumsBatch_AggregatesAcrossEmails(t *testing.T) {
 	// Two emails resolving to two distinct customers, different currencies each.
 	server := priorityServerWithContributions(100) // reuses the shared fixture: N emails -> N*amount
 	defer server.Close()
 
 	client := newPriorityTestClient(server.URL)
 	// usdRate=3.1: each email contributes 100 NIS (fixture always uses common.CurrencyNIS) -> 200 NIS total
-	result, err := fetchDonationSums(context.Background(), client, notFoundAccountingClient(t), testQuickbooksCompanyID, []string{"a@x.com", "b@x.com"}, 3.1, 3.6, addPriorityContributionsBatch)
+	result, err := fetchDonationSums(context.Background(), client, notFoundAccountingClient(t), testQuickbooksCompanyID, []string{"a@x.com", "b@x.com"}, 3.1, 3.6)
 
 	require.NoError(t, err)
 	assert.NotContains(t, result.fetchNote, "no Priority record")
@@ -474,18 +399,7 @@ func TestFetchDonationSums_AccountingOnly_AggregatesContributions(t *testing.T) 
 func TestFetchDonationSums_AllSources_SumByCurrency(t *testing.T) {
 	// Priority returns 200 NIS; QuickBooks returns 100 USD; Europe returns 100 EUR
 	// → total = 200 + 310 + 360 = 870 NIS.
-	validDate := time.Now().AddDate(0, -3, 0).Format(time.RFC3339)
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if strings.Contains(r.URL.Path, "CUSTOMERS") && r.URL.Query().Get("$filter") != "" {
-			json.NewEncoder(w).Encode(priority.CustomerODataResponse{Value: []priority.Customer{{CustName: "C1"}}})
-		} else {
-			json.NewEncoder(w).Encode(priority.AccountReceivableODataResponse{Value: []priority.AccountReceivableItem{
-				{ACCNAME: "40001", DEBIT: 200, CODE: common.CurrencyNIS, FNCDATE: validDate},
-			}})
-		}
-	}))
+	server := priorityServerWithContributions(200)
 	defer server.Close()
 	priorityClient := newPriorityTestClient(server.URL)
 

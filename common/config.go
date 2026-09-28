@@ -24,9 +24,15 @@ type envConfig struct {
 	S3BucketName string `envconfig:"S3_BUCKET_NAME"`
 	S3Endpoint   string `envconfig:"S3_ENDPOINT"`
 
-	// The Keycloak client also identifies this service to external_payments: it
-	// resolves the client to a registered caller and takes the organization from
-	// it, so nothing about the merchant account is sent in the request.
+	// The Keycloak client also identifies this service to external_payments,
+	// which resolves it to a registered caller carrying an organization.
+	//
+	// That does not replace the organization in the request body: it is required
+	// there and is sent on every charge (Organization: "ben2",
+	// domain/billing/renewal.go). Where both arrive the key is what the other
+	// side trusts, and a disagreement is logged there as ORG MISMATCH — so the
+	// credential decides which merchant account is charged, and the body field
+	// has to agree with it rather than being the thing that chooses.
 	KeycloakServerUrl    string `envconfig:"KEYCLOAK_SERVER_URL"`
 	KeycloakRealm        string `envconfig:"KEYCLOAK_REALM"`
 	KeycloakClientID     string `envconfig:"KEYCLOAK_CLIENT_ID"`

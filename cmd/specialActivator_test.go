@@ -16,9 +16,23 @@ func specialStarting(t time.Time) *repo.Special {
 
 func TestIsBeginsToday_StartsToday(t *testing.T) {
 	assert.True(t, isBeginsToday(specialStarting(time.Now())))
+
 	// Any time-of-day today counts — only the calendar date matters.
-	midnight := time.Now().Truncate(24 * time.Hour)
+	//
+	// Built with time.Date in the local zone, not time.Now().Truncate(24h):
+	// Truncate rounds against the zero time in UTC, so east of Greenwich it
+	// returns today's UTC midnight, which is 03:00 local in IDT. Between local
+	// midnight and 03:00 that instant is still *yesterday* locally, and
+	// isBeginsToday compares local calendar dates, so this assertion failed
+	// for three hours every night. CI runs in UTC, where the two agree, so it
+	// only ever failed on a developer's machine.
+	now := time.Now()
+	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	assert.True(t, isBeginsToday(specialStarting(midnight.Add(time.Minute))))
+	assert.True(t, isBeginsToday(specialStarting(midnight)))
+
+	// The other end of the same day.
+	assert.True(t, isBeginsToday(specialStarting(midnight.AddDate(0, 0, 1).Add(-time.Second))))
 }
 
 // Regression: the old check compared today's day-of-month with itself, so any

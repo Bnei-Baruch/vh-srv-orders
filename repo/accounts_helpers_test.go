@@ -199,3 +199,47 @@ func AccountFixture() Account {
 		AccountType: null.StringFrom("account type"),
 	}
 }
+
+// The email reaching GetAccount is not trusted input: both sheet importers pass
+// a cell straight from a spreadsheet, and GET /account?email= passes a query
+// parameter. Interpolated into the WHERE clause, a value shaped like the one
+// below closed the quote and replaced the predicate, so a lookup that should
+// match nothing returned the most recently created account instead.
+func TestGetAccount_EmailIsNotInterpolatedIntoTheQuery(t *testing.T) {
+	dbURL, err := testutil.NewTestOrdersDB(t, context.Background())
+	require.Nil(t, err)
+	db, err := NewOrdersDBUrl(context.Background(), dbURL, new(events.NoopEmitter))
+	require.Nil(t, err)
+	defer db.Close()
+
+	ctx := eventstest.WithTestEventBuilder(t, context.Background())
+
+	id, err := db.CreateAccount(ctx, Account{
+		UserKey: null.StringFrom("keycloak-victim"),
+		Email:   null.StringFrom("victim@example.com"),
+	})
+	require.Nil(t, err)
+	require.Greater(t, id, 0)
+
+	for _, email := range []string{
+		`x') OR 1=1 --`,
+		`x') OR TRUE --`,
+		`' OR ''='`,
+	} {
+		account, err := db.GetAccount(ctx, 0, email)
+		require.Error(t, err, "%q must match no account, not rewrite the predicate", email)
+		require.Nil(t, account)
+	}
+
+	// The ordinary lookup still works, and still ignores case.
+	account, err := db.GetAccount(ctx, 0, "VICTIM@example.com")
+	require.Nil(t, err)
+	require.Equal(t, id, account.ID)
+
+	// A literal apostrophe in an address is a value, not a syntax error.
+	quoted, err := db.CreateAccount(ctx, Account{Email: null.StringFrom(`o'brien@example.com`)})
+	require.Nil(t, err)
+	account, err = db.GetAccount(ctx, 0, `o'brien@example.com`)
+	require.Nil(t, err)
+	require.Equal(t, quoted, account.ID)
+}

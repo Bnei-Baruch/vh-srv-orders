@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
 
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
@@ -35,12 +36,15 @@ func (o *OrdersAPI) handleOperationCreate(c *gin.Context) {
 	ID, dbErr := o.repo.PerformOperation(c.Request.Context(), opr)
 
 	if dbErr != nil {
-		if errors.Is(dbErr, common.ErrAccountKeyTaken) {
+		switch {
+		case errors.Is(dbErr, common.ErrAccountKeyTaken):
 			c.JSON(http.StatusConflict, gin.H{"error": dbErr.Error()})
-			return
+		case errors.Is(dbErr, common.ErrInvalidValues):
+			c.JSON(http.StatusBadRequest, gin.H{"error": dbErr.Error()})
+		default:
+			c.Status(http.StatusInternalServerError)
+			_ = c.Error(fmt.Errorf("repo.PerformOperation: %w", dbErr))
 		}
-		c.Status(http.StatusInternalServerError)
-		_ = c.Error(fmt.Errorf("error while creating grant: %w", dbErr))
 		return
 	}
 
@@ -68,8 +72,15 @@ func (o *OrdersAPI) handleOperationRevert(c *gin.Context) {
 	revertErr := o.repo.RevertOperation(c.Request.Context(), *opr.NewEmail, *opr.OldEmail)
 
 	if revertErr != nil {
-		_ = c.Error(fmt.Errorf("error while reverting operation: %w", revertErr))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": revertErr.Error()})
+		switch {
+		case errors.Is(revertErr, pgx.ErrNoRows):
+			c.JSON(http.StatusNotFound, gin.H{"error": "no operation for these emails"})
+		case errors.Is(revertErr, common.ErrAccountKeyTaken):
+			c.JSON(http.StatusConflict, gin.H{"error": revertErr.Error()})
+		default:
+			_ = c.Error(fmt.Errorf("repo.RevertOperation: %w", revertErr))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": revertErr.Error()})
+		}
 		return
 	}
 

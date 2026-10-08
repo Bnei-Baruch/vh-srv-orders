@@ -187,6 +187,12 @@ func (o *OrdersDB) PatchOrCreateAccount(ctx context.Context, a Account) (int, er
 	if err != nil {
 		return 0, err
 	}
+	// Lost the race: another request created the key's account between the
+	// lookup above and our insert. Patch that one, as if the lookup had found
+	// it. No test reaches this branch — it needs the other insert to commit
+	// inside that window — so removing the patch would pass the suite;
+	// TestCreateAccountForKey_LosingTheRaceReturnsTheWinner pins only the
+	// account returned, not the patch.
 	if !created {
 		if err := o.PatchAccount(ctx, a, accountID); err != nil {
 			return 0, fmt.Errorf("o.PatchAccount: %w", err)

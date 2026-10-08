@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"gitlab.bbdev.team/vh/pay/orders/common"
 	"net/http"
@@ -34,6 +35,10 @@ func (o *OrdersAPI) handleOperationCreate(c *gin.Context) {
 	ID, dbErr := o.repo.PerformOperation(c.Request.Context(), opr)
 
 	if dbErr != nil {
+		if errors.Is(dbErr, common.ErrAccountKeyTaken) {
+			c.JSON(http.StatusConflict, gin.H{"error": dbErr.Error()})
+			return
+		}
 		c.Status(http.StatusInternalServerError)
 		_ = c.Error(fmt.Errorf("error while creating grant: %w", dbErr))
 		return

@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/volatiletech/null/v9"
 
+	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/events"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/testutil"
 )
@@ -92,14 +93,26 @@ func TestMigration29_MergesDuplicateUserKeyAccounts_AndReverts(t *testing.T) {
 	_, err = db.pool.Exec(ctx, `INSERT INTO accounts ("UserKey") VALUES ('kc-dup')`)
 	require.Error(t, err, "accounts_userkey_uniq refuses a second account for a key")
 
+	// A move made after the merge must survive the down migration.
+	third, thirdOrder, _, _ := seedAccountWithRows(t, db, ctx, "kc-third", "third@test.test")
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET "AccountID" = $1 WHERE id = $2`, third, midOrder)
+	require.NoError(t, err)
+
 	require.NoError(t, m.Steps(-1))
 
+	var midOrderAccount int
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT "AccountID" FROM orders WHERE id = $1`, midOrder).Scan(&midOrderAccount))
+	assert.Equal(t, third, midOrderAccount, "a row moved after the merge stays where it was put")
+	_ = thirdOrder
+
 	for _, tc := range []struct{ acct, order, card, tx int }{
-		{oldID, oldOrder, oldCard, oldTx}, {midID, midOrder, midCard, midTx}, {newID, newOrder, newCard, newTx},
+		{oldID, oldOrder, oldCard, oldTx}, {newID, newOrder, newCard, newTx},
 	} {
 		o, c, x := accountRefs(t, db, ctx, tc.order, tc.card, tc.tx)
 		assert.Equal(t, [3]int{tc.acct, tc.acct, tc.acct}, [3]int{o, c, x}, "down migration moves rows back")
 	}
+	_, c, x = accountRefs(t, db, ctx, midOrder, midCard, midTx)
+	assert.Equal(t, [2]int{midID, midID}, [2]int{c, x}, "down migration moves rows back")
 	var email string
 	require.NoError(t, db.pool.QueryRow(ctx, `SELECT "Email" FROM accounts WHERE id = $1`, midID).Scan(&email))
 	assert.Equal(t, "mid@test.test", email, "down migration restores the deleted account verbatim")
@@ -125,4 +138,24 @@ func TestCreateAccountForKey_LosingTheRaceReturnsTheWinner(t *testing.T) {
 	var count int
 	require.NoError(t, db.pool.QueryRow(ctx, `SELECT count(*) FROM accounts WHERE "UserKey" = 'kc-race'`).Scan(&count))
 	assert.Equal(t, 1, count)
+}
+
+// PerformOperation moving an account onto a keycloak id that already has one
+// would give that key two accounts. It must refuse before changing anything.
+func TestPerformOperation_RefusesKeyThatHasAnAccount(t *testing.T) {
+	db, ctx := newTestDB(t)
+
+	oldID, _, _, _ := seedAccountWithRows(t, db, ctx, "kc-old", "old@test.test")
+	seedAccountWithRows(t, db, ctx, "kc-new", "new@test.test")
+
+	str := func(s string) *string { return &s }
+	_, err := db.PerformOperation(ctx, OperationReq{
+		OldKeycloakID: str("kc-old"), NewKeycloakID: str("kc-new"),
+		OldEmail: str("old@test.test"), NewEmail: str("new@test.test"),
+	})
+	require.ErrorIs(t, err, common.ErrAccountKeyTaken)
+
+	var key string
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT "UserKey" FROM accounts WHERE id = $1`, oldID).Scan(&key))
+	assert.Equal(t, "kc-old", key)
 }

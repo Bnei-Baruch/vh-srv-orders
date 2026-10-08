@@ -16,7 +16,7 @@ func (o *OrdersDB) GetTransactionById(ctx context.Context, id int, accountId *in
 	if accountId != nil {
 		whereCondition += fmt.Sprintf(" and account_id = %d", accountId)
 	}
-	if err := o.QueryRow(ctx, `SELECT 
+	if err := o.pool.QueryRow(ctx, `SELECT 
 		id,
 		order_id,
 		payment_id,
@@ -47,7 +47,7 @@ func (o *OrdersDB) CreateTransactionAndGetId(ctx context.Context, p Transaction)
 	}
 
 	var ID int
-	if err := o.QueryRow(ctx, fmt.Sprintf(`INSERT INTO transaction (%s) VALUES (%s) RETURNING id`, createString, numString),
+	if err := o.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO transaction (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&ID); err != nil {
 		return 0, err
 	}

@@ -28,11 +28,11 @@ func insertOrder(t *testing.T, db *OrdersDB, ctx context.Context, order Order, u
 	t.Helper()
 	createString, numString, args := prepareOrderCreateQuery(order)
 	var id int
-	err := db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err := db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		args...).Scan(&id)
 	require.NoError(t, err)
 	if userkey != "" {
-		_, err = db.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey, id)
+		_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey, id)
 		require.NoError(t, err)
 	}
 	return id
@@ -54,7 +54,7 @@ func renewableOrder(accountID int, status string, paymentDate time.Time) Order {
 func getOrderFlag(t *testing.T, db *OrdersDB, ctx context.Context, orderID int) string {
 	t.Helper()
 	var flag null.String
-	err := db.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, orderID).Scan(&flag)
+	err := db.pool.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, orderID).Scan(&flag)
 	require.NoError(t, err)
 	return flag.String
 }
@@ -352,7 +352,7 @@ func TestGetFlaggedOrders(t *testing.T) {
 		Flag:      null.StringFrom(common.OrderFlagToRenew),
 	}
 	createString, numString, createQueryArgs := prepareOrderCreateQuery(order1)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order1.ID)
 	require.NoError(t, err)
 
@@ -362,7 +362,7 @@ func TestGetFlaggedOrders(t *testing.T) {
 		Flag:      null.StringFrom(common.OrderFlagToRenew),
 	}
 	createString, numString, createQueryArgs = prepareOrderCreateQuery(order2)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order2.ID)
 	require.NoError(t, err)
 
@@ -372,7 +372,7 @@ func TestGetFlaggedOrders(t *testing.T) {
 		Flag:      null.StringFrom("other"),
 	}
 	createString, numString, createQueryArgs = prepareOrderCreateQuery(order3)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order3.ID)
 	require.NoError(t, err)
 
@@ -609,7 +609,7 @@ func TestFlagOrder(t *testing.T) {
 		Flag:      null.StringFrom(common.OrderFlagToRenew),
 	}
 	createString, numString, createQueryArgs := prepareOrderCreateQuery(order)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order.ID)
 	require.NoError(t, err)
 
@@ -619,7 +619,7 @@ func TestFlagOrder(t *testing.T) {
 
 	// Verify flag was updated
 	var flag null.String
-	err = db.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order.ID).Scan(&flag)
+	err = db.pool.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order.ID).Scan(&flag)
 	require.NoError(t, err)
 	assert.Equal(t, common.OrderFlagMuhHiyuvNiklat, flag.String)
 }

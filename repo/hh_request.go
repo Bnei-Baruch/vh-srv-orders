@@ -29,9 +29,9 @@ func scanHHRequest(row pgx.Row) (*HHRequest, error) {
 // CreateHHRequest deletes any pending request for the member, then inserts the new one,
 // mirroring the v1 profiles request flow. Both operations run in a transaction.
 func (o *OrdersDB) CreateHHRequest(ctx context.Context, req HHRequestReq) (*HHRequest, error) {
-	tx, err := o.Begin(ctx)
+	tx, err := o.pool.Begin(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("o.Begin: %w", err)
+		return nil, fmt.Errorf("o.pool.Begin: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
@@ -92,9 +92,9 @@ func (o *OrdersDB) GetAllHHRequests(ctx context.Context, status, keycloakID stri
 	}
 	query += ` ORDER BY r.id DESC`
 
-	rows, err := o.Query(ctx, query, args...)
+	rows, err := o.pool.Query(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("o.Query: %w", err)
+		return nil, fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 
@@ -144,9 +144,9 @@ func (o *OrdersDB) ConcludeHHRequest(ctx context.Context, id int, c HHRequestCon
 		status = common.HHRequestStatusApproved
 	}
 
-	tx, err := o.Begin(ctx)
+	tx, err := o.pool.Begin(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("o.Begin: %w", err)
+		return nil, fmt.Errorf("o.pool.Begin: %w", err)
 	}
 	defer tx.Rollback(ctx)
 

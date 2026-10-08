@@ -16,12 +16,12 @@ func (o *OrdersDB) DeleteSpecialById(ctx context.Context, id int) error {
 		email string
 		err   error
 	)
-	if err = o.QueryRow(ctx, `SELECT email FROM specials where id=$1`, id).Scan(&email); err != nil {
+	if err = o.pool.QueryRow(ctx, `SELECT email FROM specials where id=$1`, id).Scan(&email); err != nil {
 		return err
 	}
-	res, errUpdate := o.Exec(ctx, `UPDATE  specials SET end_date = now(), updated_at = now() WHERE  id = $1`, id)
+	res, errUpdate := o.pool.Exec(ctx, `UPDATE  specials SET end_date = now(), updated_at = now() WHERE  id = $1`, id)
 	if errUpdate != nil {
-		return fmt.Errorf("o.Exec: %w", errUpdate)
+		return fmt.Errorf("o.pool.Exec: %w", errUpdate)
 	}
 
 	if res.RowsAffected() == 0 {
@@ -33,7 +33,7 @@ func (o *OrdersDB) DeleteSpecialById(ctx context.Context, id int) error {
 }
 
 func (o *OrdersDB) SetKeycloakIdByEmail(ctx context.Context, email string, keycloakID string) error {
-	_, err := o.Exec(ctx, `UPDATE specials SET keycloak_id = $1, updated_at=now() WHERE email=$2`, keycloakID, email)
+	_, err := o.pool.Exec(ctx, `UPDATE specials SET keycloak_id = $1, updated_at=now() WHERE email=$2`, keycloakID, email)
 	if err != nil {
 		return fmt.Errorf("SetKeycloakIdByEmail: %w", err)
 	}
@@ -44,11 +44,11 @@ func (o *OrdersDB) SetKeycloakIdByEmail(ctx context.Context, email string, keycl
 // DeleteSpecialById — the single primitive that ends a row and emits delete_special.
 // Past spans keep their history and future spans stay scheduled.
 func (o *OrdersDB) DeleteSpecialsByKeycloakId(ctx context.Context, keycloakID string) error {
-	rows, err := o.Query(ctx,
+	rows, err := o.pool.Query(ctx,
 		`SELECT id FROM specials WHERE keycloak_id=$1 AND start_date <= now() AND end_date > now()`,
 		keycloakID)
 	if err != nil {
-		return fmt.Errorf("o.Query: %w", err)
+		return fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 
@@ -75,7 +75,7 @@ func (o *OrdersDB) DeleteSpecialsByKeycloakId(ctx context.Context, keycloakID st
 
 func (o *OrdersDB) GetSpecialsById(ctx context.Context, id string) ([]*Special, error) {
 	var specials []*Special
-	rows, err := o.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory from specials where id = $1`, id)
+	rows, err := o.pool.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory from specials where id = $1`, id)
 
 	if err != nil {
 		return nil, err
@@ -99,7 +99,7 @@ func (o *OrdersDB) GetSpecialsById(ctx context.Context, id string) ([]*Special, 
 
 func (o *OrdersDB) GetSpecialsByKeycloakId(ctx context.Context, keycloakID string) ([]*Special, error) {
 	var specials []*Special
-	rows, err := o.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory from specials where keycloak_id = $1`, keycloakID)
+	rows, err := o.pool.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory from specials where keycloak_id = $1`, keycloakID)
 
 	if err != nil {
 		return nil, err
@@ -123,7 +123,7 @@ func (o *OrdersDB) GetSpecialsByKeycloakId(ctx context.Context, keycloakID strin
 
 func (o *OrdersDB) GetAllSpecials(ctx context.Context) ([]*Special, error) {
 	var specials []*Special
-	rows, err := o.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory from specials`)
+	rows, err := o.pool.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory from specials`)
 	if err != nil {
 		return specials, err
 	}
@@ -157,7 +157,7 @@ func (o *OrdersDB) CreateSpecial(ctx context.Context, s Special) (int, error) {
 	}
 
 	var ID int
-	if err := o.QueryRow(ctx, fmt.Sprintf(`INSERT INTO specials (%s) VALUES (%s) RETURNING id`, createString, numString),
+	if err := o.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO specials (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&ID); err != nil {
 		return 0, err
 	}
@@ -217,7 +217,7 @@ func prepareSpecialCreateQuery(req Special) (string, string, []interface{}) {
 
 func (o *OrdersDB) GetAllSpecialsByEmail(ctx context.Context, email string) ([]*Special, error) {
 	var specials []*Special
-	rows, err := o.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory,created_at from specials where email ilike $1`, email)
+	rows, err := o.pool.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory,created_at from specials where email ilike $1`, email)
 
 	if err != nil {
 		return nil, err
@@ -242,7 +242,7 @@ func (o *OrdersDB) GetAllSpecialsByEmail(ctx context.Context, email string) ([]*
 
 func (o *OrdersDB) GetUniqueEmailsFromSpecial(ctx context.Context) ([]string, error) {
 	var emails []string
-	rows, err := o.Query(ctx, `SELECT DISTINCT specials.email from specials`)
+	rows, err := o.pool.Query(ctx, `SELECT DISTINCT specials.email from specials`)
 
 	if err != nil {
 		return emails, err

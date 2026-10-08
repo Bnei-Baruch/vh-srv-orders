@@ -84,15 +84,15 @@ func (o *OrdersDB) PaidDetailCount(ctx context.Context) (*PaidDetailC, error) {
 	from orders where "ProductType" like 't-0522-%' and "Status" = 'paid'`
 
 	var result PaidDetailC
-	if err := o.QueryRow(ctx, totalPeoplePaid).Scan(&result.TotalPeoplePaid); err != nil {
+	if err := o.pool.QueryRow(ctx, totalPeoplePaid).Scan(&result.TotalPeoplePaid); err != nil {
 		return nil, fmt.Errorf("totalPeoplePaid: %w", err)
 	}
 
-	if err := o.QueryRow(ctx, totalPeoplePaidWithCC).Scan(&result.TotalPeoplePaidWithCC); err != nil {
+	if err := o.pool.QueryRow(ctx, totalPeoplePaidWithCC).Scan(&result.TotalPeoplePaidWithCC); err != nil {
 		return nil, fmt.Errorf("totalPeoplePaidWithCC: %w", err)
 	}
 
-	if err := o.QueryRow(ctx, totalTicketSold).Scan(&result.TotalTicketSold); err != nil {
+	if err := o.pool.QueryRow(ctx, totalTicketSold).Scan(&result.TotalTicketSold); err != nil {
 		return nil, fmt.Errorf("totalTicketSold: %w", err)
 	}
 
@@ -101,7 +101,7 @@ func (o *OrdersDB) PaidDetailCount(ctx context.Context) (*PaidDetailC, error) {
 
 func (o *OrdersDB) count(ctx context.Context, query string, args ...interface{}) (int64, error) {
 	var result int64
-	if err := o.QueryRow(ctx, query, args...).Scan(&result); err != nil {
+	if err := o.pool.QueryRow(ctx, query, args...).Scan(&result); err != nil {
 		return 0, err
 	}
 	return result, nil

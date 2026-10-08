@@ -163,7 +163,7 @@ func TestConcludeHHRequest_Approve_ReplacesActiveGrant(t *testing.T) {
 	// GetActiveHHGrant orders by id DESC LIMIT 1, so it returns the new grant
 	// whether or not the old one was ended. Asked directly.
 	var oldEnded bool
-	require.NoError(t, db.QueryRow(ctx,
+	require.NoError(t, db.pool.QueryRow(ctx,
 		`SELECT end_date < NOW() FROM hh_grants WHERE id = $1`, oldID).Scan(&oldEnded))
 	assert.True(t, oldEnded, "the previous grant should have been ended")
 
@@ -311,7 +311,7 @@ func TestConcludeHHRequest_EndDateDependsOnSessionTimezone(t *testing.T) {
 	t.Cleanup(jerusalem.Close)
 
 	var tz string
-	require.NoError(t, jerusalem.QueryRow(ctx, "SHOW TimeZone").Scan(&tz))
+	require.NoError(t, jerusalem.pool.QueryRow(ctx, "SHOW TimeZone").Scan(&tz))
 	require.Equal(t, "Asia/Jerusalem", tz, "second pool did not take the timezone")
 
 	r, err := jerusalem.CreateHHRequest(ctx, hhRequestReq("kc-req-tz"))

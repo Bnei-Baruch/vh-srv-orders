@@ -10,9 +10,11 @@ import (
 )
 
 type OrdersAPI struct {
-	// Concrete, because nothing substitutes it. *OrdersDB embeds *pgxpool.Pool,
-	// so Exec/Query/Begin are promoted here too — writing SQL through them
-	// skips OrdersDB.emitEvent. repo_surface_test.go guards that.
+	// Concrete, because nothing substitutes it. Safe now that *OrdersDB holds
+	// the pool in a field rather than embedding it: Exec/Query/Begin are no
+	// longer promoted onto it, so a handler cannot write SQL past
+	// OrdersDB.emitEvent. The compiler holds that, and
+	// TestOrdersDB_DoesNotExposeThePool pins it.
 	repo                *repo.OrdersDB
 	profileService      profiles.ProfileService
 	priorityClient      *priority.Client

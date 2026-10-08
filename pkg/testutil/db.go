@@ -14,6 +14,7 @@ import (
 	_ "github.com/lib/pq"
 
 	"github.com/golang-migrate/migrate/v4"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/peterldowns/pgtestdb"
 	"github.com/peterldowns/pgtestdb/migrators/golangmigrator"
 
@@ -62,4 +63,23 @@ func NewTestOrdersDB(t *testing.T, ctx context.Context) (string, error) {
 	// Once: each call creates another instance database, and Custom logs the
 	// URL itself.
 	return pgtestdb.Custom(t, config, gm).URL(), nil
+}
+
+// NewTestPool opens a pool against an already-created test database, for tests
+// that need to assert or seed database state directly.
+//
+// This exists because *repo.OrdersDB no longer exposes the pool: it holds it in
+// a field rather than embedding it, so Exec and friends are not promoted onto
+// the concrete type and a handler cannot reach the database past the repo layer
+// — which is where the events live. Tests still legitimately need raw access,
+// and they take it here rather than through an exported accessor that would put
+// the same escape hatch back on production code.
+func NewTestPool(t *testing.T, dbURL string) *pgxpool.Pool {
+	t.Helper()
+	pool, err := pgxpool.New(context.Background(), dbURL)
+	if err != nil {
+		t.Fatalf("testutil.NewTestPool: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	return pool
 }

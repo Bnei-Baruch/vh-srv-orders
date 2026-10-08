@@ -55,11 +55,24 @@ type OrdersRepository interface {
 	Close()
 }
 
+// OrdersDB owns the connection pool in a field rather than embedding it.
+//
+// Embedding promoted Exec, Query, QueryRow, Begin and the rest onto *OrdersDB,
+// so every holder of the concrete type could reach the database directly and
+// skip the repo layer — which is where emitEvent lives, so such a write lands
+// with no event and nothing downstream hears about it. While api.repo was an
+// interface the compiler hid those methods; once it became concrete the only
+// thing standing between a handler and raw SQL was an AST test that could not
+// prove absence. A named field restores that barrier to the compiler.
 type OrdersDB struct {
-	*pgxpool.Pool
+	pool           *pgxpool.Pool
 	eventEmitter   events.EventEmitter
 	profileService profiles.ProfileService
 }
+
+// Close releases the pool. Explicit because the pool is no longer embedded, and
+// the app, the importers and the workers all shut down through it.
+func (o *OrdersDB) Close() { o.pool.Close() }
 
 func NewOrdersDB(ctx context.Context, eventEmitter events.EventEmitter) (*OrdersDB, error) {
 	return NewOrdersDBUrl(ctx, GetDBURL(), eventEmitter)
@@ -80,7 +93,7 @@ func NewOrdersDBUrl(ctx context.Context, db_url string, eventEmitter events.Even
 		return nil, fmt.Errorf("pool.Ping: %w", err)
 	}
 	return &OrdersDB{
-		Pool:           pool,
+		pool:           pool,
 		eventEmitter:   eventEmitter,
 		profileService: profiles.NewProfileServiceAPI(keycloak.NewClient()),
 	}, nil

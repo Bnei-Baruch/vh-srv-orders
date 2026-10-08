@@ -11,6 +11,7 @@ import (
 	"github.com/volatiletech/null/v9"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/events"
@@ -28,22 +29,36 @@ func (o *OrdersDB) GetOrCreateAccount(ctx context.Context, a Account) (int, erro
 		return id, nil
 	}
 
-	var id int
-	err := o.pool.QueryRow(ctx, `select id from accounts where "UserKey" = $1 ORDER BY id DESC LIMIT 1`, a.UserKey.String).
-		Scan(&id)
+	id, err := o.GetAccountIDByKeycloakID(ctx, a.UserKey.String)
 	if err == nil {
 		return id, nil
 	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return 0, fmt.Errorf("o.pool.QueryRow: %w", err)
+	if !errors.Is(err, common.ErrNoRowsAffected) {
+		return 0, fmt.Errorf("o.GetAccountIDByKeycloakID: %w", err)
 	}
 
+	id, _, err = o.createAccountForKey(ctx, a)
+	return id, err
+}
+
+// createAccountForKey creates a's account, or, when a concurrent request has
+// just created one for the same key, returns that one instead (created=false):
+// accounts_userkey_uniq allows a single account per key, so losing the race
+// is not an error.
+func (o *OrdersDB) createAccountForKey(ctx context.Context, a Account) (id int, created bool, err error) {
 	id, err = o.CreateAccount(ctx, a)
-	if err != nil {
-		return 0, fmt.Errorf("o.CreateAccount: %w", err)
+	if err == nil {
+		return id, true, nil
 	}
-
-	return id, nil
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23505" || pgErr.ConstraintName != "accounts_userkey_uniq" {
+		return 0, false, fmt.Errorf("o.CreateAccount: %w", err)
+	}
+	id, err = o.GetAccountIDByKeycloakID(ctx, a.UserKey.String)
+	if err != nil {
+		return 0, false, fmt.Errorf("o.GetAccountIDByKeycloakID after conflict: %w", err)
+	}
+	return id, false, nil
 }
 
 func (o *OrdersDB) CreateAccount(ctx context.Context, a Account) (int, error) {
@@ -165,9 +180,14 @@ func (o *OrdersDB) PatchOrCreateAccount(ctx context.Context, a Account) (int, er
 		return 0, fmt.Errorf("o.GetAccountIDByKeycloakID: %w", err)
 	}
 
-	accountID, err = o.CreateAccount(ctx, a)
+	accountID, created, err := o.createAccountForKey(ctx, a)
 	if err != nil {
-		return 0, fmt.Errorf("o.CreateAccount: %w", err)
+		return 0, err
+	}
+	if !created {
+		if err := o.PatchAccount(ctx, a, accountID); err != nil {
+			return 0, fmt.Errorf("o.PatchAccount: %w", err)
+		}
 	}
 
 	return accountID, nil
@@ -679,9 +699,9 @@ func (o *OrdersDB) GetOrCreateAccountFromProfile(ctx context.Context, keycloakId
 		UserKey:     null.StringFrom(keycloakId),
 	}
 
-	account.ID, err = o.CreateAccount(ctx, *account)
+	account.ID, _, err = o.createAccountForKey(ctx, *account)
 	if err != nil {
-		return 0, fmt.Errorf("repo.CreateAccount: %w", err)
+		return 0, err
 	}
 	return account.ID, nil
 }

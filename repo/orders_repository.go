@@ -24,7 +24,7 @@ import (
 // one of their mocks for nothing.
 type OrdersRepository interface {
 	GetAccount(ctx context.Context, id int, email string) (*Account, error)
-	CreateAccount(ctx context.Context, a Account) (int, error)
+	GetOrCreateAccount(ctx context.Context, a Account) (int, error)
 
 	LoadRenewalData(ctx context.Context, orderID uint) (*RenewalData, error)
 	CreateRenewalPayment(ctx context.Context, data *RenewalData, amount float64, currency, pricingVersion string, pricingEvaluation null.JSON, pmx string) (*Payment, error)

@@ -132,9 +132,11 @@ func (im *BaseImporter) getOrCreateAccount(ctx context.Context, email string) (i
 		UserKey:     null.StringFrom(profile.KeycloakID.String()),
 	}
 
-	account.ID, err = im.repo.CreateAccount(ctx, *account)
+	// By key, not insert: the profile's keycloak id may already have an account
+	// whose stored email is stale, and the key allows only one.
+	account.ID, err = im.repo.GetOrCreateAccount(ctx, *account)
 	if err != nil {
-		return 0, fmt.Errorf("repo.CreateAccount: %w", err)
+		return 0, fmt.Errorf("repo.GetOrCreateAccount: %w", err)
 	}
 	return account.ID, nil
 }

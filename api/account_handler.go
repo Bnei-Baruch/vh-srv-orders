@@ -73,9 +73,12 @@ func (o *OrdersAPI) handleCreateAccount(c *gin.Context) {
 	}
 	accountId, err := o.repo.CreateAccount(c.Request.Context(), req)
 	if err != nil {
-		if errors.Is(err, common.ErrInvalidValues) {
+		switch {
+		case errors.Is(err, common.ErrInvalidValues):
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		} else {
+		case errors.Is(err, common.ErrAccountKeyTaken):
+			c.JSON(http.StatusConflict, gin.H{"error": common.ErrAccountKeyTaken.Error()})
+		default:
 			c.Status(http.StatusInternalServerError)
 			_ = c.Error(fmt.Errorf("repo.CreateAccount: %w", err))
 		}

@@ -50,8 +50,7 @@ func (o *OrdersDB) createAccountForKey(ctx context.Context, a Account) (id int, 
 	if err == nil {
 		return id, true, nil
 	}
-	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) || pgErr.Code != "23505" || pgErr.ConstraintName != "accounts_userkey_uniq" {
+	if !errors.Is(err, common.ErrAccountKeyTaken) {
 		return 0, false, fmt.Errorf("o.CreateAccount: %w", err)
 	}
 	id, err = o.GetAccountIDByKeycloakID(ctx, a.UserKey.String)
@@ -70,6 +69,10 @@ func (o *OrdersDB) CreateAccount(ctx context.Context, a Account) (int, error) {
 	var ID int
 	if err := o.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO accounts (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&ID); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "accounts_userkey_uniq" {
+			return 0, fmt.Errorf("%w: %w", common.ErrAccountKeyTaken, err)
+		}
 		return 0, err
 	}
 

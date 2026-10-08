@@ -739,7 +739,6 @@ func (o *OrdersDB) GetTokensForOrders(ctx context.Context, orderIDs []int) (map[
 			INNER JOIN orders o ON o.card_details_id = cd.id
 			WHERE cd.id IN (%s)
 				AND cd.active = true
-				AND cd.token IS NOT NULL
 				AND cd.token != ''
 				AND cd.deleted_at IS NULL
 		`, strings.Join(cardPlaceholders, ", "))

@@ -529,7 +529,7 @@ func preparePelecardPaymentCreateQuery(req Payment, paymentID int) (string, stri
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.Success.String)
 	}
-	if req.PelecardToken.Valid {
+	if req.PelecardToken.Valid && req.PelecardToken.String != "" {
 		createStrings = append(createStrings, "pelecard_token")
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.PelecardToken.String)
@@ -696,7 +696,7 @@ func preparePelecardPaymentUpdateQuery(req PaymentUpdate) (string, []interface{}
 		updateStrings = append(updateStrings, fmt.Sprintf("success=$%d", len(updateStrings)+1))
 		args = append(args, req.Success.String)
 	}
-	if req.PelecardToken.Valid {
+	if req.PelecardToken.Valid && req.PelecardToken.String != "" {
 		updateStrings = append(updateStrings, fmt.Sprintf("pelecard_token=$%d", len(updateStrings)+1))
 		args = append(args, req.PelecardToken.String)
 	}
@@ -835,7 +835,7 @@ func preparePelecardPaymentUpdateViaPaymentStructQuery(req Payment) (string, []i
 		updateStrings = append(updateStrings, fmt.Sprintf("success=$%d", len(updateStrings)+1))
 		args = append(args, req.Success.String)
 	}
-	if req.PelecardToken.Valid {
+	if req.PelecardToken.Valid && req.PelecardToken.String != "" {
 		updateStrings = append(updateStrings, fmt.Sprintf("pelecard_token=$%d", len(updateStrings)+1))
 		args = append(args, req.PelecardToken.String)
 	}
@@ -1171,15 +1171,15 @@ func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentTy
 		}
 		if paymentsWithTokenBool {
 			if whereCondition.String() != "" {
-				whereCondition.WriteString(" AND p.pelecard_token != ''")
+				whereCondition.WriteString(" AND p.pelecard_token IS NOT NULL")
 			} else {
-				whereCondition.WriteString(" p.pelecard_token != ''")
+				whereCondition.WriteString(" p.pelecard_token IS NOT NULL")
 			}
 		} else {
 			if whereCondition.String() != "" {
-				whereCondition.WriteString(" AND p.pelecard_token = ''")
+				whereCondition.WriteString(" AND p.pelecard_token IS NULL")
 			} else {
-				whereCondition.WriteString(" p.pelecard_token = ''")
+				whereCondition.WriteString(" p.pelecard_token IS NULL")
 			}
 
 		}
@@ -1327,7 +1327,7 @@ func preparePaymentCreateQuery(req Payment) (string, string, []interface{}) {
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.Success.String)
 	}
-	if req.PelecardToken.Valid {
+	if req.PelecardToken.Valid && req.PelecardToken.String != "" {
 		createStrings = append(createStrings, "pelecard_token")
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.PelecardToken.String)
@@ -1508,7 +1508,7 @@ func preparePaymentUpdateQuery(req Payment) (string, []interface{}) {
 		updateStrings = append(updateStrings, fmt.Sprintf("success=$%d", len(updateStrings)+1))
 		args = append(args, req.Success.String)
 	}
-	if req.PelecardToken.Valid {
+	if req.PelecardToken.Valid && req.PelecardToken.String != "" {
 		updateStrings = append(updateStrings, fmt.Sprintf("pelecard_token=$%d", len(updateStrings)+1))
 		args = append(args, req.PelecardToken.String)
 	}

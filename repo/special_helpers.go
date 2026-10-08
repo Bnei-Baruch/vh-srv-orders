@@ -7,13 +7,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/volatiletech/null/v9"
+
 	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/events"
 )
 
 func (o *OrdersDB) DeleteSpecialById(ctx context.Context, id int) error {
+	// A special identified only by keycloak_id has no email.
 	var (
-		email string
+		email null.String
 		err   error
 	)
 	if err = o.pool.QueryRow(ctx, `SELECT email FROM specials where id=$1`, id).Scan(&email); err != nil {
@@ -151,6 +154,11 @@ func (o *OrdersDB) HasSpecialMembership(ctx context.Context, email string) (bool
 }
 
 func (o *OrdersDB) CreateSpecial(ctx context.Context, s Special) (int, error) {
+	// A row with neither identifier can be reached by nothing but its id;
+	// the specials_has_identifier CHECK refuses it too.
+	if (!s.KeycloakId.Valid || s.KeycloakId.String == "") && (!s.Email.Valid || s.Email.String == "") {
+		return 0, common.ErrInvalidValues
+	}
 	createString, numString, createQueryArgs := prepareSpecialCreateQuery(s)
 	if len(createQueryArgs) == 0 {
 		return 0, common.ErrInvalidValues
@@ -171,12 +179,12 @@ func prepareSpecialCreateQuery(req Special) (string, string, []interface{}) {
 	var numString []string
 	var args []interface{}
 
-	if req.KeycloakId.Valid {
+	if req.KeycloakId.Valid && req.KeycloakId.String != "" {
 		createStrings = append(createStrings, `"keycloak_id"`)
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.KeycloakId.String)
 	}
-	if req.Email.Valid {
+	if req.Email.Valid && req.Email.String != "" {
 		createStrings = append(createStrings, `"email"`)
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.Email.String)
@@ -242,7 +250,7 @@ func (o *OrdersDB) GetAllSpecialsByEmail(ctx context.Context, email string) ([]*
 
 func (o *OrdersDB) GetUniqueEmailsFromSpecial(ctx context.Context) ([]string, error) {
 	var emails []string
-	rows, err := o.pool.Query(ctx, `SELECT DISTINCT specials.email from specials`)
+	rows, err := o.pool.Query(ctx, `SELECT DISTINCT specials.email from specials WHERE specials.email IS NOT NULL`)
 
 	if err != nil {
 		return emails, err

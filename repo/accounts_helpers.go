@@ -18,6 +18,15 @@ import (
 )
 
 func (o *OrdersDB) GetOrCreateAccount(ctx context.Context, a Account) (int, error) {
+	// No key identifies no one: an empty key would otherwise match whichever
+	// account was stored with one and hand a stranger its orders.
+	if !a.UserKey.Valid || a.UserKey.String == "" {
+		id, err := o.CreateAccount(ctx, a)
+		if err != nil {
+			return 0, fmt.Errorf("o.CreateAccount: %w", err)
+		}
+		return id, nil
+	}
 
 	var id int
 	err := o.pool.QueryRow(ctx, `select id from accounts where "UserKey" = $1 ORDER BY id DESC LIMIT 1`, a.UserKey.String).
@@ -193,8 +202,9 @@ func (o *OrdersDB) HardDeleteAllUserDataByAccountID(ctx context.Context, account
 		}
 	}
 
-	var email string
-	err = tx.QueryRow(ctx, `SELECT "UserKey", "Email" FROM accounts WHERE id = $1`, accountID).Scan(&kc_id, &email)
+	// Both columns are nullable: an account created without a key has a NULL "UserKey".
+	var storedKey, email null.String
+	err = tx.QueryRow(ctx, `SELECT "UserKey", "Email" FROM accounts WHERE id = $1`, accountID).Scan(&storedKey, &email)
 	if err != nil {
 		return fmt.Errorf("Email from account.id: %w", err)
 	}
@@ -252,7 +262,7 @@ func (o *OrdersDB) HardDeleteAllUserDataByAccountID(ctx context.Context, account
 
 	o.emitEvent(ctx, events.TypeHardDeleteAccount, map[string]interface{}{
 		"account_id":  accountID,
-		"keycloak_id": kc_id,
+		"keycloak_id": storedKey,
 		"email":       email,
 	})
 
@@ -303,6 +313,9 @@ func (o *OrdersDB) GetAccount(ctx context.Context, id int, email string) (*Accou
 }
 
 func (o *OrdersDB) GetAccountIDByKeycloakID(ctx context.Context, keycloakId string) (int, error) {
+	if keycloakId == "" {
+		return 0, common.ErrNoRowsAffected
+	}
 	var accountID int
 	if err := o.pool.QueryRow(ctx, `SELECT id FROM accounts WHERE "UserKey"=$1`, keycloakId).Scan(&accountID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -314,6 +327,9 @@ func (o *OrdersDB) GetAccountIDByKeycloakID(ctx context.Context, keycloakId stri
 }
 
 func (o *OrdersDB) GetEmailByKeycloakID(ctx context.Context, keycloakId string) (string, error) {
+	if keycloakId == "" {
+		return "", pgx.ErrNoRows
+	}
 	var email string
 	if err := o.pool.QueryRow(ctx, `SELECT "Email" FROM accounts WHERE "UserKey"=$1`, keycloakId).Scan(&email); err != nil {
 		return "", err
@@ -482,7 +498,7 @@ func prepareAccountCreateQuery(req Account) (string, string, []interface{}) {
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.AuthNo.String)
 	}
-	if req.UserKey.Valid {
+	if req.UserKey.Valid && req.UserKey.String != "" {
 		createStrings = append(createStrings, `"UserKey"`)
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.UserKey.String)
@@ -568,7 +584,7 @@ func prepareAccountUpdateQuery(req Account) (string, []interface{}) {
 		updateStrings = append(updateStrings, fmt.Sprintf(`"AuthNo"=$%d`, len(updateStrings)+1))
 		args = append(args, req.AuthNo.String)
 	}
-	if req.UserKey.Valid {
+	if req.UserKey.Valid && req.UserKey.String != "" {
 		updateStrings = append(updateStrings, fmt.Sprintf(`"UserKey"=$%d`, len(updateStrings)+1))
 		args = append(args, req.UserKey.String)
 	}
@@ -609,6 +625,9 @@ func buildAndGetAccountsWhereQuery(email string) (string, string) {
 }
 
 func (o *OrdersDB) IsSubjectID(ctx context.Context, keycloakID, accountID string) (bool, error) {
+	if keycloakID == "" {
+		return false, nil
+	}
 	row := o.pool.QueryRow(ctx, `SELECT 1 FROM accounts WHERE "UserKey" = $1 AND id = $2`, keycloakID, accountID)
 	var x int
 	if err := row.Scan(&x); err != nil {
@@ -622,6 +641,9 @@ func (o *OrdersDB) IsSubjectID(ctx context.Context, keycloakID, accountID string
 }
 
 func (o *OrdersDB) GetOrCreateAccountFromProfile(ctx context.Context, keycloakId string) (int, error) {
+	if keycloakId == "" {
+		return 0, errors.New("GetOrCreateAccountFromProfile: empty keycloakId")
+	}
 	var account *Account
 	accountId, err := o.GetAccountIDByKeycloakID(ctx, keycloakId)
 	if err == nil {

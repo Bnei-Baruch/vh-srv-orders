@@ -7,6 +7,10 @@ BEGIN;
 -- email are intended (several spans per person), so no UNIQUE.
 UPDATE specials SET keycloak_id = NULL WHERE keycloak_id = '';
 UPDATE specials SET email = NULL WHERE email = '';
+-- Rows left with neither identifier were imported from blank sheet rows (both
+-- columns ''). Nothing can reach them but their id; at the time of writing
+-- there were 5 in production, all expired.
+DELETE FROM specials WHERE keycloak_id IS NULL AND email IS NULL;
 ALTER TABLE specials
   ADD CONSTRAINT specials_identifiers_not_empty
   CHECK (keycloak_id <> '' AND email <> '');

@@ -118,7 +118,7 @@ func (o *OrdersDB) CreateRenewalPayment(ctx context.Context, data *RenewalData, 
 func (o *OrdersDB) FinalizeRenewal(ctx context.Context, orderID uint, payment *Payment) error {
 	tx, err := o.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("%w: o.Begin: %w", common.ErrPostPayment, err)
+		return fmt.Errorf("%w: o.pool.Begin: %w", common.ErrPostPayment, err)
 	}
 	defer tx.Rollback(ctx)
 

@@ -32,7 +32,7 @@ func seedAccountWithRows(t *testing.T, db *OrdersDB, ctx context.Context, key, e
 		`INSERT INTO accounts ("UserKey", "Email", created_at) VALUES ($1, $2, now()) RETURNING id`,
 		null.NewString(key, key != ""), email).Scan(&accountID))
 	require.NoError(t, db.pool.QueryRow(ctx,
-		`INSERT INTO orders ("AccountID", userkey) VALUES ($1, $2) RETURNING id`, accountID, key).Scan(&orderID))
+		`INSERT INTO orders ("AccountID") VALUES ($1) RETURNING id`, accountID).Scan(&orderID))
 	require.NoError(t, db.pool.QueryRow(ctx,
 		`INSERT INTO card_details (cc_number, cc_expdate, account_id, active, token) VALUES ('4580', '1230', $1, true, 'tok') RETURNING id`,
 		accountID).Scan(&cardID))

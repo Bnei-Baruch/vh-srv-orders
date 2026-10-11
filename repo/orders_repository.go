@@ -37,10 +37,9 @@ type OrdersRepository interface {
 	MarkResolvedForRenew(ctx context.Context, orderIDs []uint) error
 	GetTokensForOrders(ctx context.Context, orderIDs []int) (map[int]string, error)
 	ClearAllFlags(ctx context.Context) error
-	UpdateOrdersUserKeyFromAccounts(ctx context.Context) error
-	GetOrdersToSkipDouble(ctx context.Context, year, month int, lastDay time.Time) ([]string, error)
-	GetOrdersToSkipFresh(ctx context.Context, year, month int, lastDay time.Time) ([]string, error)
-	SkipOrdersByUserKey(ctx context.Context, userkey string) (int, error)
+	GetOrdersToSkipDouble(ctx context.Context, year, month int, lastDay time.Time) ([]int, error)
+	GetOrdersToSkipFresh(ctx context.Context, year, month int, lastDay time.Time) ([]int, error)
+	SkipOrdersByAccountID(ctx context.Context, accountID int) (int, error)
 
 	CreateV2Order(ctx context.Context, order Order) (int, error)
 

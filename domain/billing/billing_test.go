@@ -63,15 +63,14 @@ func TestFlagAndSkipOperations_FullFlow(t *testing.T) {
 	// Clear flags
 	mockRepo.EXPECT().ClearAllFlags(ctx).Return(nil)
 	// Update user keys
-	mockRepo.EXPECT().UpdateOrdersUserKeyFromAccounts(ctx).Return(nil)
 	// Flag orders for renewal
 	mockRepo.EXPECT().FlagOrdersToRenew(ctx, int64(6), int64(2024)).Return(int64(10), nil)
 	// flagAndSkipOperations does not call GetFlaggedOrders (only SkipDouble/SkipFresh repo methods)
-	mockRepo.EXPECT().GetOrdersToSkipDouble(ctx, 2024, 5, lastDayLastMonth).Return([]string{"user1"}, nil)
-	mockRepo.EXPECT().SkipOrdersByUserKey(ctx, "user1").Return(1, nil)
+	mockRepo.EXPECT().GetOrdersToSkipDouble(ctx, 2024, 5, lastDayLastMonth).Return([]int{1}, nil)
+	mockRepo.EXPECT().SkipOrdersByAccountID(ctx, 1).Return(1, nil)
 	// SkipFreshOrders: this month = June 2024
-	mockRepo.EXPECT().GetOrdersToSkipFresh(ctx, 2024, 6, lastDayThisMonth).Return([]string{"user2"}, nil)
-	mockRepo.EXPECT().SkipOrdersByUserKey(ctx, "user2").Return(1, nil)
+	mockRepo.EXPECT().GetOrdersToSkipFresh(ctx, 2024, 6, lastDayThisMonth).Return([]int{2}, nil)
+	mockRepo.EXPECT().SkipOrdersByAccountID(ctx, 2).Return(1, nil)
 
 	err := service.flagAndSkipOperations(ctx, period, opts)
 	assert.NoError(t, err)
@@ -93,23 +92,6 @@ func TestFlagAndSkipOperations_ClearFlagsError(t *testing.T) {
 	assert.Contains(t, err.Error(), "clear flags")
 }
 
-func TestFlagAndSkipOperations_UpdateUserKeysError(t *testing.T) {
-	ctx := context.Background()
-	mockRepo := mocks.NewMockOrdersRepository(t)
-	mockPelecard := pelecardmock.NewMockPelecardAPI(t)
-	service := NewBillingService(mockRepo, mockPelecard, nil, nil, nil)
-
-	period := NewBillingPeriodWithDate(6, 2024)
-	opts := &WorkflowOptions{Flags: true}
-
-	mockRepo.EXPECT().ClearAllFlags(ctx).Return(nil)
-	mockRepo.EXPECT().UpdateOrdersUserKeyFromAccounts(ctx).Return(errors.New("db error"))
-
-	err := service.flagAndSkipOperations(ctx, period, opts)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "update user keys")
-}
-
 func TestFlagAndSkipOperations_FlagOrdersError(t *testing.T) {
 	ctx := context.Background()
 	mockRepo := mocks.NewMockOrdersRepository(t)
@@ -120,7 +102,6 @@ func TestFlagAndSkipOperations_FlagOrdersError(t *testing.T) {
 	opts := &WorkflowOptions{Flags: true}
 
 	mockRepo.EXPECT().ClearAllFlags(ctx).Return(nil)
-	mockRepo.EXPECT().UpdateOrdersUserKeyFromAccounts(ctx).Return(nil)
 	mockRepo.EXPECT().FlagOrdersToRenew(ctx, int64(6), int64(2024)).Return(int64(0), errors.New("flag error"))
 
 	err := service.flagAndSkipOperations(ctx, period, opts)
@@ -142,12 +123,11 @@ func TestFlagAndSkipOperations_JanuaryWrapsToDecember(t *testing.T) {
 	lastDayThisMonth := period.GetEndOfMonth()
 
 	mockRepo.EXPECT().ClearAllFlags(ctx).Return(nil)
-	mockRepo.EXPECT().UpdateOrdersUserKeyFromAccounts(ctx).Return(nil)
 	mockRepo.EXPECT().FlagOrdersToRenew(ctx, int64(1), int64(2024)).Return(int64(5), nil)
 	// flagAndSkipOperations does not call GetFlaggedOrders
-	mockRepo.EXPECT().GetOrdersToSkipDouble(ctx, 2023, 12, lastDayLastMonth).Return([]string{}, nil)
+	mockRepo.EXPECT().GetOrdersToSkipDouble(ctx, 2023, 12, lastDayLastMonth).Return([]int{}, nil)
 	// SkipFresh: January 2024
-	mockRepo.EXPECT().GetOrdersToSkipFresh(ctx, 2024, 1, lastDayThisMonth).Return([]string{}, nil)
+	mockRepo.EXPECT().GetOrdersToSkipFresh(ctx, 2024, 1, lastDayThisMonth).Return([]int{}, nil)
 
 	err := service.flagAndSkipOperations(ctx, period, opts)
 	assert.NoError(t, err)
@@ -166,7 +146,6 @@ func TestFlagAndSkipOperations_SkipDoubleContinuesOnError(t *testing.T) {
 	lastDayLastMonth := period.GetLastDayOfLastMonth()
 
 	mockRepo.EXPECT().ClearAllFlags(ctx).Return(nil)
-	mockRepo.EXPECT().UpdateOrdersUserKeyFromAccounts(ctx).Return(nil)
 	mockRepo.EXPECT().FlagOrdersToRenew(ctx, int64(6), int64(2024)).Return(int64(5), nil)
 	// SkipDoubleOrders calls GetOrdersToSkipDouble first; no GetFlaggedOrders in this path
 	mockRepo.EXPECT().GetOrdersToSkipDouble(ctx, 2024, 5, lastDayLastMonth).Return(nil, errors.New("skip double error"))
@@ -324,11 +303,10 @@ func TestRunBillingWorkflow_ErrorInMuhlafim(t *testing.T) {
 
 	// Step 1: Flag & Skip succeeds
 	mockRepo.EXPECT().ClearAllFlags(ctx).Return(nil)
-	mockRepo.EXPECT().UpdateOrdersUserKeyFromAccounts(ctx).Return(nil)
 	mockRepo.EXPECT().FlagOrdersToRenew(ctx, int64(month), int64(year)).Return(int64(5), nil)
 	mockRepo.EXPECT().GetFlaggedOrders(ctx).Return([]repo.Order{{ID: 1}}, nil).Times(2)
-	mockRepo.EXPECT().GetOrdersToSkipDouble(ctx, 2024, 5, lastDayLastMonth).Return([]string{}, nil)
-	mockRepo.EXPECT().GetOrdersToSkipFresh(ctx, 2024, 6, lastDayThisMonth).Return([]string{}, nil)
+	mockRepo.EXPECT().GetOrdersToSkipDouble(ctx, 2024, 5, lastDayLastMonth).Return([]int{}, nil)
+	mockRepo.EXPECT().GetOrdersToSkipFresh(ctx, 2024, 6, lastDayThisMonth).Return([]int{}, nil)
 
 	// Step 2: Muhlafim fails
 	mockRepo.EXPECT().GetFlaggedOrders(ctx).Return([]repo.Order{{ID: 1}}, nil)
@@ -356,11 +334,10 @@ func TestRunBillingWorkflow_ErrorInCharging(t *testing.T) {
 
 	// Step 1: succeeds
 	mockRepo.EXPECT().ClearAllFlags(ctx).Return(nil)
-	mockRepo.EXPECT().UpdateOrdersUserKeyFromAccounts(ctx).Return(nil)
 	mockRepo.EXPECT().FlagOrdersToRenew(ctx, int64(month), int64(year)).Return(int64(1), nil)
 	mockRepo.EXPECT().GetFlaggedOrders(mock.Anything).Return([]repo.Order{}, nil).Times(2)
-	mockRepo.EXPECT().GetOrdersToSkipDouble(ctx, 2024, 5, lastDayLastMonth).Return([]string{}, nil)
-	mockRepo.EXPECT().GetOrdersToSkipFresh(ctx, 2024, 6, lastDayThisMonth).Return([]string{}, nil)
+	mockRepo.EXPECT().GetOrdersToSkipDouble(ctx, 2024, 5, lastDayLastMonth).Return([]int{}, nil)
+	mockRepo.EXPECT().GetOrdersToSkipFresh(ctx, 2024, 6, lastDayThisMonth).Return([]int{}, nil)
 
 	// Step 3: charge fails at GetOrderIDsToRenew
 	mockRepo.EXPECT().GetOrderIDsToRenew(mock.Anything).Return(nil, errors.New("db error"))

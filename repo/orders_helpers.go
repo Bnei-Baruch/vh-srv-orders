@@ -312,7 +312,7 @@ func (o *OrdersDB) GetAllOrders(ctx context.Context, skip int, limit int, fromDa
 	currency string, status string, organisation string, email string, accountID int, keycloakID string, evaluateMembership string,
 	orderByPaymentDate string) (*[]Order, error) {
 	limitOffsetString := fmt.Sprintf(" LIMIT %d OFFSET %d", limit, skip)
-	whereQuery, orderByQuery, queryBuildErr := buildAndGetOrdersWhereQuery(fromDate, toDate, productType, currency, status,
+	whereQuery, orderByQuery, args, queryBuildErr := buildAndGetOrdersWhereQuery(fromDate, toDate, productType, currency, status,
 		organisation, email, accountID, keycloakID, evaluateMembership, orderByPaymentDate)
 
 	if queryBuildErr != nil {
@@ -331,7 +331,7 @@ func (o *OrdersDB) GetAllOrders(ctx context.Context, skip int, limit int, fromDa
 	` + fromQuery + whereQuery + orderByQuery + limitOffsetString
 
 	// utils.LogFor(ctx).Info("GetAllOrders.query", slog.String("sql", query))
-	rows, err := o.pool.Query(ctx, query)
+	rows, err := o.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("o.pool.Query: %w", err)
 	}
@@ -548,8 +548,9 @@ func prepareOrderUpdateQuery(req Order) (string, []interface{}) {
 }
 
 func buildAndGetOrdersWhereQuery(fromDate string, dateTo *time.Time, productType string, currency string, status string,
-	organisation string, email string, accountID int, keycloakID string, evaluateMembership string, orderByPaymentDate string) (string, string, error) {
+	organisation string, email string, accountID int, keycloakID string, evaluateMembership string, orderByPaymentDate string) (string, string, []any, error) {
 
+	var args queryArgs
 	var whereString strings.Builder
 	var orderBy strings.Builder
 	var whereCondition strings.Builder
@@ -565,35 +566,35 @@ func buildAndGetOrdersWhereQuery(fromDate string, dateTo *time.Time, productType
 		fromDateParsed, err := time.Parse(rfcLayout, fromDate)
 
 		if err != nil {
-			return "", "", err
+			return "", "", nil, err
 		}
 		whereCondition.WriteString(fmt.Sprintf(" AND o.updated_at >= '%s'", fromDateParsed.Format("2006-01-02 15:04:05")))
 	}
 
 	if currency != "" {
-		whereCondition.WriteString(fmt.Sprintf(" AND LOWER(o.\"Currency\")=LOWER('%s')", currency))
+		whereCondition.WriteString(` AND LOWER(o."Currency")=LOWER(` + args.arg(currency) + `)`)
 	}
 
 	if status != "" {
-		whereCondition.WriteString(fmt.Sprintf(" AND LOWER(o.\"Status\")=LOWER('%s')", status))
+		whereCondition.WriteString(` AND LOWER(o."Status")=LOWER(` + args.arg(status) + `)`)
 	}
 
 	if productType != "" {
-		whereCondition.WriteString(fmt.Sprintf(" AND LOWER(o.\"ProductType\")=LOWER('%s')", productType))
+		whereCondition.WriteString(` AND LOWER(o."ProductType")=LOWER(` + args.arg(productType) + `)`)
 	}
 
 	if organisation != "" {
-		whereCondition.WriteString(fmt.Sprintf(" AND LOWER(o.\"Organization\")=LOWER('%s')", organisation))
+		whereCondition.WriteString(` AND LOWER(o."Organization")=LOWER(` + args.arg(organisation) + `)`)
 	}
 	if accountID != 0 {
 		whereCondition.WriteString(fmt.Sprintf(" AND o.\"AccountID\" = %d", accountID))
 	}
 	if keycloakID != "" {
-		whereCondition.WriteString(fmt.Sprintf(" AND o.userkey = '%s'", keycloakID))
+		whereCondition.WriteString(" AND o.userkey = " + args.arg(keycloakID))
 	}
 
 	if email != "" {
-		whereCondition.WriteString(fmt.Sprintf(" AND o.\"AccountID\" = a.id AND LOWER(a.\"Email\")=LOWER('%s')", email))
+		whereCondition.WriteString(` AND o."AccountID" = a.id AND LOWER(a."Email")=LOWER(` + args.arg(email) + `)`)
 	}
 
 	if evaluateMembership != "" {
@@ -621,7 +622,7 @@ func buildAndGetOrdersWhereQuery(fromDate string, dateTo *time.Time, productType
 	} else {
 		whereString.Reset()
 	}
-	return whereString.String(), orderBy.String(), nil
+	return whereString.String(), orderBy.String(), args, nil
 }
 
 func (o *OrdersDB) HasPaidMembership(ctx context.Context, email string) (bool, error) {

@@ -480,77 +480,6 @@ func TestClearAllFlags(t *testing.T) {
 	assert.Equal(t, "", flag3.String)
 }
 
-func TestUpdateOrdersUserKeyFromAccounts(t *testing.T) {
-	dbURL, err := testutil.NewTestOrdersDB(t, context.Background())
-	require.NoError(t, err)
-	db, err := NewOrdersDBUrl(context.Background(), dbURL, new(events.NoopEmitter))
-	require.NoError(t, err)
-	defer db.Close()
-
-	ctx := eventstest.WithTestEventBuilder(t, context.Background())
-
-	// Create accounts with UserKey
-	account1 := Account{
-		Email:   null.StringFrom("user1@example.com"),
-		UserKey: null.StringFrom("userkey1"),
-	}
-	accountID1, err := db.CreateAccount(ctx, account1)
-	require.NoError(t, err)
-
-	account2 := Account{
-		Email:   null.StringFrom("user2@example.com"),
-		UserKey: null.StringFrom("userkey2"),
-	}
-	accountID2, err := db.CreateAccount(ctx, account2)
-	require.NoError(t, err)
-
-	// Create orders with different userkey values (or null)
-	order1 := Order{
-		AccountID: null.IntFrom(accountID1),
-		Amount:    null.Float64From(100.0),
-	}
-	createString, numString, createQueryArgs := prepareOrderCreateQuery(order1)
-	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
-		createQueryArgs...).Scan(&order1.ID)
-	require.NoError(t, err)
-
-	// Set order1's userkey to something different
-	_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, "old_userkey1", order1.ID)
-	require.NoError(t, err)
-
-	order2 := Order{
-		AccountID: null.IntFrom(accountID2),
-		Amount:    null.Float64From(200.0),
-	}
-	createString, numString, createQueryArgs = prepareOrderCreateQuery(order2)
-	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
-		createQueryArgs...).Scan(&order2.ID)
-	require.NoError(t, err)
-
-	// Verify initial state
-	var userkey1, userkey2 null.String
-	err = db.pool.QueryRow(ctx, `SELECT userkey FROM orders WHERE id = $1`, order1.ID).Scan(&userkey1)
-	require.NoError(t, err)
-	assert.Equal(t, "old_userkey1", userkey1.String)
-
-	err = db.pool.QueryRow(ctx, `SELECT userkey FROM orders WHERE id = $1`, order2.ID).Scan(&userkey2)
-	require.NoError(t, err)
-	// order2 might have null or empty userkey initially
-
-	// Update orders userkey from accounts
-	err = db.UpdateOrdersUserKeyFromAccounts(ctx)
-	require.NoError(t, err)
-
-	// Verify userkeys were updated
-	err = db.pool.QueryRow(ctx, `SELECT userkey FROM orders WHERE id = $1`, order1.ID).Scan(&userkey1)
-	require.NoError(t, err)
-	assert.Equal(t, "userkey1", userkey1.String, "Order1 userkey should be updated from account1")
-
-	err = db.pool.QueryRow(ctx, `SELECT userkey FROM orders WHERE id = $1`, order2.ID).Scan(&userkey2)
-	require.NoError(t, err)
-	assert.Equal(t, "userkey2", userkey2.String, "Order2 userkey should be updated from account2")
-}
-
 func TestGetPaidOrdersCount(t *testing.T) {
 	dbURL, err := testutil.NewTestOrdersDB(t, context.Background())
 	require.NoError(t, err)
@@ -662,7 +591,7 @@ func TestGetOrdersToSkipDouble(t *testing.T) {
 	lastDay := time.Date(year, time.Month(month), 31, 23, 59, 59, 0, time.UTC)
 
 	// User with multiple paid orders (should be included)
-	userkey1 := "userkey1"
+	account1 := insertSkipTestAccount(t, db, ctx)
 	order1 := Order{
 		AccountID:   null.IntFrom(accountID),
 		Amount:      null.Float64From(100.0),
@@ -674,7 +603,7 @@ func TestGetOrdersToSkipDouble(t *testing.T) {
 	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order1.ID)
 	require.NoError(t, err)
-	_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey1, order1.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET "AccountID" = $1 WHERE id = $2`, account1, order1.ID)
 	require.NoError(t, err)
 
 	order2 := Order{
@@ -688,11 +617,11 @@ func TestGetOrdersToSkipDouble(t *testing.T) {
 	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order2.ID)
 	require.NoError(t, err)
-	_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey1, order2.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET "AccountID" = $1 WHERE id = $2`, account1, order2.ID)
 	require.NoError(t, err)
 
 	// User with one paid and one cancelled order (should be included - 2 total)
-	userkey2 := "userkey2"
+	account2 := insertSkipTestAccount(t, db, ctx)
 	order3 := Order{
 		AccountID:   null.IntFrom(accountID),
 		Amount:      null.Float64From(300.0),
@@ -704,7 +633,7 @@ func TestGetOrdersToSkipDouble(t *testing.T) {
 	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order3.ID)
 	require.NoError(t, err)
-	_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey2, order3.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET "AccountID" = $1 WHERE id = $2`, account2, order3.ID)
 	require.NoError(t, err)
 
 	order4 := Order{
@@ -718,11 +647,11 @@ func TestGetOrdersToSkipDouble(t *testing.T) {
 	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order4.ID)
 	require.NoError(t, err)
-	_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey2, order4.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET "AccountID" = $1 WHERE id = $2`, account2, order4.ID)
 	require.NoError(t, err)
 
 	// User with only one paid order (should NOT be included)
-	userkey3 := "userkey3"
+	account3 := insertSkipTestAccount(t, db, ctx)
 	order5 := Order{
 		AccountID:   null.IntFrom(accountID),
 		Amount:      null.Float64From(500.0),
@@ -734,11 +663,11 @@ func TestGetOrdersToSkipDouble(t *testing.T) {
 	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order5.ID)
 	require.NoError(t, err)
-	_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey3, order5.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET "AccountID" = $1 WHERE id = $2`, account3, order5.ID)
 	require.NoError(t, err)
 
 	// User with orders outside the month (should NOT be included)
-	userkey4 := "userkey4"
+	account4 := insertSkipTestAccount(t, db, ctx)
 	order6 := Order{
 		AccountID:   null.IntFrom(accountID),
 		Amount:      null.Float64From(600.0),
@@ -750,7 +679,7 @@ func TestGetOrdersToSkipDouble(t *testing.T) {
 	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order6.ID)
 	require.NoError(t, err)
-	_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey4, order6.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET "AccountID" = $1 WHERE id = $2`, account4, order6.ID)
 	require.NoError(t, err)
 
 	order7 := Order{
@@ -764,19 +693,19 @@ func TestGetOrdersToSkipDouble(t *testing.T) {
 	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order7.ID)
 	require.NoError(t, err)
-	_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey4, order7.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET "AccountID" = $1 WHERE id = $2`, account4, order7.ID)
 	require.NoError(t, err)
 
-	// Get userkeys to skip
-	userkeys, err := db.GetOrdersToSkipDouble(ctx, year, month, lastDay)
+	// Get accounts to skip
+	accountIDs, err := db.GetOrdersToSkipDouble(ctx, year, month, lastDay)
 	require.NoError(t, err)
 
-	// Should return userkey1 and userkey2 (both have >1 paid/cancelled orders in the month)
-	assert.Len(t, userkeys, 2)
-	assert.Contains(t, userkeys, userkey1, "userkey1 should be included (2 paid orders)")
-	assert.Contains(t, userkeys, userkey2, "userkey2 should be included (1 paid + 1 cancelled)")
-	assert.NotContains(t, userkeys, userkey3, "userkey3 should NOT be included (only 1 order)")
-	assert.NotContains(t, userkeys, userkey4, "userkey4 should NOT be included (orders outside month)")
+	// Should return account1 and account2 (both have >1 paid/cancelled orders in the month)
+	assert.Len(t, accountIDs, 2)
+	assert.Contains(t, accountIDs, account1, "account1 should be included (2 paid orders)")
+	assert.Contains(t, accountIDs, account2, "account2 should be included (1 paid + 1 cancelled)")
+	assert.NotContains(t, accountIDs, account3, "account3 should NOT be included (only 1 order)")
+	assert.NotContains(t, accountIDs, account4, "account4 should NOT be included (orders outside month)")
 }
 
 func TestGetOrdersToSkipFresh(t *testing.T) {
@@ -800,7 +729,7 @@ func TestGetOrdersToSkipFresh(t *testing.T) {
 	lastDay := time.Date(year, time.Month(month), 31, 23, 59, 59, 0, time.UTC)
 
 	// User with paid order and empty flag (should be included)
-	userkey1 := "userkey1"
+	account1 := insertSkipTestAccount(t, db, ctx)
 	order1 := Order{
 		AccountID:   null.IntFrom(accountID),
 		Amount:      null.Float64From(100.0),
@@ -813,11 +742,11 @@ func TestGetOrdersToSkipFresh(t *testing.T) {
 	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order1.ID)
 	require.NoError(t, err)
-	_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey1, order1.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET "AccountID" = $1 WHERE id = $2`, account1, order1.ID)
 	require.NoError(t, err)
 
 	// User with cancelled order and empty flag (should be included)
-	userkey2 := "userkey2"
+	account2 := insertSkipTestAccount(t, db, ctx)
 	order2 := Order{
 		AccountID:   null.IntFrom(accountID),
 		Amount:      null.Float64From(200.0),
@@ -830,11 +759,11 @@ func TestGetOrdersToSkipFresh(t *testing.T) {
 	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order2.ID)
 	require.NoError(t, err)
-	_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey2, order2.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET "AccountID" = $1 WHERE id = $2`, account2, order2.ID)
 	require.NoError(t, err)
 
 	// User with paid order but non-empty flag (should NOT be included)
-	userkey3 := "userkey3"
+	account3 := insertSkipTestAccount(t, db, ctx)
 	order3 := Order{
 		AccountID:   null.IntFrom(accountID),
 		Amount:      null.Float64From(300.0),
@@ -847,11 +776,11 @@ func TestGetOrdersToSkipFresh(t *testing.T) {
 	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order3.ID)
 	require.NoError(t, err)
-	_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey3, order3.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET "AccountID" = $1 WHERE id = $2`, account3, order3.ID)
 	require.NoError(t, err)
 
 	// User with order outside the month (should NOT be included)
-	userkey4 := "userkey4"
+	account4 := insertSkipTestAccount(t, db, ctx)
 	order4 := Order{
 		AccountID:   null.IntFrom(accountID),
 		Amount:      null.Float64From(400.0),
@@ -864,11 +793,11 @@ func TestGetOrdersToSkipFresh(t *testing.T) {
 	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order4.ID)
 	require.NoError(t, err)
-	_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey4, order4.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET "AccountID" = $1 WHERE id = $2`, account4, order4.ID)
 	require.NoError(t, err)
 
 	// User with different product type (should NOT be included)
-	userkey5 := "userkey5"
+	account5 := insertSkipTestAccount(t, db, ctx)
 	order5 := Order{
 		AccountID:   null.IntFrom(accountID),
 		Amount:      null.Float64From(500.0),
@@ -881,23 +810,23 @@ func TestGetOrdersToSkipFresh(t *testing.T) {
 	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order5.ID)
 	require.NoError(t, err)
-	_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey5, order5.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET "AccountID" = $1 WHERE id = $2`, account5, order5.ID)
 	require.NoError(t, err)
 
-	// Get userkeys to skip
-	userkeys, err := db.GetOrdersToSkipFresh(ctx, year, month, lastDay)
+	// Get accounts to skip
+	accountIDs, err := db.GetOrdersToSkipFresh(ctx, year, month, lastDay)
 	require.NoError(t, err)
 
-	// Should return userkey1 and userkey2 (both have paid/cancelled orders with empty flag in the month)
-	assert.Len(t, userkeys, 2)
-	assert.Contains(t, userkeys, userkey1, "userkey1 should be included (paid order with empty flag)")
-	assert.Contains(t, userkeys, userkey2, "userkey2 should be included (cancelled order with empty flag)")
-	assert.NotContains(t, userkeys, userkey3, "userkey3 should NOT be included (non-empty flag)")
-	assert.NotContains(t, userkeys, userkey4, "userkey4 should NOT be included (order outside month)")
-	assert.NotContains(t, userkeys, userkey5, "userkey5 should NOT be included (different product type)")
+	// Should return account1 and account2 (both have paid/cancelled orders with empty flag in the month)
+	assert.Len(t, accountIDs, 2)
+	assert.Contains(t, accountIDs, account1, "account1 should be included (paid order with empty flag)")
+	assert.Contains(t, accountIDs, account2, "account2 should be included (cancelled order with empty flag)")
+	assert.NotContains(t, accountIDs, account3, "account3 should NOT be included (non-empty flag)")
+	assert.NotContains(t, accountIDs, account4, "account4 should NOT be included (order outside month)")
+	assert.NotContains(t, accountIDs, account5, "account5 should NOT be included (different product type)")
 }
 
-func TestSkipOrdersByUserKey(t *testing.T) {
+func TestSkipOrdersByAccountID(t *testing.T) {
 	dbURL, err := testutil.NewTestOrdersDB(t, context.Background())
 	require.NoError(t, err)
 	db, err := NewOrdersDBUrl(context.Background(), dbURL, new(events.NoopEmitter))
@@ -912,7 +841,7 @@ func TestSkipOrdersByUserKey(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	userkey := "test_userkey"
+	account := insertSkipTestAccount(t, db, ctx)
 
 	// Create orders with "torenew" flag (should be updated)
 	order1 := Order{
@@ -924,7 +853,7 @@ func TestSkipOrdersByUserKey(t *testing.T) {
 	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order1.ID)
 	require.NoError(t, err)
-	_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey, order1.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET "AccountID" = $1 WHERE id = $2`, account, order1.ID)
 	require.NoError(t, err)
 
 	order2 := Order{
@@ -936,10 +865,10 @@ func TestSkipOrdersByUserKey(t *testing.T) {
 	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order2.ID)
 	require.NoError(t, err)
-	_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey, order2.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET "AccountID" = $1 WHERE id = $2`, account, order2.ID)
 	require.NoError(t, err)
 
-	// Create order with "torenew" flag but different userkey (should NOT be updated)
+	// Create order with "torenew" flag but different account (should NOT be updated)
 	order3 := Order{
 		AccountID: null.IntFrom(accountID),
 		Amount:    null.Float64From(300.0),
@@ -949,10 +878,10 @@ func TestSkipOrdersByUserKey(t *testing.T) {
 	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order3.ID)
 	require.NoError(t, err)
-	_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, "different_userkey", order3.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET "AccountID" = $1 WHERE id = $2`, insertSkipTestAccount(t, db, ctx), order3.ID)
 	require.NoError(t, err)
 
-	// Create order with same userkey but different flag (should NOT be updated)
+	// Create order with same account but different flag (should NOT be updated)
 	order4 := Order{
 		AccountID: null.IntFrom(accountID),
 		Amount:    null.Float64From(400.0),
@@ -962,7 +891,7 @@ func TestSkipOrdersByUserKey(t *testing.T) {
 	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&order4.ID)
 	require.NoError(t, err)
-	_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey, order4.ID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET "AccountID" = $1 WHERE id = $2`, account, order4.ID)
 	require.NoError(t, err)
 
 	// Verify initial state
@@ -983,8 +912,8 @@ func TestSkipOrdersByUserKey(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, common.OrderFlagSkip, flag4.String)
 
-	// Skip orders by userkey
-	rowsAffected, err := db.SkipOrdersByUserKey(ctx, userkey)
+	// Skip orders by account
+	rowsAffected, err := db.SkipOrdersByAccountID(ctx, account)
 	require.NoError(t, err)
 	assert.Equal(t, 2, rowsAffected, "Should update 2 orders")
 
@@ -999,14 +928,23 @@ func TestSkipOrdersByUserKey(t *testing.T) {
 
 	err = db.pool.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order3.ID).Scan(&flag3)
 	require.NoError(t, err)
-	assert.Equal(t, common.OrderFlagToRenew, flag3.String, "Order3 should NOT be updated (different userkey)")
+	assert.Equal(t, common.OrderFlagToRenew, flag3.String, "Order3 should NOT be updated (different account)")
 
 	err = db.pool.QueryRow(ctx, `SELECT "Flag" FROM orders WHERE id = $1`, order4.ID).Scan(&flag4)
 	require.NoError(t, err)
 	assert.Equal(t, common.OrderFlagSkip, flag4.String, "Order4 should NOT be updated (different flag)")
 
-	// Test with userkey that has no matching orders
-	rowsAffected, err = db.SkipOrdersByUserKey(ctx, "nonexistent_userkey")
+	// Test with an account that has no matching orders
+	rowsAffected, err = db.SkipOrdersByAccountID(ctx, -1)
 	require.NoError(t, err)
-	assert.Equal(t, 0, rowsAffected, "Should update 0 orders for nonexistent userkey")
+	assert.Equal(t, 0, rowsAffected, "Should update 0 orders for nonexistent account")
+}
+
+// insertSkipTestAccount returns a new account; the skip tests tell users apart
+// by account.
+func insertSkipTestAccount(t *testing.T, db *OrdersDB, ctx context.Context) int {
+	t.Helper()
+	var id int
+	require.NoError(t, db.pool.QueryRow(ctx, `INSERT INTO accounts ("Email") VALUES ('skip@test.test') RETURNING id`).Scan(&id))
+	return id
 }

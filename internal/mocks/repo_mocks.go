@@ -1116,23 +1116,23 @@ func (_c *MockOrdersRepository_GetOrderIDsWithPricingError_Call) RunAndReturn(ru
 }
 
 // GetOrdersToSkipDouble provides a mock function for the type MockOrdersRepository
-func (_mock *MockOrdersRepository) GetOrdersToSkipDouble(ctx context.Context, year int, month int, lastDay time.Time) ([]string, error) {
+func (_mock *MockOrdersRepository) GetOrdersToSkipDouble(ctx context.Context, year int, month int, lastDay time.Time) ([]int, error) {
 	ret := _mock.Called(ctx, year, month, lastDay)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetOrdersToSkipDouble")
 	}
 
-	var r0 []string
+	var r0 []int
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, int, int, time.Time) ([]string, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int, int, time.Time) ([]int, error)); ok {
 		return returnFunc(ctx, year, month, lastDay)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, int, int, time.Time) []string); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int, int, time.Time) []int); ok {
 		r0 = returnFunc(ctx, year, month, lastDay)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]string)
+			r0 = ret.Get(0).([]int)
 		}
 	}
 	if returnFunc, ok := ret.Get(1).(func(context.Context, int, int, time.Time) error); ok {
@@ -1185,34 +1185,34 @@ func (_c *MockOrdersRepository_GetOrdersToSkipDouble_Call) Run(run func(ctx cont
 	return _c
 }
 
-func (_c *MockOrdersRepository_GetOrdersToSkipDouble_Call) Return(strings []string, err error) *MockOrdersRepository_GetOrdersToSkipDouble_Call {
-	_c.Call.Return(strings, err)
+func (_c *MockOrdersRepository_GetOrdersToSkipDouble_Call) Return(ints []int, err error) *MockOrdersRepository_GetOrdersToSkipDouble_Call {
+	_c.Call.Return(ints, err)
 	return _c
 }
 
-func (_c *MockOrdersRepository_GetOrdersToSkipDouble_Call) RunAndReturn(run func(ctx context.Context, year int, month int, lastDay time.Time) ([]string, error)) *MockOrdersRepository_GetOrdersToSkipDouble_Call {
+func (_c *MockOrdersRepository_GetOrdersToSkipDouble_Call) RunAndReturn(run func(ctx context.Context, year int, month int, lastDay time.Time) ([]int, error)) *MockOrdersRepository_GetOrdersToSkipDouble_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // GetOrdersToSkipFresh provides a mock function for the type MockOrdersRepository
-func (_mock *MockOrdersRepository) GetOrdersToSkipFresh(ctx context.Context, year int, month int, lastDay time.Time) ([]string, error) {
+func (_mock *MockOrdersRepository) GetOrdersToSkipFresh(ctx context.Context, year int, month int, lastDay time.Time) ([]int, error) {
 	ret := _mock.Called(ctx, year, month, lastDay)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetOrdersToSkipFresh")
 	}
 
-	var r0 []string
+	var r0 []int
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, int, int, time.Time) ([]string, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int, int, time.Time) ([]int, error)); ok {
 		return returnFunc(ctx, year, month, lastDay)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, int, int, time.Time) []string); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int, int, time.Time) []int); ok {
 		r0 = returnFunc(ctx, year, month, lastDay)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]string)
+			r0 = ret.Get(0).([]int)
 		}
 	}
 	if returnFunc, ok := ret.Get(1).(func(context.Context, int, int, time.Time) error); ok {
@@ -1265,12 +1265,12 @@ func (_c *MockOrdersRepository_GetOrdersToSkipFresh_Call) Run(run func(ctx conte
 	return _c
 }
 
-func (_c *MockOrdersRepository_GetOrdersToSkipFresh_Call) Return(strings []string, err error) *MockOrdersRepository_GetOrdersToSkipFresh_Call {
-	_c.Call.Return(strings, err)
+func (_c *MockOrdersRepository_GetOrdersToSkipFresh_Call) Return(ints []int, err error) *MockOrdersRepository_GetOrdersToSkipFresh_Call {
+	_c.Call.Return(ints, err)
 	return _c
 }
 
-func (_c *MockOrdersRepository_GetOrdersToSkipFresh_Call) RunAndReturn(run func(ctx context.Context, year int, month int, lastDay time.Time) ([]string, error)) *MockOrdersRepository_GetOrdersToSkipFresh_Call {
+func (_c *MockOrdersRepository_GetOrdersToSkipFresh_Call) RunAndReturn(run func(ctx context.Context, year int, month int, lastDay time.Time) ([]int, error)) *MockOrdersRepository_GetOrdersToSkipFresh_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1598,53 +1598,53 @@ func (_c *MockOrdersRepository_MarkResolvedForRenew_Call) RunAndReturn(run func(
 	return _c
 }
 
-// SkipOrdersByUserKey provides a mock function for the type MockOrdersRepository
-func (_mock *MockOrdersRepository) SkipOrdersByUserKey(ctx context.Context, userkey string) (int, error) {
-	ret := _mock.Called(ctx, userkey)
+// SkipOrdersByAccountID provides a mock function for the type MockOrdersRepository
+func (_mock *MockOrdersRepository) SkipOrdersByAccountID(ctx context.Context, accountID int) (int, error) {
+	ret := _mock.Called(ctx, accountID)
 
 	if len(ret) == 0 {
-		panic("no return value specified for SkipOrdersByUserKey")
+		panic("no return value specified for SkipOrdersByAccountID")
 	}
 
 	var r0 int
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (int, error)); ok {
-		return returnFunc(ctx, userkey)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int) (int, error)); ok {
+		return returnFunc(ctx, accountID)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) int); ok {
-		r0 = returnFunc(ctx, userkey)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int) int); ok {
+		r0 = returnFunc(ctx, accountID)
 	} else {
 		r0 = ret.Get(0).(int)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
-		r1 = returnFunc(ctx, userkey)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, int) error); ok {
+		r1 = returnFunc(ctx, accountID)
 	} else {
 		r1 = ret.Error(1)
 	}
 	return r0, r1
 }
 
-// MockOrdersRepository_SkipOrdersByUserKey_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SkipOrdersByUserKey'
-type MockOrdersRepository_SkipOrdersByUserKey_Call struct {
+// MockOrdersRepository_SkipOrdersByAccountID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SkipOrdersByAccountID'
+type MockOrdersRepository_SkipOrdersByAccountID_Call struct {
 	*mock.Call
 }
 
-// SkipOrdersByUserKey is a helper method to define mock.On call
+// SkipOrdersByAccountID is a helper method to define mock.On call
 //   - ctx context.Context
-//   - userkey string
-func (_e *MockOrdersRepository_Expecter) SkipOrdersByUserKey(ctx any, userkey any) *MockOrdersRepository_SkipOrdersByUserKey_Call {
-	return &MockOrdersRepository_SkipOrdersByUserKey_Call{Call: _e.mock.On("SkipOrdersByUserKey", ctx, userkey)}
+//   - accountID int
+func (_e *MockOrdersRepository_Expecter) SkipOrdersByAccountID(ctx any, accountID any) *MockOrdersRepository_SkipOrdersByAccountID_Call {
+	return &MockOrdersRepository_SkipOrdersByAccountID_Call{Call: _e.mock.On("SkipOrdersByAccountID", ctx, accountID)}
 }
 
-func (_c *MockOrdersRepository_SkipOrdersByUserKey_Call) Run(run func(ctx context.Context, userkey string)) *MockOrdersRepository_SkipOrdersByUserKey_Call {
+func (_c *MockOrdersRepository_SkipOrdersByAccountID_Call) Run(run func(ctx context.Context, accountID int)) *MockOrdersRepository_SkipOrdersByAccountID_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
-		var arg1 string
+		var arg1 int
 		if args[1] != nil {
-			arg1 = args[1].(string)
+			arg1 = args[1].(int)
 		}
 		run(
 			arg0,
@@ -1654,63 +1654,12 @@ func (_c *MockOrdersRepository_SkipOrdersByUserKey_Call) Run(run func(ctx contex
 	return _c
 }
 
-func (_c *MockOrdersRepository_SkipOrdersByUserKey_Call) Return(n int, err error) *MockOrdersRepository_SkipOrdersByUserKey_Call {
+func (_c *MockOrdersRepository_SkipOrdersByAccountID_Call) Return(n int, err error) *MockOrdersRepository_SkipOrdersByAccountID_Call {
 	_c.Call.Return(n, err)
 	return _c
 }
 
-func (_c *MockOrdersRepository_SkipOrdersByUserKey_Call) RunAndReturn(run func(ctx context.Context, userkey string) (int, error)) *MockOrdersRepository_SkipOrdersByUserKey_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// UpdateOrdersUserKeyFromAccounts provides a mock function for the type MockOrdersRepository
-func (_mock *MockOrdersRepository) UpdateOrdersUserKeyFromAccounts(ctx context.Context) error {
-	ret := _mock.Called(ctx)
-
-	if len(ret) == 0 {
-		panic("no return value specified for UpdateOrdersUserKeyFromAccounts")
-	}
-
-	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context) error); ok {
-		r0 = returnFunc(ctx)
-	} else {
-		r0 = ret.Error(0)
-	}
-	return r0
-}
-
-// MockOrdersRepository_UpdateOrdersUserKeyFromAccounts_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateOrdersUserKeyFromAccounts'
-type MockOrdersRepository_UpdateOrdersUserKeyFromAccounts_Call struct {
-	*mock.Call
-}
-
-// UpdateOrdersUserKeyFromAccounts is a helper method to define mock.On call
-//   - ctx context.Context
-func (_e *MockOrdersRepository_Expecter) UpdateOrdersUserKeyFromAccounts(ctx any) *MockOrdersRepository_UpdateOrdersUserKeyFromAccounts_Call {
-	return &MockOrdersRepository_UpdateOrdersUserKeyFromAccounts_Call{Call: _e.mock.On("UpdateOrdersUserKeyFromAccounts", ctx)}
-}
-
-func (_c *MockOrdersRepository_UpdateOrdersUserKeyFromAccounts_Call) Run(run func(ctx context.Context)) *MockOrdersRepository_UpdateOrdersUserKeyFromAccounts_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 context.Context
-		if args[0] != nil {
-			arg0 = args[0].(context.Context)
-		}
-		run(
-			arg0,
-		)
-	})
-	return _c
-}
-
-func (_c *MockOrdersRepository_UpdateOrdersUserKeyFromAccounts_Call) Return(err error) *MockOrdersRepository_UpdateOrdersUserKeyFromAccounts_Call {
-	_c.Call.Return(err)
-	return _c
-}
-
-func (_c *MockOrdersRepository_UpdateOrdersUserKeyFromAccounts_Call) RunAndReturn(run func(ctx context.Context) error) *MockOrdersRepository_UpdateOrdersUserKeyFromAccounts_Call {
+func (_c *MockOrdersRepository_SkipOrdersByAccountID_Call) RunAndReturn(run func(ctx context.Context, accountID int) (int, error)) *MockOrdersRepository_SkipOrdersByAccountID_Call {
 	_c.Call.Return(run)
 	return _c
 }

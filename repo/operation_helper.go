@@ -81,7 +81,6 @@ func (o *OrdersDB) applyIdentityChange(ctx context.Context, tx pgx.Tx, c identit
 		}
 		steps = []step{
 			{"accounts", `UPDATE accounts SET "Email" = $1, "UserKey" = $2 WHERE "Email" = $3 AND "UserKey" = $4`, []any{c.toEmail, c.toKc, c.fromEmail, *c.fromKc}},
-			{"orders", `UPDATE orders SET userkey = $1 WHERE userkey = $2`, []any{c.toKc, *c.fromKc}},
 			{"specials.email", `UPDATE specials SET email = $1 WHERE email = $2`, []any{c.toEmail, c.fromEmail}},
 			{"specials.keycloak_id", `UPDATE specials SET keycloak_id = $1 WHERE keycloak_id = $2`, []any{c.toKc, *c.fromKc}},
 		}

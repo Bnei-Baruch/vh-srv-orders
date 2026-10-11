@@ -409,10 +409,6 @@ func (o *OrdersDB) MergeAccountsOrders(ctx context.Context, req AccountMergeRequ
 		return fmt.Errorf("UPDATE orders AccountIds update : %w", err)
 	}
 
-	_, err = tx.Exec(ctx, `UPDATE orders SET "userkey" = $1 WHERE "userkey" = $2`, req.DestinationKeycloakID, req.SourceKeycloakID)
-	if err != nil {
-		return fmt.Errorf("UPDATE orders userKeys update : %w", err)
-	}
 	_, err = tx.Exec(ctx, `UPDATE transaction SET account_id = $1 WHERE account_id = $2`, destinationAccountID, sourceAccountID)
 	if err != nil {
 		return fmt.Errorf("UPDATE transaction : %w", err)

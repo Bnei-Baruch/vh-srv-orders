@@ -32,7 +32,7 @@ func seedAccountWithRows(t *testing.T, db *OrdersDB, ctx context.Context, key, e
 		`INSERT INTO accounts ("UserKey", "Email", created_at) VALUES ($1, $2, now()) RETURNING id`,
 		null.NewString(key, key != ""), email).Scan(&accountID))
 	require.NoError(t, db.pool.QueryRow(ctx,
-		`INSERT INTO orders ("AccountID", userkey) VALUES ($1, $2) RETURNING id`, accountID, key).Scan(&orderID))
+		`INSERT INTO orders ("AccountID") VALUES ($1) RETURNING id`, accountID).Scan(&orderID))
 	require.NoError(t, db.pool.QueryRow(ctx,
 		`INSERT INTO card_details (cc_number, cc_expdate, account_id, active, token) VALUES ('4580', '1230', $1, true, 'tok') RETURNING id`,
 		accountID).Scan(&cardID))
@@ -59,10 +59,7 @@ func TestMigration29_MergesDuplicateUserKeyAccounts_AndReverts(t *testing.T) {
 	m, err := migrate.New("file://../db/migrations", dbURL)
 	require.NoError(t, err)
 	t.Cleanup(func() { m.Close() })
-	v, _, err := m.Version()
-	require.NoError(t, err)
-	require.EqualValues(t, mergeMigrationVersion, v, "test assumes 29 is the latest migration")
-	require.NoError(t, m.Steps(-1))
+	require.NoError(t, m.Migrate(mergeMigrationVersion-1))
 
 	oldID, oldOrder, oldCard, oldTx := seedAccountWithRows(t, db, ctx, "kc-dup", "old@test.test")
 	midID, midOrder, midCard, midTx := seedAccountWithRows(t, db, ctx, "kc-dup", "mid@test.test")
@@ -71,7 +68,7 @@ func TestMigration29_MergesDuplicateUserKeyAccounts_AndReverts(t *testing.T) {
 	keylessA, _, _, _ := seedAccountWithRows(t, db, ctx, "", "a@test.test")
 	keylessB, _, _, _ := seedAccountWithRows(t, db, ctx, "", "b@test.test")
 
-	require.NoError(t, m.Steps(1))
+	require.NoError(t, m.Migrate(mergeMigrationVersion))
 
 	for _, id := range [][3]int{{oldOrder, oldCard, oldTx}, {midOrder, midCard, midTx}, {newOrder, newCard, newTx}} {
 		o, c, x := accountRefs(t, db, ctx, id[0], id[1], id[2])
@@ -98,7 +95,7 @@ func TestMigration29_MergesDuplicateUserKeyAccounts_AndReverts(t *testing.T) {
 	_, err = db.pool.Exec(ctx, `UPDATE orders SET "AccountID" = $1 WHERE id = $2`, third, midOrder)
 	require.NoError(t, err)
 
-	require.NoError(t, m.Steps(-1))
+	require.NoError(t, m.Migrate(mergeMigrationVersion-1))
 
 	var midOrderAccount int
 	require.NoError(t, db.pool.QueryRow(ctx, `SELECT "AccountID" FROM orders WHERE id = $1`, midOrder).Scan(&midOrderAccount))

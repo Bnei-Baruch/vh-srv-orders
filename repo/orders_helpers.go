@@ -589,7 +589,7 @@ func buildAndGetOrdersWhereQuery(fromDate string, dateTo *time.Time, productType
 		whereCondition.WriteString(fmt.Sprintf(" AND o.\"AccountID\" = %d", accountID))
 	}
 	if keycloakID != "" {
-		whereCondition.WriteString(fmt.Sprintf(" AND o.userkey = '%s'", keycloakID))
+		whereCondition.WriteString(fmt.Sprintf(` AND o."AccountID" IN (SELECT id FROM accounts WHERE "UserKey" = '%s')`, keycloakID))
 	}
 
 	if email != "" {
@@ -820,18 +820,6 @@ func (o *OrdersDB) GetTokensForOrders(ctx context.Context, orderIDs []int) (map[
 	return result, nil
 }
 
-// UpdateOrdersUserKeyFromAccounts updates orders.userkey from accounts.UserKey
-func (o *OrdersDB) UpdateOrdersUserKeyFromAccounts(ctx context.Context) error {
-	query := `
-		UPDATE orders 
-		SET userkey = accounts."UserKey" 
-		FROM accounts 
-		WHERE orders."AccountID" = accounts.id
-	`
-	_, err := o.pool.Exec(ctx, query)
-	return err
-}
-
 // GetPaidOrdersCount returns the count of paid orders for a specific month/year
 // lastDay should be the last day of the month (e.g., from period.GetEndOfMonth())
 func (o *OrdersDB) GetPaidOrdersCount(ctx context.Context, year, month int, lastDay time.Time) (int64, error) {
@@ -854,17 +842,18 @@ func (o *OrdersDB) GetPaidOrdersCount(ctx context.Context, year, month int, last
 	return count, nil
 }
 
-// GetOrdersToSkipDouble returns userkeys that have multiple paid/cancelled orders in the specified month
-func (o *OrdersDB) GetOrdersToSkipDouble(ctx context.Context, year, month int, lastDay time.Time) ([]string, error) {
+// GetOrdersToSkipDouble returns the accounts that have multiple paid/cancelled orders in the specified month
+func (o *OrdersDB) GetOrdersToSkipDouble(ctx context.Context, year, month int, lastDay time.Time) ([]int, error) {
 	query := `
-		SELECT userkey
+		SELECT "AccountID"
 		FROM orders
 		WHERE ("Status" = $1 OR "Status" = $2)
 		AND "ProductType" = $3
 		AND "PaymentDate" >= $4
 		AND "PaymentDate" <= $5
-		GROUP BY userkey
-		HAVING COUNT(userkey) > 1
+		AND "AccountID" IS NOT NULL
+		GROUP BY "AccountID"
+		HAVING COUNT(*) > 1
 	`
 
 	startDate := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
@@ -875,34 +864,33 @@ func (o *OrdersDB) GetOrdersToSkipDouble(ctx context.Context, year, month int, l
 	}
 	defer rows.Close()
 
-	var userkeys []string
+	var accountIDs []int
 	for rows.Next() {
-		var userkey null.String
-		if err := rows.Scan(&userkey); err != nil {
+		var accountID int
+		if err := rows.Scan(&accountID); err != nil {
 			return nil, fmt.Errorf("rows scan: %w", err)
 		}
-		if userkey.Valid {
-			userkeys = append(userkeys, userkey.String)
-		}
+		accountIDs = append(accountIDs, accountID)
 	}
 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("rows err: %w", err)
 	}
 
-	return userkeys, nil
+	return accountIDs, nil
 }
 
-// GetOrdersToSkipFresh returns userkeys who already paid or cancelled this month
-func (o *OrdersDB) GetOrdersToSkipFresh(ctx context.Context, year, month int, lastDay time.Time) ([]string, error) {
+// GetOrdersToSkipFresh returns the accounts that already paid or cancelled this month
+func (o *OrdersDB) GetOrdersToSkipFresh(ctx context.Context, year, month int, lastDay time.Time) ([]int, error) {
 	query := `
-		SELECT DISTINCT userkey
+		SELECT DISTINCT "AccountID"
 		FROM orders
 		WHERE ("Status" = $1 OR "Status" = $2)
 		AND "ProductType" = $3
 		AND ("Flag" = '' OR "Flag" IS NULL)
 		AND "PaymentDate" >= $4
 		AND "PaymentDate" <= $5
+		AND "AccountID" IS NOT NULL
 	`
 
 	startDate := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
@@ -913,34 +901,32 @@ func (o *OrdersDB) GetOrdersToSkipFresh(ctx context.Context, year, month int, la
 	}
 	defer rows.Close()
 
-	var userkeys []string
+	var accountIDs []int
 	for rows.Next() {
-		var userkey null.String
-		if err := rows.Scan(&userkey); err != nil {
+		var accountID int
+		if err := rows.Scan(&accountID); err != nil {
 			return nil, fmt.Errorf("rows scan: %w", err)
 		}
-		if userkey.Valid {
-			userkeys = append(userkeys, userkey.String)
-		}
+		accountIDs = append(accountIDs, accountID)
 	}
 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("rows err: %w", err)
 	}
 
-	return userkeys, nil
+	return accountIDs, nil
 }
 
-// SkipOrdersByUserKey sets Flag='skip' for all orders with the given userkey that are currently flagged as 'torenew'
-func (o *OrdersDB) SkipOrdersByUserKey(ctx context.Context, userkey string) (int, error) {
+// SkipOrdersByAccountID sets Flag='skip' for all of the account's orders that are currently flagged as 'torenew'
+func (o *OrdersDB) SkipOrdersByAccountID(ctx context.Context, accountID int) (int, error) {
 	query := `
 		UPDATE orders
 		SET "Flag" = $1
 		WHERE "Flag" = $2
-		AND userkey = $3
+		AND "AccountID" = $3
 	`
 
-	result, err := o.pool.Exec(ctx, query, common.OrderFlagSkip, common.OrderFlagToRenew, userkey)
+	result, err := o.pool.Exec(ctx, query, common.OrderFlagSkip, common.OrderFlagToRenew, accountID)
 	if err != nil {
 		return 0, fmt.Errorf("exec: %w", err)
 	}

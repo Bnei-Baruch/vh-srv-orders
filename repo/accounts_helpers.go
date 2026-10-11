@@ -18,15 +18,6 @@ import (
 )
 
 func (o *OrdersDB) GetOrCreateAccount(ctx context.Context, a Account) (int, error) {
-	// No key identifies no one: an empty key would otherwise match whichever
-	// account was stored with one and hand a stranger its orders.
-	if !a.UserKey.Valid || a.UserKey.String == "" {
-		id, err := o.CreateAccount(ctx, a)
-		if err != nil {
-			return 0, fmt.Errorf("o.CreateAccount: %w", err)
-		}
-		return id, nil
-	}
 
 	var id int
 	err := o.pool.QueryRow(ctx, `select id from accounts where "UserKey" = $1 ORDER BY id DESC LIMIT 1`, a.UserKey.String).
@@ -313,9 +304,6 @@ func (o *OrdersDB) GetAccount(ctx context.Context, id int, email string) (*Accou
 }
 
 func (o *OrdersDB) GetAccountIDByKeycloakID(ctx context.Context, keycloakId string) (int, error) {
-	if keycloakId == "" {
-		return 0, common.ErrNoRowsAffected
-	}
 	var accountID int
 	if err := o.pool.QueryRow(ctx, `SELECT id FROM accounts WHERE "UserKey"=$1`, keycloakId).Scan(&accountID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -358,13 +346,13 @@ func (o *OrdersDB) MergeAccountsOrders(ctx context.Context, req AccountMergeRequ
 	if err != nil {
 		return fmt.Errorf("o.GetAccountIDByKeycloakID: %w", err)
 	}
-	var sourceAccountEmail string
+	// "Email" is nullable; an account without one can still be merged.
+	var sourceAccountEmail, destinationAccountEmail null.String
 	err = o.pool.QueryRow(ctx, `SELECT  "Email" FROM accounts WHERE id = $1`, sourceAccountID).Scan(&sourceAccountEmail)
 	if err != nil {
 		return fmt.Errorf("Email from source account.id: %w", err)
 	}
 
-	var destinationAccountEmail string
 	err = o.pool.QueryRow(ctx, `SELECT "Email" FROM accounts WHERE id = $1`, destinationAccountID).Scan(&destinationAccountEmail)
 	if err != nil {
 		return fmt.Errorf("Email from destaination account.id: %w", err)
@@ -632,9 +620,6 @@ func buildAndGetAccountsWhereQuery(email string) (string, string) {
 }
 
 func (o *OrdersDB) IsSubjectID(ctx context.Context, keycloakID, accountID string) (bool, error) {
-	if keycloakID == "" {
-		return false, nil
-	}
 	row := o.pool.QueryRow(ctx, `SELECT 1 FROM accounts WHERE "UserKey" = $1 AND id = $2`, keycloakID, accountID)
 	var x int
 	if err := row.Scan(&x); err != nil {

@@ -253,3 +253,86 @@ func TestCreateAccount_EmptyEmailIsStoredAsNull(t *testing.T) {
 	require.NoError(t, db.pool.QueryRow(ctx, `SELECT "Email" FROM accounts WHERE id = $1`, id).Scan(&email))
 	assert.False(t, email.Valid)
 }
+
+// create_special, like delete_special, sends both identifiers as strings: a
+// special with only one of them must not put null on the wire, where
+// vh-srv-profile's .(string) read panics.
+func TestCreateSpecial_EmitsStringIdentifiers(t *testing.T) {
+	dbURL, err := testutil.NewTestOrdersDB(t, context.Background())
+	require.NoError(t, err)
+	rec := new(recordingEmitter)
+	db, err := NewOrdersDBUrl(context.Background(), dbURL, rec)
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Close() })
+	ctx := eventstest.WithTestEventBuilder(t, context.Background())
+
+	_, err = db.CreateSpecial(ctx, Special{
+		KeycloakId: null.StringFrom("kc-only"),
+		StartDate:  null.TimeFrom(time.Now()),
+		EndDate:    null.TimeFrom(time.Now().Add(time.Hour)),
+		Category:   null.StringFrom("hh"),
+	})
+	require.NoError(t, err)
+
+	require.Len(t, rec.events, 1)
+	assert.Equal(t, "", rec.events[0].Payload["email"])
+	assert.Equal(t, "kc-only", rec.events[0].Payload["keycloak_id"])
+}
+
+// An account stored without an email (an empty one is stored as NULL) can
+// still be merged; reading its NULL email used to fail the merge.
+func TestMergeAccountsOrders_AccountWithoutEmail(t *testing.T) {
+	db, ctx := newTestDB(t)
+
+	src, err := db.CreateAccount(ctx, Account{UserKey: null.StringFrom("kc-src"), Email: null.StringFrom("")})
+	require.NoError(t, err)
+	dst, err := db.CreateAccount(ctx, Account{UserKey: null.StringFrom("kc-dst"), Email: null.StringFrom("dst@test.test")})
+	require.NoError(t, err)
+	var orderID int
+	require.NoError(t, db.pool.QueryRow(ctx, `INSERT INTO orders ("AccountID") VALUES ($1) RETURNING id`, src).Scan(&orderID))
+
+	require.NoError(t, db.MergeAccountsOrders(ctx, AccountMergeRequest{
+		SourceKeycloakID:      null.StringFrom("kc-src"),
+		DestinationKeycloakID: null.StringFrom("kc-dst"),
+	}))
+
+	var owner int
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT "AccountID" FROM orders WHERE id = $1`, orderID).Scan(&owner))
+	assert.Equal(t, dst, owner)
+}
+
+// An empty key names no profile: refused before any profile lookup or
+// account creation.
+func TestGetOrCreateAccountFromProfile_EmptyKeyIsInvalid(t *testing.T) {
+	db, ctx := newTestDB(t)
+
+	_, err := db.GetOrCreateAccountFromProfile(ctx, "")
+	assert.ErrorIs(t, err, common.ErrInvalidValues)
+
+	var n int
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT count(*) FROM accounts`).Scan(&n))
+	assert.Zero(t, n)
+}
+
+// An empty pelecard token is an absent one: no writer puts it in the column,
+// where pelecard_token's CHECK would refuse it. A renewal copying a legacy
+// empty token reaches these.
+func TestPreparePelecardPaymentCreate_SkipsEmptyToken(t *testing.T) {
+	cols, _, _ := preparePelecardPaymentCreateQuery(Payment{PelecardToken: null.StringFrom(""), ParamX: null.StringFrom("x")}, 1)
+	assert.NotContains(t, cols, "pelecard_token")
+}
+
+func TestPreparePelecardPaymentUpdate_SkipsEmptyToken(t *testing.T) {
+	set, _ := preparePelecardPaymentUpdateQuery(PaymentUpdate{PelecardToken: null.StringFrom("")})
+	assert.NotContains(t, set, "pelecard_token")
+}
+
+func TestPreparePelecardPaymentUpdateViaPayment_SkipsEmptyToken(t *testing.T) {
+	set, _ := preparePelecardPaymentUpdateViaPaymentStructQuery(Payment{PelecardToken: null.StringFrom("")})
+	assert.NotContains(t, set, "pelecard_token")
+}
+
+func TestPreparePaymentUpdate_SkipsEmptyToken(t *testing.T) {
+	set, _ := preparePaymentUpdateQuery(Payment{PelecardToken: null.StringFrom("")})
+	assert.NotContains(t, set, "pelecard_token")
+}

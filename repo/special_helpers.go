@@ -174,8 +174,10 @@ func (o *OrdersDB) CreateSpecial(ctx context.Context, s Special) (int, error) {
 		createQueryArgs...).Scan(&ID); err != nil {
 		return 0, err
 	}
+	// As in delete_special: vh-srv-profile reads both identifiers with .(string),
+	// so an absent one goes out as "", never null.
 	o.emitEvent(ctx, events.TypeCreateSpecial,
-		map[string]interface{}{"email": s.Email, "keycloak_id": s.KeycloakId, "start_date": s.StartDate, "end_date": s.EndDate})
+		map[string]interface{}{"email": s.Email.String, "keycloak_id": s.KeycloakId.String, "start_date": s.StartDate, "end_date": s.EndDate})
 	return ID, nil
 }
 

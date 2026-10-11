@@ -14,7 +14,7 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
-// hhGrantProviderFunc is a function adapter that implements HHGrantProvider.
+// hhGrantProviderFunc is a function adapter that implements hhGrantProvider.
 type hhGrantProviderFunc func(ctx context.Context, keycloakID string) (*repo.HHGrant, error)
 
 func (f hhGrantProviderFunc) GetActiveHHGrant(ctx context.Context, keycloakID string) (*repo.HHGrant, error) {
@@ -95,7 +95,7 @@ func TestApplyHHDiscount_AuditProperties(t *testing.T) {
 	assert.Equal(t, grant.EndDate.Unix(), props.ExpiresAt.Unix())
 }
 
-// --- HHGrantProvider integration ---
+// --- hhGrantProvider integration ---
 
 func TestEvaluateV2Price_WithHHProvider_Applied(t *testing.T) {
 	// No donations → final price = base (180 NIS). HH 80% off = 36 NIS < 180 NIS → applied.

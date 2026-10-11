@@ -30,9 +30,9 @@ func (o *OrdersDB) LoadRenewalData(ctx context.Context, orderID uint) (*RenewalD
 		return nil, fmt.Errorf("%w: o.GetOrderByID: %w", common.ErrPrePayment, err)
 	}
 
-	prevPayment, err := o.GetPaymentForOrderID(ctx, orderID)
+	prevPayment, err := o.getPaymentForOrderID(ctx, orderID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: o.GetPaymentForOrderID: %w", common.ErrPrePayment, err)
+		return nil, fmt.Errorf("%w: o.getPaymentForOrderID: %w", common.ErrPrePayment, err)
 	}
 
 	account, err := o.GetAccountForOrderID(ctx, orderID)

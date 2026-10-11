@@ -1,7 +1,10 @@
 package repo
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,6 +14,9 @@ import (
 	"github.com/volatiletech/null/v9"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
+	"gitlab.bbdev.team/vh/pay/orders/events"
+	"gitlab.bbdev.team/vh/pay/orders/events/eventstest"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/testutil"
 )
 
 // Migration 28 makes NULL the only spelling of "absent" for the identity
@@ -66,6 +72,58 @@ func TestSpecials_NullEmailIsAbsentNotFatal(t *testing.T) {
 
 	require.NoError(t, db.DeleteSpecialsByKeycloakId(ctx, "kc-no-email"),
 		"revoking a keycloak-only special must not die scanning its NULL email")
+}
+
+type recordingEmitter struct {
+	mu     sync.Mutex
+	events []events.Event
+}
+
+func (r *recordingEmitter) Emit(_ context.Context, es ...events.Event) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.events = append(r.events, es...)
+}
+
+func (r *recordingEmitter) Close(context.Context) {}
+
+// vh-srv-profile reads delete_special's "email" with an unchecked string
+// assertion; a null there panics its consumer and the event is lost. A
+// keycloak-only special must go out with "" and its keycloak_id.
+func TestDeleteSpecial_KeycloakOnlyEmitsStringEmail(t *testing.T) {
+	dbURL, err := testutil.NewTestOrdersDB(t, context.Background())
+	require.NoError(t, err)
+	rec := new(recordingEmitter)
+	db, err := NewOrdersDBUrl(context.Background(), dbURL, rec)
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Close() })
+	ctx := eventstest.WithTestEventBuilder(t, context.Background())
+
+	_, err = db.pool.Exec(ctx,
+		`INSERT INTO specials (keycloak_id, start_date, end_date, category)
+		 VALUES ('kc-no-email', now() - interval '1 day', now() + interval '1 day', 'hh')`)
+	require.NoError(t, err)
+	require.NoError(t, db.DeleteSpecialsByKeycloakId(ctx, "kc-no-email"))
+
+	require.Len(t, rec.events, 1)
+	assert.Equal(t, events.TypeDeleteSpecial, rec.events[0].Type)
+	payload, err := json.Marshal(rec.events[0].Payload)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"email":"","keycloak_id":"kc-no-email"}`, string(payload))
+}
+
+// The schema refuses ” in specials.keycloak_id; an empty request value is the
+// caller's mistake, not a server error.
+func TestSetKeycloakIdByEmail_EmptyValuesAreInvalid(t *testing.T) {
+	db, ctx := newTestDB(t)
+	insertSpecial(t, db, ctx, "kc-1", "x@test.test", -time.Hour, 24*time.Hour)
+
+	assert.ErrorIs(t, db.SetKeycloakIdByEmail(ctx, "x@test.test", ""), common.ErrInvalidValues)
+	assert.ErrorIs(t, db.SetKeycloakIdByEmail(ctx, "", "kc-2"), common.ErrInvalidValues)
+
+	var key string
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT keycloak_id FROM specials WHERE email = 'x@test.test'`).Scan(&key))
+	assert.Equal(t, "kc-1", key)
 }
 
 func TestCreateSpecial_RequiresAnIdentifier(t *testing.T) {

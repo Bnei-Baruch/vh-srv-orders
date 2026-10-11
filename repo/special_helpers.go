@@ -14,12 +14,13 @@ import (
 )
 
 func (o *OrdersDB) DeleteSpecialById(ctx context.Context, id int) error {
-	// A special identified only by keycloak_id has no email.
+	// A special identified only by keycloak_id has no email, and one identified
+	// only by email has no keycloak_id.
 	var (
-		email null.String
-		err   error
+		email, keycloakID null.String
+		err               error
 	)
-	if err = o.pool.QueryRow(ctx, `SELECT email FROM specials where id=$1`, id).Scan(&email); err != nil {
+	if err = o.pool.QueryRow(ctx, `SELECT email, keycloak_id FROM specials where id=$1`, id).Scan(&email, &keycloakID); err != nil {
 		return err
 	}
 	res, errUpdate := o.pool.Exec(ctx, `UPDATE  specials SET end_date = now(), updated_at = now() WHERE  id = $1`, id)
@@ -30,12 +31,21 @@ func (o *OrdersDB) DeleteSpecialById(ctx context.Context, id int) error {
 	if res.RowsAffected() == 0 {
 		return common.ErrNoRowsAffected
 	} else {
-		o.emitEvent(ctx, events.TypeDeleteSpecial, map[string]interface{}{"email": email})
+		// vh-srv-profile reads "email" with an unchecked string assertion, so an
+		// absent one goes out as "", never null. keycloak_id lets a consumer
+		// find the user of a special that has no email.
+		o.emitEvent(ctx, events.TypeDeleteSpecial, map[string]interface{}{
+			"email":       email.String,
+			"keycloak_id": keycloakID.String,
+		})
 	}
 	return nil
 }
 
 func (o *OrdersDB) SetKeycloakIdByEmail(ctx context.Context, email string, keycloakID string) error {
+	if email == "" || keycloakID == "" {
+		return fmt.Errorf("%w: email and keycloak_id are required", common.ErrInvalidValues)
+	}
 	_, err := o.pool.Exec(ctx, `UPDATE specials SET keycloak_id = $1, updated_at=now() WHERE email=$2`, keycloakID, email)
 	if err != nil {
 		return fmt.Errorf("SetKeycloakIdByEmail: %w", err)

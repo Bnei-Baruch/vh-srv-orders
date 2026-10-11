@@ -642,7 +642,7 @@ func (o *OrdersDB) IsSubjectID(ctx context.Context, keycloakID, accountID string
 
 func (o *OrdersDB) GetOrCreateAccountFromProfile(ctx context.Context, keycloakId string) (int, error) {
 	if keycloakId == "" {
-		return 0, errors.New("GetOrCreateAccountFromProfile: empty keycloakId")
+		return 0, fmt.Errorf("%w: empty keycloak id", common.ErrInvalidValues)
 	}
 	var account *Account
 	accountId, err := o.GetAccountIDByKeycloakID(ctx, keycloakId)

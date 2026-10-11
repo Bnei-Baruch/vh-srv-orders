@@ -286,7 +286,7 @@ func (o *OrdersAPI) handleCreateOffline(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"Error": err.Error(), "success": false})
 		return
 	}
-	if !req.KeycloakID.Valid {
+	if req.KeycloakID.String == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing KeycloakID.", "success": false})
 		return
 	}

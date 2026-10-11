@@ -31,29 +31,48 @@ func requireCheckViolation(t *testing.T, err error, constraint string) {
 	assert.Equal(t, constraint, pgErr.ConstraintName)
 }
 
-func TestSchema_RefusesEmptyIdentifiers(t *testing.T) {
+func TestSchema_RefusesSpecialsEmptyEmail(t *testing.T) {
 	db, ctx := newTestDB(t)
+	_, err := db.pool.Exec(ctx, `INSERT INTO specials (keycloak_id, email, start_date, end_date, category) VALUES ('kc', '', now(), now(), 'x')`)
+	requireCheckViolation(t, err, "specials_identifiers_not_empty")
+}
 
-	cases := []struct {
-		name, sql, constraint string
-	}{
-		{"specials empty email", `INSERT INTO specials (keycloak_id, email, start_date, end_date, category) VALUES ('kc', '', now(), now(), 'x')`, "specials_identifiers_not_empty"},
-		{"specials empty keycloak_id", `INSERT INTO specials (keycloak_id, email, start_date, end_date, category) VALUES ('', 'a@test.test', now(), now(), 'x')`, "specials_identifiers_not_empty"},
-		{"specials no identifier", `INSERT INTO specials (start_date, end_date, category) VALUES (now(), now(), 'x')`, "specials_has_identifier"},
-		{"accounts empty UserKey", `INSERT INTO accounts ("Email", "UserKey") VALUES ('a@test.test', '')`, "accounts_userkey_not_empty"},
-		{"accounts empty Email", `INSERT INTO accounts ("Email", "UserKey") VALUES ('', 'kc-empty-email')`, "accounts_email_not_empty"},
-		{"payments empty token", `INSERT INTO payments (pelecard_token) VALUES ('')`, "payments_pelecard_token_not_empty"},
-		{"payments_pelecard empty token", `INSERT INTO payments_pelecard (payment_id, pelecard_token) VALUES ((SELECT id FROM payments LIMIT 1), '')`, "payments_pelecard_pelecard_token_not_empty"},
-	}
-	_, err := db.pool.Exec(ctx, `INSERT INTO payments (pelecard_token) VALUES (NULL)`)
-	require.NoError(t, err)
+func TestSchema_RefusesSpecialsEmptyKeycloakID(t *testing.T) {
+	db, ctx := newTestDB(t)
+	_, err := db.pool.Exec(ctx, `INSERT INTO specials (keycloak_id, email, start_date, end_date, category) VALUES ('', 'a@test.test', now(), now(), 'x')`)
+	requireCheckViolation(t, err, "specials_identifiers_not_empty")
+}
 
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			_, err := db.pool.Exec(ctx, tc.sql)
-			requireCheckViolation(t, err, tc.constraint)
-		})
-	}
+func TestSchema_RefusesSpecialsWithoutIdentifier(t *testing.T) {
+	db, ctx := newTestDB(t)
+	_, err := db.pool.Exec(ctx, `INSERT INTO specials (start_date, end_date, category) VALUES (now(), now(), 'x')`)
+	requireCheckViolation(t, err, "specials_has_identifier")
+}
+
+func TestSchema_RefusesAccountsEmptyUserKey(t *testing.T) {
+	db, ctx := newTestDB(t)
+	_, err := db.pool.Exec(ctx, `INSERT INTO accounts ("Email", "UserKey") VALUES ('a@test.test', '')`)
+	requireCheckViolation(t, err, "accounts_userkey_not_empty")
+}
+
+func TestSchema_RefusesAccountsEmptyEmail(t *testing.T) {
+	db, ctx := newTestDB(t)
+	_, err := db.pool.Exec(ctx, `INSERT INTO accounts ("Email", "UserKey") VALUES ('', 'kc-empty-email')`)
+	requireCheckViolation(t, err, "accounts_email_not_empty")
+}
+
+func TestSchema_RefusesPaymentsEmptyToken(t *testing.T) {
+	db, ctx := newTestDB(t)
+	_, err := db.pool.Exec(ctx, `INSERT INTO payments (pelecard_token) VALUES ('')`)
+	requireCheckViolation(t, err, "payments_pelecard_token_not_empty")
+}
+
+func TestSchema_RefusesPaymentsPelecardEmptyToken(t *testing.T) {
+	db, ctx := newTestDB(t)
+	var paymentID int
+	require.NoError(t, db.pool.QueryRow(ctx, `INSERT INTO payments (pelecard_token) VALUES (NULL) RETURNING id`).Scan(&paymentID))
+	_, err := db.pool.Exec(ctx, `INSERT INTO payments_pelecard (payment_id, pelecard_token) VALUES ($1, '')`, paymentID)
+	requireCheckViolation(t, err, "payments_pelecard_pelecard_token_not_empty")
 }
 
 // One specials row without an email used to make GetUniqueEmailsFromSpecial fail,
@@ -90,7 +109,7 @@ func (r *recordingEmitter) Close(context.Context) {}
 
 // vh-srv-profile reads delete_special's "email" with an unchecked string
 // assertion; a null there panics its consumer and the event is lost. A
-// keycloak-only special must go out with "" and its keycloak_id.
+// keycloak-only special must go out with "".
 func TestDeleteSpecial_KeycloakOnlyEmitsStringEmail(t *testing.T) {
 	dbURL, err := testutil.NewTestOrdersDB(t, context.Background())
 	require.NoError(t, err)
@@ -110,10 +129,10 @@ func TestDeleteSpecial_KeycloakOnlyEmitsStringEmail(t *testing.T) {
 	assert.Equal(t, events.TypeDeleteSpecial, rec.events[0].Type)
 	payload, err := json.Marshal(rec.events[0].Payload)
 	require.NoError(t, err)
-	assert.JSONEq(t, `{"email":"","keycloak_id":"kc-no-email"}`, string(payload))
+	assert.JSONEq(t, `{"email":""}`, string(payload))
 }
 
-// The schema refuses ” in specials.keycloak_id; an empty request value is the
+// The schema refuses an empty specials.keycloak_id; an empty request value is the
 // caller's mistake, not a server error.
 func TestSetKeycloakIdByEmail_EmptyValuesAreInvalid(t *testing.T) {
 	db, ctx := newTestDB(t)
@@ -155,7 +174,7 @@ func TestCreateSpecial_RequiresAnIdentifier(t *testing.T) {
 	assert.False(t, email.Valid, "an empty email is stored as NULL")
 }
 
-// An empty key used to match any account stored with "UserKey" = ”, attaching
+// An empty key used to match any account stored with an empty "UserKey", attaching
 // one person's orders to a stranger's account.
 func TestGetOrCreateAccount_EmptyKeyNeverMatches(t *testing.T) {
 	db, ctx := newTestDB(t)
@@ -193,7 +212,7 @@ func TestHardDeleteAllUserData_KeylessAccount(t *testing.T) {
 	require.NoError(t, db.HardDeleteAllUserDataByAccountID(ctx, id, ""))
 }
 
-// The back office's "without token" filter used to test = ” and so omitted
+// The back office's "without token" filter used to test for an empty string and so omitted
 // exactly the payments created without a token.
 func TestGetAllPayments_TokenFilterCountsNullAsWithout(t *testing.T) {
 	db, ctx := newTestDB(t)
@@ -221,7 +240,7 @@ func TestGetAllPayments_TokenFilterCountsNullAsWithout(t *testing.T) {
 	assert.Len(t, without, 2)
 }
 
-// accounts_email_not_empty refuses ”; the writers store an empty email as
+// accounts_email_not_empty refuses an empty string; the writers store an empty email as
 // absent instead of failing on it.
 func TestCreateAccount_EmptyEmailIsStoredAsNull(t *testing.T) {
 	db, ctx := newTestDB(t)

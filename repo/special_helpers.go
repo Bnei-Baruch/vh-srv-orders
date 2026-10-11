@@ -14,13 +14,12 @@ import (
 )
 
 func (o *OrdersDB) DeleteSpecialById(ctx context.Context, id int) error {
-	// A special identified only by keycloak_id has no email, and one identified
-	// only by email has no keycloak_id.
+	// A special identified only by keycloak_id has no email.
 	var (
-		email, keycloakID null.String
-		err               error
+		email null.String
+		err   error
 	)
-	if err = o.pool.QueryRow(ctx, `SELECT email, keycloak_id FROM specials where id=$1`, id).Scan(&email, &keycloakID); err != nil {
+	if err = o.pool.QueryRow(ctx, `SELECT email FROM specials where id=$1`, id).Scan(&email); err != nil {
 		return err
 	}
 	res, errUpdate := o.pool.Exec(ctx, `UPDATE  specials SET end_date = now(), updated_at = now() WHERE  id = $1`, id)
@@ -32,12 +31,8 @@ func (o *OrdersDB) DeleteSpecialById(ctx context.Context, id int) error {
 		return common.ErrNoRowsAffected
 	} else {
 		// vh-srv-profile reads "email" with an unchecked string assertion, so an
-		// absent one goes out as "", never null. keycloak_id lets a consumer
-		// find the user of a special that has no email.
-		o.emitEvent(ctx, events.TypeDeleteSpecial, map[string]interface{}{
-			"email":       email.String,
-			"keycloak_id": keycloakID.String,
-		})
+		// absent one goes out as "", never null.
+		o.emitEvent(ctx, events.TypeDeleteSpecial, map[string]interface{}{"email": email.String})
 	}
 	return nil
 }

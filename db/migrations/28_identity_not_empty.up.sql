@@ -23,6 +23,13 @@ UPDATE accounts SET "UserKey" = NULL WHERE "UserKey" = '';
 ALTER TABLE accounts
   ADD CONSTRAINT accounts_userkey_not_empty CHECK ("UserKey" <> '');
 
+-- accounts."Email": a lookup by "" matched an account stored with ''. It stays
+-- nullable: nothing guarantees profile has an email for every user. 0 rows
+-- with '' in production at the time of writing.
+UPDATE accounts SET "Email" = NULL WHERE "Email" = '';
+ALTER TABLE accounts
+  ADD CONSTRAINT accounts_email_not_empty CHECK ("Email" <> '');
+
 -- pelecard_token: the "with token" / "without token" filters tested '' only and
 -- dropped NULL rows from both.
 UPDATE payments SET pelecard_token = NULL WHERE pelecard_token = '';

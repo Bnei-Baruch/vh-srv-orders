@@ -433,7 +433,7 @@ func prepareAccountCreateQuery(req Account) (string, string, []interface{}) {
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.LastName.String)
 	}
-	if req.Email.Valid {
+	if req.Email.Valid && req.Email.String != "" {
 		createStrings = append(createStrings, `"Email"`)
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.Email.String)
@@ -532,7 +532,7 @@ func prepareAccountUpdateQuery(req Account) (string, []interface{}) {
 		updateStrings = append(updateStrings, fmt.Sprintf(`"LastName"=$%d`, len(updateStrings)+1))
 		args = append(args, req.LastName.String)
 	}
-	if req.Email.Valid {
+	if req.Email.Valid && req.Email.String != "" {
 		updateStrings = append(updateStrings, fmt.Sprintf(`"Email"=$%d`, len(updateStrings)+1))
 		args = append(args, req.Email.String)
 	}

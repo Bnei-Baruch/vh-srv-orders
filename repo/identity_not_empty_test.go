@@ -41,6 +41,7 @@ func TestSchema_RefusesEmptyIdentifiers(t *testing.T) {
 		{"specials empty keycloak_id", `INSERT INTO specials (keycloak_id, email, start_date, end_date, category) VALUES ('', 'a@test.test', now(), now(), 'x')`, "specials_identifiers_not_empty"},
 		{"specials no identifier", `INSERT INTO specials (start_date, end_date, category) VALUES (now(), now(), 'x')`, "specials_has_identifier"},
 		{"accounts empty UserKey", `INSERT INTO accounts ("Email", "UserKey") VALUES ('a@test.test', '')`, "accounts_userkey_not_empty"},
+		{"accounts empty Email", `INSERT INTO accounts ("Email", "UserKey") VALUES ('', 'kc-empty-email')`, "accounts_email_not_empty"},
 		{"payments empty token", `INSERT INTO payments (pelecard_token) VALUES ('')`, "payments_pelecard_token_not_empty"},
 		{"payments_pelecard empty token", `INSERT INTO payments_pelecard (payment_id, pelecard_token) VALUES ((SELECT id FROM payments LIMIT 1), '')`, "payments_pelecard_pelecard_token_not_empty"},
 	}
@@ -218,4 +219,18 @@ func TestGetAllPayments_TokenFilterCountsNullAsWithout(t *testing.T) {
 	assert.Len(t, all, 3)
 	assert.Len(t, with, 1)
 	assert.Len(t, without, 2)
+}
+
+// accounts_email_not_empty refuses ”; the writers store an empty email as
+// absent instead of failing on it.
+func TestCreateAccount_EmptyEmailIsStoredAsNull(t *testing.T) {
+	db, ctx := newTestDB(t)
+
+	id, err := db.CreateAccount(ctx, Account{UserKey: null.StringFrom("kc-1"), Email: null.StringFrom("")})
+	require.NoError(t, err)
+	require.NoError(t, db.PatchAccount(ctx, Account{Email: null.StringFrom(""), FirstName: null.StringFrom("A")}, id))
+
+	var email null.String
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT "Email" FROM accounts WHERE id = $1`, id).Scan(&email))
+	assert.False(t, email.Valid)
 }

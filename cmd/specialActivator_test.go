@@ -1,12 +1,16 @@
 package cmd
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/volatiletech/null/v9"
 
+	"gitlab.bbdev.team/vh/pay/orders/events"
+	"gitlab.bbdev.team/vh/pay/orders/internal/mocks"
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
@@ -41,4 +45,34 @@ func TestIsBeginsToday_YesterdayTomorrowAndFar(t *testing.T) {
 
 func TestIsBeginsToday_NoStartDate(t *testing.T) {
 	assert.False(t, isBeginsToday(&repo.Special{}))
+}
+
+type capturingEmitter struct{ events []events.Event }
+
+func (e *capturingEmitter) Emit(_ context.Context, evs ...events.Event) {
+	e.events = append(e.events, evs...)
+}
+func (e *capturingEmitter) Close(context.Context) {}
+
+// A special created by email only has a NULL keycloak_id. vh-srv-profile asserts
+// both identifiers to string, so the activation event must carry "", not null.
+func TestDoTask_SpecialWithoutKeycloakIdActivatesWithEmptyString(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := mocks.NewMockOrdersRepository(t)
+	mockRepo.EXPECT().GetUniqueEmailsFromSpecial(ctx).Return([]string{"a@example.com"}, nil)
+	mockRepo.EXPECT().GetAllSpecialsByEmail(ctx, "a@example.com").Return([]*repo.Special{{
+		Email:     null.StringFrom("a@example.com"),
+		StartDate: null.TimeFrom(time.Now()),
+		EndDate:   null.TimeFrom(time.Now().AddDate(0, 1, 0)),
+	}}, nil)
+	emitter := &capturingEmitter{}
+	w := &Worker{repo: mockRepo, eventEmitter: emitter}
+
+	require.NoError(t, w.DoTask())
+
+	require.Len(t, emitter.events, 1)
+	payload := emitter.events[0].Payload
+	assert.Equal(t, events.TypeCreateSpecial, emitter.events[0].Type)
+	assert.Equal(t, "a@example.com", payload["email"])
+	assert.Equal(t, "", payload["keycloak_id"])
 }

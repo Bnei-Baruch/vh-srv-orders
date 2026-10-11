@@ -121,9 +121,11 @@ func (w *Worker) DoTask() error {
 			ctx := context.WithValue(context.Background(), common.CtxEventBuilder, w)
 			w.emitEvent(ctx,
 				events.TypeCreateSpecial,
+				// vh-srv-profile reads both identifiers with unchecked string
+				// assertions, so an absent one goes out as "", never null.
 				map[string]interface{}{
-					"email":       actualSpecial.Email,
-					"keycloak_id": actualSpecial.KeycloakId,
+					"email":       actualSpecial.Email.String,
+					"keycloak_id": actualSpecial.KeycloakId.String,
 					"start_date":  actualSpecial.StartDate,
 					"end_date":    actualSpecial.EndDate})
 		}

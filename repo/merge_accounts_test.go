@@ -26,12 +26,12 @@ func insertMergeCard(t *testing.T, db *OrdersDB, ctx context.Context, accountID 
 	return id
 }
 
-func insertMergeOrder(t *testing.T, db *OrdersDB, ctx context.Context, accountID int, key string, cardID null.Int) int {
+func insertMergeOrder(t *testing.T, db *OrdersDB, ctx context.Context, accountID int, cardID null.Int) int {
 	t.Helper()
 	var id int
 	require.NoError(t, db.pool.QueryRow(ctx,
-		`INSERT INTO orders ("AccountID", userkey, card_details_id) VALUES ($1, $2, $3) RETURNING id`,
-		accountID, key, cardID).Scan(&id))
+		`INSERT INTO orders ("AccountID", card_details_id) VALUES ($1, $2) RETURNING id`,
+		accountID, cardID).Scan(&id))
 	return id
 }
 
@@ -50,8 +50,8 @@ func TestMergeAccountsOrders_MovesEveryCard(t *testing.T) {
 	shared := insertMergeCard(t, db, ctx, src, "9999")
 	dstCard := insertMergeCard(t, db, ctx, dst, "9999")
 
-	usedOrder := insertMergeOrder(t, db, ctx, src, "kc-src", null.IntFrom(used))
-	sharedOrder := insertMergeOrder(t, db, ctx, src, "kc-src", null.IntFrom(shared))
+	usedOrder := insertMergeOrder(t, db, ctx, src, null.IntFrom(used))
+	sharedOrder := insertMergeOrder(t, db, ctx, src, null.IntFrom(shared))
 
 	require.NoError(t, db.MergeAccountsOrders(ctx, AccountMergeRequest{
 		SourceKeycloakID:      null.StringFrom("kc-src"),
@@ -87,7 +87,7 @@ func TestMergeAccountsOrders_SourceWithoutEmail(t *testing.T) {
 
 	src := insertMergeAccount(t, db, ctx, "kc-src", null.String{})
 	dst := insertMergeAccount(t, db, ctx, "kc-dst", null.StringFrom("dst@test.test"))
-	order := insertMergeOrder(t, db, ctx, src, "kc-src", null.Int{})
+	order := insertMergeOrder(t, db, ctx, src, null.Int{})
 
 	require.NoError(t, db.MergeAccountsOrders(ctx, AccountMergeRequest{
 		SourceKeycloakID:      null.StringFrom("kc-src"),

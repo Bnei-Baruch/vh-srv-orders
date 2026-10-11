@@ -527,9 +527,10 @@ func prepareAccountUpdateQuery(req Account) (string, []interface{}) {
 		updateStrings = append(updateStrings, fmt.Sprintf(`"LastName"=$%d`, len(updateStrings)+1))
 		args = append(args, req.LastName.String)
 	}
-	if req.Email.Valid && req.Email.String != "" {
+	// An empty email or key clears it, as storing '' did before: absent is NULL.
+	if req.Email.Valid {
 		updateStrings = append(updateStrings, fmt.Sprintf(`"Email"=$%d`, len(updateStrings)+1))
-		args = append(args, req.Email.String)
+		args = append(args, nullIfEmpty(req.Email))
 	}
 	if req.Phone.Valid {
 		updateStrings = append(updateStrings, fmt.Sprintf(`"Phone"=$%d`, len(updateStrings)+1))
@@ -579,9 +580,9 @@ func prepareAccountUpdateQuery(req Account) (string, []interface{}) {
 		updateStrings = append(updateStrings, fmt.Sprintf(`"AuthNo"=$%d`, len(updateStrings)+1))
 		args = append(args, req.AuthNo.String)
 	}
-	if req.UserKey.Valid && req.UserKey.String != "" {
+	if req.UserKey.Valid {
 		updateStrings = append(updateStrings, fmt.Sprintf(`"UserKey"=$%d`, len(updateStrings)+1))
-		args = append(args, req.UserKey.String)
+		args = append(args, nullIfEmpty(req.UserKey))
 	}
 
 	if len(args) != 0 {
@@ -676,4 +677,13 @@ func (o *OrdersDB) GetOrCreateAccountFromProfile(ctx context.Context, keycloakId
 		return 0, fmt.Errorf("repo.CreateAccount: %w", err)
 	}
 	return account.ID, nil
+}
+
+// nullIfEmpty binds an empty string as NULL, the only spelling of an absent
+// identity value since migration 28.
+func nullIfEmpty(s null.String) any {
+	if s.String == "" {
+		return nil
+	}
+	return s.String
 }

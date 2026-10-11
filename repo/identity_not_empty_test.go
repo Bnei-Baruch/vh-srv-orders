@@ -336,3 +336,55 @@ func TestPreparePaymentUpdate_SkipsEmptyToken(t *testing.T) {
 	set, _ := preparePaymentUpdateQuery(Payment{PelecardToken: null.StringFrom("")})
 	assert.NotContains(t, set, "pelecard_token")
 }
+
+// Patching an empty key clears it, as storing an empty string did before.
+func TestPatchAccount_EmptyUserKeyClearsIt(t *testing.T) {
+	db, ctx := newTestDB(t)
+
+	id, err := db.CreateAccount(ctx, Account{UserKey: null.StringFrom("kc-1"), Email: null.StringFrom("a@test.test")})
+	require.NoError(t, err)
+	require.NoError(t, db.PatchAccount(ctx, Account{UserKey: null.StringFrom("")}, id))
+
+	var key null.String
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT "UserKey" FROM accounts WHERE id = $1`, id).Scan(&key))
+	assert.False(t, key.Valid)
+}
+
+// The admin lookup by ParamX reads an account without email or key, which
+// migration 28 stores as NULL, the same as before: as empty strings.
+func TestFetchPaymentByParamX_AccountWithoutEmailOrKey(t *testing.T) {
+	db, ctx := newTestDB(t)
+
+	var accountID, orderID int
+	require.NoError(t, db.pool.QueryRow(ctx,
+		`INSERT INTO accounts ("FirstName", "LastName", "Street", "City") VALUES ('F', 'L', 'S', 'C') RETURNING id`).Scan(&accountID))
+	require.NoError(t, db.pool.QueryRow(ctx,
+		`INSERT INTO orders ("AccountID", "OrderLanguage", "Amount", "Currency", "SKU") VALUES ($1, 'en', 10, 'ILS', 'sku') RETURNING id`,
+		accountID).Scan(&orderID))
+	_, err := db.pool.Exec(ctx, `INSERT INTO payments ("OrderID", "ParamX") VALUES ($1, 'px-probe')`, orderID)
+	require.NoError(t, err)
+
+	p, err := db.FetchPaymentByParamX(ctx, "px-probe")
+	require.NoError(t, err)
+	assert.Equal(t, "", p.Email)
+	assert.Equal(t, "", p.UserKey)
+}
+
+// A specials sheet row with an email and a blank keycloak column is created
+// with no keycloak_id, not refused by specials_identifiers_not_empty.
+func TestCreateSpecial_BlankKeycloakIDIsAbsent(t *testing.T) {
+	db, ctx := newTestDB(t)
+
+	id, err := db.CreateSpecial(ctx, Special{
+		Email:      null.StringFrom("sheet@test.test"),
+		KeycloakId: null.StringFrom(""),
+		StartDate:  null.TimeFrom(time.Now()),
+		EndDate:    null.TimeFrom(time.Now().Add(time.Hour)),
+		Category:   null.StringFrom("hh"),
+	})
+	require.NoError(t, err)
+
+	var key null.String
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT keycloak_id FROM specials WHERE id = $1`, id).Scan(&key))
+	assert.False(t, key.Valid)
+}

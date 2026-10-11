@@ -1622,7 +1622,7 @@ func preparePaymentUpdateQuery(req Payment) (string, []interface{}) {
 func (o *OrdersDB) FetchPaymentByParamX(ctx context.Context, paramX string) (*PaymentWithFullName, error) {
 	var p PaymentWithFullName
 
-	if err := o.pool.QueryRow(ctx, `select a."UserKey", a.id, a."FirstName", a."LastName", a."Email", a."Street", a."City", o."OrderLanguage", o."Amount", o."Currency", 
+	if err := o.pool.QueryRow(ctx, `select COALESCE(a."UserKey", ''), a.id, a."FirstName", a."LastName", COALESCE(a."Email", ''), a."Street", a."City", o."OrderLanguage", o."Amount", o."Currency", 
 	p.id, p."Amount", p."PaymentStatus", p."PaymentType", p."OrderID", p."ParamX", p."AuthNo", p.confirmation_key,
 	p.success, p.pelecard_token, p."TransactionID", p."ErrorMsg", p."CardHebrewName", p."CCAbroadCard", p."CCBrand",
 	p."CCCompanyClearer", p."CCCompanyIssuer", p.credit_type, p."CCExpDate", p."CCNumber", p."DebitCode", p."DebitCurrency",

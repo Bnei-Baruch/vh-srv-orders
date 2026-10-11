@@ -225,7 +225,6 @@ func TestAccountEmail_AbsentIsNull(t *testing.T) {
 	assert.Equal(t, "a@test.test", email)
 
 	require.NoError(t, db.PatchAccount(ctx, Account{Email: null.StringFrom(""), FirstName: null.StringFrom("A")}, id))
-	email, err = db.GetEmailByKeycloakID(ctx, "kc-email")
-	require.NoError(t, err)
-	assert.Equal(t, "a@test.test", email, "patching an empty email leaves the stored one")
+	_, err = db.GetEmailByKeycloakID(ctx, "kc-email")
+	assert.ErrorIs(t, err, common.ErrNoRowsAffected, "patching an empty email clears it, as storing '' did before")
 }

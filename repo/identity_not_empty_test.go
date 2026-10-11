@@ -2,7 +2,6 @@ package repo
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sync"
 	"testing"
@@ -90,8 +89,6 @@ func TestSpecials_NullEmailIsAbsentNotFatal(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"with@test.test"}, emails)
 
-	require.NoError(t, db.DeleteSpecialsByKeycloakId(ctx, "kc-no-email"),
-		"revoking a keycloak-only special must not die scanning its NULL email")
 }
 
 type recordingEmitter struct {
@@ -107,10 +104,10 @@ func (r *recordingEmitter) Emit(_ context.Context, es ...events.Event) {
 
 func (r *recordingEmitter) Close(context.Context) {}
 
-// vh-srv-profile reads delete_special's "email" with an unchecked string
-// assertion; a null there panics its consumer and the event is lost. A
-// keycloak-only special must go out with "".
-func TestDeleteSpecial_KeycloakOnlyEmitsStringEmail(t *testing.T) {
+// vh-srv-profile revokes a special by email only. Ending a keycloak-only special
+// would report success while profile keeps the membership, so the revoke is
+// refused: the row stays active and no event goes out.
+func TestDeleteSpecial_KeycloakOnlyIsRefused(t *testing.T) {
 	dbURL, err := testutil.NewTestOrdersDB(t, context.Background())
 	require.NoError(t, err)
 	rec := new(recordingEmitter)
@@ -123,13 +120,14 @@ func TestDeleteSpecial_KeycloakOnlyEmitsStringEmail(t *testing.T) {
 		`INSERT INTO specials (keycloak_id, start_date, end_date, category)
 		 VALUES ('kc-no-email', now() - interval '1 day', now() + interval '1 day', 'hh')`)
 	require.NoError(t, err)
-	require.NoError(t, db.DeleteSpecialsByKeycloakId(ctx, "kc-no-email"))
 
-	require.Len(t, rec.events, 1)
-	assert.Equal(t, events.TypeDeleteSpecial, rec.events[0].Type)
-	payload, err := json.Marshal(rec.events[0].Payload)
-	require.NoError(t, err)
-	assert.JSONEq(t, `{"email":""}`, string(payload))
+	assert.ErrorIs(t, db.DeleteSpecialsByKeycloakId(ctx, "kc-no-email"), common.ErrInvalidValues)
+
+	assert.Empty(t, rec.events)
+	var active bool
+	require.NoError(t, db.pool.QueryRow(ctx,
+		`SELECT end_date > now() FROM specials WHERE keycloak_id = 'kc-no-email'`).Scan(&active))
+	assert.True(t, active)
 }
 
 // The schema refuses an empty specials.keycloak_id; an empty request value is the

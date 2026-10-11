@@ -14,13 +14,17 @@ import (
 )
 
 func (o *OrdersDB) DeleteSpecialById(ctx context.Context, id int) error {
-	// A special identified only by keycloak_id has no email.
 	var (
 		email null.String
 		err   error
 	)
 	if err = o.pool.QueryRow(ctx, `SELECT email FROM specials where id=$1`, id).Scan(&email); err != nil {
 		return err
+	}
+	// vh-srv-profile revokes by email only, so ending a special that has none
+	// would leave the membership active there. Refuse, and leave the row as is.
+	if !email.Valid {
+		return fmt.Errorf("special %d has no email to revoke by: %w", id, common.ErrInvalidValues)
 	}
 	res, errUpdate := o.pool.Exec(ctx, `UPDATE  specials SET end_date = now(), updated_at = now() WHERE  id = $1`, id)
 	if errUpdate != nil {
@@ -30,8 +34,6 @@ func (o *OrdersDB) DeleteSpecialById(ctx context.Context, id int) error {
 	if res.RowsAffected() == 0 {
 		return common.ErrNoRowsAffected
 	} else {
-		// vh-srv-profile reads "email" with an unchecked string assertion, so an
-		// absent one goes out as "", never null.
 		o.emitEvent(ctx, events.TypeDeleteSpecial, map[string]interface{}{"email": email.String})
 	}
 	return nil

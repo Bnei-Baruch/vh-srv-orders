@@ -52,3 +52,16 @@ func TestRespError_NonJSONFallsBack(t *testing.T) {
 
 	assert.EqualError(t, RespError(resp), "unexpected response: [502 Bad Gateway] <html>502</html>")
 }
+
+func TestRespStatusError_SuccessIsNil(t *testing.T) {
+	resp := getWith(t, http.StatusOK, "application/json", `{"value":[]}`)
+
+	assert.NoError(t, RespStatusError(resp, "priority API error"))
+}
+
+// The message keeps the shape the Priority and Pelecard clients built inline.
+func TestRespStatusError_NamesTheAPIStatusAndBody(t *testing.T) {
+	resp := getWith(t, http.StatusServiceUnavailable, "text/plain", "maintenance")
+
+	assert.EqualError(t, RespStatusError(resp, "priority API error"), "priority API error [503]: maintenance")
+}

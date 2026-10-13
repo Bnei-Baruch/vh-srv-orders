@@ -80,3 +80,13 @@ func RespError(resp *resty.Response) error {
 	}
 	return fmt.Errorf("unexpected response: [%s] %s", resp.Status(), resp.String())
 }
+
+// RespStatusError is RespError for outside APIs (Priority, Pelecard) whose
+// error body isn't our APIError: nil for a successful response, otherwise
+// "<what> [<status>]: <body>".
+func RespStatusError(resp *resty.Response, what string) error {
+	if !resp.IsError() {
+		return nil
+	}
+	return fmt.Errorf("%s [%d]: %s", what, resp.StatusCode(), resp.String())
+}

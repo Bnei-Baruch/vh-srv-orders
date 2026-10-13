@@ -141,3 +141,32 @@ func Test_payments_email_with_apostrophe_is_found(t *testing.T) {
 	got := do(t, a, "GET", "/v2/payments?email="+url.QueryEscape(email), nil, http.StatusOK, DoOptions{isRoot: true})
 	assert.Len(t, got["data"], 1)
 }
+
+// /payments/activities pins a non-admin to their own email. Matched as a
+// substring, a@test.test also saw ba@test.test's payments.
+func Test_activities_non_admin_sees_only_own_email(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
+	// The API only sets an account's email from the token, which has none here.
+	_, err := a.testPool(t).Exec(context.Background(), `UPDATE accounts SET "Email" = 'a@test.test' WHERE "UserKey" = $1`, USER_KEY)
+	require.NoError(t, err)
+	seedOtherAccountPayment(t, a, "ba@test.test")
+
+	got := GET(t, a, "/payments/activities", http.StatusOK)
+	assert.Empty(t, got["data"], "a@test.test must not see ba@test.test's payments")
+	assert.Equal(t, float64(0), got["totalCount"])
+}
+
+// Admins keep the substring search.
+func Test_activities_admin_email_is_a_substring_search(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	seedOtherAccountPayment(t, a, "ba@test.test")
+
+	got := do(t, a, "GET", "/payments/activities?email=a@test", nil, http.StatusOK, DoOptions{isRoot: true})
+	assert.Len(t, got["data"], 1)
+	assert.Equal(t, float64(1), got["totalCount"])
+}

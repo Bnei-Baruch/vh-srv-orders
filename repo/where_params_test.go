@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -49,7 +50,7 @@ func TestListFilters_ValuesAreParameters(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, quotedEmail, acc.Email.String)
 		_, err = db.GetAccount(ctx, 0, injection)
-		assert.Error(t, err, "matches no account")
+		assert.ErrorIs(t, err, pgx.ErrNoRows, "matches no account")
 	})
 
 	t.Run("GetAllAccounts", func(t *testing.T) {
@@ -101,20 +102,40 @@ func TestListFilters_ValuesAreParameters(t *testing.T) {
 	})
 
 	t.Run("GetPaymentActivities", func(t *testing.T) {
-		acts, err := db.GetPaymentActivities(ctx, "o'brien", "", "", 0, 10)
+		acts, err := db.GetPaymentActivities(ctx, "o'brien", false, "", "", 0, 10)
 		require.NoError(t, err)
-		assert.Len(t, acts, 1, "email is a substring match")
-		n, err := db.GetTotalParticipationStatusCount(ctx, "o'brien", "", "")
+		assert.Len(t, acts, 1, "without exactEmail, email is a substring search")
+		n, err := db.GetTotalParticipationStatusCount(ctx, "o'brien", false, "", "")
 		require.NoError(t, err)
 		assert.Equal(t, 1, n)
 
 		for _, args := range [][3]string{{"x%') OR ('1'='1", "", ""}, {"", injection, ""}, {"", "", injection}} {
-			acts, err := db.GetPaymentActivities(ctx, args[0], args[1], args[2], 0, 10)
+			acts, err := db.GetPaymentActivities(ctx, args[0], false, args[1], args[2], 0, 10)
 			require.NoError(t, err)
 			assert.Empty(t, acts, args)
-			n, err := db.GetTotalParticipationStatusCount(ctx, args[0], args[1], args[2])
+			n, err := db.GetTotalParticipationStatusCount(ctx, args[0], false, args[1], args[2])
 			require.NoError(t, err)
 			assert.Zero(t, n, args)
+		}
+	})
+
+	// A non-admin's email is their account boundary, so it must match whole
+	// addresses only: no substrings, and no LIKE wildcards.
+	t.Run("GetPaymentActivities exactEmail", func(t *testing.T) {
+		acts, err := db.GetPaymentActivities(ctx, quotedEmail, true, "", "", 0, 10)
+		require.NoError(t, err)
+		assert.Len(t, acts, 1)
+		n, err := db.GetTotalParticipationStatusCount(ctx, quotedEmail, true, "", "")
+		require.NoError(t, err)
+		assert.Equal(t, 1, n)
+
+		for _, email := range []string{"brien@test.test", "o_brien@test.test", "%"} {
+			acts, err := db.GetPaymentActivities(ctx, email, true, "", "", 0, 10)
+			require.NoError(t, err)
+			assert.Empty(t, acts, email)
+			n, err := db.GetTotalParticipationStatusCount(ctx, email, true, "", "")
+			require.NoError(t, err)
+			assert.Zero(t, n, email)
 		}
 	})
 

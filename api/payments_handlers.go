@@ -422,14 +422,14 @@ func (o *OrdersAPI) handleGetActivities(c *gin.Context) {
 		return
 	}
 
-	payAct, err := o.repo.GetPaymentActivities(c.Request.Context(), email, productType, paymentType, intSkip, intLimit)
+	payAct, err := o.repo.GetPaymentActivities(c.Request.Context(), email, !isAdmin, productType, paymentType, intSkip, intLimit)
 	if err != nil {
 		c.Status(http.StatusInternalServerError)
 		_ = c.Error(fmt.Errorf("repo.GetPaymentActivities: %w", err))
 		return
 	}
 
-	count, err := o.repo.GetTotalParticipationStatusCount(c.Request.Context(), email, productType, paymentType)
+	count, err := o.repo.GetTotalParticipationStatusCount(c.Request.Context(), email, !isAdmin, productType, paymentType)
 	if err != nil {
 		c.Status(http.StatusInternalServerError)
 		_ = c.Error(fmt.Errorf("repo.GetTotalParticipationStatusCount: %w", err))

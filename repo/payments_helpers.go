@@ -45,8 +45,12 @@ func (o *OrdersDB) SoftDeletePayment(ctx context.Context, paymentID int) error {
 	return nil
 }
 
-func (o *OrdersDB) GetPaymentActivities(ctx context.Context, email string, productType string, paymentType string, skip int, limit int) ([]PaymentActivitiesRes, error) {
-	userDbWhereQuery, orderByQuery, args := buildAndGetWherePaymentActQuery(email, productType, paymentType)
+// GetPaymentActivities lists payments with their order and account. With
+// exactEmail, email matches a whole address; otherwise it is a substring
+// search. A non-admin's email pins them to their own account, so it must be
+// exact, or a@x.com would also see ba@x.com.
+func (o *OrdersDB) GetPaymentActivities(ctx context.Context, email string, exactEmail bool, productType string, paymentType string, skip int, limit int) ([]PaymentActivitiesRes, error) {
+	userDbWhereQuery, orderByQuery, args := buildAndGetWherePaymentActQuery(email, exactEmail, productType, paymentType)
 
 	rows, err := o.pool.Query(ctx, `SELECT p.created_at,  p."Amount", p."PaymentType",  p."OrderID", 
 	p."ParamX", p."PaymentStatus", p."CCNumber", p."CCExpDate", 
@@ -132,11 +136,13 @@ func (o *OrdersDB) GetAllPayments(ctx context.Context, skip int, limit int, from
 	return payments, nil
 }
 
-func (o *OrdersDB) GetTotalParticipationStatusCount(ctx context.Context, email string, productType string,
+// GetTotalParticipationStatusCount counts what GetPaymentActivities lists;
+// exactEmail means the same there.
+func (o *OrdersDB) GetTotalParticipationStatusCount(ctx context.Context, email string, exactEmail bool, productType string,
 	paymentType string) (int, error) {
 	var count int
 
-	userDbWhereQuery, _, args := buildAndGetWherePaymentActQuery(email, productType, paymentType)
+	userDbWhereQuery, _, args := buildAndGetWherePaymentActQuery(email, exactEmail, productType, paymentType)
 	err := o.pool.QueryRow(ctx, `SELECT COUNT(*) FROM payments as p, orders as o, accounts as a`+userDbWhereQuery, args...).
 		Scan(&count)
 	if err != nil {
@@ -1079,7 +1085,7 @@ func prepareHelpHaverPaymentUpdateQuery(req PaymentUpdate) (string, []interface{
 	return updateArgument, args
 }
 
-func buildAndGetWherePaymentActQuery(email string, productType string, paymentType string) (string, string, queryArgs) {
+func buildAndGetWherePaymentActQuery(email string, exactEmail bool, productType string, paymentType string) (string, string, queryArgs) {
 
 	var args queryArgs
 	var whereString strings.Builder
@@ -1092,7 +1098,11 @@ func buildAndGetWherePaymentActQuery(email string, productType string, paymentTy
 
 	// WHERE query generation based on parameters
 	if email != "" {
-		whereCondition.WriteString(` AND LOWER(a."Email") LIKE LOWER('%' || ` + args.arg(email) + ` || '%')`)
+		if exactEmail {
+			whereCondition.WriteString(` AND LOWER(a."Email") = LOWER(` + args.arg(email) + `)`)
+		} else {
+			whereCondition.WriteString(` AND LOWER(a."Email") LIKE LOWER('%' || ` + args.arg(email) + ` || '%')`)
+		}
 	}
 
 	if productType != "" {

@@ -227,6 +227,7 @@ func (o *OrdersAPI) handleOrderFetch(c *gin.Context) {
 
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid date-from"})
+			return
 		}
 	} else {
 		toDateParsed = time.Now()

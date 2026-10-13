@@ -286,6 +286,14 @@ func (o *OrdersAPI) handlePaymentFetch(c *gin.Context) {
 		}
 	}
 
+	// Same for token-exist: the repo's ParseBool failure would be a 500.
+	if tokenExist != "" {
+		if _, err := strconv.ParseBool(tokenExist); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid token-exist value! Accepted values are true or false"})
+			return
+		}
+	}
+
 	if toDate != "" {
 		rfcLayout := time.RFC3339
 		toDateParsed, err = time.Parse(rfcLayout, toDate)

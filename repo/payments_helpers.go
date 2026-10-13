@@ -46,11 +46,12 @@ func (o *OrdersDB) SoftDeletePayment(ctx context.Context, paymentID int) error {
 }
 
 // GetPaymentActivities lists payments with their order and account. A
-// non-zero accountID limits them to that account; email is a substring
-// search. A non-admin is pinned by accountID, never by email: they can edit
-// their account's email, so it cannot be what keeps them out of others' data.
-func (o *OrdersDB) GetPaymentActivities(ctx context.Context, accountID int, email string, productType string, paymentType string, skip int, limit int) ([]PaymentActivitiesRes, error) {
-	userDbWhereQuery, orderByQuery, args := buildAndGetWherePaymentActQuery(accountID, email, productType, paymentType)
+// non-empty userKey limits them to the accounts with that keycloak id (a user
+// can have more than one); email is a substring search. A non-admin is pinned
+// by userKey, never by email: they can edit their account's email, so it
+// cannot be what keeps them out of others' data.
+func (o *OrdersDB) GetPaymentActivities(ctx context.Context, userKey string, email string, productType string, paymentType string, skip int, limit int) ([]PaymentActivitiesRes, error) {
+	userDbWhereQuery, orderByQuery, args := buildAndGetWherePaymentActQuery(userKey, email, productType, paymentType)
 
 	rows, err := o.pool.Query(ctx, `SELECT p.created_at,  p."Amount", p."PaymentType",  p."OrderID", 
 	p."ParamX", p."PaymentStatus", p."CCNumber", p."CCExpDate", 
@@ -137,12 +138,12 @@ func (o *OrdersDB) GetAllPayments(ctx context.Context, skip int, limit int, from
 }
 
 // GetTotalParticipationStatusCount counts what GetPaymentActivities lists;
-// accountID means the same there.
-func (o *OrdersDB) GetTotalParticipationStatusCount(ctx context.Context, accountID int, email string, productType string,
+// userKey means the same there.
+func (o *OrdersDB) GetTotalParticipationStatusCount(ctx context.Context, userKey string, email string, productType string,
 	paymentType string) (int, error) {
 	var count int
 
-	userDbWhereQuery, _, args := buildAndGetWherePaymentActQuery(accountID, email, productType, paymentType)
+	userDbWhereQuery, _, args := buildAndGetWherePaymentActQuery(userKey, email, productType, paymentType)
 	err := o.pool.QueryRow(ctx, `SELECT COUNT(*) FROM payments as p, orders as o, accounts as a`+userDbWhereQuery, args...).
 		Scan(&count)
 	if err != nil {
@@ -1085,7 +1086,7 @@ func prepareHelpHaverPaymentUpdateQuery(req PaymentUpdate) (string, []interface{
 	return updateArgument, args
 }
 
-func buildAndGetWherePaymentActQuery(accountID int, email string, productType string, paymentType string) (string, string, queryArgs) {
+func buildAndGetWherePaymentActQuery(userKey string, email string, productType string, paymentType string) (string, string, queryArgs) {
 
 	var args queryArgs
 	var whereString strings.Builder
@@ -1097,8 +1098,8 @@ func buildAndGetWherePaymentActQuery(accountID int, email string, productType st
 	whereCondition.WriteString(` p."OrderID" = o.id AND o."AccountID" = a.id`)
 
 	// WHERE query generation based on parameters
-	if accountID != 0 {
-		whereCondition.WriteString(` AND a.id = ` + args.arg(accountID))
+	if userKey != "" {
+		whereCondition.WriteString(` AND a."UserKey" = ` + args.arg(userKey))
 	}
 
 	if email != "" {

@@ -102,42 +102,38 @@ func TestListFilters_ValuesAreParameters(t *testing.T) {
 	})
 
 	t.Run("GetPaymentActivities", func(t *testing.T) {
-		acts, err := db.GetPaymentActivities(ctx, 0, "o'brien", "", "", 0, 10)
+		acts, err := db.GetPaymentActivities(ctx, "", "o'brien", "", "", 0, 10)
 		require.NoError(t, err)
 		assert.Len(t, acts, 1, "email is a substring search")
-		n, err := db.GetTotalParticipationStatusCount(ctx, 0, "o'brien", "", "")
+		n, err := db.GetTotalParticipationStatusCount(ctx, "", "o'brien", "", "")
 		require.NoError(t, err)
 		assert.Equal(t, 1, n)
 
 		for _, args := range [][3]string{{"x%') OR ('1'='1", "", ""}, {"", injection, ""}, {"", "", injection}} {
-			acts, err := db.GetPaymentActivities(ctx, 0, args[0], args[1], args[2], 0, 10)
+			acts, err := db.GetPaymentActivities(ctx, "", args[0], args[1], args[2], 0, 10)
 			require.NoError(t, err)
 			assert.Empty(t, acts, args)
-			n, err := db.GetTotalParticipationStatusCount(ctx, 0, args[0], args[1], args[2])
+			n, err := db.GetTotalParticipationStatusCount(ctx, "", args[0], args[1], args[2])
 			require.NoError(t, err)
 			assert.Zero(t, n, args)
 		}
 	})
 
-	// accountID is what pins a non-admin. Whatever email comes with it, only
-	// that account's payments can match.
-	t.Run("GetPaymentActivities accountID", func(t *testing.T) {
-		var quotedID, otherID int
-		require.NoError(t, db.pool.QueryRow(ctx, `SELECT id FROM accounts WHERE "Email" = $1`, quotedEmail).Scan(&quotedID))
-		require.NoError(t, db.pool.QueryRow(ctx, `SELECT id FROM accounts WHERE "Email" = 'other@test.test'`).Scan(&otherID))
-
-		acts, err := db.GetPaymentActivities(ctx, quotedID, "", "", "", 0, 10)
+	// userKey is what pins a non-admin. Whatever email comes with it, only
+	// that keycloak id's accounts can match.
+	t.Run("GetPaymentActivities userKey", func(t *testing.T) {
+		acts, err := db.GetPaymentActivities(ctx, "kc-quoted", "", "", "", 0, 10)
 		require.NoError(t, err)
-		require.Len(t, acts, 1, "no email: just the pinned account")
+		require.Len(t, acts, 1, "no email: just the pinned user's accounts")
 		assert.Equal(t, quotedEmail, acts[0].Email.String)
-		n, err := db.GetTotalParticipationStatusCount(ctx, quotedID, "", "", "")
+		n, err := db.GetTotalParticipationStatusCount(ctx, "kc-quoted", "", "", "")
 		require.NoError(t, err)
 		assert.Equal(t, 1, n)
 
-		acts, err = db.GetPaymentActivities(ctx, otherID, quotedEmail, "", "", 0, 10)
+		acts, err = db.GetPaymentActivities(ctx, "kc-other", quotedEmail, "", "", 0, 10)
 		require.NoError(t, err)
-		assert.Empty(t, acts, "another account's email does not reach past the pin")
-		n, err = db.GetTotalParticipationStatusCount(ctx, otherID, quotedEmail, "", "")
+		assert.Empty(t, acts, "another user's email does not reach past the pin")
+		n, err = db.GetTotalParticipationStatusCount(ctx, "kc-other", quotedEmail, "", "")
 		require.NoError(t, err)
 		assert.Zero(t, n)
 	})

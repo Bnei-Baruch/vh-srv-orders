@@ -372,11 +372,19 @@ func (o *OrdersAPI) handleGetActivities(c *gin.Context) {
 		return
 	}
 	var (
-		currentUserEmail     string
-		currentUserAccountID int
-		err                  error
+		currentUserEmail string
+		pinUserKey       string
+		err              error
 	)
 	if !isAdmin {
+		// The pin: every account with the caller's keycloak id. Not the email,
+		// which the user can edit to someone else's address or to "" (no
+		// filter at all); not one account id, since a user can have several.
+		if keycloakId == "" {
+			c.Status(http.StatusForbidden)
+			return
+		}
+		pinUserKey = keycloakId
 		currentUserEmail, err = o.repo.GetEmailByKeycloakID(c.Request.Context(), keycloakId) // getting user email by keycloakId
 		if errors.Is(err, common.ErrNoRowsAffected) {
 			// No account or no email: no activities. Never fall through with an
@@ -387,14 +395,6 @@ func (o *OrdersAPI) handleGetActivities(c *gin.Context) {
 		if err != nil {
 			c.Status(http.StatusInternalServerError)
 			_ = c.Error(fmt.Errorf("repo.GetEmailByKeycloakID: %w", err))
-			return
-		}
-		// The pin. Not the email: the user can edit it, to someone else's
-		// address or to "", which would drop the filter altogether.
-		currentUserAccountID, err = o.repo.GetAccountIDByKeycloakID(c.Request.Context(), keycloakId)
-		if err != nil {
-			c.Status(http.StatusInternalServerError)
-			_ = c.Error(fmt.Errorf("repo.GetAccountIDByKeycloakID: %w", err))
 			return
 		}
 	}
@@ -431,14 +431,14 @@ func (o *OrdersAPI) handleGetActivities(c *gin.Context) {
 		return
 	}
 
-	payAct, err := o.repo.GetPaymentActivities(c.Request.Context(), currentUserAccountID, email, productType, paymentType, intSkip, intLimit)
+	payAct, err := o.repo.GetPaymentActivities(c.Request.Context(), pinUserKey, email, productType, paymentType, intSkip, intLimit)
 	if err != nil {
 		c.Status(http.StatusInternalServerError)
 		_ = c.Error(fmt.Errorf("repo.GetPaymentActivities: %w", err))
 		return
 	}
 
-	count, err := o.repo.GetTotalParticipationStatusCount(c.Request.Context(), currentUserAccountID, email, productType, paymentType)
+	count, err := o.repo.GetTotalParticipationStatusCount(c.Request.Context(), pinUserKey, email, productType, paymentType)
 	if err != nil {
 		c.Status(http.StatusInternalServerError)
 		_ = c.Error(fmt.Errorf("repo.GetTotalParticipationStatusCount: %w", err))

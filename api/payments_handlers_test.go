@@ -208,6 +208,26 @@ func Test_activities_non_admin_with_empty_email_sees_nothing_of_others(t *testin
 	assert.Equal(t, float64(0), got["totalCount"])
 }
 
+// A user can have more than one account with their keycloak id (the
+// importer creates a new one when the email changed), and new orders land on
+// the newest. Pinned to a single account id, the activities could miss them.
+func Test_activities_non_admin_sees_all_accounts_with_own_keycloak_id(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
+	setCallerEmail(t, a, "a@test.test")
+	_, err := a.testPool(t).Exec(context.Background(), `
+		WITH acc AS (INSERT INTO accounts ("UserKey", "Email", created_at, updated_at) VALUES ($1, 'a@test.test', now(), now()) RETURNING id),
+		     ord AS (INSERT INTO orders ("AccountID", created_at, updated_at) SELECT id, now(), now() FROM acc RETURNING id)
+		INSERT INTO payments ("OrderID", created_at, updated_at) SELECT id, now(), now() FROM ord`, USER_KEY)
+	require.NoError(t, err)
+
+	got := GET(t, a, "/payments/activities", http.StatusOK)
+	assert.Len(t, got["data"], 1, "the payment on the second account is the caller's own")
+	assert.Equal(t, float64(1), got["totalCount"])
+}
+
 // Admins are not pinned and keep the substring search.
 func Test_activities_admin_email_is_a_substring_search(t *testing.T) {
 	a := NewTestApp(t)

@@ -165,6 +165,29 @@ func TestProfileServiceAPI_LookupProfile_OtherError(t *testing.T) {
 	assert.Contains(t, err.Error(), "internal server error")
 }
 
+// A JSON error body without our "error" field (a framework's default
+// {"message": ...}) must still produce a readable error, not errors.New("").
+func TestProfileServiceAPI_LookupProfile_ErrorBodyWithoutErrorField(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"message":"boom"}`))
+	}))
+	defer server.Close()
+
+	mockTokenSource := keycloakmocks.NewMockTokenSource(t)
+	mockTokenSource.EXPECT().Token().Return("token123", nil).Once()
+
+	api := newTestProfileServiceAPI(server.URL, mockTokenSource)
+
+	profile, err := api.LookupProfile(context.Background(), "test@example.com")
+
+	require.Error(t, err)
+	assert.Nil(t, profile)
+	assert.Contains(t, err.Error(), "500")
+	assert.Contains(t, err.Error(), "boom")
+}
+
 func TestProfileServiceAPI_LookupProfileByKeycloakId_Success(t *testing.T) {
 	keycloakID := uuid.FromStringOrNil("22000000-0000-0000-0000-000000000000")
 	expectedProfile := Profile{

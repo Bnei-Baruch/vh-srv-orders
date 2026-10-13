@@ -174,12 +174,11 @@ func (p *ProfileServiceAPI) executeWithRetry(ctx context.Context,
 }
 
 func respError(resp *resty.Response) error {
-	if resp.IsError() {
-		if apiErr, ok := resp.Error().(*APIError); ok {
-			return errors.New(apiErr.Error)
-		} else {
-			return fmt.Errorf("unexpected response: [%s] %s", resp.Status(), resp.String())
-		}
+	if !resp.IsError() {
+		return nil
 	}
-	return nil
+	if apiErr, ok := resp.Error().(*APIError); ok && apiErr.Error != "" {
+		return errors.New(apiErr.Error)
+	}
+	return fmt.Errorf("unexpected response: [%s] %s", resp.Status(), resp.String())
 }

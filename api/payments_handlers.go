@@ -287,8 +287,7 @@ func (o *OrdersAPI) handlePaymentFetch(c *gin.Context) {
 			return
 		}
 	} else {
-		// set null value
-		toDateParsed = time.Time{}
+		toDateParsed = time.Now()
 	}
 
 	if skip == "" {
@@ -314,7 +313,7 @@ func (o *OrdersAPI) handlePaymentFetch(c *gin.Context) {
 	if accountID != "" {
 		intAccountID, err = strconv.Atoi(accountID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit value! Accepted value is INTEGER", "success": false})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid account-id value! Accepted value is INTEGER", "success": false})
 			return
 		}
 	}
@@ -322,7 +321,7 @@ func (o *OrdersAPI) handlePaymentFetch(c *gin.Context) {
 	if orderID != "" {
 		intOrderID, err = strconv.Atoi(orderID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit value! Accepted value is INTEGER", "success": false})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid order-id value! Accepted value is INTEGER", "success": false})
 			return
 		}
 	} else {

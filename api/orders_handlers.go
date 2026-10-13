@@ -255,7 +255,7 @@ func (o *OrdersAPI) handleOrderFetch(c *gin.Context) {
 	if accountID != "" {
 		intAccountID, err = strconv.Atoi(accountID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit value! Accepted value is INTEGER", "success": false})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid account-id value! Accepted value is INTEGER", "success": false})
 			return
 		}
 	} else {

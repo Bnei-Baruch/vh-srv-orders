@@ -198,12 +198,12 @@ func (c *Client) GetAccountReceivables(ctx context.Context, customerID string) (
 			Get(nextLink)
 
 		if err != nil {
-			// Log warning but return what we have
+			// Return the pages fetched so far together with the error.
 			return allItems, fmt.Errorf("error fetching next page (returning partial results): %w", err)
 		}
 
 		if nextResp.IsError() {
-			// Log warning but return what we have
+			// Return the pages fetched so far together with the error.
 			return allItems, utils.RespStatusError(nextResp, "error fetching next page (returning partial results)")
 		}
 

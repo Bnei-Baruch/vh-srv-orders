@@ -189,6 +189,7 @@ func TestAccountingServiceAPI_GetLastContributions_401RetryFailure(t *testing.T)
 	attemptCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attemptCount++
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(utils.APIError{Error: "unauthorized"})
 	}))
@@ -205,7 +206,7 @@ func TestAccountingServiceAPI_GetLastContributions_401RetryFailure(t *testing.T)
 
 	require.Error(t, err)
 	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "unauthorized")
+	assert.EqualError(t, err, "unauthorized")
 	assert.Equal(t, 2, attemptCount)
 }
 

@@ -89,6 +89,7 @@ func TestProfileServiceAPI_LookupProfile_401RetryFailure(t *testing.T) {
 	attemptCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attemptCount++
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(utils.APIError{Error: "unauthorized"})
 	}))
@@ -105,7 +106,7 @@ func TestProfileServiceAPI_LookupProfile_401RetryFailure(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Nil(t, profile)
-	assert.Contains(t, err.Error(), "unauthorized")
+	assert.EqualError(t, err, "unauthorized")
 	assert.Equal(t, 2, attemptCount)
 }
 
@@ -272,6 +273,28 @@ func TestProfileServiceAPI_LookupProfileByKeycloakId_NotFound(t *testing.T) {
 	assert.Nil(t, profile)
 }
 
+func TestProfileServiceAPI_LookupProfileByKeycloakId_OtherError(t *testing.T) {
+	keycloakID := uuid.FromStringOrNil("22000000-0000-0000-0000-000000000000")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(utils.APIError{Error: "internal server error"})
+	}))
+	defer server.Close()
+
+	mockTokenSource := keycloakmocks.NewMockTokenSource(t)
+	mockTokenSource.EXPECT().Token().Return("token123", nil).Once()
+
+	api := newTestProfileServiceAPI(server.URL, mockTokenSource)
+
+	profile, err := api.LookupProfileByKeycloakId(context.Background(), keycloakID.String())
+
+	require.Error(t, err)
+	assert.Nil(t, profile)
+	assert.EqualError(t, err, "internal server error")
+}
+
 func TestProfileServiceAPI_GetProfileByKeycloakID_Success(t *testing.T) {
 	keycloakID := uuid.FromStringOrNil("22000000-0000-0000-0000-000000000000")
 	expectedProfile := Profile{
@@ -341,6 +364,7 @@ func TestProfileServiceAPI_GetProfileByKeycloakID_401RetryFailure(t *testing.T) 
 	attemptCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attemptCount++
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(utils.APIError{Error: "unauthorized"})
 	}))
@@ -357,7 +381,7 @@ func TestProfileServiceAPI_GetProfileByKeycloakID_401RetryFailure(t *testing.T) 
 
 	require.Error(t, err)
 	assert.Nil(t, profile)
-	assert.Contains(t, err.Error(), "unauthorized")
+	assert.EqualError(t, err, "unauthorized")
 	assert.Equal(t, 2, attemptCount)
 }
 

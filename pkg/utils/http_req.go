@@ -68,9 +68,10 @@ type APIError struct {
 	Error string `json:"error"`
 }
 
-// RespError returns nil for a successful response. For a failed one it
-// returns the service's own message from an APIError body, or, when the body
-// has none (not JSON, or JSON without "error"), the status and raw body.
+// RespError returns nil unless resty counts the response as an error
+// (status >= 400). For an error it returns the service's own message from an
+// APIError body, or, when the body has none (not JSON, or JSON without
+// "error"), the status and raw body.
 func RespError(resp *resty.Response) error {
 	if !resp.IsError() {
 		return nil
@@ -82,7 +83,7 @@ func RespError(resp *resty.Response) error {
 }
 
 // RespStatusError is RespError for outside APIs (Priority, Pelecard) whose
-// error body isn't our APIError: nil for a successful response, otherwise
+// error body isn't our APIError: nil unless the status is >= 400, otherwise
 // "<what> [<status>]: <body>".
 func RespStatusError(resp *resty.Response, what string) error {
 	if !resp.IsError() {

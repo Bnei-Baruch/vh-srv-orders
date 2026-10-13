@@ -206,7 +206,7 @@ func TestAccountingServiceAPI_GetEuropeContributions_OtherError(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "internal server error")
+	assert.EqualError(t, err, "internal server error")
 }
 
 func TestAccountingServiceAPI_GetEuropeContributions_TokenSourceError(t *testing.T) {

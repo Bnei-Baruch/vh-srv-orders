@@ -164,7 +164,7 @@ func TestProfileServiceAPI_LookupProfile_OtherError(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Nil(t, profile)
-	assert.Contains(t, err.Error(), "internal server error")
+	assert.EqualError(t, err, "internal server error")
 }
 
 // A JSON error body without our "error" field (a framework's default
@@ -402,7 +402,7 @@ func TestProfileServiceAPI_GetProfileByKeycloakID_OtherError(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Nil(t, profile)
-	assert.Contains(t, err.Error(), "internal server error")
+	assert.EqualError(t, err, "internal server error")
 }
 
 // Helper function to create a test ProfileServiceAPI with a test server URL

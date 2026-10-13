@@ -165,7 +165,7 @@ func TestFetchMuhlafim_RetriesOnlyOnce(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Nil(t, entries)
-	assert.Contains(t, err.Error(), "401")
+	assert.EqualError(t, err, `external muhlafim error [401]: {"error":"unauthorized"}`)
 	assert.Equal(t, 2, requests, "a persistent 401 fails rather than looping")
 }
 

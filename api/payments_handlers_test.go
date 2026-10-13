@@ -1,14 +1,18 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/volatiletech/null/v9"
 
+	"gitlab.bbdev.team/vh/pay/orders/api/middleware"
+	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
@@ -70,4 +74,41 @@ func Test_offline_payment(t *testing.T) {
 	// Amount is NOT expected to change, we should ignore it's update value.
 	assert.Equal(t, float64(15), got["data"].(map[string]interface{})["Amount"].(float64))
 	assert.Equal(t, "some new status", got["data"].(map[string]interface{})["PaymentStatus"].(string))
+}
+
+// A bad token-exist is the client's mistake: 400, not the 500 the repo's
+// ParseBool failure used to surface as.
+func Test_payment_fetch_invalid_token_exist_is_400(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	got := GET(t, a, "/v2/payments?token-exist=maybe", http.StatusBadRequest)
+	assert.Equal(t, "Invalid token-exist value! Accepted values are true or false", got["error"])
+}
+
+// Params are validated before the caller's account is looked up, so a user
+// with no account still gets the 400 for a bad param, not a 500 from the
+// lookup.
+func Test_payment_fetch_bad_param_without_account_is_400(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	got := GET(t, a, "/v2/payments?limit=x", http.StatusBadRequest)
+	assert.Equal(t, "Invalid limit value! Accepted value is INTEGER", got["error"])
+}
+
+// Moving the lookup must keep the ownership check: a non-admin asking for
+// another account's payments is refused.
+func Test_payment_fetch_other_account_id_is_403(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/v2/payments?account-id=999999", nil)
+	claims := &middleware.IDTokenClaims{Sub: USER_KEY, RealmAccess: middleware.Roles{Roles: []string{"some-role"}}}
+	a.gEngine.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), common.CtxAuthClaims, claims)))
+
+	assert.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
 }

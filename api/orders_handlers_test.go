@@ -128,6 +128,9 @@ func Test_payment_fetch_invalid_from_date_is_400(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)
 
+	// Payments looks up the caller's account before it reads the dates.
+	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
+
 	got := GET(t, a, "/v2/payments?from-date=not-a-date", http.StatusBadRequest)
 	assert.Equal(t, "Invalid from-date", got["error"])
 }

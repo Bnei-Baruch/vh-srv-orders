@@ -250,7 +250,19 @@ func (o *OrdersAPI) handlePaymentFetch(c *gin.Context) {
 	orderID := c.Query("order-id")
 	orderByCreatedAt := c.Query("o-created-at")
 
-	var err error
+	var (
+		currentUserAccountId int
+		err                  error
+	)
+	if !isAdmin {
+		currentUserAccountId, err = o.repo.GetAccountIDByKeycloakID(c.Request.Context(), keycloakId)
+		if err != nil {
+			c.Status(http.StatusInternalServerError)
+			_ = c.Error(fmt.Errorf("repo.GetAccountIDByKeycloakID: %w", err))
+			return
+		}
+
+	}
 
 	if orderByCreatedAt != "" {
 		if orderByCreatedAt != "asc" && orderByCreatedAt != "desc" {
@@ -319,6 +331,16 @@ func (o *OrdersAPI) handlePaymentFetch(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid account-id value! Accepted value is INTEGER", "success": false})
 			return
 		}
+
+		if !isAdmin && currentUserAccountId != intAccountID {
+			c.Status(http.StatusForbidden)
+			return
+		}
+	} else {
+		if !isAdmin {
+			intAccountID = currentUserAccountId
+		}
+
 	}
 
 	if orderID != "" {
@@ -329,22 +351,6 @@ func (o *OrdersAPI) handlePaymentFetch(c *gin.Context) {
 		}
 	} else {
 		intOrderID = 0
-	}
-
-	// A non-admin sees only their own account. Looked up after the params are
-	// validated, so a bad request gets its 400 without a DB round-trip.
-	if !isAdmin {
-		currentUserAccountId, err := o.repo.GetAccountIDByKeycloakID(c.Request.Context(), keycloakId)
-		if err != nil {
-			c.Status(http.StatusInternalServerError)
-			_ = c.Error(fmt.Errorf("repo.GetAccountIDByKeycloakID: %w", err))
-			return
-		}
-		if accountID != "" && intAccountID != currentUserAccountId {
-			c.Status(http.StatusForbidden)
-			return
-		}
-		intAccountID = currentUserAccountId
 	}
 
 	payments, err := o.repo.GetAllPayments(c.Request.Context(), intSkip, intLimit, fromDate, &toDateParsed, paymentType,

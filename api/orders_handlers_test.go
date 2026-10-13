@@ -113,3 +113,24 @@ func Test_fetch_invalid_id_names_the_parameter(t *testing.T) {
 		})
 	}
 }
+
+// A bad from-date is the client's mistake: 400, not the 500 the repo's own
+// parse failure used to surface as.
+func Test_order_fetch_invalid_from_date_is_400(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	got := GET(t, a, "/v2/orders?from-date=not-a-date", http.StatusBadRequest)
+	assert.Equal(t, "Invalid from-date", got["error"])
+}
+
+func Test_payment_fetch_invalid_from_date_is_400(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	// Payments looks up the caller's account before it reads the dates.
+	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
+
+	got := GET(t, a, "/v2/payments?from-date=not-a-date", http.StatusBadRequest)
+	assert.Equal(t, "Invalid from-date", got["error"])
+}

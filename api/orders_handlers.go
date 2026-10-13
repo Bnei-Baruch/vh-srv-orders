@@ -221,6 +221,14 @@ func (o *OrdersAPI) handleOrderFetch(c *gin.Context) {
 		err          error
 	)
 
+	// The repo parses from-date too, but a failure there comes back as a 500.
+	if fromDate != "" {
+		if _, err := time.Parse(time.RFC3339, fromDate); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid from-date"})
+			return
+		}
+	}
+
 	if toDate != "" {
 		rfcLayout := time.RFC3339
 		toDateParsed, err = time.Parse(rfcLayout, toDate)

@@ -53,12 +53,15 @@ func (o *OrdersDB) SoftDeletePayment(ctx context.Context, paymentID int) error {
 func (o *OrdersDB) GetPaymentActivities(ctx context.Context, userKey string, email string, productType string, paymentType string, skip int, limit int) ([]PaymentActivitiesRes, error) {
 	userDbWhereQuery, orderByQuery, args := buildAndGetWherePaymentActQuery(userKey, email, productType, paymentType)
 
-	rows, err := o.pool.Query(ctx, `SELECT p.created_at,  p."Amount", p."PaymentType",  p."OrderID", 
+	// Built first: args.arg appends to args, and Go does not order that
+	// against reading args for the variadic argument of the same call.
+	query := `SELECT p.created_at,  p."Amount", p."PaymentType",  p."OrderID", 
 	p."ParamX", p."PaymentStatus", p."CCNumber", p."CCExpDate", 
 	o."ProductType", o."Type", o."Currency",
 	a."FirstName", a."LastName", a."Email", a."Country" 
-	from payments as p, orders as o, accounts as a`+
-		userDbWhereQuery+orderByQuery+" LIMIT "+args.arg(limit)+" OFFSET "+args.arg(skip), args...)
+	from payments as p, orders as o, accounts as a` +
+		userDbWhereQuery + orderByQuery + " LIMIT " + args.arg(limit) + " OFFSET " + args.arg(skip)
+	rows, err := o.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("o.pool.Query: %w", err)
 	}
@@ -83,21 +86,25 @@ func (o *OrdersDB) GetPaymentActivities(ctx context.Context, userKey string, ema
 	return PaymentActivities, nil
 }
 
+// GetAllPayments lists payments by the given filters. A non-empty userKey
+// limits them to the accounts with that keycloak id (a user can have more
+// than one); it is what pins a non-admin, and email and accountID only narrow
+// within it.
 func (o *OrdersDB) GetAllPayments(ctx context.Context, skip int, limit int, fromDate string, toDate *time.Time,
-	paymentType string, paymentStatus string, orderType string, email string, accountID int, paymentsWithToken string,
+	paymentType string, paymentStatus string, orderType string, email string, accountID int, userKey string, paymentsWithToken string,
 	intOrderID int, orderByCreatedAt string) ([]Payment, error) {
 
 	limitOffsetString := fmt.Sprintf(" LIMIT %d OFFSET %d", limit, skip)
 	whereQuery, orderByQuery, args, err := buildAndGetPaymentsWhereQuery(fromDate, toDate, paymentType, paymentStatus,
-		orderType, email, accountID, paymentsWithToken, intOrderID, orderByCreatedAt)
+		orderType, email, accountID, userKey, paymentsWithToken, intOrderID, orderByCreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("buildAndGetPaymentsWhereQuery: %w", err)
 	}
 
 	fromQuery := " FROM payments as p"
-	if email != "" || accountID != 0 || orderType != "" {
+	if email != "" || accountID != 0 || userKey != "" || orderType != "" {
 		fromQuery = fromQuery + ", orders as o"
-		if email != "" || accountID != 0 {
+		if email != "" || accountID != 0 || userKey != "" {
 			fromQuery = fromQuery + ", accounts as a"
 		}
 	}
@@ -1133,7 +1140,7 @@ func buildAndGetWherePaymentActQuery(userKey string, email string, productType s
 }
 
 func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentType string, paymentStatus string,
-	orderType string, email string, accontID int, paymentsWithToken string, intOrderID int, orderByCreatedAt string) (string, string, []any, error) {
+	orderType string, email string, accontID int, userKey string, paymentsWithToken string, intOrderID int, orderByCreatedAt string) (string, string, []any, error) {
 	var args queryArgs
 	var whereString strings.Builder
 	var orderBy strings.Builder
@@ -1208,9 +1215,10 @@ func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentTy
 
 	}
 
-	// Email and account filter together: for a non-admin the handler pins
-	// accontID to the caller's own account, so email must not replace it.
-	if email != "" || accontID != 0 {
+	// Email, account and keycloak id filter together: for a non-admin the
+	// handler pins userKey to the caller, so neither email nor accontID may
+	// replace it.
+	if email != "" || accontID != 0 || userKey != "" {
 		if whereCondition.String() != "" {
 			whereCondition.WriteString(` AND p."OrderID" = o.id AND a.id = o."AccountID"`)
 		} else {
@@ -1221,6 +1229,9 @@ func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentTy
 		}
 		if accontID != 0 {
 			whereCondition.WriteString(fmt.Sprintf(` AND a.id=%d`, accontID))
+		}
+		if userKey != "" {
+			whereCondition.WriteString(` AND a."UserKey" = ` + args.arg(userKey))
 		}
 	}
 

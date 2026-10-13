@@ -103,6 +103,41 @@ func Test_payments_email_filter_stays_within_own_account(t *testing.T) {
 	assert.Len(t, got["data"], 1, "admin filtering by email still finds them")
 }
 
+// /v2/payments pins a non-admin by keycloak id, like the activities: all of
+// their accounts, whatever email each carries. Pinned to the one account
+// GetAccountIDByKeycloakID happened to return, a payment on the other was
+// invisible, with or without ?email=.
+func Test_payments_non_admin_sees_all_accounts_with_own_keycloak_id(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
+	setCallerEmail(t, a, "old@test.test")
+	seedCallerSecondAccount(t, a, "new@test.test")
+
+	got := GET(t, a, "/v2/payments", http.StatusOK)
+	assert.Len(t, got["data"], 1, "the payment on the second account is the caller's own")
+
+	got = GET(t, a, "/v2/payments?email=new@test.test", http.StatusOK)
+	assert.Len(t, got["data"], 1)
+}
+
+// account-id from a non-admin only narrows within their own accounts, so
+// another account's id gives an empty list.
+func Test_payments_non_admin_foreign_account_id_is_empty(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
+	seedOtherAccountPayment(t, a, "other@test.test")
+	var otherID int
+	require.NoError(t, a.testPool(t).QueryRow(context.Background(),
+		`SELECT id FROM accounts WHERE "Email" = 'other@test.test'`).Scan(&otherID))
+
+	got := GET(t, a, fmt.Sprintf("/v2/payments?account-id=%d", otherID), http.StatusOK)
+	assert.Empty(t, got["data"])
+}
+
 // With the email pasted into the SQL, `x') OR TRUE OR ('t` turned the account
 // pin into one branch of an OR and returned every account's payments.
 func Test_payments_email_injection_stays_within_own_account(t *testing.T) {

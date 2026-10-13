@@ -251,17 +251,18 @@ func (o *OrdersAPI) handlePaymentFetch(c *gin.Context) {
 	orderByCreatedAt := c.Query("o-created-at")
 
 	var (
-		currentUserAccountId int
-		err                  error
+		pinUserKey string
+		err        error
 	)
 	if !isAdmin {
-		currentUserAccountId, err = o.repo.GetAccountIDByKeycloakID(c.Request.Context(), keycloakId)
-		if err != nil {
-			c.Status(http.StatusInternalServerError)
-			_ = c.Error(fmt.Errorf("repo.GetAccountIDByKeycloakID: %w", err))
+		// The pin: every account with the caller's keycloak id, as in
+		// handleGetActivities. Not one account id, since a user can have
+		// several; account-id and email then only narrow within them.
+		if keycloakId == "" {
+			c.Status(http.StatusForbidden)
 			return
 		}
-
+		pinUserKey = keycloakId
 	}
 
 	if orderByCreatedAt != "" {
@@ -316,16 +317,6 @@ func (o *OrdersAPI) handlePaymentFetch(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit value! Accepted value is INTEGER", "success": false})
 			return
 		}
-
-		if !isAdmin && currentUserAccountId != intAccountID {
-			c.Status(http.StatusForbidden)
-			return
-		}
-	} else {
-		if !isAdmin {
-			intAccountID = currentUserAccountId
-		}
-
 	}
 
 	if orderID != "" {
@@ -339,7 +330,7 @@ func (o *OrdersAPI) handlePaymentFetch(c *gin.Context) {
 	}
 
 	payments, err := o.repo.GetAllPayments(c.Request.Context(), intSkip, intLimit, fromDate, &toDateParsed, paymentType,
-		paymentStatus, orderType, email, intAccountID, tokenExist, intOrderID, orderByCreatedAt)
+		paymentStatus, orderType, email, intAccountID, pinUserKey, tokenExist, intOrderID, orderByCreatedAt)
 	if err != nil {
 		c.Status(http.StatusInternalServerError)
 		_ = c.Error(fmt.Errorf("repo.GetAllPayments: %w", err))

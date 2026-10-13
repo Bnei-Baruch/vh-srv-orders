@@ -187,8 +187,7 @@ func TestProfileServiceAPI_LookupProfile_ErrorBodyWithoutErrorField(t *testing.T
 
 	require.Error(t, err)
 	assert.Nil(t, profile)
-	assert.Contains(t, err.Error(), "500")
-	assert.Contains(t, err.Error(), "boom")
+	assert.EqualError(t, err, `unexpected response: [500 Internal Server Error] {"message":"boom"}`)
 }
 
 func TestProfileServiceAPI_LookupProfileByKeycloakId_Success(t *testing.T) {

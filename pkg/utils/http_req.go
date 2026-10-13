@@ -2,9 +2,12 @@ package utils
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/go-resty/resty/v2"
 )
 
 func HTTPCallAndGetBody(fullUrl string, authHeader string, bodyBuffer *bytes.Buffer, typeOfReq string) ([]byte, int) {
@@ -56,4 +59,24 @@ func PostJSON(method string, url string, payload []byte) (*http.Response, error)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	return new(http.Client).Do((req))
+}
+
+// APIError is the {"error": "..."} body our own services (accounting,
+// profile) answer with on failure. Clients register it with resty's
+// SetError so RespError can read it.
+type APIError struct {
+	Error string `json:"error"`
+}
+
+// RespError returns nil for a successful response. For a failed one it
+// returns the service's own message from an APIError body, or, when the body
+// has none (not JSON, or JSON without "error"), the status and raw body.
+func RespError(resp *resty.Response) error {
+	if !resp.IsError() {
+		return nil
+	}
+	if apiErr, ok := resp.Error().(*APIError); ok && apiErr.Error != "" {
+		return errors.New(apiErr.Error)
+	}
+	return fmt.Errorf("unexpected response: [%s] %s", resp.Status(), resp.String())
 }

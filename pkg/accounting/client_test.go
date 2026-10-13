@@ -13,6 +13,7 @@ import (
 
 	keycloakmocks "gitlab.bbdev.team/vh/pay/orders/internal/mocks/pkg/keycloak"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/keycloak"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 )
 
 func TestAccountingServiceAPI_GetLastContributions_Success(t *testing.T) {
@@ -155,7 +156,7 @@ func TestAccountingServiceAPI_GetLastContributions_401RetrySuccess(t *testing.T)
 		attemptCount++
 		if attemptCount == 1 {
 			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(APIError{Error: "unauthorized"})
+			json.NewEncoder(w).Encode(utils.APIError{Error: "unauthorized"})
 			return
 		}
 
@@ -189,7 +190,7 @@ func TestAccountingServiceAPI_GetLastContributions_401RetryFailure(t *testing.T)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attemptCount++
 		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(APIError{Error: "unauthorized"})
+		json.NewEncoder(w).Encode(utils.APIError{Error: "unauthorized"})
 	}))
 	defer server.Close()
 
@@ -210,8 +211,9 @@ func TestAccountingServiceAPI_GetLastContributions_401RetryFailure(t *testing.T)
 
 func TestAccountingServiceAPI_GetLastContributions_OtherError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(APIError{Error: "internal server error"})
+		json.NewEncoder(w).Encode(utils.APIError{Error: "internal server error"})
 	}))
 	defer server.Close()
 
@@ -252,7 +254,7 @@ func newTestAccountingServiceAPI(serverURL string, tokenSource keycloak.TokenSou
 		"Content-Type": "application/json",
 		"User-Agent":   "test",
 	})
-	client.SetError(APIError{})
+	client.SetError(utils.APIError{})
 
 	return &AccountingServiceAPI{
 		client:      client,

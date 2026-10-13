@@ -2,7 +2,6 @@ package profiles
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 
@@ -10,6 +9,7 @@ import (
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/keycloak"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 )
 
 type ProfileService interface {
@@ -32,7 +32,7 @@ func NewProfileServiceAPI(tokenSource keycloak.TokenSource) *ProfileServiceAPI {
 	})
 	// TODO (edo): under API context we should propagate request ID (tracing) and actor (user-agent)
 
-	client.SetError(APIError{})
+	client.SetError(utils.APIError{})
 	//client.EnableTrace()
 
 	return &ProfileServiceAPI{
@@ -56,7 +56,7 @@ func (p *ProfileServiceAPI) LookupProfile(ctx context.Context, email string) (*P
 		if resp.StatusCode() == http.StatusNotFound {
 			return nil, nil
 		}
-		return nil, respError(resp)
+		return nil, utils.RespError(resp)
 	}
 
 	results := resp.Result().(*[]Profile)
@@ -83,7 +83,7 @@ func (p *ProfileServiceAPI) LookupProfileByKeycloakId(ctx context.Context, keycl
 		if resp.StatusCode() == http.StatusNotFound {
 			return nil, nil
 		}
-		return nil, respError(resp)
+		return nil, utils.RespError(resp)
 	}
 
 	result := resp.Result().(*Profile)
@@ -110,7 +110,7 @@ func (p *ProfileServiceAPI) GetProfileByKeycloakID(ctx context.Context, keycloak
 		if resp.StatusCode() == http.StatusNotFound {
 			return nil, ErrNotFound
 		}
-		return nil, respError(resp)
+		return nil, utils.RespError(resp)
 	}
 
 	return resp.Result().(*Profile), nil
@@ -166,19 +166,9 @@ func (p *ProfileServiceAPI) executeWithRetry(ctx context.Context,
 
 		// If still 401 after retry with fresh token, return the error
 		if resp != nil && resp.StatusCode() == http.StatusUnauthorized {
-			return nil, respError(resp)
+			return nil, utils.RespError(resp)
 		}
 	}
 
 	return resp, nil
-}
-
-func respError(resp *resty.Response) error {
-	if !resp.IsError() {
-		return nil
-	}
-	if apiErr, ok := resp.Error().(*APIError); ok && apiErr.Error != "" {
-		return errors.New(apiErr.Error)
-	}
-	return fmt.Errorf("unexpected response: [%s] %s", resp.Status(), resp.String())
 }

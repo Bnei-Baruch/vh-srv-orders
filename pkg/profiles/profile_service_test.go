@@ -14,6 +14,7 @@ import (
 
 	keycloakmocks "gitlab.bbdev.team/vh/pay/orders/internal/mocks/pkg/keycloak"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/keycloak"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 )
 
 func TestProfileServiceAPI_LookupProfile_Success(t *testing.T) {
@@ -58,7 +59,7 @@ func TestProfileServiceAPI_LookupProfile_401RetrySuccess(t *testing.T) {
 		attemptCount++
 		if attemptCount == 1 {
 			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(APIError{Error: "unauthorized"})
+			json.NewEncoder(w).Encode(utils.APIError{Error: "unauthorized"})
 			return
 		}
 
@@ -89,7 +90,7 @@ func TestProfileServiceAPI_LookupProfile_401RetryFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attemptCount++
 		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(APIError{Error: "unauthorized"})
+		json.NewEncoder(w).Encode(utils.APIError{Error: "unauthorized"})
 	}))
 	defer server.Close()
 
@@ -146,8 +147,9 @@ func TestProfileServiceAPI_LookupProfile_EmptyResults(t *testing.T) {
 
 func TestProfileServiceAPI_LookupProfile_OtherError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(APIError{Error: "internal server error"})
+		json.NewEncoder(w).Encode(utils.APIError{Error: "internal server error"})
 	}))
 	defer server.Close()
 
@@ -340,7 +342,7 @@ func TestProfileServiceAPI_GetProfileByKeycloakID_401RetryFailure(t *testing.T) 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attemptCount++
 		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(APIError{Error: "unauthorized"})
+		json.NewEncoder(w).Encode(utils.APIError{Error: "unauthorized"})
 	}))
 	defer server.Close()
 
@@ -383,8 +385,9 @@ func TestProfileServiceAPI_GetProfileByKeycloakID_OtherError(t *testing.T) {
 	keycloakID := uuid.FromStringOrNil("22000000-0000-0000-0000-000000000000")
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(APIError{Error: "internal server error"})
+		json.NewEncoder(w).Encode(utils.APIError{Error: "internal server error"})
 	}))
 	defer server.Close()
 
@@ -410,7 +413,7 @@ func newTestProfileServiceAPI(serverURL string, tokenSource keycloak.TokenSource
 		"Content-Type": "application/json",
 		"User-Agent":   "test",
 	})
-	client.SetError(APIError{})
+	client.SetError(utils.APIError{})
 
 	return &ProfileServiceAPI{
 		client:      client,

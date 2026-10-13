@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	keycloakmocks "gitlab.bbdev.team/vh/pay/orders/internal/mocks/pkg/keycloak"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 )
 
 func TestAccountingServiceAPI_GetEuropeContributions_Success(t *testing.T) {
@@ -158,7 +159,7 @@ func TestAccountingServiceAPI_GetEuropeContributions_401RetrySuccess(t *testing.
 		attemptCount++
 		if attemptCount == 1 {
 			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(APIError{Error: "unauthorized"})
+			json.NewEncoder(w).Encode(utils.APIError{Error: "unauthorized"})
 			return
 		}
 
@@ -189,8 +190,9 @@ func TestAccountingServiceAPI_GetEuropeContributions_401RetrySuccess(t *testing.
 
 func TestAccountingServiceAPI_GetEuropeContributions_OtherError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(APIError{Error: "internal server error"})
+		json.NewEncoder(w).Encode(utils.APIError{Error: "internal server error"})
 	}))
 	defer server.Close()
 

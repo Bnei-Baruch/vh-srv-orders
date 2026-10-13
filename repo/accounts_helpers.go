@@ -317,24 +317,6 @@ func (o *OrdersDB) GetAccountIDByKeycloakID(ctx context.Context, keycloakId stri
 	return accountID, nil
 }
 
-// GetEmailByKeycloakID returns the email of the key's account, or
-// common.ErrNoRowsAffected when there is no account or it has no email. It
-// never returns "": callers filter by the result, and an empty filter matches
-// everyone.
-func (o *OrdersDB) GetEmailByKeycloakID(ctx context.Context, keycloakId string) (string, error) {
-	var email null.String
-	if err := o.pool.QueryRow(ctx, `SELECT "Email" FROM accounts WHERE "UserKey"=$1`, keycloakId).Scan(&email); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return "", common.ErrNoRowsAffected
-		}
-		return "", err
-	}
-	if email.String == "" {
-		return "", common.ErrNoRowsAffected
-	}
-	return email.String, nil
-}
-
 func (o *OrdersDB) MergeAccountsOrders(ctx context.Context, req AccountMergeRequest) error {
 	var (
 		sourceAccountID      int

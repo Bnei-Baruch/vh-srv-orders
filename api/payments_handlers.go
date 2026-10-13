@@ -371,32 +371,18 @@ func (o *OrdersAPI) handleGetActivities(c *gin.Context) {
 	if !isAuthUser {
 		return
 	}
-	var (
-		currentUserEmail string
-		pinUserKey       string
-		err              error
-	)
+	var pinUserKey string
 	if !isAdmin {
-		// The pin: every account with the caller's keycloak id. Not the email,
+		// The pin: every account with the caller's keycloak id. Not an email,
 		// which the user can edit to someone else's address or to "" (no
-		// filter at all); not one account id, since a user can have several.
+		// filter at all), and which differs between their accounts; not one
+		// account id, since a user can have several. ?email= then only narrows
+		// within their own accounts.
 		if keycloakId == "" {
 			c.Status(http.StatusForbidden)
 			return
 		}
 		pinUserKey = keycloakId
-		currentUserEmail, err = o.repo.GetEmailByKeycloakID(c.Request.Context(), keycloakId) // getting user email by keycloakId
-		if errors.Is(err, common.ErrNoRowsAffected) {
-			// No account or no email: no activities. Never fall through with an
-			// empty email, which would drop the filter and list everyone's.
-			c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": []repo.PaymentActivitiesRes{}, "totalCount": 0, "success": true})
-			return
-		}
-		if err != nil {
-			c.Status(http.StatusInternalServerError)
-			_ = c.Error(fmt.Errorf("repo.GetEmailByKeycloakID: %w", err))
-			return
-		}
 	}
 
 	skip := c.Query("skip")
@@ -411,13 +397,6 @@ func (o *OrdersAPI) handleGetActivities(c *gin.Context) {
 
 	if limit == "" {
 		limit = "10"
-	}
-	if !isAdmin && email != "" && currentUserEmail != email {
-		c.Status(http.StatusForbidden)
-		return
-	}
-	if !isAdmin {
-		email = currentUserEmail
 	}
 	intSkip, err := strconv.Atoi(skip)
 	if err != nil {

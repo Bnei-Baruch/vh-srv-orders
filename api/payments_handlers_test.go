@@ -208,23 +208,66 @@ func Test_activities_non_admin_with_empty_email_sees_nothing_of_others(t *testin
 	assert.Equal(t, float64(0), got["totalCount"])
 }
 
-// A user can have more than one account with their keycloak id (the
-// importer creates a new one when the email changed), and new orders land on
-// the newest. Pinned to a single account id, the activities could miss them.
+// seedCallerSecondAccount gives the caller a second account under the same
+// keycloak id, with its own email and payment, the way the importer does
+// when a user's email changed.
+func seedCallerSecondAccount(t *testing.T, a *App, email string) {
+	t.Helper()
+	_, err := a.testPool(t).Exec(context.Background(), `
+		WITH acc AS (INSERT INTO accounts ("UserKey", "Email", created_at, updated_at) VALUES ($1, $2, now(), now()) RETURNING id),
+		     ord AS (INSERT INTO orders ("AccountID", created_at, updated_at) SELECT id, now(), now() FROM acc RETURNING id)
+		INSERT INTO payments ("OrderID", created_at, updated_at) SELECT id, now(), now() FROM ord`, USER_KEY, email)
+	require.NoError(t, err)
+}
+
+// All of a user's accounts are theirs, whatever email each one carries.
+// Pinned to one account, or narrowed by one account's email, the other's
+// payments went missing.
 func Test_activities_non_admin_sees_all_accounts_with_own_keycloak_id(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)
 
 	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
-	setCallerEmail(t, a, "a@test.test")
-	_, err := a.testPool(t).Exec(context.Background(), `
-		WITH acc AS (INSERT INTO accounts ("UserKey", "Email", created_at, updated_at) VALUES ($1, 'a@test.test', now(), now()) RETURNING id),
-		     ord AS (INSERT INTO orders ("AccountID", created_at, updated_at) SELECT id, now(), now() FROM acc RETURNING id)
-		INSERT INTO payments ("OrderID", created_at, updated_at) SELECT id, now(), now() FROM ord`, USER_KEY)
-	require.NoError(t, err)
+	setCallerEmail(t, a, "old@test.test")
+	seedCallerPayment(t, a)
+	seedCallerSecondAccount(t, a, "new@test.test")
 
 	got := GET(t, a, "/payments/activities", http.StatusOK)
-	assert.Len(t, got["data"], 1, "the payment on the second account is the caller's own")
+	assert.Len(t, got["data"], 2)
+	assert.Equal(t, float64(2), got["totalCount"])
+}
+
+// An account without an email still belongs to its keycloak id.
+func Test_activities_non_admin_sees_payments_on_account_without_email(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
+	_, err := a.testPool(t).Exec(context.Background(), `UPDATE accounts SET "Email" = NULL WHERE "UserKey" = $1`, USER_KEY)
+	require.NoError(t, err)
+	seedCallerPayment(t, a)
+
+	got := GET(t, a, "/payments/activities", http.StatusOK)
+	assert.Len(t, got["data"], 1)
+	assert.Equal(t, float64(1), got["totalCount"])
+}
+
+// ?email= from a non-admin narrows within their own accounts. It used to be
+// checked against one of their emails and refused with 403 otherwise; now a
+// matching address elsewhere just isn't theirs to see.
+func Test_activities_non_admin_email_narrows_within_own_accounts(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
+	setCallerEmail(t, a, "old@test.test")
+	seedCallerPayment(t, a)
+	seedCallerSecondAccount(t, a, "new@test.test")
+	seedOtherAccountPayment(t, a, "xnew@test.test")
+
+	got := GET(t, a, "/payments/activities?email=new@test.test", http.StatusOK)
+	require.Len(t, got["data"], 1)
+	assert.Equal(t, "new@test.test", got["data"].([]interface{})[0].(map[string]interface{})["email"])
 	assert.Equal(t, float64(1), got["totalCount"])
 }
 

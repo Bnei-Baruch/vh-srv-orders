@@ -142,24 +142,73 @@ func Test_payments_email_with_apostrophe_is_found(t *testing.T) {
 	assert.Len(t, got["data"], 1)
 }
 
-// /payments/activities pins a non-admin to their own email. Matched as a
-// substring, a@test.test also saw ba@test.test's payments.
-func Test_activities_non_admin_sees_only_own_email(t *testing.T) {
+// setCallerEmail sets the caller's account email directly. Through the API
+// the owner can set it to anything with PATCH /v2/account/:id, which is why
+// it must not be what pins them.
+func setCallerEmail(t *testing.T, a *App, email string) {
+	t.Helper()
+	_, err := a.testPool(t).Exec(context.Background(), `UPDATE accounts SET "Email" = $1 WHERE "UserKey" = $2`, email, USER_KEY)
+	require.NoError(t, err)
+}
+
+// seedCallerPayment gives the caller's account an order and a payment.
+func seedCallerPayment(t *testing.T, a *App) {
+	t.Helper()
+	_, err := a.testPool(t).Exec(context.Background(), `
+		WITH ord AS (INSERT INTO orders ("AccountID", created_at, updated_at)
+		             SELECT id, now(), now() FROM accounts WHERE "UserKey" = $1 RETURNING id)
+		INSERT INTO payments ("OrderID", created_at, updated_at) SELECT id, now(), now() FROM ord`, USER_KEY)
+	require.NoError(t, err)
+}
+
+// A non-admin gets their own activities, and only those: a@test.test's
+// filter used to be a substring, so it also matched ba@test.test.
+func Test_activities_non_admin_sees_only_own_account(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)
 
 	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
-	// The API only sets an account's email from the token, which has none here.
-	_, err := a.testPool(t).Exec(context.Background(), `UPDATE accounts SET "Email" = 'a@test.test' WHERE "UserKey" = $1`, USER_KEY)
-	require.NoError(t, err)
+	setCallerEmail(t, a, "a@test.test")
+	seedCallerPayment(t, a)
 	seedOtherAccountPayment(t, a, "ba@test.test")
 
 	got := GET(t, a, "/payments/activities", http.StatusOK)
-	assert.Empty(t, got["data"], "a@test.test must not see ba@test.test's payments")
+	require.Len(t, got["data"], 1)
+	assert.Equal(t, "a@test.test", got["data"].([]interface{})[0].(map[string]interface{})["email"])
+	assert.Equal(t, float64(1), got["totalCount"])
+}
+
+// A user who sets their own email to someone else's must not get that
+// person's activities.
+func Test_activities_non_admin_with_someone_elses_email_sees_nothing_of_theirs(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
+	setCallerEmail(t, a, "victim@test.test")
+	seedOtherAccountPayment(t, a, "victim@test.test")
+
+	got := GET(t, a, "/payments/activities", http.StatusOK)
+	assert.Empty(t, got["data"])
 	assert.Equal(t, float64(0), got["totalCount"])
 }
 
-// Admins keep the substring search.
+// An empty email drops the email filter. Pinned by email, that returned every
+// account's activities.
+func Test_activities_non_admin_with_empty_email_sees_nothing_of_others(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
+	setCallerEmail(t, a, "")
+	seedOtherAccountPayment(t, a, "other@test.test")
+
+	got := GET(t, a, "/payments/activities", http.StatusOK)
+	assert.Empty(t, got["data"])
+	assert.Equal(t, float64(0), got["totalCount"])
+}
+
+// Admins are not pinned and keep the substring search.
 func Test_activities_admin_email_is_a_substring_search(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)

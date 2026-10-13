@@ -372,8 +372,9 @@ func (o *OrdersAPI) handleGetActivities(c *gin.Context) {
 		return
 	}
 	var (
-		currentUserEmail string
-		err              error
+		currentUserEmail     string
+		currentUserAccountID int
+		err                  error
 	)
 	if !isAdmin {
 		currentUserEmail, err = o.repo.GetEmailByKeycloakID(c.Request.Context(), keycloakId) // getting user email by keycloakId
@@ -386,6 +387,14 @@ func (o *OrdersAPI) handleGetActivities(c *gin.Context) {
 		if err != nil {
 			c.Status(http.StatusInternalServerError)
 			_ = c.Error(fmt.Errorf("repo.GetEmailByKeycloakID: %w", err))
+			return
+		}
+		// The pin. Not the email: the user can edit it, to someone else's
+		// address or to "", which would drop the filter altogether.
+		currentUserAccountID, err = o.repo.GetAccountIDByKeycloakID(c.Request.Context(), keycloakId)
+		if err != nil {
+			c.Status(http.StatusInternalServerError)
+			_ = c.Error(fmt.Errorf("repo.GetAccountIDByKeycloakID: %w", err))
 			return
 		}
 	}
@@ -422,14 +431,14 @@ func (o *OrdersAPI) handleGetActivities(c *gin.Context) {
 		return
 	}
 
-	payAct, err := o.repo.GetPaymentActivities(c.Request.Context(), email, !isAdmin, productType, paymentType, intSkip, intLimit)
+	payAct, err := o.repo.GetPaymentActivities(c.Request.Context(), currentUserAccountID, email, productType, paymentType, intSkip, intLimit)
 	if err != nil {
 		c.Status(http.StatusInternalServerError)
 		_ = c.Error(fmt.Errorf("repo.GetPaymentActivities: %w", err))
 		return
 	}
 
-	count, err := o.repo.GetTotalParticipationStatusCount(c.Request.Context(), email, !isAdmin, productType, paymentType)
+	count, err := o.repo.GetTotalParticipationStatusCount(c.Request.Context(), currentUserAccountID, email, productType, paymentType)
 	if err != nil {
 		c.Status(http.StatusInternalServerError)
 		_ = c.Error(fmt.Errorf("repo.GetTotalParticipationStatusCount: %w", err))

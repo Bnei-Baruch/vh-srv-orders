@@ -454,7 +454,7 @@ func TestGetAccountReceivables_PaginationError_ReturnsPartialResults(t *testing.
 
 	// Should return partial results with error
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "returning partial results")
+	assert.EqualError(t, err, "error fetching next page (returning partial results) [500]: ")
 	require.Len(t, result, 2)
 }
 

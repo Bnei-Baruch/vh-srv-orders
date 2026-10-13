@@ -204,8 +204,7 @@ func (c *Client) GetAccountReceivables(ctx context.Context, customerID string) (
 
 		if nextResp.IsError() {
 			// Log warning but return what we have
-			return allItems, fmt.Errorf("error fetching next page [%d] (returning partial results): %s",
-				nextResp.StatusCode(), nextResp.String())
+			return allItems, utils.RespStatusError(nextResp, "error fetching next page (returning partial results)")
 		}
 
 		nextResult := nextResp.Result().(*AccountReceivableODataResponse)

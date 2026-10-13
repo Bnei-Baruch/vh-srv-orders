@@ -1,12 +1,14 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/volatiletech/null/v9"
 
 	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
@@ -70,4 +72,28 @@ func Test_offline_payment(t *testing.T) {
 	// Amount is NOT expected to change, we should ignore it's update value.
 	assert.Equal(t, float64(15), got["data"].(map[string]interface{})["Amount"].(float64))
 	assert.Equal(t, "some new status", got["data"].(map[string]interface{})["PaymentStatus"].(string))
+}
+
+// A non-admin is pinned to their own account. Filtering by someone else's
+// email must narrow that, not replace it and expose the other account.
+func Test_payments_email_filter_stays_within_own_account(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
+
+	// Another user's account, order and payment, written directly: the API
+	// only lets a caller create their own account.
+	const otherEmail = "other@example.com"
+	_, err := a.testPool(t).Exec(context.Background(), `
+		WITH acc AS (INSERT INTO accounts ("Email", created_at, updated_at) VALUES ($1, now(), now()) RETURNING id),
+		     ord AS (INSERT INTO orders ("AccountID", created_at, updated_at) SELECT id, now(), now() FROM acc RETURNING id)
+		INSERT INTO payments ("OrderID", created_at, updated_at) SELECT id, now(), now() FROM ord`, otherEmail)
+	require.NoError(t, err)
+
+	got := GET(t, a, "/v2/payments?email="+otherEmail, http.StatusOK)
+	assert.Empty(t, got["data"], "non-admin must not see another account's payments")
+
+	got = do(t, a, "GET", "/v2/payments?email="+otherEmail, nil, http.StatusOK, DoOptions{isRoot: true})
+	assert.Len(t, got["data"], 1, "admin filtering by email still finds them")
 }

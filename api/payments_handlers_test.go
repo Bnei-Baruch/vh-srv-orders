@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"testing"
 	"time"
 
@@ -74,6 +75,17 @@ func Test_offline_payment(t *testing.T) {
 	assert.Equal(t, "some new status", got["data"].(map[string]interface{})["PaymentStatus"].(string))
 }
 
+// seedOtherAccountPayment writes another user's account, order and payment
+// directly: the API only lets a caller create their own account.
+func seedOtherAccountPayment(t *testing.T, a *App, email string) {
+	t.Helper()
+	_, err := a.testPool(t).Exec(context.Background(), `
+		WITH acc AS (INSERT INTO accounts ("Email", created_at, updated_at) VALUES ($1, now(), now()) RETURNING id),
+		     ord AS (INSERT INTO orders ("AccountID", created_at, updated_at) SELECT id, now(), now() FROM acc RETURNING id)
+		INSERT INTO payments ("OrderID", created_at, updated_at) SELECT id, now(), now() FROM ord`, email)
+	require.NoError(t, err)
+}
+
 // A non-admin is pinned to their own account. Filtering by someone else's
 // email must narrow that, not replace it and expose the other account.
 func Test_payments_email_filter_stays_within_own_account(t *testing.T) {
@@ -81,19 +93,51 @@ func Test_payments_email_filter_stays_within_own_account(t *testing.T) {
 	defer CloseTestApp(a)
 
 	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
-
-	// Another user's account, order and payment, written directly: the API
-	// only lets a caller create their own account.
 	const otherEmail = "other@example.com"
-	_, err := a.testPool(t).Exec(context.Background(), `
-		WITH acc AS (INSERT INTO accounts ("Email", created_at, updated_at) VALUES ($1, now(), now()) RETURNING id),
-		     ord AS (INSERT INTO orders ("AccountID", created_at, updated_at) SELECT id, now(), now() FROM acc RETURNING id)
-		INSERT INTO payments ("OrderID", created_at, updated_at) SELECT id, now(), now() FROM ord`, otherEmail)
-	require.NoError(t, err)
+	seedOtherAccountPayment(t, a, otherEmail)
 
 	got := GET(t, a, "/v2/payments?email="+otherEmail, http.StatusOK)
 	assert.Empty(t, got["data"], "non-admin must not see another account's payments")
 
 	got = do(t, a, "GET", "/v2/payments?email="+otherEmail, nil, http.StatusOK, DoOptions{isRoot: true})
 	assert.Len(t, got["data"], 1, "admin filtering by email still finds them")
+}
+
+// With the email pasted into the SQL, `x') OR TRUE OR ('t` turned the account
+// pin into one branch of an OR and returned every account's payments.
+func Test_payments_email_injection_stays_within_own_account(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
+	seedOtherAccountPayment(t, a, "other@example.com")
+
+	got := GET(t, a, "/v2/payments?email="+url.QueryEscape("x') OR TRUE OR ('t"), http.StatusOK)
+	assert.Empty(t, got["data"], "an injected email must not widen the non-admin's results")
+}
+
+// status sits before the account clause, so the same payload there escaped
+// the pin too.
+func Test_payments_status_injection_stays_within_own_account(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
+	seedOtherAccountPayment(t, a, "other@example.com")
+
+	got := GET(t, a, "/v2/payments?status="+url.QueryEscape("x') OR TRUE OR ('t"), http.StatusOK)
+	assert.Empty(t, got["data"], "an injected status must not widen the non-admin's results")
+}
+
+// Real addresses can contain an apostrophe; pasted into the SQL it was a
+// syntax error and a 500.
+func Test_payments_email_with_apostrophe_is_found(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	const email = "o'brien@example.com"
+	seedOtherAccountPayment(t, a, email)
+
+	got := do(t, a, "GET", "/v2/payments?email="+url.QueryEscape(email), nil, http.StatusOK, DoOptions{isRoot: true})
+	assert.Len(t, got["data"], 1)
 }

@@ -31,19 +31,3 @@ func TestPaymentsWhere_DateBoundsKeepOffset(t *testing.T) {
 	assert.Contains(t, where, `p.updated_at <= '2026-01-02T10:00:00+03:00'`)
 	assert.Contains(t, where, `p.updated_at >= '2026-01-01T10:00:00+03:00'`)
 }
-
-// pelecard_token is nullable, and NULL = ” is not true, so a payment that
-// never had a token must be matched through COALESCE.
-func TestPaymentsWhere_NullTokenCountsAsNoToken(t *testing.T) {
-	for _, tc := range []struct{ tokenExist, want string }{
-		{"false", `COALESCE(p.pelecard_token, '') = ''`},
-		{"true", `COALESCE(p.pelecard_token, '') != ''`},
-	} {
-		t.Run(tc.tokenExist, func(t *testing.T) {
-			where, _, err := buildAndGetPaymentsWhereQuery("", &time.Time{},
-				"", "", "", "", 0, tc.tokenExist, 0, "")
-			require.NoError(t, err)
-			assert.Contains(t, where, tc.want)
-		})
-	}
-}

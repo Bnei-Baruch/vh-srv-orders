@@ -301,6 +301,13 @@ func TestFlagAndSkipOperations_SkippedWhenFlagsFalse(t *testing.T) { ... }
 func TestChargeOperations_ConcurrentFallbackToEMV(t *testing.T) { ... }
 ```
 
+One exception: when a single scenario checks **one property over a list of
+inputs**, such as every list filter against the same injection payloads, a
+loop with `t.Run` subtests is fine. Splitting it would repeat the same body
+once per input and hide that it is one property. Each case still gets a name
+in the failure output. Anything with its own setup or its own expectation is a
+separate scenario function.
+
 **Integration tests:** Real PostgreSQL via `pgtestdb` (isolated migrated DBs per test). HTTP tests use `httptest` with helpers (`GET`, `POST`, `PATCH_ROOT`).
 
 A test that needs raw SQL — seeding a row, asserting one the repo has no method

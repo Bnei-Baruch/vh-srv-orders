@@ -119,25 +119,6 @@ func TestListFilters_ValuesAreParameters(t *testing.T) {
 		}
 	})
 
-	// userKey is what pins a non-admin. Whatever email comes with it, only
-	// that keycloak id's accounts can match.
-	t.Run("GetPaymentActivities userKey", func(t *testing.T) {
-		acts, err := db.GetPaymentActivities(ctx, "kc-quoted", "", "", "", 0, 10)
-		require.NoError(t, err)
-		require.Len(t, acts, 1, "no email: just the pinned user's accounts")
-		assert.Equal(t, quotedEmail, acts[0].Email.String)
-		n, err := db.GetTotalParticipationStatusCount(ctx, "kc-quoted", "", "", "")
-		require.NoError(t, err)
-		assert.Equal(t, 1, n)
-
-		acts, err = db.GetPaymentActivities(ctx, "kc-other", quotedEmail, "", "", 0, 10)
-		require.NoError(t, err)
-		assert.Empty(t, acts, "another user's email does not reach past the pin")
-		n, err = db.GetTotalParticipationStatusCount(ctx, "kc-other", quotedEmail, "", "")
-		require.NoError(t, err)
-		assert.Zero(t, n)
-	})
-
 	t.Run("GetOfflinePayments", func(t *testing.T) {
 		payments, err := db.GetOfflinePayments(ctx, 0, 10, "cash", "")
 		require.NoError(t, err)
@@ -146,4 +127,26 @@ func TestListFilters_ValuesAreParameters(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, payments)
 	})
+}
+
+// userKey is what pins a non-admin. Whatever email comes with it, only that
+// keycloak id's accounts can match.
+func TestPaymentActivities_PinnedByUserKey(t *testing.T) {
+	db, ctx := newTestDB(t)
+	seedFilterRows(t, db, ctx)
+
+	acts, err := db.GetPaymentActivities(ctx, "kc-quoted", "", "", "", 0, 10)
+	require.NoError(t, err)
+	require.Len(t, acts, 1, "no email: just the pinned user's accounts")
+	assert.Equal(t, quotedEmail, acts[0].Email.String)
+	n, err := db.GetTotalParticipationStatusCount(ctx, "kc-quoted", "", "", "")
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
+
+	acts, err = db.GetPaymentActivities(ctx, "kc-other", quotedEmail, "", "", 0, 10)
+	require.NoError(t, err)
+	assert.Empty(t, acts, "another user's email does not reach past the pin")
+	n, err = db.GetTotalParticipationStatusCount(ctx, "kc-other", quotedEmail, "", "")
+	require.NoError(t, err)
+	assert.Zero(t, n)
 }

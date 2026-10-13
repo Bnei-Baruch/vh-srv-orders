@@ -1195,19 +1195,19 @@ func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentTy
 
 	}
 
+	// Email and account filter together: for a non-admin the handler pins
+	// accontID to the caller's own account, so email must not replace it.
 	if email != "" || accontID != 0 {
-		if email != "" {
-			if whereCondition.String() != "" {
-				whereCondition.WriteString(fmt.Sprintf(` AND p."OrderID" = o.id AND a.id = o."AccountID" AND LOWER(a."Email")=LOWER('%s')`, email))
-			} else {
-				whereCondition.WriteString(fmt.Sprintf(` p."OrderID" = o.id AND a.id = o."AccountID" AND LOWER(a."Email")=LOWER('%s')`, email))
-			}
+		if whereCondition.String() != "" {
+			whereCondition.WriteString(` AND p."OrderID" = o.id AND a.id = o."AccountID"`)
 		} else {
-			if whereCondition.String() != "" {
-				whereCondition.WriteString(fmt.Sprintf(` AND p."OrderID" = o.id AND a.id = o."AccountID" AND a.id=%d`, accontID))
-			} else {
-				whereCondition.WriteString(fmt.Sprintf(` p."OrderID" = o.id AND a.id = o."AccountID" AND a.id=%d`, accontID))
-			}
+			whereCondition.WriteString(` p."OrderID" = o.id AND a.id = o."AccountID"`)
+		}
+		if email != "" {
+			whereCondition.WriteString(fmt.Sprintf(` AND LOWER(a."Email")=LOWER('%s')`, email))
+		}
+		if accontID != 0 {
+			whereCondition.WriteString(fmt.Sprintf(` AND a.id=%d`, accontID))
 		}
 	}
 

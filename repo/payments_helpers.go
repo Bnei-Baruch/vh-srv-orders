@@ -696,9 +696,17 @@ func preparePelecardPaymentUpdateQuery(req PaymentUpdate) (string, []interface{}
 		updateStrings = append(updateStrings, fmt.Sprintf("success=$%d", len(updateStrings)+1))
 		args = append(args, req.Success.String)
 	}
-	if req.PelecardToken.Valid && req.PelecardToken.String != "" {
+	// An admin sending "" clears the token, as it did before NULL became the
+	// only spelling of an absent one; it is written as NULL, which the
+	// column's CHECK allows. The Payment-struct builders below skip "" instead:
+	// there it means a response carried no token, not a request to clear one.
+	if req.PelecardToken.Valid {
 		updateStrings = append(updateStrings, fmt.Sprintf("pelecard_token=$%d", len(updateStrings)+1))
-		args = append(args, req.PelecardToken.String)
+		if req.PelecardToken.String == "" {
+			args = append(args, nil)
+		} else {
+			args = append(args, req.PelecardToken.String)
+		}
 	}
 	if req.TransactionID.Valid {
 		updateStrings = append(updateStrings, fmt.Sprintf("transaction_id=$%d", len(updateStrings)+1))

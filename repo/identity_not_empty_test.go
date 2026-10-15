@@ -320,9 +320,25 @@ func TestPreparePelecardPaymentCreate_SkipsEmptyToken(t *testing.T) {
 	assert.NotContains(t, cols, "pelecard_token")
 }
 
-func TestPreparePelecardPaymentUpdate_SkipsEmptyToken(t *testing.T) {
-	set, _ := preparePelecardPaymentUpdateQuery(PaymentUpdate{PelecardToken: null.StringFrom("")})
-	assert.NotContains(t, set, "pelecard_token")
+// From the admin update, "" is a request to clear the token. Before NULL
+// became its only spelling that wrote an empty string; it now writes NULL.
+// Skipped, an old token would silently stay.
+func TestUpdatePelecardPayment_EmptyTokenClearsIt(t *testing.T) {
+	db, ctx := newTestDB(t)
+
+	var paymentID int
+	require.NoError(t, db.pool.QueryRow(ctx, `INSERT INTO payments (created_at, updated_at) VALUES (now(), now()) RETURNING id`).Scan(&paymentID))
+	_, err := db.pool.Exec(ctx, `INSERT INTO payments_pelecard (payment_id, pelecard_token) VALUES ($1, 'old-token')`, paymentID)
+	require.NoError(t, err)
+
+	require.NoError(t, db.UpdatePelecardPayment(ctx, PaymentUpdate{
+		PaymentID:     null.IntFrom(paymentID),
+		PelecardToken: null.StringFrom(""),
+	}))
+
+	var token null.String
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT pelecard_token FROM payments_pelecard WHERE payment_id = $1`, paymentID).Scan(&token))
+	assert.False(t, token.Valid, "the old token is cleared to NULL")
 }
 
 func TestPreparePelecardPaymentUpdateViaPayment_SkipsEmptyToken(t *testing.T) {

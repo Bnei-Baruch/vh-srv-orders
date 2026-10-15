@@ -25,3 +25,14 @@ func Test_create_and_get_account(t *testing.T) {
 	assert.Equal(t, true, got["success"].(bool))
 	assert.Equal(t, "Test", got["data"].(map[string]interface{})["FirstName"].(string))
 }
+
+// accounts_userkey_uniq allows one account per key; a second create for the
+// same key is a conflict, not a server error.
+func TestCreateAccount_KeyThatHasAnAccountIsConflict(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	req := repo.Account{FirstName: null.StringFrom("Test"), UserKey: null.StringFrom("kc-create-twice")}
+	POST(t, a, "/v2/account/", req, http.StatusCreated)
+	POST(t, a, "/v2/account/", req, http.StatusConflict)
+}

@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -56,6 +57,17 @@ func (o *OrdersDB) PerformOperation(ctx context.Context, req OperationReq) (int,
 
 		queryArr []string
 	)
+
+	// Moving an account onto a key that already has one would give that key two
+	// accounts, which accounts_userkey_uniq refuses. Say so before running
+	// anything; folding two people's accounts together is MergeAccountsOrders.
+	if oldKcId != nil && *newKcId != *oldKcId {
+		if _, err := o.GetAccountIDByKeycloakID(ctx, *newKcId); err == nil {
+			return 0, fmt.Errorf("new keycloak id: %w; merge the accounts instead", common.ErrAccountKeyTaken)
+		} else if !errors.Is(err, common.ErrNoRowsAffected) {
+			return 0, fmt.Errorf("o.GetAccountIDByKeycloakID: %w", err)
+		}
+	}
 
 	tx, err := o.pool.Begin(ctx)
 	if err != nil {

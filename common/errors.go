@@ -6,6 +6,10 @@ var (
 	ErrInvalidValues  = fmt.Errorf("invalid values")
 	ErrNoRowsAffected = fmt.Errorf("no rows affected")
 
+	// ErrAccountKeyTaken: the keycloak id already has an account, and
+	// accounts_userkey_uniq allows one per key.
+	ErrAccountKeyTaken = fmt.Errorf("an account already exists for this keycloak id")
+
 	// ErrPrePayment wraps errors that occur before any payment is attempted
 	// (DB lookups, missing card details). No money moved. No point retrying
 	// on another terminal since the same issue will occur.

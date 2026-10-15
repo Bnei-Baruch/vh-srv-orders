@@ -567,7 +567,7 @@ func buildAndGetOrdersWhereQuery(fromDate string, dateTo *time.Time, productType
 		if err != nil {
 			return "", "", err
 		}
-		whereCondition.WriteString(fmt.Sprintf(" AND o.updated_at >= '%s'", fromDateParsed.Format("2006-01-02 15:04:05")))
+		whereCondition.WriteString(fmt.Sprintf(" AND o.updated_at >= '%s'", fromDateParsed.Format(time.RFC3339Nano)))
 	}
 
 	if currency != "" {

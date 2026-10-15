@@ -93,3 +93,44 @@ func Test_payment_fetch_invalid_to_date_is_rejected(t *testing.T) {
 	got := GET(t, a, "/v2/payments?to-date=not-a-date", http.StatusBadRequest)
 	assert.Equal(t, "Invalid date-from", got["error"])
 }
+
+// A bad account-id or order-id must be named in the error, not reported as a
+// bad limit.
+func Test_fetch_invalid_id_names_the_parameter(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
+
+	for path, want := range map[string]string{
+		"/v2/orders?account-id=x":   "Invalid account-id value! Accepted value is INTEGER",
+		"/v2/payments?account-id=x": "Invalid account-id value! Accepted value is INTEGER",
+		"/v2/payments?order-id=x":   "Invalid order-id value! Accepted value is INTEGER",
+	} {
+		t.Run(path, func(t *testing.T) {
+			got := GET(t, a, path, http.StatusBadRequest)
+			assert.Equal(t, want, got["error"])
+		})
+	}
+}
+
+// A bad from-date is the client's mistake: 400, not the 500 the repo's own
+// parse failure used to surface as.
+func Test_order_fetch_invalid_from_date_is_400(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	got := GET(t, a, "/v2/orders?from-date=not-a-date", http.StatusBadRequest)
+	assert.Equal(t, "Invalid from-date", got["error"])
+}
+
+func Test_payment_fetch_invalid_from_date_is_400(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	// Payments looks up the caller's account before it reads the dates.
+	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
+
+	got := GET(t, a, "/v2/payments?from-date=not-a-date", http.StatusBadRequest)
+	assert.Equal(t, "Invalid from-date", got["error"])
+}

@@ -1129,7 +1129,7 @@ func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentTy
 	whereCondition.WriteString("")
 
 	if !dateTo.IsZero() {
-		whereCondition.WriteString(fmt.Sprintf(" p.updated_at <= '%s'", dateTo.Format("2006-01-02 15:04:05")))
+		whereCondition.WriteString(fmt.Sprintf(" p.updated_at <= '%s'", dateTo.Format(time.RFC3339Nano)))
 	}
 
 	// WHERE query generation based on parameters
@@ -1141,9 +1141,9 @@ func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentTy
 			return "", "", err
 		}
 		if whereCondition.String() != "" {
-			whereCondition.WriteString(fmt.Sprintf(" AND p.updated_at >= '%s'", fromDateParsed.Format("2006-01-02 15:04:05")))
+			whereCondition.WriteString(fmt.Sprintf(" AND p.updated_at >= '%s'", fromDateParsed.Format(time.RFC3339Nano)))
 		} else {
-			whereCondition.WriteString(fmt.Sprintf(" p.updated_at >= '%s'", fromDateParsed.Format("2006-01-02 15:04:05")))
+			whereCondition.WriteString(fmt.Sprintf(" p.updated_at >= '%s'", fromDateParsed.Format(time.RFC3339Nano)))
 		}
 	}
 

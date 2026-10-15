@@ -71,3 +71,16 @@ func Test_offline_payment(t *testing.T) {
 	assert.Equal(t, float64(15), got["data"].(map[string]interface{})["Amount"].(float64))
 	assert.Equal(t, "some new status", got["data"].(map[string]interface{})["PaymentStatus"].(string))
 }
+
+// A bad token-exist is the client's mistake: 400, not the 500 the repo's
+// ParseBool failure used to surface as.
+func Test_payment_fetch_invalid_token_exist_is_400(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	// Payments looks up the caller's account before it reads the params.
+	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
+
+	got := GET(t, a, "/v2/payments?token-exist=maybe", http.StatusBadRequest)
+	assert.Equal(t, "Invalid token-exist value! Accepted values are true or false", got["error"])
+}

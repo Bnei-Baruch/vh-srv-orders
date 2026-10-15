@@ -144,7 +144,9 @@ func TestSetKeycloakIdByEmail_EmptyValuesAreInvalid(t *testing.T) {
 	assert.Equal(t, "kc-1", key)
 }
 
-func TestCreateSpecial_RequiresAnIdentifier(t *testing.T) {
+// An email is required; an empty one counts as none. The keycloak-only case
+// is TestCreateSpecial_KeycloakOnlyIsRefused.
+func TestCreateSpecial_RequiresAnEmail(t *testing.T) {
 	db, ctx := newTestDB(t)
 
 	base := Special{
@@ -161,15 +163,6 @@ func TestCreateSpecial_RequiresAnIdentifier(t *testing.T) {
 	empty.Email = null.StringFrom("")
 	_, err = db.CreateSpecial(ctx, empty)
 	assert.ErrorIs(t, err, common.ErrInvalidValues, "empty identifiers are no identifiers")
-
-	keycloakOnly := base
-	keycloakOnly.KeycloakId = null.StringFrom("kc-only")
-	keycloakOnly.Email = null.StringFrom("")
-	id, err := db.CreateSpecial(ctx, keycloakOnly)
-	require.NoError(t, err)
-	var email null.String
-	require.NoError(t, db.pool.QueryRow(ctx, `SELECT email FROM specials WHERE id = $1`, id).Scan(&email))
-	assert.False(t, email.Valid, "an empty email is stored as NULL")
 }
 
 // An empty key used to match any account stored with an empty "UserKey", attaching
@@ -265,16 +258,42 @@ func TestCreateSpecial_EmitsStringIdentifiers(t *testing.T) {
 	ctx := eventstest.WithTestEventBuilder(t, context.Background())
 
 	_, err = db.CreateSpecial(ctx, Special{
+		Email:     null.StringFrom("email-only@test.test"),
+		StartDate: null.TimeFrom(time.Now()),
+		EndDate:   null.TimeFrom(time.Now().Add(time.Hour)),
+		Category:  null.StringFrom("hh"),
+	})
+	require.NoError(t, err)
+
+	require.Len(t, rec.events, 1)
+	assert.Equal(t, "email-only@test.test", rec.events[0].Payload["email"])
+	assert.Equal(t, "", rec.events[0].Payload["keycloak_id"])
+}
+
+// A keycloak-only special could be granted but never revoked:
+// DeleteSpecialById refuses it, since vh-srv-profile revokes by email. So it
+// is refused at create, before any row or event exists.
+func TestCreateSpecial_KeycloakOnlyIsRefused(t *testing.T) {
+	dbURL, err := testutil.NewTestOrdersDB(t, context.Background())
+	require.NoError(t, err)
+	rec := new(recordingEmitter)
+	db, err := NewOrdersDBUrl(context.Background(), dbURL, rec)
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Close() })
+	ctx := eventstest.WithTestEventBuilder(t, context.Background())
+
+	_, err = db.CreateSpecial(ctx, Special{
 		KeycloakId: null.StringFrom("kc-only"),
 		StartDate:  null.TimeFrom(time.Now()),
 		EndDate:    null.TimeFrom(time.Now().Add(time.Hour)),
 		Category:   null.StringFrom("hh"),
 	})
-	require.NoError(t, err)
 
-	require.Len(t, rec.events, 1)
-	assert.Equal(t, "", rec.events[0].Payload["email"])
-	assert.Equal(t, "kc-only", rec.events[0].Payload["keycloak_id"])
+	assert.ErrorIs(t, err, common.ErrInvalidValues)
+	assert.Empty(t, rec.events)
+	var n int
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT count(*) FROM specials WHERE keycloak_id = 'kc-only'`).Scan(&n))
+	assert.Zero(t, n)
 }
 
 // An account stored without an email (an empty one is stored as NULL) can

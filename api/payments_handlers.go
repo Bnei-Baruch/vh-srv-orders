@@ -283,6 +283,7 @@ func (o *OrdersAPI) handlePaymentFetch(c *gin.Context) {
 
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid date-from"})
+			return
 		}
 	} else {
 		// set null value

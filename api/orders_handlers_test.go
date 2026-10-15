@@ -70,3 +70,26 @@ func Test_duplicate_card_key(t *testing.T) {
 	fmt.Printf("Update token: %+v\n", got)
 	assert.Equal(t, true, got["success"].(bool))
 }
+
+// A bad to-date must stop the request at the 400. Before the fix the handler
+// fell through, ran the query with a zero date and wrote a second JSON body
+// after the first, which GET's json.Unmarshal rejects.
+func Test_order_fetch_invalid_to_date_is_rejected(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	got := GET(t, a, "/v2/orders?to-date=not-a-date", http.StatusBadRequest)
+	assert.Equal(t, "Invalid date-from", got["error"])
+}
+
+// Same as above for payments, which first looks up the caller's account, so
+// the account must exist for the request to reach the date parsing.
+func Test_payment_fetch_invalid_to_date_is_rejected(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
+
+	got := GET(t, a, "/v2/payments?to-date=not-a-date", http.StatusBadRequest)
+	assert.Equal(t, "Invalid date-from", got["error"])
+}

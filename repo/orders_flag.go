@@ -9,16 +9,15 @@ import (
 )
 
 func (o *OrdersDB) FlagOrdersToRenew(ctx context.Context, month int64, year int64) (int64, error) {
-	// Select all unique individuals who have an active renewable order.
-	// userkey is NULL until UpdateOrdersUserKeyFromAccounts copies it from the
-	// account, and for orders with no account; such rows identify nobody, and
-	// their group scanned a nil key that the per-user query dereferenced.
+	// Select all unique individuals who have an active renewable order: one
+	// account per person since migration 29. An order with no account
+	// identifies nobody.
 	qOPotentialStr := `
-	select userkey, count(userkey) as qt
+	select "AccountID", count(*) as qt
 	from orders where ("Status" = 'paid' or "Status" = 'nosuccess')
 	and "ProductType" = 'globalmembership'
-	and userkey is not null
-	group by userkey
+	and "AccountID" is not null
+	group by "AccountID"
 	order by qt desc
 	`
 
@@ -29,28 +28,28 @@ func (o *OrdersDB) FlagOrdersToRenew(ctx context.Context, month int64, year int6
 	defer rows.Close()
 
 	type qOPotential struct {
-		Userkey *string
-		Qt      *int64
+		AccountID int
+		Qt        int64
 	}
 
 	var aOPotential qOPotential
 	var counter int64 = 0
 	for rows.Next() {
-		err := rows.Scan(&aOPotential.Userkey, &aOPotential.Qt)
+		err := rows.Scan(&aOPotential.AccountID, &aOPotential.Qt)
 		if err != nil {
 			return 0, fmt.Errorf("rows.Scan [potential]: %w", err)
 		}
 
 		qOSelectStr := `
 		select id, "Type", "PaymentDate" from orders
-		where userkey = $1
+		where "AccountID" = $1
 		and ("Status"='paid' or "Status"='nosuccess')
 		and "ProductType" = 'globalmembership'
 		order by "PaymentDate" desc
 		limit 1
 		`
 
-		oselected, err := o.pool.Query(ctx, qOSelectStr, *aOPotential.Userkey)
+		oselected, err := o.pool.Query(ctx, qOSelectStr, aOPotential.AccountID)
 		if err != nil {
 			return 0, fmt.Errorf("o.pool.Query [selected]: %w", err)
 		}

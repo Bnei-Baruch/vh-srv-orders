@@ -193,8 +193,9 @@ func (o *OrdersDB) HardDeleteAllUserDataByAccountID(ctx context.Context, account
 		}
 	}
 
-	var email string
-	err = tx.QueryRow(ctx, `SELECT "UserKey", "Email" FROM accounts WHERE id = $1`, accountID).Scan(&kc_id, &email)
+	// Both columns are nullable: an account created without a key has a NULL "UserKey".
+	var storedKey, email null.String
+	err = tx.QueryRow(ctx, `SELECT "UserKey", "Email" FROM accounts WHERE id = $1`, accountID).Scan(&storedKey, &email)
 	if err != nil {
 		return fmt.Errorf("Email from account.id: %w", err)
 	}
@@ -252,7 +253,7 @@ func (o *OrdersDB) HardDeleteAllUserDataByAccountID(ctx context.Context, account
 
 	o.emitEvent(ctx, events.TypeHardDeleteAccount, map[string]interface{}{
 		"account_id":  accountID,
-		"keycloak_id": kc_id,
+		"keycloak_id": storedKey,
 		"email":       email,
 	})
 
@@ -313,12 +314,22 @@ func (o *OrdersDB) GetAccountIDByKeycloakID(ctx context.Context, keycloakId stri
 	return accountID, nil
 }
 
+// GetEmailByKeycloakID returns the email of the key's account, or
+// common.ErrNoRowsAffected when there is no account or it has no email. It
+// never returns "": callers filter by the result, and an empty filter matches
+// everyone.
 func (o *OrdersDB) GetEmailByKeycloakID(ctx context.Context, keycloakId string) (string, error) {
-	var email string
+	var email null.String
 	if err := o.pool.QueryRow(ctx, `SELECT "Email" FROM accounts WHERE "UserKey"=$1`, keycloakId).Scan(&email); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", common.ErrNoRowsAffected
+		}
 		return "", err
 	}
-	return email, nil
+	if email.String == "" {
+		return "", common.ErrNoRowsAffected
+	}
+	return email.String, nil
 }
 
 func (o *OrdersDB) MergeAccountsOrders(ctx context.Context, req AccountMergeRequest) error {
@@ -335,13 +346,13 @@ func (o *OrdersDB) MergeAccountsOrders(ctx context.Context, req AccountMergeRequ
 	if err != nil {
 		return fmt.Errorf("o.GetAccountIDByKeycloakID: %w", err)
 	}
-	var sourceAccountEmail string
+	// "Email" is nullable; an account without one can still be merged.
+	var sourceAccountEmail, destinationAccountEmail null.String
 	err = o.pool.QueryRow(ctx, `SELECT  "Email" FROM accounts WHERE id = $1`, sourceAccountID).Scan(&sourceAccountEmail)
 	if err != nil {
 		return fmt.Errorf("Email from source account.id: %w", err)
 	}
 
-	var destinationAccountEmail string
 	err = o.pool.QueryRow(ctx, `SELECT "Email" FROM accounts WHERE id = $1`, destinationAccountID).Scan(&destinationAccountEmail)
 	if err != nil {
 		return fmt.Errorf("Email from destaination account.id: %w", err)
@@ -417,7 +428,7 @@ func prepareAccountCreateQuery(req Account) (string, string, []interface{}) {
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.LastName.String)
 	}
-	if req.Email.Valid {
+	if req.Email.Valid && req.Email.String != "" {
 		createStrings = append(createStrings, `"Email"`)
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.Email.String)
@@ -482,7 +493,7 @@ func prepareAccountCreateQuery(req Account) (string, string, []interface{}) {
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.AuthNo.String)
 	}
-	if req.UserKey.Valid {
+	if req.UserKey.Valid && req.UserKey.String != "" {
 		createStrings = append(createStrings, `"UserKey"`)
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.UserKey.String)
@@ -516,9 +527,10 @@ func prepareAccountUpdateQuery(req Account) (string, []interface{}) {
 		updateStrings = append(updateStrings, fmt.Sprintf(`"LastName"=$%d`, len(updateStrings)+1))
 		args = append(args, req.LastName.String)
 	}
+	// An empty email or key clears it, as storing '' did before: absent is NULL.
 	if req.Email.Valid {
 		updateStrings = append(updateStrings, fmt.Sprintf(`"Email"=$%d`, len(updateStrings)+1))
-		args = append(args, req.Email.String)
+		args = append(args, nullIfEmpty(req.Email))
 	}
 	if req.Phone.Valid {
 		updateStrings = append(updateStrings, fmt.Sprintf(`"Phone"=$%d`, len(updateStrings)+1))
@@ -570,7 +582,7 @@ func prepareAccountUpdateQuery(req Account) (string, []interface{}) {
 	}
 	if req.UserKey.Valid {
 		updateStrings = append(updateStrings, fmt.Sprintf(`"UserKey"=$%d`, len(updateStrings)+1))
-		args = append(args, req.UserKey.String)
+		args = append(args, nullIfEmpty(req.UserKey))
 	}
 
 	if len(args) != 0 {
@@ -622,6 +634,9 @@ func (o *OrdersDB) IsSubjectID(ctx context.Context, keycloakID, accountID string
 }
 
 func (o *OrdersDB) GetOrCreateAccountFromProfile(ctx context.Context, keycloakId string) (int, error) {
+	if keycloakId == "" {
+		return 0, fmt.Errorf("%w: empty keycloak id", common.ErrInvalidValues)
+	}
 	var account *Account
 	accountId, err := o.GetAccountIDByKeycloakID(ctx, keycloakId)
 	if err == nil {
@@ -662,4 +677,13 @@ func (o *OrdersDB) GetOrCreateAccountFromProfile(ctx context.Context, keycloakId
 		return 0, fmt.Errorf("repo.CreateAccount: %w", err)
 	}
 	return account.ID, nil
+}
+
+// nullIfEmpty binds an empty string as NULL, the only spelling of an absent
+// identity value since migration 28.
+func nullIfEmpty(s null.String) any {
+	if s.String == "" {
+		return nil
+	}
+	return s.String
 }

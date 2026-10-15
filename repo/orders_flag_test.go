@@ -88,6 +88,30 @@ func TestFlagOrdersToRenew_SingleUserSingleOrder(t *testing.T) {
 	assert.Equal(t, common.OrderFlagToRenew, getOrderFlag(t, db, ctx, orderID))
 }
 
+// An eligible order whose userkey was never synced (or that has no account)
+// formed a NULL group whose nil key was dereferenced: the run panicked after
+// flagging every keyed user. It is skipped now; the keyed user is still
+// flagged.
+func TestFlagOrdersToRenew_NullUserkeyIsSkipped(t *testing.T) {
+	db, ctx := newTestDB(t)
+	keyed := createTestAccount(t, db, ctx, "keyed@test.com")
+	unsynced := createTestAccount(t, db, ctx, "unsynced@test.com")
+	may := time.Date(2024, 5, 15, 0, 0, 0, 0, time.UTC)
+
+	keyedOrder := insertOrder(t, db, ctx, renewableOrder(keyed, common.OrderStatusPaid, may), "keyed-key")
+	unsyncedOrder := insertOrder(t, db, ctx, renewableOrder(unsynced, common.OrderStatusPaid, may), "")
+
+	var count int64
+	require.NotPanics(t, func() {
+		var err error
+		count, err = db.FlagOrdersToRenew(ctx, 6, 2024)
+		require.NoError(t, err)
+	})
+	assert.Equal(t, int64(1), count)
+	assert.Equal(t, common.OrderFlagToRenew, getOrderFlag(t, db, ctx, keyedOrder))
+	assert.Empty(t, getOrderFlag(t, db, ctx, unsyncedOrder))
+}
+
 func TestFlagOrdersToRenew_PaymentDateInBillingMonth_NotFlagged(t *testing.T) {
 	db, ctx := newTestDB(t)
 	accountID := createTestAccount(t, db, ctx, "user1@test.com")

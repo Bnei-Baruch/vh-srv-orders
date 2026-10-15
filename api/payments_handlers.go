@@ -376,6 +376,12 @@ func (o *OrdersAPI) handleGetActivities(c *gin.Context) {
 	)
 	if !isAdmin {
 		currentUserEmail, err = o.repo.GetEmailByKeycloakID(c.Request.Context(), keycloakId) // getting user email by keycloakId
+		if errors.Is(err, common.ErrNoRowsAffected) {
+			// No account or no email: no activities. Never fall through with an
+			// empty email, which would drop the filter and list everyone's.
+			c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": []repo.PaymentActivitiesRes{}, "totalCount": 0, "success": true})
+			return
+		}
 		if err != nil {
 			c.Status(http.StatusInternalServerError)
 			_ = c.Error(fmt.Errorf("repo.GetEmailByKeycloakID: %w", err))

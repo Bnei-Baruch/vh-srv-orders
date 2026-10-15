@@ -529,7 +529,7 @@ func preparePelecardPaymentCreateQuery(req Payment, paymentID int) (string, stri
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.Success.String)
 	}
-	if req.PelecardToken.Valid {
+	if req.PelecardToken.Valid && req.PelecardToken.String != "" {
 		createStrings = append(createStrings, "pelecard_token")
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.PelecardToken.String)
@@ -696,7 +696,7 @@ func preparePelecardPaymentUpdateQuery(req PaymentUpdate) (string, []interface{}
 		updateStrings = append(updateStrings, fmt.Sprintf("success=$%d", len(updateStrings)+1))
 		args = append(args, req.Success.String)
 	}
-	if req.PelecardToken.Valid {
+	if req.PelecardToken.Valid && req.PelecardToken.String != "" {
 		updateStrings = append(updateStrings, fmt.Sprintf("pelecard_token=$%d", len(updateStrings)+1))
 		args = append(args, req.PelecardToken.String)
 	}
@@ -835,7 +835,7 @@ func preparePelecardPaymentUpdateViaPaymentStructQuery(req Payment) (string, []i
 		updateStrings = append(updateStrings, fmt.Sprintf("success=$%d", len(updateStrings)+1))
 		args = append(args, req.Success.String)
 	}
-	if req.PelecardToken.Valid {
+	if req.PelecardToken.Valid && req.PelecardToken.String != "" {
 		updateStrings = append(updateStrings, fmt.Sprintf("pelecard_token=$%d", len(updateStrings)+1))
 		args = append(args, req.PelecardToken.String)
 	}
@@ -1171,15 +1171,15 @@ func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentTy
 		}
 		if paymentsWithTokenBool {
 			if whereCondition.String() != "" {
-				whereCondition.WriteString(" AND p.pelecard_token != ''")
+				whereCondition.WriteString(" AND p.pelecard_token IS NOT NULL")
 			} else {
-				whereCondition.WriteString(" p.pelecard_token != ''")
+				whereCondition.WriteString(" p.pelecard_token IS NOT NULL")
 			}
 		} else {
 			if whereCondition.String() != "" {
-				whereCondition.WriteString(" AND p.pelecard_token = ''")
+				whereCondition.WriteString(" AND p.pelecard_token IS NULL")
 			} else {
-				whereCondition.WriteString(" p.pelecard_token = ''")
+				whereCondition.WriteString(" p.pelecard_token IS NULL")
 			}
 
 		}
@@ -1327,7 +1327,7 @@ func preparePaymentCreateQuery(req Payment) (string, string, []interface{}) {
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.Success.String)
 	}
-	if req.PelecardToken.Valid {
+	if req.PelecardToken.Valid && req.PelecardToken.String != "" {
 		createStrings = append(createStrings, "pelecard_token")
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.PelecardToken.String)
@@ -1508,7 +1508,7 @@ func preparePaymentUpdateQuery(req Payment) (string, []interface{}) {
 		updateStrings = append(updateStrings, fmt.Sprintf("success=$%d", len(updateStrings)+1))
 		args = append(args, req.Success.String)
 	}
-	if req.PelecardToken.Valid {
+	if req.PelecardToken.Valid && req.PelecardToken.String != "" {
 		updateStrings = append(updateStrings, fmt.Sprintf("pelecard_token=$%d", len(updateStrings)+1))
 		args = append(args, req.PelecardToken.String)
 	}
@@ -1622,7 +1622,7 @@ func preparePaymentUpdateQuery(req Payment) (string, []interface{}) {
 func (o *OrdersDB) FetchPaymentByParamX(ctx context.Context, paramX string) (*PaymentWithFullName, error) {
 	var p PaymentWithFullName
 
-	if err := o.pool.QueryRow(ctx, `select a."UserKey", a.id, a."FirstName", a."LastName", a."Email", a."Street", a."City", o."OrderLanguage", o."Amount", o."Currency", 
+	if err := o.pool.QueryRow(ctx, `select COALESCE(a."UserKey", ''), a.id, a."FirstName", a."LastName", COALESCE(a."Email", ''), a."Street", a."City", o."OrderLanguage", o."Amount", o."Currency", 
 	p.id, p."Amount", p."PaymentStatus", p."PaymentType", p."OrderID", p."ParamX", p."AuthNo", p.confirmation_key,
 	p.success, p.pelecard_token, p."TransactionID", p."ErrorMsg", p."CardHebrewName", p."CCAbroadCard", p."CCBrand",
 	p."CCCompanyClearer", p."CCCompanyIssuer", p.credit_type, p."CCExpDate", p."CCNumber", p."DebitCode", p."DebitCurrency",

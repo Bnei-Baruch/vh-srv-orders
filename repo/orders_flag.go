@@ -9,11 +9,15 @@ import (
 )
 
 func (o *OrdersDB) FlagOrdersToRenew(ctx context.Context, month int64, year int64) (int64, error) {
-	// Select all unique individuals who have an active renewable order
+	// Select all unique individuals who have an active renewable order.
+	// userkey is NULL until UpdateOrdersUserKeyFromAccounts copies it from the
+	// account, and for orders with no account; such rows identify nobody, and
+	// their group scanned a nil key that the per-user query dereferenced.
 	qOPotentialStr := `
 	select userkey, count(userkey) as qt
 	from orders where ("Status" = 'paid' or "Status" = 'nosuccess')
 	and "ProductType" = 'globalmembership'
+	and userkey is not null
 	group by userkey
 	order by qt desc
 	`

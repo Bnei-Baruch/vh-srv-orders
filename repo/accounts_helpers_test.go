@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	uuid "github.com/satori/go.uuid"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/volatiletech/null/v9"
@@ -198,4 +199,32 @@ func AccountFixture() Account {
 		Country:     null.StringFrom("country"),
 		AccountType: null.StringFrom("account type"),
 	}
+}
+
+// An absent email is NULL: GetEmailByKeycloakID reports it as no email rather
+// than failing to scan it or returning "", and writers store "" as absent.
+func TestAccountEmail_AbsentIsNull(t *testing.T) {
+	db, ctx := newTestDB(t)
+
+	_, err := db.GetEmailByKeycloakID(ctx, "kc-nobody")
+	assert.ErrorIs(t, err, common.ErrNoRowsAffected, "no account")
+
+	id, err := db.CreateAccount(ctx, Account{UserKey: null.StringFrom("kc-noemail"), Email: null.StringFrom("")})
+	require.NoError(t, err)
+	var stored null.String
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT "Email" FROM accounts WHERE id = $1`, id).Scan(&stored))
+	assert.False(t, stored.Valid, "an empty email is stored as NULL")
+
+	_, err = db.GetEmailByKeycloakID(ctx, "kc-noemail")
+	assert.ErrorIs(t, err, common.ErrNoRowsAffected, "account without email")
+
+	id, err = db.CreateAccount(ctx, Account{UserKey: null.StringFrom("kc-email"), Email: null.StringFrom("a@test.test")})
+	require.NoError(t, err)
+	email, err := db.GetEmailByKeycloakID(ctx, "kc-email")
+	require.NoError(t, err)
+	assert.Equal(t, "a@test.test", email)
+
+	require.NoError(t, db.PatchAccount(ctx, Account{Email: null.StringFrom(""), FirstName: null.StringFrom("A")}, id))
+	_, err = db.GetEmailByKeycloakID(ctx, "kc-email")
+	assert.ErrorIs(t, err, common.ErrNoRowsAffected, "patching an empty email clears it, as storing '' did before")
 }

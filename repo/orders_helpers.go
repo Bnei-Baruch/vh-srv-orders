@@ -828,6 +828,7 @@ func (o *OrdersDB) UpdateOrdersUserKeyFromAccounts(ctx context.Context) error {
 		SET userkey = accounts."UserKey" 
 		FROM accounts 
 		WHERE orders."AccountID" = accounts.id
+		  AND orders.userkey IS DISTINCT FROM accounts."UserKey"
 	`
 	_, err := o.pool.Exec(ctx, query)
 	return err

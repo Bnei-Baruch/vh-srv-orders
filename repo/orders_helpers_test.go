@@ -551,6 +551,26 @@ func TestUpdateOrdersUserKeyFromAccounts(t *testing.T) {
 	assert.Equal(t, "userkey2", userkey2.String, "Order2 userkey should be updated from account2")
 }
 
+// The sync runs before every billing run. An order whose userkey already
+// matches must not be rewritten: every rewrite is a new row version and a row
+// lock for nothing. A new version shows as a changed xmin.
+func TestUpdateOrdersUserKeyFromAccounts_SkipsSyncedOrders(t *testing.T) {
+	db, ctx := newTestDB(t)
+
+	accountID, err := db.CreateAccount(ctx, Account{UserKey: null.StringFrom("userkey1")})
+	require.NoError(t, err)
+	var orderID int
+	require.NoError(t, db.pool.QueryRow(ctx,
+		`INSERT INTO orders ("AccountID", userkey) VALUES ($1, 'userkey1') RETURNING id`, accountID).Scan(&orderID))
+
+	var before, after string
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT xmin::text FROM orders WHERE id = $1`, orderID).Scan(&before))
+	require.NoError(t, db.UpdateOrdersUserKeyFromAccounts(ctx))
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT xmin::text FROM orders WHERE id = $1`, orderID).Scan(&after))
+
+	assert.Equal(t, before, after, "an order already in sync is left untouched")
+}
+
 func TestGetPaidOrdersCount(t *testing.T) {
 	dbURL, err := testutil.NewTestOrdersDB(t, context.Background())
 	require.NoError(t, err)

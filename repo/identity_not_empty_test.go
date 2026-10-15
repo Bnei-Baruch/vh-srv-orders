@@ -144,6 +144,25 @@ func TestSetKeycloakIdByEmail_EmptyValuesAreInvalid(t *testing.T) {
 	assert.Equal(t, "kc-1", key)
 }
 
+// The specials sheet gives a blank email column as "", not NULL. With a
+// keycloak id that is still a keycloak-only special, and refused.
+func TestCreateSpecial_KeycloakIDWithEmptyEmailIsRefused(t *testing.T) {
+	db, ctx := newTestDB(t)
+
+	_, err := db.CreateSpecial(ctx, Special{
+		KeycloakId: null.StringFrom("kc-blank-email"),
+		Email:      null.StringFrom(""),
+		StartDate:  null.TimeFrom(time.Now()),
+		EndDate:    null.TimeFrom(time.Now().Add(time.Hour)),
+		Category:   null.StringFrom("hh"),
+	})
+
+	assert.ErrorIs(t, err, common.ErrInvalidValues)
+	var n int
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT count(*) FROM specials WHERE keycloak_id = 'kc-blank-email'`).Scan(&n))
+	assert.Zero(t, n)
+}
+
 // An email is required; an empty one counts as none. The keycloak-only case
 // is TestCreateSpecial_KeycloakOnlyIsRefused.
 func TestCreateSpecial_RequiresAnEmail(t *testing.T) {

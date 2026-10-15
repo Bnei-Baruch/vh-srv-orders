@@ -169,9 +169,6 @@ func (o *OrdersDB) CreateSpecial(ctx context.Context, s Special) (int, error) {
 		return 0, fmt.Errorf("special needs an email: %w", common.ErrInvalidValues)
 	}
 	createString, numString, createQueryArgs := prepareSpecialCreateQuery(s)
-	if len(createQueryArgs) == 0 {
-		return 0, common.ErrInvalidValues
-	}
 
 	var ID int
 	if err := o.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO specials (%s) VALUES (%s) RETURNING id`, createString, numString),

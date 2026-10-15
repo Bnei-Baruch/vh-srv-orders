@@ -71,6 +71,9 @@ func (o *OrdersAPI) handleCreateAccount(c *gin.Context) {
 	if !o.isEmailOwnerOrHasAnyRole(c, req.Email.String, common.RoleRoot, common.RoleAdmin) {
 		return
 	}
+	if !o.mayStoreUserKey(c, req.UserKey) {
+		return
+	}
 	accountId, err := o.repo.CreateAccount(c.Request.Context(), req)
 	if err != nil {
 		if errors.Is(err, common.ErrInvalidValues) {
@@ -145,6 +148,9 @@ func (o *OrdersAPI) handlePatchAccount(c *gin.Context) {
 		return
 	}
 	if !o.isUserOrHasAnyRole(c, id, common.RoleRoot, common.RoleAdmin) {
+		return
+	}
+	if !o.mayStoreUserKey(c, req.UserKey) {
 		return
 	}
 	err = o.repo.PatchAccount(c.Request.Context(), req, intID)

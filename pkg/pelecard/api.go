@@ -90,7 +90,7 @@ func (c *Client) FetchMuhlafim(ctx context.Context, startDate, endDate string) (
 	}
 
 	if resp.IsError() {
-		return nil, fmt.Errorf("external muhlafim error [%d]: %s", resp.StatusCode(), resp.String())
+		return nil, utils.RespStatusError(resp, "external muhlafim error")
 	}
 
 	var entries map[string]MuhlafimEntry

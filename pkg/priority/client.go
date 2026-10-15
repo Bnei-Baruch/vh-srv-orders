@@ -96,7 +96,7 @@ func (c *Client) GetCustomersByEmail(ctx context.Context, email string) ([]Custo
 	}
 
 	if resp.IsError() {
-		return nil, fmt.Errorf("priority API error [%d]: %s", resp.StatusCode(), resp.String())
+		return nil, utils.RespStatusError(resp, "priority API error")
 	}
 
 	result := resp.Result().(*CustomerODataResponse)
@@ -127,7 +127,7 @@ func (c *Client) GetCustomerByID(ctx context.Context, customerID string) (*Custo
 		if resp.StatusCode() == http.StatusNotFound {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("priority API error [%d]: %s", resp.StatusCode(), resp.String())
+		return nil, utils.RespStatusError(resp, "priority API error")
 	}
 
 	customer, _ := resp.Result().(*Customer)
@@ -176,7 +176,7 @@ func (c *Client) GetAccountReceivables(ctx context.Context, customerID string) (
 		if resp.StatusCode() == http.StatusNotFound {
 			return []AccountReceivableItem{}, nil // Return empty slice, not an error
 		}
-		return nil, fmt.Errorf("priority API error [%d]: %s", resp.StatusCode(), resp.String())
+		return nil, utils.RespStatusError(resp, "priority API error")
 	}
 
 	result := resp.Result().(*AccountReceivableODataResponse)
@@ -198,14 +198,13 @@ func (c *Client) GetAccountReceivables(ctx context.Context, customerID string) (
 			Get(nextLink)
 
 		if err != nil {
-			// Log warning but return what we have
+			// Return the pages fetched so far together with the error.
 			return allItems, fmt.Errorf("error fetching next page (returning partial results): %w", err)
 		}
 
 		if nextResp.IsError() {
-			// Log warning but return what we have
-			return allItems, fmt.Errorf("error fetching next page [%d] (returning partial results): %s",
-				nextResp.StatusCode(), nextResp.String())
+			// Return the pages fetched so far together with the error.
+			return allItems, utils.RespStatusError(nextResp, "error fetching next page (returning partial results)")
 		}
 
 		nextResult := nextResp.Result().(*AccountReceivableODataResponse)
@@ -395,7 +394,7 @@ func (c *Client) resolveActiveCustNames(ctx context.Context, emails []string, st
 				// customers". A real "no rows" result is a 200 with an empty value array, not
 				// a 404. Treat 404 like any other error instead of silently skipping the
 				// chunk, so a real failure surfaces as pricing_error and gets retried.
-				return nil, fmt.Errorf("priority API error [%d]: %s", resp.StatusCode(), resp.String())
+				return nil, utils.RespStatusError(resp, "priority API error")
 			}
 			if !isJSONResponse(resp) {
 				// A 200 with a non-JSON body (maintenance page, redirect target) would
@@ -503,7 +502,7 @@ func (c *Client) fetchContributionsByCustomer(ctx context.Context, custNames []s
 				// lookup, so a 404 isn't a reliable "no rows" signal. Treat it as a real
 				// error so it surfaces as pricing_error and gets retried, instead of every
 				// customer in the chunk silently reporting zero contributions.
-				return fmt.Errorf("priority API error [%d]: %s", resp.StatusCode(), resp.String())
+				return utils.RespStatusError(resp, "priority API error")
 			}
 			if !isJSONResponse(resp) {
 				return fmt.Errorf("priority returned non-JSON response (content-type=%q, status=%d)",
@@ -590,7 +589,7 @@ func (c *Client) fetchAllExpandedItems(ctx context.Context, acc accountsReceivab
 		stats.Bytes += len(resp.Body())
 
 		if resp.IsError() {
-			return nil, fmt.Errorf("priority API error [%d]: %s", resp.StatusCode(), resp.String())
+			return nil, utils.RespStatusError(resp, "priority API error")
 		}
 		if !isJSONResponse(resp) {
 			return nil, fmt.Errorf("priority returned non-JSON response (content-type=%q, status=%d)",

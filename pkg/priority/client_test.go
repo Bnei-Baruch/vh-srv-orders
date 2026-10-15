@@ -138,7 +138,7 @@ func TestGetCustomersByEmail_APIError(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "priority API error [500]")
+	assert.EqualError(t, err, `priority API error [500]: {"error": "internal server error"}`)
 }
 
 func TestGetCustomersByEmail_RequestError(t *testing.T) {
@@ -215,7 +215,7 @@ func TestGetCustomerByID_APIError(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "priority API error [500]")
+	assert.EqualError(t, err, `priority API error [500]: {"error": "internal server error"}`)
 }
 
 func TestGetCustomerByID_RequestError(t *testing.T) {
@@ -454,7 +454,7 @@ func TestGetAccountReceivables_PaginationError_ReturnsPartialResults(t *testing.
 
 	// Should return partial results with error
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "returning partial results")
+	assert.EqualError(t, err, "error fetching next page (returning partial results) [500]: ")
 	require.Len(t, result, 2)
 }
 
@@ -470,7 +470,7 @@ func TestGetAccountReceivables_APIError(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "priority API error [500]")
+	assert.EqualError(t, err, `priority API error [500]: {"error": "internal server error"}`)
 }
 
 // --- GetLastContributionsBatch ---

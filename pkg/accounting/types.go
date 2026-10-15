@@ -1,9 +1,5 @@
 package accounting
 
-type APIError struct {
-	Error string `json:"error"`
-}
-
 // ContributionsResult is the breakdown returned by GetLastContributions.
 // Found is false when the email did not match any customer in any enabled company.
 type ContributionsResult struct {

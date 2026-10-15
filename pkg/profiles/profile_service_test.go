@@ -14,6 +14,7 @@ import (
 
 	keycloakmocks "gitlab.bbdev.team/vh/pay/orders/internal/mocks/pkg/keycloak"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/keycloak"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
 )
 
 func TestProfileServiceAPI_LookupProfile_Success(t *testing.T) {
@@ -58,7 +59,7 @@ func TestProfileServiceAPI_LookupProfile_401RetrySuccess(t *testing.T) {
 		attemptCount++
 		if attemptCount == 1 {
 			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(APIError{Error: "unauthorized"})
+			json.NewEncoder(w).Encode(utils.APIError{Error: "unauthorized"})
 			return
 		}
 
@@ -88,8 +89,9 @@ func TestProfileServiceAPI_LookupProfile_401RetryFailure(t *testing.T) {
 	attemptCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attemptCount++
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(APIError{Error: "unauthorized"})
+		json.NewEncoder(w).Encode(utils.APIError{Error: "unauthorized"})
 	}))
 	defer server.Close()
 
@@ -104,7 +106,7 @@ func TestProfileServiceAPI_LookupProfile_401RetryFailure(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Nil(t, profile)
-	assert.Contains(t, err.Error(), "unauthorized")
+	assert.EqualError(t, err, "unauthorized")
 	assert.Equal(t, 2, attemptCount)
 }
 
@@ -146,8 +148,9 @@ func TestProfileServiceAPI_LookupProfile_EmptyResults(t *testing.T) {
 
 func TestProfileServiceAPI_LookupProfile_OtherError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(APIError{Error: "internal server error"})
+		json.NewEncoder(w).Encode(utils.APIError{Error: "internal server error"})
 	}))
 	defer server.Close()
 
@@ -162,7 +165,29 @@ func TestProfileServiceAPI_LookupProfile_OtherError(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Nil(t, profile)
-	assert.Contains(t, err.Error(), "internal server error")
+	assert.EqualError(t, err, "internal server error")
+}
+
+// A JSON error body without our "error" field (a framework's default
+// {"message": ...}) must still produce a readable error, not errors.New("").
+func TestProfileServiceAPI_LookupProfile_ErrorBodyWithoutErrorField(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"message":"boom"}`))
+	}))
+	defer server.Close()
+
+	mockTokenSource := keycloakmocks.NewMockTokenSource(t)
+	mockTokenSource.EXPECT().Token().Return("token123", nil).Once()
+
+	api := newTestProfileServiceAPI(server.URL, mockTokenSource)
+
+	profile, err := api.LookupProfile(context.Background(), "test@example.com")
+
+	require.Error(t, err)
+	assert.Nil(t, profile)
+	assert.EqualError(t, err, `unexpected response: [500 Internal Server Error] {"message":"boom"}`)
 }
 
 func TestProfileServiceAPI_LookupProfileByKeycloakId_Success(t *testing.T) {
@@ -247,6 +272,28 @@ func TestProfileServiceAPI_LookupProfileByKeycloakId_NotFound(t *testing.T) {
 	assert.Nil(t, profile)
 }
 
+func TestProfileServiceAPI_LookupProfileByKeycloakId_OtherError(t *testing.T) {
+	keycloakID := uuid.FromStringOrNil("22000000-0000-0000-0000-000000000000")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(utils.APIError{Error: "internal server error"})
+	}))
+	defer server.Close()
+
+	mockTokenSource := keycloakmocks.NewMockTokenSource(t)
+	mockTokenSource.EXPECT().Token().Return("token123", nil).Once()
+
+	api := newTestProfileServiceAPI(server.URL, mockTokenSource)
+
+	profile, err := api.LookupProfileByKeycloakId(context.Background(), keycloakID.String())
+
+	require.Error(t, err)
+	assert.Nil(t, profile)
+	assert.EqualError(t, err, "internal server error")
+}
+
 func TestProfileServiceAPI_GetProfileByKeycloakID_Success(t *testing.T) {
 	keycloakID := uuid.FromStringOrNil("22000000-0000-0000-0000-000000000000")
 	expectedProfile := Profile{
@@ -316,8 +363,9 @@ func TestProfileServiceAPI_GetProfileByKeycloakID_401RetryFailure(t *testing.T) 
 	attemptCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attemptCount++
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(APIError{Error: "unauthorized"})
+		json.NewEncoder(w).Encode(utils.APIError{Error: "unauthorized"})
 	}))
 	defer server.Close()
 
@@ -332,7 +380,7 @@ func TestProfileServiceAPI_GetProfileByKeycloakID_401RetryFailure(t *testing.T) 
 
 	require.Error(t, err)
 	assert.Nil(t, profile)
-	assert.Contains(t, err.Error(), "unauthorized")
+	assert.EqualError(t, err, "unauthorized")
 	assert.Equal(t, 2, attemptCount)
 }
 
@@ -360,8 +408,9 @@ func TestProfileServiceAPI_GetProfileByKeycloakID_OtherError(t *testing.T) {
 	keycloakID := uuid.FromStringOrNil("22000000-0000-0000-0000-000000000000")
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(APIError{Error: "internal server error"})
+		json.NewEncoder(w).Encode(utils.APIError{Error: "internal server error"})
 	}))
 	defer server.Close()
 
@@ -376,7 +425,7 @@ func TestProfileServiceAPI_GetProfileByKeycloakID_OtherError(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Nil(t, profile)
-	assert.Contains(t, err.Error(), "internal server error")
+	assert.EqualError(t, err, "internal server error")
 }
 
 // Helper function to create a test ProfileServiceAPI with a test server URL
@@ -387,7 +436,7 @@ func newTestProfileServiceAPI(serverURL string, tokenSource keycloak.TokenSource
 		"Content-Type": "application/json",
 		"User-Agent":   "test",
 	})
-	client.SetError(APIError{})
+	client.SetError(utils.APIError{})
 
 	return &ProfileServiceAPI{
 		client:      client,

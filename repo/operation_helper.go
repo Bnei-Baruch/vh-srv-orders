@@ -192,12 +192,10 @@ func (o *OrdersDB) RevertOperation(ctx context.Context, newEmail string, oldEmai
 	}
 
 	tx, err := o.pool.Begin(ctx)
-
-	defer func() { _ = tx.Rollback(ctx) }()
-
 	if err != nil {
-		return err
+		return fmt.Errorf("o.pool.Begin: %w", err)
 	}
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	var query string
 	// first query in the Queries array is the query to revert

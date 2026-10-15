@@ -5,16 +5,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
+
+	"github.com/jackc/pgx/v5"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
 )
 
-type QueryLog struct {
-	Queries []interface{} `json:"queries"`
-	Logs    []interface{} `json:"logs"`
-}
+const (
+	operationTypeEmailUpdate = "email_update"
+	operationStatusSuccess   = "success"
+	operationStatusReverted  = "reverted"
+)
 
+// emailInput is what operation_trace.input stores: the change as requested.
+// RevertOperation re-applies it with old and new swapped, so no SQL is ever
+// stored or read back.
 type emailInput struct {
 	NewEmail      *string `json:"new_email"`
 	NewKeycloakID *string `json:"new_keycloak_id"`
@@ -22,309 +27,162 @@ type emailInput struct {
 	OldEmail      *string `json:"old_email"`
 }
 
-func convertStructToJSONString(input interface{}) string {
-	jsonString, err := json.Marshal(input)
-	if err != nil {
-		return ""
+// identityChange is one direction of an email_update: from → to.
+// With fromKc nil only the email changes, on the account whose key is toKc.
+type identityChange struct {
+	fromEmail, toEmail string
+	fromKc             *string
+	toKc               string
+}
+
+func (in emailInput) forward() (identityChange, error) {
+	if in.NewEmail == nil || in.OldEmail == nil || in.NewKeycloakID == nil {
+		return identityChange{}, fmt.Errorf("%w: new_email, old_email and new_keycloak_id are required", common.ErrInvalidValues)
 	}
-	return string(jsonString)
+	return identityChange{fromEmail: *in.OldEmail, toEmail: *in.NewEmail, fromKc: in.OldKeycloakID, toKc: *in.NewKeycloakID}, nil
+}
+
+func (c identityChange) reverse() identityChange {
+	if c.fromKc == nil {
+		return identityChange{fromEmail: c.toEmail, toEmail: c.fromEmail, toKc: c.toKc}
+	}
+	fromKc := c.toKc
+	return identityChange{fromEmail: c.toEmail, toEmail: c.fromEmail, fromKc: &fromKc, toKc: *c.fromKc}
+}
+
+// apply runs the change in tx and returns the rows each step touched.
+//
+// Only tables that hold the user's email or keycloak id change. payments
+// "Ordkey" and payments_pelecard ord_key hold order keys ("ord-…"), never a
+// keycloak id, so they are not touched.
+func (o *OrdersDB) applyIdentityChange(ctx context.Context, tx pgx.Tx, c identityChange) (map[string]int64, error) {
+	type step struct {
+		name string
+		sql  string
+		args []any
+	}
+	var steps []step
+
+	if c.fromKc == nil {
+		steps = []step{
+			{"accounts", `UPDATE accounts SET "Email" = $1 WHERE "Email" = $2 AND "UserKey" = $3`, []any{c.toEmail, c.fromEmail, c.toKc}},
+			{"specials", `UPDATE specials SET email = $1 WHERE email = $2`, []any{c.toEmail, c.fromEmail}},
+		}
+	} else {
+		// Moving an account onto a key that already has one would give that key
+		// two accounts, which accounts_userkey_uniq refuses. Say so before
+		// changing anything; folding two people together is MergeAccountsOrders.
+		if *c.fromKc != c.toKc {
+			if _, err := o.GetAccountIDByKeycloakID(ctx, c.toKc); err == nil {
+				return nil, fmt.Errorf("new keycloak id: %w; merge the accounts instead", common.ErrAccountKeyTaken)
+			} else if !errors.Is(err, common.ErrNoRowsAffected) {
+				return nil, fmt.Errorf("o.GetAccountIDByKeycloakID: %w", err)
+			}
+		}
+		steps = []step{
+			{"accounts", `UPDATE accounts SET "Email" = $1, "UserKey" = $2 WHERE "Email" = $3 AND "UserKey" = $4`, []any{c.toEmail, c.toKc, c.fromEmail, *c.fromKc}},
+			{"orders", `UPDATE orders SET userkey = $1 WHERE userkey = $2`, []any{c.toKc, *c.fromKc}},
+			{"specials.email", `UPDATE specials SET email = $1 WHERE email = $2`, []any{c.toEmail, c.fromEmail}},
+			{"specials.keycloak_id", `UPDATE specials SET keycloak_id = $1 WHERE keycloak_id = $2`, []any{c.toKc, *c.fromKc}},
+		}
+	}
+
+	rows := make(map[string]int64, len(steps))
+	for _, s := range steps {
+		res, err := tx.Exec(ctx, s.sql, s.args...)
+		if err != nil {
+			return nil, fmt.Errorf("update %s: %w", s.name, err)
+		}
+		rows[s.name] = res.RowsAffected()
+	}
+	return rows, nil
 }
 
 func (o *OrdersDB) PerformOperation(ctx context.Context, req OperationReq) (int, error) {
-
-	newKcId := req.NewKeycloakID
-	oldKcId := req.OldKeycloakID
-	newEmail := req.NewEmail
-	oldEmail := req.OldEmail
-
-	var output QueryLog
-	var input emailInput
-	var revert QueryLog
-
-	var (
-		updateAccountsQuery         string
-		revertAcccountsQuery        string
-		updateOrdersQuery           string
-		revertOrdersQuery           string
-		updatePaymentsPelecardQuery string
-		revertPaymentsPelecardQuery string
-		updatePaymentsQuery         string
-		revertPaymentsQuery         string
-		updateSpecialsQuery         string
-		revertSpecialsQuery         string
-		updateSpecialsSep2021Query  string
-		revertSpecialsSep2021Query  string
-
-		queryArr []string
-	)
-
-	// Moving an account onto a key that already has one would give that key two
-	// accounts, which accounts_userkey_uniq refuses. Say so before running
-	// anything; folding two people's accounts together is MergeAccountsOrders.
-	if oldKcId != nil && *newKcId != *oldKcId {
-		if _, err := o.GetAccountIDByKeycloakID(ctx, *newKcId); err == nil {
-			return 0, fmt.Errorf("new keycloak id: %w; merge the accounts instead", common.ErrAccountKeyTaken)
-		} else if !errors.Is(err, common.ErrNoRowsAffected) {
-			return 0, fmt.Errorf("o.GetAccountIDByKeycloakID: %w", err)
-		}
+	input := emailInput{NewEmail: req.NewEmail, NewKeycloakID: req.NewKeycloakID, OldKeycloakID: req.OldKeycloakID, OldEmail: req.OldEmail}
+	change, err := input.forward()
+	if err != nil {
+		return 0, err
 	}
 
 	tx, err := o.pool.Begin(ctx)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("o.pool.Begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if oldKcId == nil {
-		updateAccountsQuery = `UPDATE accounts SET "Email" = '` + *newEmail + `' WHERE "Email" = '` + *oldEmail + ` AND "UserKey" = '` + *newKcId + `';`
-		revertAcccountsQuery = `UPDATE accounts SET "Email" = '` + *oldEmail + `' WHERE "Email" = '` + *newEmail + ` AND "UserKey" = '` + *newKcId + `';`
-		queryArr = append(queryArr, updateAccountsQuery)
-
-		// Order Table: no need to update orders table because it has no relation to email
-		// Pelecard Table: no need to update payments_pelecard table because it has no relation to email
-		// Payments Table: no need to update payments table because it has no relation to email
-
-		updateSpecialsQuery = `UPDATE specials SET email = '` + *newEmail + `' WHERE email = '` + *oldEmail + `';`
-		revertSpecialsQuery = `UPDATE specials SET email = '` + *oldEmail + `' WHERE email = '` + *newEmail + `';`
-		queryArr = append(queryArr, updateSpecialsQuery)
-
-	} else {
-		updateAccountsQuery = `UPDATE accounts SET "Email" = '` + *newEmail + `', "UserKey" = '` + *newKcId + `' WHERE "Email" = '` + *oldEmail + `' AND "UserKey" = '` + *oldKcId + `';`
-		revertAcccountsQuery = `UPDATE accounts SET "Email" = '` + *oldEmail + `', "UserKey" = '` + *oldKcId + `' WHERE "Email" = '` + *newEmail + `' AND "UserKey" = '` + *newKcId + `';`
-		queryArr = append(queryArr, updateAccountsQuery)
-
-		updateOrdersQuery = `UPDATE orders SET userkey = '` + *newKcId + `' WHERE userkey = '` + *oldKcId + `';`
-		revertOrdersQuery = `UPDATE orders SET userkey = '` + *oldKcId + `' WHERE userkey = '` + *newKcId + `';`
-		queryArr = append(queryArr, updateOrdersQuery)
-
-		updatePaymentsPelecardQuery = `UPDATE payments_pelecard SET ord_key = '` + *newKcId + `' WHERE ord_key = '` + *oldKcId + `';`
-		revertPaymentsPelecardQuery = `UPDATE payments_pelecard SET ord_key = '` + *oldKcId + `' WHERE ord_key = '` + *newKcId + `';`
-		queryArr = append(queryArr, updatePaymentsPelecardQuery)
-
-		updatePaymentsQuery = `UPDATE payments SET "Ordkey" = '` + *newKcId + `' WHERE "Ordkey" = '` + *oldKcId + `';`
-		revertPaymentsQuery = `UPDATE payments SET "Ordkey" = '` + *oldKcId + `' WHERE "Ordkey" = '` + *newKcId + `';`
-		queryArr = append(queryArr, updatePaymentsQuery)
-
-		updateSpecialsQuery = `UPDATE specials SET email = '` + *newEmail + `' WHERE email = '` + *oldEmail + `';`
-		revertSpecialsQuery = `UPDATE specials SET email = '` + *oldEmail + `' WHERE email = '` + *newEmail + `';`
-		queryArr = append(queryArr, updateSpecialsQuery)
-
-		updateSpecialsSep2021Query = `UPDATE specials_sep2021 SET email = '` + *newEmail + `' WHERE email = '` + *oldEmail + `';`
-		revertSpecialsSep2021Query = `UPDATE specials_sep2021 SET email = '` + *oldEmail + `' WHERE email = '` + *newEmail + `';`
-		queryArr = append(queryArr, updateSpecialsSep2021Query)
+	rows, err := o.applyIdentityChange(ctx, tx, change)
+	if err != nil {
+		return 0, err
 	}
 
-	input.NewEmail = newEmail
-	input.NewKeycloakID = newKcId
-	input.OldKeycloakID = oldKcId
-	input.OldEmail = req.OldEmail
-
-	// run loop for all queries
-	for _, query := range queryArr {
-		updatedRes, err := tx.Exec(ctx, query)
-
-		if err != nil {
-			return 0, fmt.Errorf("problem updating users: %w", err)
-		}
-
-		output.Queries = append(output.Queries, query)
-		output.Logs = append(output.Logs, updatedRes.String())
-
-		switch query {
-		case updateAccountsQuery:
-			revert.Queries = append(revert.Queries, revertAcccountsQuery)
-		case updateOrdersQuery:
-			revert.Queries = append(revert.Queries, revertOrdersQuery)
-		case updatePaymentsPelecardQuery:
-			revert.Queries = append(revert.Queries, revertPaymentsPelecardQuery)
-		case updatePaymentsQuery:
-			revert.Queries = append(revert.Queries, revertPaymentsQuery)
-		case updateSpecialsQuery:
-			revert.Queries = append(revert.Queries, revertSpecialsQuery)
-		case updateSpecialsSep2021Query:
-			revert.Queries = append(revert.Queries, revertSpecialsSep2021Query)
-		}
+	inputJSON, err := json.Marshal(input)
+	if err != nil {
+		return 0, fmt.Errorf("marshal input: %w", err)
+	}
+	outputJSON, err := json.Marshal(rows)
+	if err != nil {
+		return 0, fmt.Errorf("marshal output: %w", err)
 	}
 
-	revert.Logs = []interface{}{}
-
-	var ID int
-
-	inputJson := convertStructToJSONString(input)
-	req.Input = &inputJson
-
-	outputJson := convertStructToJSONString(output)
-	req.Output = &outputJson
-
-	revertJson := convertStructToJSONString(revert)
-	req.Revert = &revertJson
-
-	success := "success"
-	req.Status = &success
-
-	emailUpdate := "email_update"
-	req.Type = &emailUpdate
-
-	createString, numString, createQueryArgs := prepareOperationCreateQuery(req)
-
-	if len(createQueryArgs) != 0 {
-		if err := tx.QueryRow(ctx, fmt.Sprintf(`INSERT INTO operation_trace (%s) VALUES (%s) RETURNING id`, createString, numString),
-			createQueryArgs...).Scan(&ID); err != nil {
-			return 0, fmt.Errorf("problem creating operation_trace: %w", err)
-		}
-
-		return ID, tx.Commit(ctx)
-	} else {
-		return 0, common.ErrInvalidValues
+	var id int
+	if err := tx.QueryRow(ctx,
+		`INSERT INTO operation_trace (input, output, status, type) VALUES ($1, $2, $3, $4) RETURNING id`,
+		string(inputJSON), string(outputJSON), operationStatusSuccess, operationTypeEmailUpdate).Scan(&id); err != nil {
+		return 0, fmt.Errorf("insert operation_trace: %w", err)
 	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("tx.Commit: %w", err)
+	}
+	return id, nil
 }
 
-// TODO; revert operation
+// RevertOperation undoes the latest operation from oldEmail to newEmail by
+// applying its input in reverse, and records the rows that touched.
 func (o *OrdersDB) RevertOperation(ctx context.Context, newEmail string, oldEmail string) error {
-	// get operation by id
-	var operation OperationTrace
-
-	// get operation by newEmail and oldEmail
-
-	if err := o.pool.QueryRow(ctx, `SELECT id, status, revert FROM operation_trace WHERE input->>'new_email'=$1 AND input->>'old_email'=$2 ORDER BY id DESC LIMIT 1`, newEmail, oldEmail).Scan(
-		&operation.ID,
-		&operation.Status,
-		&operation.Revert); err != nil {
-		return fmt.Errorf("problem getting operation_trace: %w", err)
+	var (
+		id     int
+		status string
+		raw    string
+	)
+	if err := o.pool.QueryRow(ctx,
+		`SELECT id, status, input::text FROM operation_trace
+		 WHERE input->>'new_email' = $1 AND input->>'old_email' = $2
+		 ORDER BY id DESC LIMIT 1`, newEmail, oldEmail).Scan(&id, &status, &raw); err != nil {
+		return fmt.Errorf("select operation_trace: %w", err)
 	}
-
-	if *operation.Status == "reverted" {
+	if status == operationStatusReverted {
 		return fmt.Errorf("operation already reverted")
 	}
 
-	// revert operation
-	var revert QueryLog
-	if err := json.Unmarshal([]byte(*operation.Revert), &revert); err != nil {
-		return fmt.Errorf("problem unmarshalling operation_trace: %w", err)
+	var input emailInput
+	if err := json.Unmarshal([]byte(raw), &input); err != nil {
+		return fmt.Errorf("unmarshal operation_trace input: %w", err)
 	}
-
-	tx, err := o.pool.Begin(ctx)
-
-	defer func() { _ = tx.Rollback(ctx) }()
-
+	change, err := input.forward()
 	if err != nil {
 		return err
 	}
 
-	var query string
-	// first query in the Queries array is the query to revert
-	if revert.Queries != nil {
-		// query = revert.Queries[0].(string)
-		// loop over all queries in the Queries array
-		for _, q := range revert.Queries {
-			query = q.(string)
-			revertRes, err := tx.Exec(ctx, query)
-			if err != nil {
-				return fmt.Errorf("problem reverting operation: %w", err)
-			}
+	tx, err := o.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("o.pool.Begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
 
-			// update operation_trace
-			revert.Logs = append(revert.Logs, revertRes.String())
-		}
+	rows, err := o.applyIdentityChange(ctx, tx, change.reverse())
+	if err != nil {
+		return err
+	}
+	revertJSON, err := json.Marshal(rows)
+	if err != nil {
+		return fmt.Errorf("marshal revert: %w", err)
 	}
 
-	revertJson := convertStructToJSONString(revert)
-	operation.Revert = &revertJson
-
-	var revertedStr = "reverted"
-	operation.Status = &revertedStr
-
-	updateString, updateQueryArgs := prepareOperationTraceUpdateQuery(operation)
-
-	if len(updateQueryArgs) != 0 {
-		if err := tx.QueryRow(ctx, fmt.Sprintf(`UPDATE operation_trace SET %s WHERE id='%d' RETURNING id`, updateString, *operation.ID),
-			updateQueryArgs...).Scan(&operation.ID); err != nil {
-			return fmt.Errorf("problem updating operation_trace: %w", err)
-		}
-
-		return tx.Commit(ctx)
-	} else {
-		return common.ErrInvalidValues
+	if _, err := tx.Exec(ctx, `UPDATE operation_trace SET revert = $1, status = $2 WHERE id = $3`,
+		string(revertJSON), operationStatusReverted, id); err != nil {
+		return fmt.Errorf("update operation_trace: %w", err)
 	}
-
-}
-
-func prepareOperationCreateQuery(req OperationReq) (string, string, []interface{}) {
-	var createStrings []string
-	var numString []string
-	var args []interface{}
-
-	if req.Input != nil {
-		createStrings = append(createStrings, "input")
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, *req.Input)
-	}
-
-	if req.Output != nil {
-		createStrings = append(createStrings, "output")
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, *req.Output)
-	}
-
-	if req.Revert != nil {
-		createStrings = append(createStrings, "revert")
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, *req.Revert)
-	}
-
-	if req.Status != nil {
-		createStrings = append(createStrings, "status")
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, *req.Status)
-	}
-
-	if req.Type != nil {
-		createStrings = append(createStrings, "type")
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, *req.Type)
-	}
-
-	concatedCreateString := strings.Join(createStrings, ",")
-	concatedNumString := strings.Join(numString, ",")
-
-	return concatedCreateString, concatedNumString, args
-}
-
-func prepareOperationTraceUpdateQuery(req OperationTrace) (string, []interface{}) {
-	var updateStrings []string
-	var args []interface{}
-
-	if req.Input != nil {
-		updateStrings = append(updateStrings, fmt.Sprintf("input=$%d", len(updateStrings)+1))
-		args = append(args, *req.Input)
-	}
-
-	if req.Output != nil {
-		updateStrings = append(updateStrings, fmt.Sprintf("output=$%d", len(updateStrings)+1))
-		args = append(args, *req.Output)
-	}
-
-	if req.Revert != nil {
-		updateStrings = append(updateStrings, fmt.Sprintf("revert=$%d", len(updateStrings)+1))
-		args = append(args, *req.Revert)
-	}
-
-	if req.Status != nil {
-		updateStrings = append(updateStrings, fmt.Sprintf("status=$%d", len(updateStrings)+1))
-		args = append(args, *req.Status)
-	}
-
-	if req.Type != nil {
-		updateStrings = append(updateStrings, fmt.Sprintf("type=$%d", len(updateStrings)+1))
-		args = append(args, *req.Type)
-	}
-
-	// if len(args) != 0 {
-	// 	updateStrings = append(updateStrings, fmt.Sprintf("updated_at=$%d", len(updateStrings)+1))
-	// 	args = append(args, time.Now())
-	// }
-
-	updateArgument := strings.Join(updateStrings, ",")
-
-	return updateArgument, args
+	return tx.Commit(ctx)
 }

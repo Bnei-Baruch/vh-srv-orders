@@ -228,14 +228,16 @@ func Test_activities_non_admin_with_someone_elses_email_sees_nothing_of_theirs(t
 	assert.Equal(t, float64(0), got["totalCount"])
 }
 
-// An empty email drops the email filter. Pinned by email, that returned every
-// account's activities.
-func Test_activities_non_admin_with_empty_email_sees_nothing_of_others(t *testing.T) {
+// A user can clear their own email (PATCH with "" stores NULL). Pinned by
+// email, an absent one dropped the email filter and returned every account's
+// activities.
+func Test_activities_non_admin_without_email_sees_nothing_of_others(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)
 
 	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
-	setCallerEmail(t, a, "")
+	_, err := a.testPool(t).Exec(context.Background(), `UPDATE accounts SET "Email" = NULL WHERE "UserKey" = $1`, USER_KEY)
+	require.NoError(t, err)
 	seedOtherAccountPayment(t, a, "other@test.test")
 
 	got := GET(t, a, "/payments/activities", http.StatusOK)

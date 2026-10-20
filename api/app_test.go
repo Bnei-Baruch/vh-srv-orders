@@ -160,6 +160,9 @@ func do(t *testing.T, a *App, method string, path string, request interface{}, e
 
 	var payload gin.H
 	b := w.Body.Bytes()
+	if len(b) == 0 {
+		return payload
+	}
 	err := json.Unmarshal(b, &payload)
 	require.NoError(t, err, "json.Unmarshal")
 	return payload

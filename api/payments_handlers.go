@@ -278,20 +278,24 @@ func (o *OrdersAPI) handlePaymentFetch(c *gin.Context) {
 		intOrderID   int
 	)
 
-	// The repo parses from-date too, but a failure there comes back as a 500.
+	var fromDateParsed *time.Time
 	if fromDate != "" {
-		if _, err := time.Parse(time.RFC3339, fromDate); err != nil {
+		t, err := time.Parse(time.RFC3339, fromDate)
+		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid from-date"})
 			return
 		}
+		fromDateParsed = &t
 	}
 
-	// Same for token-exist: the repo's ParseBool failure would be a 500.
+	var withToken *bool
 	if tokenExist != "" {
-		if _, err := strconv.ParseBool(tokenExist); err != nil {
+		b, err := strconv.ParseBool(tokenExist)
+		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid token-exist value! Accepted values are true or false"})
 			return
 		}
+		withToken = &b
 	}
 
 	if toDate != "" {
@@ -344,8 +348,8 @@ func (o *OrdersAPI) handlePaymentFetch(c *gin.Context) {
 		intOrderID = 0
 	}
 
-	payments, err := o.repo.GetAllPayments(c.Request.Context(), intSkip, intLimit, fromDate, &toDateParsed, paymentType,
-		paymentStatus, orderType, email, intAccountID, pinUserKey, tokenExist, intOrderID, orderByCreatedAt)
+	payments, err := o.repo.GetAllPayments(c.Request.Context(), intSkip, intLimit, fromDateParsed, &toDateParsed, paymentType,
+		paymentStatus, orderType, email, intAccountID, pinUserKey, withToken, intOrderID, orderByCreatedAt)
 	if err != nil {
 		c.Status(http.StatusInternalServerError)
 		_ = c.Error(fmt.Errorf("repo.GetAllPayments: %w", err))

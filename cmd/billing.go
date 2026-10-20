@@ -245,8 +245,6 @@ func initBillingInfra() (events.EventEmitter, *repo.OrdersDB, func(), error) {
 	return eventEmitter, ordersDB, cleanup, nil
 }
 
-// buildChargeableBillingService wires a BillingService with charge executor and pricing resolver.
-// Used by commands that perform charging (start, retry-pricing-errors).
 // validateChargeConfig checks everything a charging run needs before it runs.
 //
 // Called by the commands, not from buildChargeableBillingService: the builder
@@ -260,12 +258,24 @@ func initBillingInfra() (events.EventEmitter, *repo.OrdersDB, func(), error) {
 // --muhlafim=false disables it, and an empty window returns before it needs a
 // token.
 func validateChargeConfig() {
-	if err := pricing.ValidateConfig(); err != nil {
-		utils.LogFatal("pricing.ValidateConfig", slog.Any("err", err))
+	if err := chargeConfigError(); err != nil {
+		utils.LogFatal("chargeConfigError", slog.Any("err", err))
 	}
-	validateKeycloakConfig()
 }
 
+// chargeConfigError is the check, split from the exit so it can be tested.
+func chargeConfigError() error {
+	if err := pricing.ValidateConfig(); err != nil {
+		return fmt.Errorf("pricing.ValidateConfig: %w", err)
+	}
+	if err := keycloakConfigError(); err != nil {
+		return fmt.Errorf("keycloakConfigError: %w", err)
+	}
+	return nil
+}
+
+// buildChargeableBillingService wires a BillingService with charge executor and pricing resolver.
+// Used by commands that perform charging (start, retry-pricing-errors).
 func buildChargeableBillingService(ordersDB *repo.OrdersDB, eventEmitter events.EventEmitter, dryRun bool) *billing.BillingService {
 	pelecardClient := pelecard.NewClient()
 	var chargeExecutor pelecard.ChargeExecutor

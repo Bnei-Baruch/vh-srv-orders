@@ -98,3 +98,58 @@ func TestMergeAccountsOrders_SourceWithoutEmail(t *testing.T) {
 	require.NoError(t, db.pool.QueryRow(ctx, `SELECT "AccountID" FROM orders WHERE id = $1`, order).Scan(&account))
 	assert.Equal(t, dst, account)
 }
+
+func insertMergeSpecial(t *testing.T, db *OrdersDB, ctx context.Context, key string, email string) int {
+	t.Helper()
+	var id int
+	require.NoError(t, db.pool.QueryRow(ctx,
+		`INSERT INTO specials (keycloak_id, email, start_date, end_date, category) VALUES ($1, $2, now(), now(), 'x') RETURNING id`,
+		key, email).Scan(&id))
+	return id
+}
+
+func specialExists(t *testing.T, db *OrdersDB, ctx context.Context, id int) bool {
+	t.Helper()
+	var exists bool
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM specials WHERE id = $1)`, id).Scan(&exists))
+	return exists
+}
+
+// The merge deletes the source's specials by its email. When the destination
+// has the same email (in any case), that would delete the destination's own
+// specials too, so none are deleted.
+func TestMergeAccountsOrders_SharedEmailKeepsSpecials(t *testing.T) {
+	db, ctx := newTestDB(t)
+
+	insertMergeAccount(t, db, ctx, "kc-src", null.StringFrom("Same@test.test"))
+	insertMergeAccount(t, db, ctx, "kc-dst", null.StringFrom("same@test.test"))
+	srcSpecial := insertMergeSpecial(t, db, ctx, "kc-src", "Same@test.test")
+	dstSpecial := insertMergeSpecial(t, db, ctx, "kc-dst", "Same@test.test")
+
+	require.NoError(t, db.MergeAccountsOrders(ctx, AccountMergeRequest{
+		SourceKeycloakID:      null.StringFrom("kc-src"),
+		DestinationKeycloakID: null.StringFrom("kc-dst"),
+	}))
+
+	assert.True(t, specialExists(t, db, ctx, srcSpecial))
+	assert.True(t, specialExists(t, db, ctx, dstSpecial), "the destination keeps its specials")
+}
+
+// With different emails the source's specials are still deleted, and the
+// destination's stay.
+func TestMergeAccountsOrders_DifferentEmailDeletesSourceSpecials(t *testing.T) {
+	db, ctx := newTestDB(t)
+
+	insertMergeAccount(t, db, ctx, "kc-src", null.StringFrom("src@test.test"))
+	insertMergeAccount(t, db, ctx, "kc-dst", null.StringFrom("dst@test.test"))
+	srcSpecial := insertMergeSpecial(t, db, ctx, "kc-src", "src@test.test")
+	dstSpecial := insertMergeSpecial(t, db, ctx, "kc-dst", "dst@test.test")
+
+	require.NoError(t, db.MergeAccountsOrders(ctx, AccountMergeRequest{
+		SourceKeycloakID:      null.StringFrom("kc-src"),
+		DestinationKeycloakID: null.StringFrom("kc-dst"),
+	}))
+
+	assert.False(t, specialExists(t, db, ctx, srcSpecial))
+	assert.True(t, specialExists(t, db, ctx, dstSpecial))
+}

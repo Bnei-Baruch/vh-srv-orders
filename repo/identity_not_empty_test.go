@@ -238,11 +238,11 @@ func TestGetAllPayments_TokenFilterCountsNullAsWithout(t *testing.T) {
 	}
 
 	far := time.Now().Add(time.Hour)
-	all, err := db.GetAllPayments(ctx, 0, 100, "", &far, "", "", "", "", 0, "", 0, "")
+	all, err := db.GetAllPayments(ctx, 0, 100, "", &far, "", "", "", "", 0, "", "", 0, "")
 	require.NoError(t, err)
-	with, err := db.GetAllPayments(ctx, 0, 100, "", &far, "", "", "", "", 0, "true", 0, "")
+	with, err := db.GetAllPayments(ctx, 0, 100, "", &far, "", "", "", "", 0, "", "true", 0, "")
 	require.NoError(t, err)
-	without, err := db.GetAllPayments(ctx, 0, 100, "", &far, "", "", "", "", 0, "false", 0, "")
+	without, err := db.GetAllPayments(ctx, 0, 100, "", &far, "", "", "", "", 0, "", "false", 0, "")
 	require.NoError(t, err)
 
 	assert.Len(t, all, 3)

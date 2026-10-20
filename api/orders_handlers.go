@@ -216,17 +216,19 @@ func (o *OrdersAPI) handleOrderFetch(c *gin.Context) {
 	}
 
 	var (
-		intAccountID int
-		toDateParsed time.Time
-		err          error
+		intAccountID   int
+		fromDateParsed *time.Time
+		toDateParsed   time.Time
+		err            error
 	)
 
-	// The repo parses from-date too, but a failure there comes back as a 500.
 	if fromDate != "" {
-		if _, err := time.Parse(time.RFC3339, fromDate); err != nil {
+		t, err := time.Parse(time.RFC3339, fromDate)
+		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid from-date"})
 			return
 		}
+		fromDateParsed = &t
 	}
 
 	if toDate != "" {
@@ -273,7 +275,7 @@ func (o *OrdersAPI) handleOrderFetch(c *gin.Context) {
 		keycloakId = "" //We should send keycloakId only is user is not admin
 	}
 
-	orders, err := o.repo.GetAllOrders(c.Request.Context(), intSkip, intLimit, fromDate, &toDateParsed, productType,
+	orders, err := o.repo.GetAllOrders(c.Request.Context(), intSkip, intLimit, fromDateParsed, &toDateParsed, productType,
 		currency, status, organisation, email, intAccountID, keycloakId, evaluateMembership, orderByPaymentDate)
 
 	if err != nil {

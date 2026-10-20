@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
@@ -160,7 +161,10 @@ func do(t *testing.T, a *App, method string, path string, request interface{}, e
 
 	var payload gin.H
 	b := w.Body.Bytes()
-	if len(b) == 0 {
+	// A 5xx may carry no body (c.Status alone), and a 204 never does. Any
+	// other status must answer JSON, so an empty 200 still fails here instead
+	// of reading as an empty list.
+	if len(b) == 0 && (expectedCode >= http.StatusInternalServerError || expectedCode == http.StatusNoContent) {
 		return payload
 	}
 	err := json.Unmarshal(b, &payload)

@@ -107,7 +107,7 @@ func (c *Client) sendAuthorized(ctx context.Context, what string,
 	// Only the token that was rejected: workers share one keycloak.Client, and an
 	// unconditional Invalidate has each discard the replacement the last one
 	// fetched, turning one expiry into a login per worker.
-	c.invalidate(token)
+	c.Tokens.InvalidateToken(token)
 
 	utils.LogFor(ctx).Warn("external_payments returned 401, retrying with a fresh token",
 		slog.String("call", what))
@@ -115,25 +115,6 @@ func (c *Client) sendAuthorized(ctx context.Context, what string,
 	resp, _, err = send()
 
 	return resp, err
-}
-
-// invalidateNamer is the comparing form of Invalidate: it names the rejected
-// token so a shared source can refuse to clear a newer one. Reached by assertion
-// because keycloak.TokenSource promises only Invalidate(), and pinned below —
-// a rename would otherwise fall back to the unconditional clear in silence.
-type invalidateNamer interface{ InvalidateToken(string) }
-
-var _ invalidateNamer = (*keycloak.Client)(nil)
-
-// invalidate drops the rejected token, comparing before clearing where the
-// source supports it.
-func (c *Client) invalidate(stale string) {
-	if source, ok := c.Tokens.(invalidateNamer); ok {
-		source.InvalidateToken(stale)
-		return
-	}
-
-	c.Tokens.Invalidate()
 }
 
 // FetchMuhlafim returns Pelecard's card replacements for a date window from

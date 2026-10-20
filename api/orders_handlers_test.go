@@ -91,7 +91,22 @@ func Test_payment_fetch_invalid_to_date_is_rejected(t *testing.T) {
 	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
 
 	got := GET(t, a, "/v2/payments?to-date=not-a-date", http.StatusBadRequest)
-	assert.Equal(t, "Invalid date-from", got["error"])
+	assert.Equal(t, "Invalid to-date", got["error"])
+}
+
+// Each bad payments filter is named in the error, so the back office shows
+// which one to fix.
+func Test_payment_fetch_invalid_ids_name_the_parameter(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
+
+	got := GET(t, a, "/v2/payments?account-id=x", http.StatusBadRequest)
+	assert.Equal(t, "Invalid account-id value! Accepted value is INTEGER", got["error"])
+
+	got = GET(t, a, "/v2/payments?order-id=x", http.StatusBadRequest)
+	assert.Equal(t, "Invalid order-id value! Accepted value is INTEGER", got["error"])
 }
 
 // A bad account-id or order-id must be named in the error, not reported as a

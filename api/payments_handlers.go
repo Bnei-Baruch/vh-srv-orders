@@ -278,6 +278,22 @@ func (o *OrdersAPI) handlePaymentFetch(c *gin.Context) {
 		intOrderID   int
 	)
 
+	// The repo parses from-date too, but a failure there comes back as a 500.
+	if fromDate != "" {
+		if _, err := time.Parse(time.RFC3339, fromDate); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid from-date"})
+			return
+		}
+	}
+
+	// Same for token-exist: the repo's ParseBool failure would be a 500.
+	if tokenExist != "" {
+		if _, err := strconv.ParseBool(tokenExist); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid token-exist value! Accepted values are true or false"})
+			return
+		}
+	}
+
 	if toDate != "" {
 		rfcLayout := time.RFC3339
 		toDateParsed, err = time.Parse(rfcLayout, toDate)
@@ -287,8 +303,7 @@ func (o *OrdersAPI) handlePaymentFetch(c *gin.Context) {
 			return
 		}
 	} else {
-		// set null value
-		toDateParsed = time.Time{}
+		toDateParsed = time.Now()
 	}
 
 	if skip == "" {
@@ -314,7 +329,7 @@ func (o *OrdersAPI) handlePaymentFetch(c *gin.Context) {
 	if accountID != "" {
 		intAccountID, err = strconv.Atoi(accountID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit value! Accepted value is INTEGER", "success": false})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid account-id value! Accepted value is INTEGER", "success": false})
 			return
 		}
 	}
@@ -322,7 +337,7 @@ func (o *OrdersAPI) handlePaymentFetch(c *gin.Context) {
 	if orderID != "" {
 		intOrderID, err = strconv.Atoi(orderID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit value! Accepted value is INTEGER", "success": false})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid order-id value! Accepted value is INTEGER", "success": false})
 			return
 		}
 	} else {

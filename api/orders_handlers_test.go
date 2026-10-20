@@ -1,11 +1,13 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/volatiletech/null/v9"
 
 	"gitlab.bbdev.team/vh/pay/orders/repo"
@@ -116,4 +118,20 @@ func Test_payment_fetch_invalid_from_date_is_400(t *testing.T) {
 
 	got := GET(t, a, "/v2/payments?from-date=not-a-date", http.StatusBadRequest)
 	assert.Equal(t, "Invalid from-date", got["error"])
+}
+
+// from-date is parsed in the handler; the parsed value must reach the query.
+// Listed as root: offline orders don't carry the caller's keycloak id, which
+// a non-admin's orders are filtered by.
+func Test_order_fetch_from_date_filters(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	_, orders := seedTwoPayments(t, a)
+	_, err := a.testPool(t).Exec(context.Background(),
+		`UPDATE orders SET updated_at = '2020-01-01T00:00:00Z' WHERE id = $1`, orders[0])
+	require.NoError(t, err)
+
+	got := do(t, a, "GET", "/v2/orders?from-date=2025-01-01T00:00:00Z", nil, http.StatusOK, DoOptions{isRoot: true})
+	assert.Equal(t, []int{orders[1]}, listedIDs(t, got))
 }

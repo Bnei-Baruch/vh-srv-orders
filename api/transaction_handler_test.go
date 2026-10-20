@@ -1,7 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -159,4 +162,34 @@ func Test_page_rejected_credential_is_retried_once_then_sends_the_error_url(t *t
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.JSONEq(t, `{"url":"http://test/error"}`, w.Body.String())
 	assert.Len(t, calls(), 2, "one retry with a fresh token")
+}
+
+// The payer still gets a 200 with their error URL, so the request log and the
+// Sentry middleware never see a failure. reportPageFailure is the only trace
+// left when the credential stops working.
+func Test_page_failure_is_logged_at_error(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	stubPages(t, a, http.StatusUnauthorized, "application/json", `{"error":"unauthorized"}`)
+
+	var log bytes.Buffer
+	real := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(real) })
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&log, nil)))
+
+	w := postAsRoot(a, "/v2/transaction/new_token_no_cvv", `{"ErrorURL":"http://test/error"}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var found map[string]any
+	for _, line := range bytes.Split(bytes.TrimSpace(log.Bytes()), []byte("\n")) {
+		var rec map[string]any
+		require.NoError(t, json.Unmarshal(line, &rec))
+		if rec["msg"] == "payment page failed" {
+			found = rec
+		}
+	}
+	require.NotNil(t, found, "the failure must be logged")
+	assert.Equal(t, "ERROR", found["level"])
+	assert.Contains(t, found["err"], pelecard.PageRenewCard)
+	assert.Contains(t, found["err"], pelecard.ErrUnauthorized.Error())
 }

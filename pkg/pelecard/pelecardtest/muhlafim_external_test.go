@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+	"time"
 
 	"errors"
 
@@ -169,6 +170,21 @@ func TestFetchMuhlafim_RetriesOnlyOnce(t *testing.T) {
 	assert.Equal(t, 2, requests, "a persistent 401 fails rather than looping")
 }
 
+// Without a timeout a hung external_payments holds a charge worker for the life
+// of the process: the charge context is uncancellable by design. Set below
+// external_payments' own 120s WriteTimeout, a charge still in flight would be
+// abandoned and re-sent to the EMV terminal under a different reference, which
+// the duplicate suppression there cannot match.
+func TestChargeClientHasAGenerousDeadline(t *testing.T) {
+	const externalPaymentsWriteTimeout = 120 * time.Second
+
+	timeout := pelecard.NewClient().Client.GetClient().Timeout
+
+	require.NotZero(t, timeout, "the charge context is uncancellable")
+	assert.Greater(t, timeout, externalPaymentsWriteTimeout)
+	assert.LessOrEqual(t, timeout, 5*time.Minute, "long enough to be no bound at all")
+}
+
 // Failing before the request makes a Keycloak problem obvious, rather than
 // surfacing as a 401 from somewhere else.
 func TestFetchMuhlafim_TokenUnavailable(t *testing.T) {
@@ -200,4 +216,26 @@ func TestFetchMuhlafim_NoTokenSource(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no token source")
+}
+
+// recordingTokens notes which token each invalidation names, which is what lets
+// a shared source compare before clearing.
+type recordingTokens struct {
+	current     string
+	next        string
+	invalidated []string
+}
+
+func (r *recordingTokens) Token() (string, error) { return r.current, nil }
+
+func (r *recordingTokens) Invalidate() {
+	r.invalidated = append(r.invalidated, "<unnamed>")
+	r.current = r.next
+}
+
+func (r *recordingTokens) InvalidateToken(stale string) {
+	r.invalidated = append(r.invalidated, stale)
+	if r.current == stale {
+		r.current = r.next
+	}
 }

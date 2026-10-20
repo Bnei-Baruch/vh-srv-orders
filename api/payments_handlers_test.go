@@ -356,6 +356,16 @@ func Test_payment_fetch_without_to_date_lists_a_fresh_payment(t *testing.T) {
 	defer CloseTestApp(a)
 
 	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
+	postOfflinePayment(t, a)
+
+	got := GET(t, a, "/v2/payments", http.StatusOK)
+	assert.Len(t, got["data"], 1)
+}
+
+// postOfflinePayment creates an order and a payment for the caller through
+// the API.
+func postOfflinePayment(t *testing.T, a *App) {
+	t.Helper()
 	got := POST_ROOT(t, a, "/v2/order/offline", repo.OfflinePaymentRequest{
 		KeycloakID:    null.StringFrom(USER_KEY),
 		Currency:      null.StringFrom("usd"),
@@ -365,7 +375,68 @@ func Test_payment_fetch_without_to_date_lists_a_fresh_payment(t *testing.T) {
 		Amount:        15.0,
 	}, http.StatusOK)
 	require.Equal(t, true, got["success"])
+}
 
-	got = GET(t, a, "/v2/payments", http.StatusOK)
-	assert.Len(t, got["data"], 1)
+// seedTwoPayments gives the caller two orders with a payment each, through
+// the API, and returns the payment and order ids, oldest first.
+func seedTwoPayments(t *testing.T, a *App) (payments, orders [2]int) {
+	t.Helper()
+	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
+	postOfflinePayment(t, a)
+	postOfflinePayment(t, a)
+
+	rows, err := a.testPool(t).Query(context.Background(), `SELECT id, "OrderID" FROM payments ORDER BY id`)
+	require.NoError(t, err)
+	defer rows.Close()
+	i := 0
+	for rows.Next() {
+		require.Less(t, i, 2)
+		require.NoError(t, rows.Scan(&payments[i], &orders[i]))
+		i++
+	}
+	require.NoError(t, rows.Err())
+	require.Equal(t, 2, i)
+	return payments, orders
+}
+
+// listedIDs returns the IDs in a list response.
+func listedIDs(t *testing.T, got map[string]any) []int {
+	t.Helper()
+	var ids []int
+	for _, item := range got["data"].([]any) {
+		ids = append(ids, int(item.(map[string]any)["ID"].(float64)))
+	}
+	return ids
+}
+
+// from-date is parsed in the handler; the parsed value must reach the query.
+func Test_payment_fetch_from_date_filters(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	payments, _ := seedTwoPayments(t, a)
+	_, err := a.testPool(t).Exec(context.Background(),
+		`UPDATE payments SET updated_at = '2020-01-01T00:00:00Z' WHERE id = $1`, payments[0])
+	require.NoError(t, err)
+
+	got := GET(t, a, "/v2/payments?from-date=2025-01-01T00:00:00Z", http.StatusOK)
+	assert.Equal(t, []int{payments[1]}, listedIDs(t, got))
+}
+
+// token-exist is parsed in the handler; the parsed value must reach the query
+// either way.
+func Test_payment_fetch_token_exist_filters(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	payments, _ := seedTwoPayments(t, a)
+	_, err := a.testPool(t).Exec(context.Background(),
+		`UPDATE payments SET pelecard_token = 'tok' WHERE id = $1`, payments[1])
+	require.NoError(t, err)
+
+	got := GET(t, a, "/v2/payments?token-exist=true", http.StatusOK)
+	assert.Equal(t, []int{payments[1]}, listedIDs(t, got))
+
+	got = GET(t, a, "/v2/payments?token-exist=false", http.StatusOK)
+	assert.Equal(t, []int{payments[0]}, listedIDs(t, got))
 }

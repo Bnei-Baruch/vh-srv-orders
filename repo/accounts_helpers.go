@@ -349,15 +349,14 @@ func (o *OrdersDB) MergeAccountsOrders(ctx context.Context, req AccountMergeRequ
 	}
 	defer tx.Rollback(ctx)
 
-	_, err = tx.Exec(ctx, `UPDATE card_details SET account_id = $1 WHERE id IN (SELECT card_details_id FROM orders WHERE account_id = $2) 
-		AND  cc_number NOT IN (SELECT cc_number FROM card_details WHERE account_id = $1 )`, destinationAccountID, sourceAccountID)
+	// Every card moves. Deleting the ones whose number the destination already
+	// has would leave the source's orders pointing at a removed card_details row
+	// (orders.card_details_id has no FK), and identical card details on one
+	// account are legitimate (migration 20). Cards no order uses are still saved
+	// payment methods, so they move too.
+	_, err = tx.Exec(ctx, `UPDATE card_details SET account_id = $1 WHERE account_id = $2`, destinationAccountID, sourceAccountID)
 	if err != nil {
-		return fmt.Errorf("UPDATE card_details  AccountIds update : %w", err)
-	}
-
-	_, err = tx.Exec(ctx, `DELETE FROM card_details where account_id = $1`, sourceAccountID)
-	if err != nil {
-		return fmt.Errorf("delete from card_details: %w", err)
+		return fmt.Errorf("UPDATE card_details AccountIds update: %w", err)
 	}
 
 	_, err = tx.Exec(ctx, `UPDATE orders SET "AccountID" = $1 WHERE "AccountID" = $2`, destinationAccountID, sourceAccountID)

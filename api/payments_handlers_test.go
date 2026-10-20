@@ -329,3 +329,43 @@ func Test_payment_fetch_invalid_token_exist_is_400(t *testing.T) {
 	got := GET(t, a, "/v2/payments?token-exist=maybe", http.StatusBadRequest)
 	assert.Equal(t, "Invalid token-exist value! Accepted values are true or false", got["error"])
 }
+
+// A bad account-id or order-id must be named in the error, not reported as a
+// bad limit.
+func Test_payment_fetch_invalid_account_id_names_the_parameter(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	got := GET(t, a, "/v2/payments?account-id=x", http.StatusBadRequest)
+	assert.Equal(t, "Invalid account-id value! Accepted value is INTEGER", got["error"])
+}
+
+func Test_payment_fetch_invalid_order_id_names_the_parameter(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	got := GET(t, a, "/v2/payments?order-id=x", http.StatusBadRequest)
+	assert.Equal(t, "Invalid order-id value! Accepted value is INTEGER", got["error"])
+}
+
+// With no to-date the upper bound is now, so a payment written a moment ago
+// must still be listed. It is created through the API, which stamps
+// updated_at with the app's clock, the same clock as the bound.
+func Test_payment_fetch_without_to_date_lists_a_fresh_payment(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
+	got := POST_ROOT(t, a, "/v2/order/offline", repo.OfflinePaymentRequest{
+		KeycloakID:    null.StringFrom(USER_KEY),
+		Currency:      null.StringFrom("usd"),
+		PaymentMethod: null.StringFrom("offline"),
+		PaymentDate:   null.TimeFrom(time.Now()),
+		Quantity:      1,
+		Amount:        15.0,
+	}, http.StatusOK)
+	require.Equal(t, true, got["success"])
+
+	got = GET(t, a, "/v2/payments", http.StatusOK)
+	assert.Len(t, got["data"], 1)
+}

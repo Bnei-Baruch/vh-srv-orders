@@ -13,7 +13,7 @@ import (
 func TestOrdersWhere_DateBoundsKeepOffset(t *testing.T) {
 	to := time.Date(2026, 1, 2, 10, 0, 0, 0, time.FixedZone("", 3*3600))
 
-	where, _, err := buildAndGetOrdersWhereQuery("2026-01-01T10:00:00+03:00", &to,
+	where, _, _, err := buildAndGetOrdersWhereQuery("2026-01-01T10:00:00+03:00", &to,
 		"", "", "", "", "", 0, "", "", "")
 	require.NoError(t, err)
 
@@ -24,8 +24,8 @@ func TestOrdersWhere_DateBoundsKeepOffset(t *testing.T) {
 func TestPaymentsWhere_DateBoundsKeepOffset(t *testing.T) {
 	to := time.Date(2026, 1, 2, 10, 0, 0, 0, time.FixedZone("", 3*3600))
 
-	where, _, err := buildAndGetPaymentsWhereQuery("2026-01-01T10:00:00+03:00", &to,
-		"", "", "", "", 0, "", 0, "")
+	where, _, _, err := buildAndGetPaymentsWhereQuery("2026-01-01T10:00:00+03:00", &to,
+		"", "", "", "", 0, "", "", 0, "")
 	require.NoError(t, err)
 
 	assert.Contains(t, where, `p.updated_at <= '2026-01-02T10:00:00+03:00'`)

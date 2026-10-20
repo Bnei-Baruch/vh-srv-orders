@@ -72,29 +72,61 @@ func postAsRoot(a *App, path string, body string) *httptest.ResponseRecorder {
 	return w
 }
 
+// captureRequestLog records what the logging middleware writes through
+// slog.Default().
+func captureRequestLog(t *testing.T) *bytes.Buffer {
+	var buf bytes.Buffer
+	real := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(real) })
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	return &buf
+}
+
+// requestErrors returns the errs of the logged "request" record. They are what
+// the Sentry middleware captures on a 5xx.
+func requestErrors(t *testing.T, log *bytes.Buffer) string {
+	t.Helper()
+	for _, line := range strings.Split(strings.TrimSpace(log.String()), "\n") {
+		var rec map[string]any
+		require.NoError(t, json.Unmarshal([]byte(line), &rec))
+		if rec["msg"] == "request" {
+			assert.Equal(t, "ERROR", rec["level"])
+			errs, _ := json.Marshal(rec["errs"])
+			return string(errs)
+		}
+	}
+	t.Fatal("no request record logged")
+	return ""
+}
+
 // When the checkout service answers with something that isn't JSON (a proxy
 // error, a maintenance page), the caller must get a 500, not a 200 with a null
-// body that looks like success.
+// body that looks like success, and the cause must be recorded on the request
+// so it reaches Sentry.
 func Test_new_token_non_json_upstream_is_500(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)
 	stubPages(t, a, http.StatusBadGateway, "text/html", "<html>502 Bad Gateway</html>")
+	log := captureRequestLog(t)
 
 	w := postAsRoot(a, "/v2/transaction/new_token", `{}`)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code, w.Body.String())
 	assert.NotEqual(t, "null", w.Body.String())
+	assert.Contains(t, requestErrors(t, log), "getToken response json.Unmarshal")
 }
 
 func Test_new_token_no_cvv_non_json_upstream_is_500(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)
 	stubPages(t, a, http.StatusBadGateway, "text/html", "<html>502 Bad Gateway</html>")
+	log := captureRequestLog(t)
 
 	w := postAsRoot(a, "/v2/transaction/new_token_no_cvv", `{}`)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code, w.Body.String())
 	assert.NotEqual(t, "null", w.Body.String())
+	assert.Contains(t, requestErrors(t, log), "getToken response json.Unmarshal")
 }
 
 // Every page call carries a bearer, to the /vh route: the shared routes read

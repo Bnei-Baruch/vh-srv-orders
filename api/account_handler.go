@@ -162,6 +162,8 @@ func (o *OrdersAPI) handlePatchAccount(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		} else if errors.Is(err, common.ErrNoRowsAffected) {
 			c.Status(http.StatusNotFound)
+		} else if errors.Is(err, common.ErrAccountKeyTaken) {
+			c.JSON(http.StatusConflict, gin.H{"error": common.ErrAccountKeyTaken.Error()})
 		} else {
 			c.Status(http.StatusInternalServerError)
 			_ = c.Error(fmt.Errorf("repo.PatchAccount: %w", err))

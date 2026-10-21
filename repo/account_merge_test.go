@@ -59,10 +59,7 @@ func TestMigration29_MergesDuplicateUserKeyAccounts_AndReverts(t *testing.T) {
 	m, err := migrate.New("file://../db/migrations", dbURL)
 	require.NoError(t, err)
 	t.Cleanup(func() { m.Close() })
-	v, _, err := m.Version()
-	require.NoError(t, err)
-	require.EqualValues(t, mergeMigrationVersion, v, "test assumes 29 is the latest migration")
-	require.NoError(t, m.Steps(-1))
+	require.NoError(t, m.Migrate(mergeMigrationVersion-1))
 
 	oldID, oldOrder, oldCard, oldTx := seedAccountWithRows(t, db, ctx, "kc-dup", "old@test.test")
 	midID, midOrder, midCard, midTx := seedAccountWithRows(t, db, ctx, "kc-dup", "mid@test.test")
@@ -71,7 +68,7 @@ func TestMigration29_MergesDuplicateUserKeyAccounts_AndReverts(t *testing.T) {
 	keylessA, _, _, _ := seedAccountWithRows(t, db, ctx, "", "a@test.test")
 	keylessB, _, _, _ := seedAccountWithRows(t, db, ctx, "", "b@test.test")
 
-	require.NoError(t, m.Steps(1))
+	require.NoError(t, m.Migrate(mergeMigrationVersion))
 
 	for _, id := range [][3]int{{oldOrder, oldCard, oldTx}, {midOrder, midCard, midTx}, {newOrder, newCard, newTx}} {
 		o, c, x := accountRefs(t, db, ctx, id[0], id[1], id[2])
@@ -94,16 +91,15 @@ func TestMigration29_MergesDuplicateUserKeyAccounts_AndReverts(t *testing.T) {
 	require.Error(t, err, "accounts_userkey_uniq refuses a second account for a key")
 
 	// A move made after the merge must survive the down migration.
-	third, thirdOrder, _, _ := seedAccountWithRows(t, db, ctx, "kc-third", "third@test.test")
+	third, _, _, _ := seedAccountWithRows(t, db, ctx, "kc-third", "third@test.test")
 	_, err = db.pool.Exec(ctx, `UPDATE orders SET "AccountID" = $1 WHERE id = $2`, third, midOrder)
 	require.NoError(t, err)
 
-	require.NoError(t, m.Steps(-1))
+	require.NoError(t, m.Migrate(mergeMigrationVersion-1))
 
 	var midOrderAccount int
 	require.NoError(t, db.pool.QueryRow(ctx, `SELECT "AccountID" FROM orders WHERE id = $1`, midOrder).Scan(&midOrderAccount))
 	assert.Equal(t, third, midOrderAccount, "a row moved after the merge stays where it was put")
-	_ = thirdOrder
 
 	for _, tc := range []struct{ acct, order, card, tx int }{
 		{oldID, oldOrder, oldCard, oldTx}, {newID, newOrder, newCard, newTx},
@@ -158,4 +154,72 @@ func TestPerformOperation_RefusesKeyThatHasAnAccount(t *testing.T) {
 	var key string
 	require.NoError(t, db.pool.QueryRow(ctx, `SELECT "UserKey" FROM accounts WHERE id = $1`, oldID).Scan(&key))
 	assert.Equal(t, "kc-old", key)
+}
+
+// seedMergeCopy records loser as merged into winner, the way migration 29 does.
+func seedMergeCopy(t *testing.T, db *OrdersDB, ctx context.Context, loserID, winnerID int) {
+	t.Helper()
+	_, err := db.pool.Exec(ctx, `INSERT INTO account_merges (loser_id, winner_id, loser)
+		VALUES ($1, $2, '{"Email": "loser@test.test", "PaymentToken": "tok"}')`, loserID, winnerID)
+	require.NoError(t, err)
+	_, err = db.pool.Exec(ctx, `INSERT INTO account_merge_moves (tbl, row_id, loser_id) VALUES ('orders', $1, $1)`, loserID)
+	require.NoError(t, err)
+}
+
+func mergeCopies(t *testing.T, db *OrdersDB, ctx context.Context, loserID int) (merges, moves int, winnerID null.Int) {
+	t.Helper()
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT count(*), max(winner_id) FROM account_merges WHERE loser_id = $1`, loserID).
+		Scan(&merges, &winnerID))
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT count(*) FROM account_merge_moves WHERE loser_id = $1`, loserID).Scan(&moves))
+	return merges, moves, winnerID
+}
+
+// account_merges holds a full copy of each account migration 29 deleted. A
+// member's "delete my data" must remove the copies merged into their account.
+func TestHardDelete_RemovesTheAccountsMergeCopies(t *testing.T) {
+	db, ctx := newTestDB(t)
+
+	winner, _, _, _ := seedAccountWithRows(t, db, ctx, "kc-winner", "winner@test.test")
+	other, _, _, _ := seedAccountWithRows(t, db, ctx, "kc-other", "other@test.test")
+	seedMergeCopy(t, db, ctx, 900001, winner)
+	seedMergeCopy(t, db, ctx, 900002, other)
+
+	require.NoError(t, db.HardDeleteAllUserDataByAccountID(ctx, winner, ""))
+
+	merges, moves, _ := mergeCopies(t, db, ctx, 900001)
+	assert.Zero(t, merges)
+	assert.Zero(t, moves)
+	merges, moves, _ = mergeCopies(t, db, ctx, 900002)
+	assert.Equal(t, 1, merges, "another member's copy stays")
+	assert.Equal(t, 1, moves)
+}
+
+// MergeAccountsOrders deletes the source account; the copies merged into it
+// must follow to the destination so a later hard delete still finds them.
+func TestMergeAccounts_MovesTheMergeCopiesToTheDestination(t *testing.T) {
+	db, ctx := newTestDB(t)
+
+	source, _, _, _ := seedAccountWithRows(t, db, ctx, "kc-src", "src@test.test")
+	destination, _, _, _ := seedAccountWithRows(t, db, ctx, "kc-dst", "dst@test.test")
+	seedMergeCopy(t, db, ctx, 900003, source)
+
+	require.NoError(t, db.MergeAccountsOrders(ctx, AccountMergeRequest{
+		SourceKeycloakID:      null.StringFrom("kc-src"),
+		DestinationKeycloakID: null.StringFrom("kc-dst"),
+	}))
+
+	_, _, winnerID := mergeCopies(t, db, ctx, 900003)
+	assert.Equal(t, null.IntFrom(destination), winnerID)
+}
+
+// Patching an account onto a key that already has one is the same conflict as
+// creating a second account for it.
+func TestPatchAccount_KeyThatHasAnAccountIsTaken(t *testing.T) {
+	db, ctx := newTestDB(t)
+
+	seedAccountWithRows(t, db, ctx, "kc-taken", "taken@test.test")
+	mine, _, _, _ := seedAccountWithRows(t, db, ctx, "kc-mine", "mine@test.test")
+
+	err := db.PatchAccount(ctx, Account{UserKey: null.StringFrom("kc-taken")}, mine)
+	require.ErrorIs(t, err, common.ErrAccountKeyTaken)
 }

@@ -1,5 +1,11 @@
 BEGIN;
 
+-- Writes to these tables wait until the merge commits: a row written for a
+-- merged account in between would be moved without being recorded, and a new
+-- duplicate account would fail the unique index. Reads go on.
+SET LOCAL lock_timeout = '10s';
+LOCK TABLE accounts, orders, card_details, transaction IN SHARE ROW EXCLUSIVE MODE;
+
 -- Some "UserKey"s are shared by several accounts (524 keys / 1,106 accounts in
 -- production, mostly created 2020-2021). GetOrCreateAccount picked the newest
 -- and GetAccountIDByKeycloakID whichever row came first, so one person's orders

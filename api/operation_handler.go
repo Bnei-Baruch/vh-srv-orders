@@ -36,7 +36,7 @@ func (o *OrdersAPI) handleOperationCreate(c *gin.Context) {
 
 	if dbErr != nil {
 		if errors.Is(dbErr, common.ErrAccountKeyTaken) {
-			c.JSON(http.StatusConflict, gin.H{"error": dbErr.Error()})
+			c.JSON(http.StatusConflict, gin.H{"error": common.ErrAccountKeyTaken.Error()})
 			return
 		}
 		c.Status(http.StatusInternalServerError)

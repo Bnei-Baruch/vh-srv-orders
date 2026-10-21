@@ -100,3 +100,17 @@ func TestCreateAccount_KeyThatHasAnAccountIsConflict(t *testing.T) {
 	POST_ROOT(t, a, "/v2/account/", req, http.StatusCreated)
 	POST_ROOT(t, a, "/v2/account/", req, http.StatusConflict)
 }
+
+// The same conflict through PATCH: moving an account onto a key that already
+// has one.
+func TestPatchAccount_KeyThatHasAnAccountIsConflict(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	POST_ROOT(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom("kc-taken")}, http.StatusCreated)
+	got := POST_ROOT(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom("kc-mine")}, http.StatusCreated)
+	id := int(got["data"].(float64))
+
+	got = PATCH_ROOT(t, a, fmt.Sprintf("/v2/account/%d", id), repo.Account{UserKey: null.StringFrom("kc-taken")}, http.StatusConflict)
+	assert.Equal(t, common.ErrAccountKeyTaken.Error(), got["error"])
+}

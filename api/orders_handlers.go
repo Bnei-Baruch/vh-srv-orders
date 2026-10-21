@@ -30,6 +30,10 @@ func (o *OrdersAPI) handleV2OrderCreate(c *gin.Context) {
 	if !o.isUserOrHasAnyRole(c, userIdString, common.RoleRoot, common.RoleAdmin) {
 		return
 	}
+	// Billing charges the card an order points at, whoever owns it.
+	if req.CardDetailsId.Valid && !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
+		return
+	}
 
 	orderID, err := o.repo.CreateV2Order(c.Request.Context(), req)
 	if err != nil {
@@ -84,6 +88,11 @@ func (o *OrdersAPI) handleOrderUpdateByID(c *gin.Context) {
 		return
 	}
 	if !isAdmin {
+		// Billing charges the card an order points at, whoever owns it.
+		if req.AccountID.Valid || req.CardDetailsId.Valid {
+			c.Status(http.StatusForbidden)
+			return
+		}
 		account, err := o.repo.GetAccountForOrderID(c.Request.Context(), uint(id))
 		if err != nil {
 			c.Status(http.StatusInternalServerError)

@@ -5,6 +5,8 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/volatiletech/null/v9"
+
 	"gitlab.bbdev.team/vh/pay/orders/api/middleware"
 	"gitlab.bbdev.team/vh/pay/orders/common"
 )
@@ -159,4 +161,26 @@ func (o *OrdersAPI) isAuthUserOrHasAnyRole(c *gin.Context, roles ...string) (boo
 		c.Status(http.StatusForbidden)
 	}
 	return ok, isAdmin, keycloakID
+}
+
+// mayStoreUserKey reports whether the caller may store key as an account's
+// "UserKey": admins any key, everyone else only their own keycloak id (or
+// none). Orders and payments find their account by that key, so a user who
+// could put someone else's on an account would have that person's new orders
+// land on it. Answers 403 itself when the caller may not.
+func (o *OrdersAPI) mayStoreUserKey(c *gin.Context, key null.String) bool {
+	if !key.Valid || key.String == "" {
+		return true
+	}
+	authData := c.Request.Context().Value(common.CtxAuthClaims)
+	if authData == nil {
+		c.Status(http.StatusForbidden)
+		return false
+	}
+	claims := authData.(*middleware.IDTokenClaims)
+	if claims.HasAnyRole(common.RoleRoot, common.RoleAdmin) || claims.Sub == key.String {
+		return true
+	}
+	c.Status(http.StatusForbidden)
+	return false
 }

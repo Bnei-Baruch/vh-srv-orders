@@ -17,6 +17,12 @@ import (
 )
 
 func (o *OrdersAPI) handleV2OrderCreate(c *gin.Context) {
+	// Orders are the system's: checkout creates them through the transaction
+	// endpoints. Whoever creates one here sets its Status, PaymentDate and card.
+	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
+		return
+	}
+
 	var req repo.Order
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -25,14 +31,6 @@ func (o *OrdersAPI) handleV2OrderCreate(c *gin.Context) {
 
 	if req.AccountID.IsZero() {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing AccountID"})
-		return
-	}
-	userIdString := strconv.Itoa(req.AccountID.Int)
-	if !o.isUserOrHasAnyRole(c, userIdString, common.RoleRoot, common.RoleAdmin) {
-		return
-	}
-	// Billing charges the card an order points at, whoever owns it.
-	if req.CardDetailsId.Valid && !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
 		return
 	}
 

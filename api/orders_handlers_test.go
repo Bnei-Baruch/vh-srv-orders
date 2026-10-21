@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -218,6 +219,43 @@ func Test_create_order_with_someone_elses_card_is_forbidden(t *testing.T) {
 	require.NoError(t, a.testPool(t).QueryRow(context.Background(),
 		`SELECT count(*) FROM orders WHERE "AccountID" = $1`, accountID).Scan(&n))
 	assert.Zero(t, n)
+}
+
+// Beyond Amount and Currency, an order's fields are the system's: whether and
+// when billing charges it. None of these may come from its owner.
+func Test_owner_may_not_patch_system_fields(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	_, orderID := ownOrder(t, a)
+	path := fmt.Sprintf("/v2/order/%d", orderID)
+
+	for name, req := range map[string]repo.Order{
+		"Status":             {Status: null.StringFrom("active")},
+		"PaymentDate":        {PaymentDate: null.TimeFrom(time.Now().AddDate(1, 0, 0))},
+		"StartingDate":       {StartingDate: null.TimeFrom(time.Now().AddDate(1, 0, 0))},
+		"Flag":               {Flag: null.StringFrom("skip")},
+		"Type":               {Type: null.StringFrom("membership")},
+		"RecuringFreq":       {RecuringFreq: null.IntFrom(12)},
+		"Amount with Status": {Amount: null.Float64From(1), Status: null.StringFrom("active")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			before := orderRow(t, a, orderID)
+
+			w := sendAsUser(t, a, http.MethodPatch, path, req)
+
+			assert.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+			assert.Equal(t, before, orderRow(t, a, orderID))
+		})
+	}
+}
+
+func orderRow(t *testing.T, a *App, orderID int) string {
+	t.Helper()
+	var row string
+	require.NoError(t, a.testPool(t).QueryRow(context.Background(),
+		`SELECT o::text FROM orders o WHERE id = $1`, orderID).Scan(&row))
+	return row
 }
 
 // vh-payment's "update payment" page sends only Amount and Currency.

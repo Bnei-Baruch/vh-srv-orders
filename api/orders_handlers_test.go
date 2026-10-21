@@ -24,7 +24,7 @@ func Test_get_order_by_id(t *testing.T) {
 	accountID := int(got["data"].(float64))
 
 	orderReq := repo.Order{Amount: null.Float64From(15), AccountID: null.IntFrom(accountID)}
-	got = POST(t, a, "/v2/order/", orderReq, http.StatusCreated)
+	got = POST_ROOT(t, a, "/v2/order/", orderReq, http.StatusCreated)
 	fmt.Printf("Added order: %+v\n", got)
 	orderID := int(got["data"].(float64))
 
@@ -44,7 +44,7 @@ func Test_duplicate_card_key(t *testing.T) {
 	accountID := int(got["data"].(float64))
 
 	orderReq := repo.Order{Amount: null.Float64From(15), AccountID: null.IntFrom(accountID)}
-	got = POST(t, a, "/v2/order/", orderReq, http.StatusCreated)
+	got = POST_ROOT(t, a, "/v2/order/", orderReq, http.StatusCreated)
 	fmt.Printf("Added order: %+v\n", got)
 	orderID := int(got["data"].(float64))
 
@@ -160,7 +160,7 @@ func ownOrder(t *testing.T, a *App) (accountID, orderID int) {
 	t.Helper()
 	got := POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
 	accountID = int(got["data"].(float64))
-	got = POST(t, a, "/v2/order/", repo.Order{Amount: null.Float64From(15), AccountID: null.IntFrom(accountID)}, http.StatusCreated)
+	got = POST_ROOT(t, a, "/v2/order/", repo.Order{Amount: null.Float64From(15), AccountID: null.IntFrom(accountID)}, http.StatusCreated)
 	return accountID, int(got["data"].(float64))
 }
 
@@ -202,16 +202,17 @@ func Test_patch_own_order_onto_someone_elses_account_is_forbidden(t *testing.T) 
 	assert.Equal(t, accountID, gotAccount)
 }
 
-func Test_create_order_with_someone_elses_card_is_forbidden(t *testing.T) {
+// Checkout creates orders through the transaction endpoints. A user creating
+// one directly could give it any Status, PaymentDate or card.
+func Test_non_admin_may_not_create_order(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)
 
-	_, cardID := victimCard(t, a)
 	got := POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
 	accountID := int(got["data"].(float64))
 
 	w := sendAsUser(t, a, http.MethodPost, "/v2/order/", repo.Order{
-		Amount: null.Float64From(15), AccountID: null.IntFrom(accountID), CardDetailsId: null.IntFrom(cardID),
+		Amount: null.Float64From(15), AccountID: null.IntFrom(accountID), Status: null.StringFrom("paid"),
 	})
 
 	assert.Equal(t, http.StatusForbidden, w.Code, w.Body.String())

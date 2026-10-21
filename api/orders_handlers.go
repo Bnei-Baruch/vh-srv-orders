@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strconv"
 	"time"
 
@@ -88,8 +89,7 @@ func (o *OrdersAPI) handleOrderUpdateByID(c *gin.Context) {
 		return
 	}
 	if !isAdmin {
-		// Billing charges the card an order points at, whoever owns it.
-		if req.AccountID.Valid || req.CardDetailsId.Valid {
+		if !ownerMayPatch(req) {
 			c.Status(http.StatusForbidden)
 			return
 		}
@@ -119,6 +119,24 @@ func (o *OrdersAPI) handleOrderUpdateByID(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Updated!", "success": true})
+}
+
+// ownerMayPatch reports whether a non-admin owner's PATCH touches only Amount
+// and Currency, which vh-payment's update-payment page sends. Every other field
+// is the system's: AccountID and card_details_id decide whose card billing
+// charges, and Status, PaymentDate and the rest decide whether it charges.
+func ownerMayPatch(req repo.Order) bool {
+	v := reflect.ValueOf(req)
+	for i := range v.NumField() {
+		name := v.Type().Field(i).Name
+		if name == "Amount" || name == "Currency" || v.Field(i).Kind() != reflect.Struct {
+			continue
+		}
+		if valid := v.Field(i).FieldByName("Valid"); valid.IsValid() && valid.Bool() {
+			return false
+		}
+	}
+	return true
 }
 
 func (o *OrdersAPI) handleOrderGetByID(c *gin.Context) {

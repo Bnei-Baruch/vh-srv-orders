@@ -239,6 +239,8 @@ func Test_owner_may_not_patch_system_fields(t *testing.T) {
 		"Type":               {Type: null.StringFrom("membership")},
 		"RecuringFreq":       {RecuringFreq: null.IntFrom(12)},
 		"Amount with Status": {Amount: null.Float64From(1), Status: null.StringFrom("active")},
+		"cancelled with PaymentDate": {Status: null.StringFrom("cancelled"),
+			PaymentDate: null.TimeFrom(time.Now().AddDate(1, 0, 0))},
 	} {
 		t.Run(name, func(t *testing.T) {
 			before := orderRow(t, a, orderID)
@@ -246,6 +248,7 @@ func Test_owner_may_not_patch_system_fields(t *testing.T) {
 			w := sendAsUser(t, a, http.MethodPatch, path, req)
 
 			assert.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+			assert.Contains(t, w.Body.String(), "may change only Amount and Currency")
 			assert.Equal(t, before, orderRow(t, a, orderID))
 		})
 	}
@@ -270,6 +273,23 @@ func Test_owner_may_still_update_amount_and_currency(t *testing.T) {
 		repo.Order{Amount: null.Float64From(30), Currency: null.StringFrom("USD")})
 
 	assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+}
+
+// profile's membership cancellation forwards the member's token.
+func Test_owner_may_cancel_own_order(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	_, orderID := ownOrder(t, a)
+
+	w := sendAsUser(t, a, http.MethodPatch, fmt.Sprintf("/v2/order/%d", orderID),
+		repo.Order{Status: null.StringFrom("cancelled")})
+
+	assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var status string
+	require.NoError(t, a.testPool(t).QueryRow(context.Background(),
+		`SELECT "Status" FROM orders WHERE id = $1`, orderID).Scan(&status))
+	assert.Equal(t, "cancelled", status)
 }
 
 func Test_admin_may_move_order_to_another_account_and_card(t *testing.T) {

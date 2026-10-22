@@ -88,7 +88,7 @@ func (o *OrdersAPI) handleOrderUpdateByID(c *gin.Context) {
 	}
 	if !isAdmin {
 		if !ownerMayPatch(req) {
-			c.Status(http.StatusForbidden)
+			c.JSON(http.StatusForbidden, gin.H{"error": "an order's owner may change only Amount and Currency, or set Status to cancelled"})
 			return
 		}
 		account, err := o.repo.GetAccountForOrderID(c.Request.Context(), uint(id))
@@ -120,14 +120,19 @@ func (o *OrdersAPI) handleOrderUpdateByID(c *gin.Context) {
 }
 
 // ownerMayPatch reports whether a non-admin owner's PATCH touches only Amount
-// and Currency, which vh-payment's update-payment page sends. Every other field
-// is the system's: AccountID and card_details_id decide whose card billing
-// charges, and Status, PaymentDate and the rest decide whether it charges.
+// and Currency, which vh-payment's update-payment page sends, and Status set to
+// "cancelled", which profile's membership cancellation sends with the member's
+// token. Every other field is the system's: AccountID and card_details_id
+// decide whose card billing charges, and PaymentDate and the rest decide
+// whether it charges.
 func ownerMayPatch(req repo.Order) bool {
+	if req.Status.Valid && req.Status.String != "cancelled" {
+		return false
+	}
 	v := reflect.ValueOf(req)
 	for i := range v.NumField() {
 		name := v.Type().Field(i).Name
-		if name == "Amount" || name == "Currency" || v.Field(i).Kind() != reflect.Struct {
+		if name == "Amount" || name == "Currency" || name == "Status" || v.Field(i).Kind() != reflect.Struct {
 			continue
 		}
 		if valid := v.Field(i).FieldByName("Valid"); valid.IsValid() && valid.Bool() {

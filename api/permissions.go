@@ -169,18 +169,5 @@ func (o *OrdersAPI) isAuthUserOrHasAnyRole(c *gin.Context, roles ...string) (boo
 // could put someone else's on an account would have that person's new orders
 // land on it. Answers 403 itself when the caller may not.
 func (o *OrdersAPI) mayStoreUserKey(c *gin.Context, key null.String) bool {
-	if !key.Valid || key.String == "" {
-		return true
-	}
-	authData := c.Request.Context().Value(common.CtxAuthClaims)
-	if authData == nil {
-		c.Status(http.StatusForbidden)
-		return false
-	}
-	claims := authData.(*middleware.IDTokenClaims)
-	if claims.HasAnyRole(common.RoleRoot, common.RoleAdmin) || claims.Sub == key.String {
-		return true
-	}
-	c.Status(http.StatusForbidden)
-	return false
+	return !key.Valid || key.String == "" || o.isSubjectOrHasAnyRole(c, key.String, common.RoleRoot, common.RoleAdmin)
 }

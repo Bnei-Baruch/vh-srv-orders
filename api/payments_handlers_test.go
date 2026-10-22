@@ -103,25 +103,6 @@ func Test_payments_email_filter_stays_within_own_account(t *testing.T) {
 	assert.Len(t, got["data"], 1, "admin filtering by email still finds them")
 }
 
-// /v2/payments pins a non-admin by keycloak id, like the activities: all of
-// their accounts, whatever email each carries. Pinned to the one account
-// GetAccountIDByKeycloakID happened to return, a payment on the other was
-// invisible, with or without ?email=.
-func Test_payments_non_admin_sees_all_accounts_with_own_keycloak_id(t *testing.T) {
-	a := NewTestApp(t)
-	defer CloseTestApp(a)
-
-	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
-	setCallerEmail(t, a, "old@test.test")
-	seedCallerSecondAccount(t, a, "new@test.test")
-
-	got := GET(t, a, "/v2/payments", http.StatusOK)
-	assert.Len(t, got["data"], 1, "the payment on the second account is the caller's own")
-
-	got = GET(t, a, "/v2/payments?email=new@test.test", http.StatusOK)
-	assert.Len(t, got["data"], 1)
-}
-
 // account-id from a non-admin only narrows within their own accounts, so
 // another account's id gives an empty list.
 func Test_payments_non_admin_foreign_account_id_is_empty(t *testing.T) {
@@ -245,35 +226,6 @@ func Test_activities_non_admin_without_email_sees_nothing_of_others(t *testing.T
 	assert.Equal(t, float64(0), got["totalCount"])
 }
 
-// seedCallerSecondAccount gives the caller a second account under the same
-// keycloak id, with its own email and payment, the way the importer does
-// when a user's email changed.
-func seedCallerSecondAccount(t *testing.T, a *App, email string) {
-	t.Helper()
-	_, err := a.testPool(t).Exec(context.Background(), `
-		WITH acc AS (INSERT INTO accounts ("UserKey", "Email", created_at, updated_at) VALUES ($1, $2, now(), now()) RETURNING id),
-		     ord AS (INSERT INTO orders ("AccountID", created_at, updated_at) SELECT id, now(), now() FROM acc RETURNING id)
-		INSERT INTO payments ("OrderID", created_at, updated_at) SELECT id, now(), now() FROM ord`, USER_KEY, email)
-	require.NoError(t, err)
-}
-
-// All of a user's accounts are theirs, whatever email each one carries.
-// Pinned to one account, or narrowed by one account's email, the other's
-// payments went missing.
-func Test_activities_non_admin_sees_all_accounts_with_own_keycloak_id(t *testing.T) {
-	a := NewTestApp(t)
-	defer CloseTestApp(a)
-
-	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
-	setCallerEmail(t, a, "old@test.test")
-	seedCallerPayment(t, a)
-	seedCallerSecondAccount(t, a, "new@test.test")
-
-	got := GET(t, a, "/payments/activities", http.StatusOK)
-	assert.Len(t, got["data"], 2)
-	assert.Equal(t, float64(2), got["totalCount"])
-}
-
 // An account without an email still belongs to its keycloak id.
 func Test_activities_non_admin_sees_payments_on_account_without_email(t *testing.T) {
 	a := NewTestApp(t)
@@ -289,17 +241,16 @@ func Test_activities_non_admin_sees_payments_on_account_without_email(t *testing
 	assert.Equal(t, float64(1), got["totalCount"])
 }
 
-// ?email= from a non-admin narrows within their own accounts. It used to be
-// checked against one of their emails and refused with 403 otherwise; now a
-// matching address elsewhere just isn't theirs to see.
+// ?email= from a non-admin narrows within their own account. It used to be
+// checked against their email and refused with 403 otherwise; now a matching
+// address elsewhere just isn't theirs to see.
 func Test_activities_non_admin_email_narrows_within_own_accounts(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)
 
 	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
-	setCallerEmail(t, a, "old@test.test")
+	setCallerEmail(t, a, "new@test.test")
 	seedCallerPayment(t, a)
-	seedCallerSecondAccount(t, a, "new@test.test")
 	seedOtherAccountPayment(t, a, "xnew@test.test")
 
 	got := GET(t, a, "/payments/activities?email=new@test.test", http.StatusOK)

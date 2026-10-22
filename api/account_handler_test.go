@@ -89,3 +89,28 @@ func Test_admin_may_create_account_with_any_userkey(t *testing.T) {
 
 	assert.Equal(t, 1, countAccountsWithUserKey(t, a, "kc-someone"))
 }
+
+// accounts_userkey_uniq allows one account per key; a second create for the
+// same key is a conflict, not a server error.
+func TestCreateAccount_KeyThatHasAnAccountIsConflict(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	req := repo.Account{FirstName: null.StringFrom("Test"), UserKey: null.StringFrom("kc-create-twice")}
+	POST_ROOT(t, a, "/v2/account/", req, http.StatusCreated)
+	POST_ROOT(t, a, "/v2/account/", req, http.StatusConflict)
+}
+
+// The same conflict through PATCH: moving an account onto a key that already
+// has one.
+func TestPatchAccount_KeyThatHasAnAccountIsConflict(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	POST_ROOT(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom("kc-taken")}, http.StatusCreated)
+	got := POST_ROOT(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom("kc-mine")}, http.StatusCreated)
+	id := int(got["data"].(float64))
+
+	got = PATCH_ROOT(t, a, fmt.Sprintf("/v2/account/%d", id), repo.Account{UserKey: null.StringFrom("kc-taken")}, http.StatusConflict)
+	assert.Equal(t, common.ErrAccountKeyTaken.Error(), got["error"])
+}

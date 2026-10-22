@@ -133,72 +133,6 @@ func (_c *MockOrdersRepository_Close_Call) RunAndReturn(run func()) *MockOrdersR
 	return _c
 }
 
-// CreateAccount provides a mock function for the type MockOrdersRepository
-func (_mock *MockOrdersRepository) CreateAccount(ctx context.Context, a repo.Account) (int, error) {
-	ret := _mock.Called(ctx, a)
-
-	if len(ret) == 0 {
-		panic("no return value specified for CreateAccount")
-	}
-
-	var r0 int
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, repo.Account) (int, error)); ok {
-		return returnFunc(ctx, a)
-	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, repo.Account) int); ok {
-		r0 = returnFunc(ctx, a)
-	} else {
-		r0 = ret.Get(0).(int)
-	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, repo.Account) error); ok {
-		r1 = returnFunc(ctx, a)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// MockOrdersRepository_CreateAccount_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateAccount'
-type MockOrdersRepository_CreateAccount_Call struct {
-	*mock.Call
-}
-
-// CreateAccount is a helper method to define mock.On call
-//   - ctx context.Context
-//   - a repo.Account
-func (_e *MockOrdersRepository_Expecter) CreateAccount(ctx any, a any) *MockOrdersRepository_CreateAccount_Call {
-	return &MockOrdersRepository_CreateAccount_Call{Call: _e.mock.On("CreateAccount", ctx, a)}
-}
-
-func (_c *MockOrdersRepository_CreateAccount_Call) Run(run func(ctx context.Context, a repo.Account)) *MockOrdersRepository_CreateAccount_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 context.Context
-		if args[0] != nil {
-			arg0 = args[0].(context.Context)
-		}
-		var arg1 repo.Account
-		if args[1] != nil {
-			arg1 = args[1].(repo.Account)
-		}
-		run(
-			arg0,
-			arg1,
-		)
-	})
-	return _c
-}
-
-func (_c *MockOrdersRepository_CreateAccount_Call) Return(n int, err error) *MockOrdersRepository_CreateAccount_Call {
-	_c.Call.Return(n, err)
-	return _c
-}
-
-func (_c *MockOrdersRepository_CreateAccount_Call) RunAndReturn(run func(ctx context.Context, a repo.Account) (int, error)) *MockOrdersRepository_CreateAccount_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // CreatePayment provides a mock function for the type MockOrdersRepository
 func (_mock *MockOrdersRepository) CreatePayment(ctx context.Context, req repo.RequestOrder, orderID int) (*repo.Payment, error) {
 	ret := _mock.Called(ctx, req, orderID)
@@ -987,6 +921,72 @@ func (_c *MockOrdersRepository_GetOfflinePayments_Call) Return(offlinePayments [
 }
 
 func (_c *MockOrdersRepository_GetOfflinePayments_Call) RunAndReturn(run func(ctx context.Context, skip int, limit int, method string, orderByCreatedAt string) ([]*repo.OfflinePayment, error)) *MockOrdersRepository_GetOfflinePayments_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetOrCreateAccount provides a mock function for the type MockOrdersRepository
+func (_mock *MockOrdersRepository) GetOrCreateAccount(ctx context.Context, a repo.Account) (int, error) {
+	ret := _mock.Called(ctx, a)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetOrCreateAccount")
+	}
+
+	var r0 int
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, repo.Account) (int, error)); ok {
+		return returnFunc(ctx, a)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, repo.Account) int); ok {
+		r0 = returnFunc(ctx, a)
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, repo.Account) error); ok {
+		r1 = returnFunc(ctx, a)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockOrdersRepository_GetOrCreateAccount_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetOrCreateAccount'
+type MockOrdersRepository_GetOrCreateAccount_Call struct {
+	*mock.Call
+}
+
+// GetOrCreateAccount is a helper method to define mock.On call
+//   - ctx context.Context
+//   - a repo.Account
+func (_e *MockOrdersRepository_Expecter) GetOrCreateAccount(ctx any, a any) *MockOrdersRepository_GetOrCreateAccount_Call {
+	return &MockOrdersRepository_GetOrCreateAccount_Call{Call: _e.mock.On("GetOrCreateAccount", ctx, a)}
+}
+
+func (_c *MockOrdersRepository_GetOrCreateAccount_Call) Run(run func(ctx context.Context, a repo.Account)) *MockOrdersRepository_GetOrCreateAccount_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 repo.Account
+		if args[1] != nil {
+			arg1 = args[1].(repo.Account)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockOrdersRepository_GetOrCreateAccount_Call) Return(n int, err error) *MockOrdersRepository_GetOrCreateAccount_Call {
+	_c.Call.Return(n, err)
+	return _c
+}
+
+func (_c *MockOrdersRepository_GetOrCreateAccount_Call) RunAndReturn(run func(ctx context.Context, a repo.Account) (int, error)) *MockOrdersRepository_GetOrCreateAccount_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/volatiletech/null/v9"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/events"
@@ -19,22 +20,35 @@ import (
 
 func (o *OrdersDB) GetOrCreateAccount(ctx context.Context, a Account) (int, error) {
 
-	var id int
-	err := o.pool.QueryRow(ctx, `select id from accounts where "UserKey" = $1 ORDER BY id DESC LIMIT 1`, a.UserKey.String).
-		Scan(&id)
+	id, err := o.GetAccountIDByKeycloakID(ctx, a.UserKey.String)
 	if err == nil {
 		return id, nil
 	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return 0, fmt.Errorf("o.pool.QueryRow: %w", err)
+	if !errors.Is(err, common.ErrNoRowsAffected) {
+		return 0, fmt.Errorf("o.GetAccountIDByKeycloakID: %w", err)
 	}
 
+	id, _, err = o.createAccountForKey(ctx, a)
+	return id, err
+}
+
+// createAccountForKey creates a's account, or, when a concurrent request has
+// just created one for the same key, returns that one instead (created=false):
+// accounts_userkey_uniq allows a single account per key, so losing the race
+// is not an error.
+func (o *OrdersDB) createAccountForKey(ctx context.Context, a Account) (id int, created bool, err error) {
 	id, err = o.CreateAccount(ctx, a)
-	if err != nil {
-		return 0, fmt.Errorf("o.CreateAccount: %w", err)
+	if err == nil {
+		return id, true, nil
 	}
-
-	return id, nil
+	if !errors.Is(err, common.ErrAccountKeyTaken) {
+		return 0, false, fmt.Errorf("o.CreateAccount: %w", err)
+	}
+	id, err = o.GetAccountIDByKeycloakID(ctx, a.UserKey.String)
+	if err != nil {
+		return 0, false, fmt.Errorf("o.GetAccountIDByKeycloakID after conflict: %w", err)
+	}
+	return id, false, nil
 }
 
 func (o *OrdersDB) CreateAccount(ctx context.Context, a Account) (int, error) {
@@ -46,6 +60,9 @@ func (o *OrdersDB) CreateAccount(ctx context.Context, a Account) (int, error) {
 	var ID int
 	if err := o.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO accounts (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&ID); err != nil {
+		if isKeyTaken(err) {
+			return 0, fmt.Errorf("%w: %w", common.ErrAccountKeyTaken, err)
+		}
 		return 0, err
 	}
 
@@ -131,6 +148,9 @@ func (o *OrdersDB) PatchAccount(ctx context.Context, req Account, accountID int)
 
 	updateRes, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE accounts SET %s WHERE id=%d`, toUpdate, accountID), toUpdateArgs...)
 	if err != nil {
+		if isKeyTaken(err) {
+			return fmt.Errorf("%w: %w", common.ErrAccountKeyTaken, err)
+		}
 		return fmt.Errorf("o.pool.Exec: %w", err)
 	}
 	if updateRes.RowsAffected() == 0 {
@@ -156,9 +176,15 @@ func (o *OrdersDB) PatchOrCreateAccount(ctx context.Context, a Account) (int, er
 		return 0, fmt.Errorf("o.GetAccountIDByKeycloakID: %w", err)
 	}
 
-	accountID, err = o.CreateAccount(ctx, a)
+	accountID, created, err := o.createAccountForKey(ctx, a)
 	if err != nil {
-		return 0, fmt.Errorf("o.CreateAccount: %w", err)
+		return 0, err
+	}
+	// Lost the race: patch the account the other request just created.
+	if !created {
+		if err := o.PatchAccount(ctx, a, accountID); err != nil {
+			return 0, fmt.Errorf("o.PatchAccount: %w", err)
+		}
 	}
 
 	return accountID, nil
@@ -239,6 +265,13 @@ func (o *OrdersDB) HardDeleteAllUserDataByAccountID(ctx context.Context, account
 	_, err = tx.Exec(ctx, `DELETE FROM orders where "AccountID" = $1`, accountID)
 	if err != nil {
 		return fmt.Errorf("delete from orders: %w", err)
+	}
+
+	// Migration 29 kept a copy of every account it merged into this one.
+	_, err = tx.Exec(ctx, `WITH m AS (DELETE FROM account_merges WHERE winner_id = $1 RETURNING loser_id)
+		DELETE FROM account_merge_moves WHERE loser_id IN (SELECT loser_id FROM m)`, accountID)
+	if err != nil {
+		return fmt.Errorf("delete from account_merges: %w", err)
 	}
 
 	_, err = tx.Exec(ctx, "DELETE FROM accounts WHERE id = $1", accountID)
@@ -373,6 +406,13 @@ func (o *OrdersDB) MergeAccountsOrders(ctx context.Context, req AccountMergeRequ
 		return fmt.Errorf("UPDATE transaction : %w", err)
 	}
 
+	// Migration 29's copies follow the account they were merged into, so a
+	// later hard delete of the destination removes them too.
+	_, err = tx.Exec(ctx, `UPDATE account_merges SET winner_id = $1 WHERE winner_id = $2`, destinationAccountID, sourceAccountID)
+	if err != nil {
+		return fmt.Errorf("UPDATE account_merges : %w", err)
+	}
+
 	_, err = tx.Exec(ctx, `DELETE FROM specials where email = (SELECT "Email" FROM accounts WHERE id = $1)`, sourceAccountID)
 	if err != nil {
 		return fmt.Errorf("delete from specials: %w", err)
@@ -395,6 +435,13 @@ func (o *OrdersDB) MergeAccountsOrders(ctx context.Context, req AccountMergeRequ
 		"destination_account_email": destinationAccountEmail})
 
 	return nil
+}
+
+// isKeyTaken reports whether err is accounts_userkey_uniq refusing a second
+// account for a key.
+func isKeyTaken(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "accounts_userkey_uniq"
 }
 
 func prepareAccountCreateQuery(req Account) (string, string, []interface{}) {
@@ -657,9 +704,9 @@ func (o *OrdersDB) GetOrCreateAccountFromProfile(ctx context.Context, keycloakId
 		UserKey:     null.StringFrom(keycloakId),
 	}
 
-	account.ID, err = o.CreateAccount(ctx, *account)
+	account.ID, _, err = o.createAccountForKey(ctx, *account)
 	if err != nil {
-		return 0, fmt.Errorf("repo.CreateAccount: %w", err)
+		return 0, err
 	}
 	return account.ID, nil
 }

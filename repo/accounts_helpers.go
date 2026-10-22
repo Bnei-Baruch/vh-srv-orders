@@ -340,7 +340,7 @@ func (o *OrdersDB) MergeAccountsOrders(ctx context.Context, req AccountMergeRequ
 
 	err = o.pool.QueryRow(ctx, `SELECT "Email" FROM accounts WHERE id = $1`, destinationAccountID).Scan(&destinationAccountEmail)
 	if err != nil {
-		return fmt.Errorf("Email from destaination account.id: %w", err)
+		return fmt.Errorf("Email from destination account.id: %w", err)
 	}
 
 	tx, err := o.pool.Begin(ctx)
@@ -373,9 +373,13 @@ func (o *OrdersDB) MergeAccountsOrders(ctx context.Context, req AccountMergeRequ
 		return fmt.Errorf("UPDATE transaction : %w", err)
 	}
 
-	_, err = tx.Exec(ctx, `DELETE FROM specials where email = (SELECT "Email" FROM accounts WHERE id = $1)`, sourceAccountID)
-	if err != nil {
-		return fmt.Errorf("delete from specials: %w", err)
+	// Specials are keyed by email. When both accounts carry the same one, the
+	// source's specials are also the destination's, so they stay.
+	if !strings.EqualFold(sourceAccountEmail.String, destinationAccountEmail.String) {
+		_, err = tx.Exec(ctx, `DELETE FROM specials where email = (SELECT "Email" FROM accounts WHERE id = $1)`, sourceAccountID)
+		if err != nil {
+			return fmt.Errorf("delete from specials: %w", err)
+		}
 	}
 
 	_, err = tx.Exec(ctx, "DELETE FROM accounts WHERE id = $1", sourceAccountID)

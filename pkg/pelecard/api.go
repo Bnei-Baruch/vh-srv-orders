@@ -164,6 +164,39 @@ func (c *Client) FetchMuhlafim(ctx context.Context, startDate, endDate string) (
 	return entries, nil
 }
 
+// Routes that open a Pelecard page for a payer, all in the /vh group: it
+// requires a key and takes the organization from it. The shared /emv, /token
+// and /renew routes read no credential at all, so a bearer sent there would be
+// ignored and the call still logged as anonymous.
+const (
+	PageTokenNew    = "/vh/token/new"
+	PageEmvNew      = "/vh/emv/new"
+	PageEmvNewToken = "/vh/emv/new_token"
+	PageRenewCard   = "/vh/renew-card"
+)
+
+// OpenPage asks external_payments for a Pelecard page, with a bearer, and
+// returns the answer for the caller to parse: the routes answer in different
+// shapes. A 401 that survives the retry is ErrUnauthorized.
+func (c *Client) OpenPage(ctx context.Context, path string, payload []byte) (*resty.Response, error) {
+	if c.Tokens == nil {
+		return nil, fmt.Errorf("no token source configured for external_payments")
+	}
+
+	resp, err := c.sendAuthorized(ctx, "page "+path, func(r *resty.Request) (*resty.Response, error) {
+		return r.SetBody(payload).Post(c.BaseURL + path)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode() == http.StatusUnauthorized {
+		return nil, fmt.Errorf("%w: %s", ErrUnauthorized, path)
+	}
+
+	return resp, nil
+}
+
 // ChargeByToken sends a token-based charge request to the payment gateway.
 //
 // It authenticates: these calls used to arrive with no credential, which is why

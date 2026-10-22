@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -193,31 +192,35 @@ func (o *OrdersAPI) handleTransactionOrderAndPay(c *gin.Context) {
 		return
 	}
 
-	ENDPOINT := ""
+	page := ""
 	if req.Type.String == "recurring" {
-		ENDPOINT = "https://checkout.kbb1.com/token/new"
+		page = pelecard.PageTokenNew
 	}
 	if req.Type.String == "regular" {
-		ENDPOINT = "https://checkout.kbb1.com/emv/new"
+		page = pelecard.PageEmvNew
 	}
 	if req.Reference.String == "testemv" {
-		ENDPOINT = "https://checkout.kbb1.com/emv/new"
+		page = pelecard.PageEmvNew
 	}
-	utils.LogFor(c.Request.Context()).Debug("payment endpoint", slog.String("endpoint", ENDPOINT))
-
-	resp, err := utils.PostJSON("POST", ENDPOINT, payload)
-	if err != nil {
-		utils.LogFor(c.Request.Context()).Info("POST external payment failed", slog.Any("err", err))
+	utils.LogFor(c.Request.Context()).Debug("payment page", slog.String("page", page))
+	if page == "" {
+		utils.LogFor(c.Request.Context()).Error("no payment page for this order type", slog.String("type", req.Type.String))
 		c.JSON(http.StatusOK, gin.H{"url": errorurl})
 		return
 	}
-	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	resp, err := o.pages.OpenPage(c.Request.Context(), page, payload)
+	if err != nil {
+		reportPageFailure(c, page, err)
+		c.JSON(http.StatusOK, gin.H{"url": errorurl})
+		return
+	}
+
+	body := resp.Body()
 
 	utils.LogFor(c.Request.Context()).Info("payment response", slog.Group("response",
-		slog.String("status", resp.Status),
-		slog.Any("headers", resp.Header),
+		slog.String("status", resp.Status()),
+		slog.Any("headers", resp.Header()),
 		slog.String("body", string(body))))
 
 	// Grisha you should fix that one... seriously
@@ -315,19 +318,18 @@ func (o *OrdersAPI) handleTransactionNewToken(c *gin.Context) {
 		return
 	}
 
-	resp, err := utils.PostJSON("POST", common.GetNewTokenEndpoint, payload)
+	resp, err := o.pages.OpenPage(c.Request.Context(), pelecard.PageEmvNewToken, payload)
 	if err != nil {
-		utils.LogFor(c.Request.Context()).Info("POST handleTransactionNewToken failed", slog.Any("err", err))
+		reportPageFailure(c, pelecard.PageEmvNewToken, err)
 		c.JSON(http.StatusOK, gin.H{"url": req.ErrorURL})
 		return
 	}
-	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body := resp.Body()
 
 	utils.LogFor(c.Request.Context()).Info("getToken response", slog.Group("response",
-		slog.String("status", resp.Status),
-		slog.Any("headers", resp.Header),
+		slog.String("status", resp.Status()),
+		slog.Any("headers", resp.Header()),
 		slog.String("body", string(body))))
 	{
 		var i interface{}
@@ -411,19 +413,18 @@ func (o *OrdersAPI) handleTransactionNewTokenNoCVV(c *gin.Context) {
 		return
 	}
 
-	resp, err := utils.PostJSON("POST", common.GetNewTokenNoCVVEndpoint, payload)
+	resp, err := o.pages.OpenPage(c.Request.Context(), pelecard.PageRenewCard, payload)
 	if err != nil {
-		utils.LogFor(c.Request.Context()).Info("POST GetNewTokenNoCVVEndpoint failed", slog.Any("err", err))
+		reportPageFailure(c, pelecard.PageRenewCard, err)
 		c.JSON(http.StatusOK, gin.H{"url": req.ErrorURL})
 		return
 	}
-	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body := resp.Body()
 
 	utils.LogFor(c.Request.Context()).Info("getToken response", slog.Group("response",
-		slog.String("status", resp.Status),
-		slog.Any("headers", resp.Header),
+		slog.String("status", resp.Status()),
+		slog.Any("headers", resp.Header()),
 		slog.String("body", string(body))))
 	{
 		var i interface{}
@@ -496,4 +497,14 @@ func (o *OrdersAPI) handleTransactionPaid(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, nil)
+}
+
+// reportPageFailure records a payer who could not get a payment page. The
+// handlers still answer 200 with the caller's error URL, so the Sentry
+// middleware never sees it: without this, a credential that stopped working
+// would turn every payer away with nothing in Sentry.
+func reportPageFailure(c *gin.Context, page string, err error) {
+	err = fmt.Errorf("open payment page %s: %w", page, err)
+	utils.LogFor(c.Request.Context()).Error("payment page failed", slog.Any("err", err))
+	utils.SentryFor(c.Request.Context()).CaptureException(err)
 }

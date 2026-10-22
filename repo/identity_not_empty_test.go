@@ -182,6 +182,12 @@ func TestCreateSpecial_RequiresAnEmail(t *testing.T) {
 	empty.Email = null.StringFrom("")
 	_, err = db.CreateSpecial(ctx, empty)
 	assert.ErrorIs(t, err, common.ErrInvalidValues, "empty identifiers are no identifiers")
+
+	blank := base
+	blank.KeycloakId = null.StringFrom("kc-blank-email")
+	blank.Email = null.StringFrom("  ")
+	_, err = db.CreateSpecial(ctx, blank)
+	assert.ErrorIs(t, err, common.ErrInvalidValues, "a blank email is no email")
 }
 
 // An empty key used to match any account stored with an empty "UserKey", attaching

@@ -90,16 +90,13 @@ func (o *OrdersDB) GetPaymentActivities(ctx context.Context, userKey string, ema
 // limits them to the accounts with that keycloak id (a user can have more
 // than one); it is what pins a non-admin, and email and accountID only narrow
 // within it.
-func (o *OrdersDB) GetAllPayments(ctx context.Context, skip int, limit int, fromDate string, toDate *time.Time,
-	paymentType string, paymentStatus string, orderType string, email string, accountID int, userKey string, paymentsWithToken string,
+func (o *OrdersDB) GetAllPayments(ctx context.Context, skip int, limit int, fromDate *time.Time, toDate *time.Time,
+	paymentType string, paymentStatus string, orderType string, email string, accountID int, userKey string, paymentsWithToken *bool,
 	intOrderID int, orderByCreatedAt string) ([]Payment, error) {
 
 	limitOffsetString := fmt.Sprintf(" LIMIT %d OFFSET %d", limit, skip)
-	whereQuery, orderByQuery, args, err := buildAndGetPaymentsWhereQuery(fromDate, toDate, paymentType, paymentStatus,
+	whereQuery, orderByQuery, args := buildAndGetPaymentsWhereQuery(fromDate, toDate, paymentType, paymentStatus,
 		orderType, email, accountID, userKey, paymentsWithToken, intOrderID, orderByCreatedAt)
-	if err != nil {
-		return nil, fmt.Errorf("buildAndGetPaymentsWhereQuery: %w", err)
-	}
 
 	fromQuery := " FROM payments as p"
 	if email != "" || accountID != 0 || userKey != "" || orderType != "" {
@@ -1139,8 +1136,8 @@ func buildAndGetWherePaymentActQuery(userKey string, email string, productType s
 	return whereString.String(), orderBy.String(), args
 }
 
-func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentType string, paymentStatus string,
-	orderType string, email string, accontID int, userKey string, paymentsWithToken string, intOrderID int, orderByCreatedAt string) (string, string, []any, error) {
+func buildAndGetPaymentsWhereQuery(fromDate *time.Time, dateTo *time.Time, paymentType string, paymentStatus string,
+	orderType string, email string, accontID int, userKey string, paymentsWithToken *bool, intOrderID int, orderByCreatedAt string) (string, string, []any) {
 	var args queryArgs
 	var whereString strings.Builder
 	var orderBy strings.Builder
@@ -1153,17 +1150,11 @@ func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentTy
 	}
 
 	// WHERE query generation based on parameters
-	if fromDate != "" {
-		rfcLayout := time.RFC3339
-		fromDateParsed, err := time.Parse(rfcLayout, fromDate)
-
-		if err != nil {
-			return "", "", nil, err
-		}
+	if fromDate != nil {
 		if whereCondition.String() != "" {
-			whereCondition.WriteString(fmt.Sprintf(" AND p.updated_at >= '%s'", fromDateParsed.Format(time.RFC3339Nano)))
+			whereCondition.WriteString(fmt.Sprintf(" AND p.updated_at >= '%s'", fromDate.Format(time.RFC3339Nano)))
 		} else {
-			whereCondition.WriteString(fmt.Sprintf(" p.updated_at >= '%s'", fromDateParsed.Format(time.RFC3339Nano)))
+			whereCondition.WriteString(fmt.Sprintf(" p.updated_at >= '%s'", fromDate.Format(time.RFC3339Nano)))
 		}
 	}
 
@@ -1183,13 +1174,8 @@ func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentTy
 		}
 	}
 
-	if paymentsWithToken != "" {
-		//convert string to bool
-		paymentsWithTokenBool, err := strconv.ParseBool(paymentsWithToken)
-		if err != nil {
-			return "", "", nil, err
-		}
-		if paymentsWithTokenBool {
+	if paymentsWithToken != nil {
+		if *paymentsWithToken {
 			if whereCondition.String() != "" {
 				whereCondition.WriteString(" AND p.pelecard_token IS NOT NULL")
 			} else {
@@ -1265,7 +1251,7 @@ func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentTy
 	} else {
 		whereString.Reset()
 	}
-	return whereString.String(), orderBy.String(), args, nil
+	return whereString.String(), orderBy.String(), args
 }
 
 func buildAndGetOfflinePaymentsWhereQuery(method string, orderByCreatedAt string) (string, string, []any, error) {

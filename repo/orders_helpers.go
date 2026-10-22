@@ -308,16 +308,12 @@ func (o *OrdersDB) PatchOrderByID(ctx context.Context, order Order, orderId int)
 	return nil
 }
 
-func (o *OrdersDB) GetAllOrders(ctx context.Context, skip int, limit int, fromDate string, toDate *time.Time, productType string,
+func (o *OrdersDB) GetAllOrders(ctx context.Context, skip int, limit int, fromDate *time.Time, toDate *time.Time, productType string,
 	currency string, status string, organisation string, email string, accountID int, keycloakID string, evaluateMembership string,
 	orderByPaymentDate string) (*[]Order, error) {
 	limitOffsetString := fmt.Sprintf(" LIMIT %d OFFSET %d", limit, skip)
-	whereQuery, orderByQuery, args, queryBuildErr := buildAndGetOrdersWhereQuery(fromDate, toDate, productType, currency, status,
+	whereQuery, orderByQuery, args := buildAndGetOrdersWhereQuery(fromDate, toDate, productType, currency, status,
 		organisation, email, accountID, keycloakID, evaluateMembership, orderByPaymentDate)
-
-	if queryBuildErr != nil {
-		return nil, fmt.Errorf("buildAndGetOrdersWhereQuery: %w", queryBuildErr)
-	}
 
 	fromQuery := " FROM orders as o"
 	if email != "" {
@@ -547,8 +543,8 @@ func prepareOrderUpdateQuery(req Order) (string, []interface{}) {
 	return updateArgument, args
 }
 
-func buildAndGetOrdersWhereQuery(fromDate string, dateTo *time.Time, productType string, currency string, status string,
-	organisation string, email string, accountID int, keycloakID string, evaluateMembership string, orderByPaymentDate string) (string, string, []any, error) {
+func buildAndGetOrdersWhereQuery(fromDate *time.Time, dateTo *time.Time, productType string, currency string, status string,
+	organisation string, email string, accountID int, keycloakID string, evaluateMembership string, orderByPaymentDate string) (string, string, []any) {
 
 	var args queryArgs
 	var whereString strings.Builder
@@ -561,14 +557,8 @@ func buildAndGetOrdersWhereQuery(fromDate string, dateTo *time.Time, productType
 	whereCondition.WriteString(fmt.Sprintf(" o.updated_at <= '%s'", dateTo.Format(time.RFC3339Nano)))
 
 	// WHERE query generation based on parameters
-	if fromDate != "" {
-		rfcLayout := time.RFC3339
-		fromDateParsed, err := time.Parse(rfcLayout, fromDate)
-
-		if err != nil {
-			return "", "", nil, err
-		}
-		whereCondition.WriteString(fmt.Sprintf(" AND o.updated_at >= '%s'", fromDateParsed.Format(time.RFC3339Nano)))
+	if fromDate != nil {
+		whereCondition.WriteString(fmt.Sprintf(" AND o.updated_at >= '%s'", fromDate.Format(time.RFC3339Nano)))
 	}
 
 	if currency != "" {
@@ -622,7 +612,7 @@ func buildAndGetOrdersWhereQuery(fromDate string, dateTo *time.Time, productType
 	} else {
 		whereString.Reset()
 	}
-	return whereString.String(), orderBy.String(), args, nil
+	return whereString.String(), orderBy.String(), args
 }
 
 func (o *OrdersDB) HasPaidMembership(ctx context.Context, email string) (bool, error) {

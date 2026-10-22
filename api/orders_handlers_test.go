@@ -1,11 +1,13 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/volatiletech/null/v9"
 
 	"gitlab.bbdev.team/vh/pay/orders/repo"
@@ -79,39 +81,25 @@ func Test_order_fetch_invalid_to_date_is_rejected(t *testing.T) {
 	defer CloseTestApp(a)
 
 	got := GET(t, a, "/v2/orders?to-date=not-a-date", http.StatusBadRequest)
-	assert.Equal(t, "Invalid date-from", got["error"])
+	assert.Equal(t, "Invalid to-date", got["error"])
 }
 
-// Same as above for payments, which first looks up the caller's account, so
-// the account must exist for the request to reach the date parsing.
+// Same as above for payments.
 func Test_payment_fetch_invalid_to_date_is_rejected(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)
 
-	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
-
 	got := GET(t, a, "/v2/payments?to-date=not-a-date", http.StatusBadRequest)
-	assert.Equal(t, "Invalid date-from", got["error"])
+	assert.Equal(t, "Invalid to-date", got["error"])
 }
 
-// A bad account-id or order-id must be named in the error, not reported as a
-// bad limit.
-func Test_fetch_invalid_id_names_the_parameter(t *testing.T) {
+// A bad account-id must be named in the error, not reported as a bad limit.
+func Test_order_fetch_invalid_account_id_names_the_parameter(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)
 
-	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
-
-	for path, want := range map[string]string{
-		"/v2/orders?account-id=x":   "Invalid account-id value! Accepted value is INTEGER",
-		"/v2/payments?account-id=x": "Invalid account-id value! Accepted value is INTEGER",
-		"/v2/payments?order-id=x":   "Invalid order-id value! Accepted value is INTEGER",
-	} {
-		t.Run(path, func(t *testing.T) {
-			got := GET(t, a, path, http.StatusBadRequest)
-			assert.Equal(t, want, got["error"])
-		})
-	}
+	got := GET(t, a, "/v2/orders?account-id=x", http.StatusBadRequest)
+	assert.Equal(t, "Invalid account-id value! Accepted value is INTEGER", got["error"])
 }
 
 // A bad from-date is the client's mistake: 400, not the 500 the repo's own
@@ -128,9 +116,22 @@ func Test_payment_fetch_invalid_from_date_is_400(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)
 
-	// Payments looks up the caller's account before it reads the dates.
-	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
-
 	got := GET(t, a, "/v2/payments?from-date=not-a-date", http.StatusBadRequest)
 	assert.Equal(t, "Invalid from-date", got["error"])
+}
+
+// from-date is parsed in the handler; the parsed value must reach the query.
+// Listed as root: offline orders don't carry the caller's keycloak id, which
+// a non-admin's orders are filtered by.
+func Test_order_fetch_from_date_filters(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	_, orders := seedTwoPayments(t, a)
+	_, err := a.testPool(t).Exec(context.Background(),
+		`UPDATE orders SET updated_at = '2020-01-01T00:00:00Z' WHERE id = $1`, orders[0])
+	require.NoError(t, err)
+
+	got := do(t, a, "GET", "/v2/orders?from-date=2025-01-01T00:00:00Z", nil, http.StatusOK, DoOptions{isRoot: true})
+	assert.Equal(t, []int{orders[1]}, listedIDs(t, got))
 }

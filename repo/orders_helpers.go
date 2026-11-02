@@ -14,7 +14,7 @@ import (
 )
 
 func (o *OrdersDB) UpdateOrderStatusByOrderID(ctx context.Context, oid int, status string) error {
-	_, err := o.Exec(ctx, `UPDATE orders SET "Status"=$1 WHERE id=$2`, status, oid)
+	_, err := o.pool.Exec(ctx, `UPDATE orders SET "Status"=$1 WHERE id=$2`, status, oid)
 	return err
 }
 
@@ -55,11 +55,11 @@ func (o *OrdersDB) CreateOrderViaTransaction(ctx context.Context, req RequestOrd
 	}
 
 	createString, numString, createQueryArgs := prepareOrderCreateQuery(order)
-	err = o.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = o.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).
 		Scan(&order.ID)
 	if err != nil {
-		return nil, fmt.Errorf("o.QueryRow.Scan: %w", err)
+		return nil, fmt.Errorf("o.pool.QueryRow.Scan: %w", err)
 	}
 
 	o.emitEvent(ctx, events.TypeCreateOrder, map[string]interface{}{"order_id": order.ID})
@@ -95,26 +95,26 @@ func (o *OrdersDB) UpdateOrdersToken(ctx context.Context, req RequestUpdateToken
 func (o *OrdersDB) UpdateOrderAfterPayment(ctx context.Context, p Payment) error {
 	var order Order
 
-	if err := o.QueryRow(ctx, `SELECT id, "ProductType", "AccountID", "OrderLanguage" FROM orders WHERE id=$1`, p.OrderID.Int).
+	if err := o.pool.QueryRow(ctx, `SELECT id, "ProductType", "AccountID", "OrderLanguage" FROM orders WHERE id=$1`, p.OrderID.Int).
 		Scan(&order.ID, &order.ProductType, &order.AccountID, &order.OrderLanguage); err != nil {
-		return fmt.Errorf("o.QueryRow.Scan: %w", err)
+		return fmt.Errorf("o.pool.QueryRow.Scan: %w", err)
 	}
 
 	if p.Success.String == "1" {
 		order.Status = null.NewString(common.OrderStatusPaid, true)
 		order.PaymentDate = null.NewTime(time.Now(), true)
 
-		_, err := o.Exec(ctx, `UPDATE orders SET "Status"=$1, "PaymentDate"=$2, updated_at=$3 WHERE id = $4`,
+		_, err := o.pool.Exec(ctx, `UPDATE orders SET "Status"=$1, "PaymentDate"=$2, updated_at=$3 WHERE id = $4`,
 			order.Status.String, order.PaymentDate.Time, time.Now(), p.OrderID.Int)
 		if err != nil {
-			return fmt.Errorf("o.Exec [success]: %w", err)
+			return fmt.Errorf("o.pool.Exec [success]: %w", err)
 		}
 	} else {
 		order.Status = null.NewString(common.OrderStatusNoSuccess, true)
-		_, err := o.Exec(ctx, `UPDATE orders SET "Status"=$1, updated_at=$2 WHERE id = $3`,
+		_, err := o.pool.Exec(ctx, `UPDATE orders SET "Status"=$1, updated_at=$2 WHERE id = $3`,
 			order.Status.String, time.Now(), p.OrderID.Int)
 		if err != nil {
-			return fmt.Errorf("o.Exec [%s]: %w", common.OrderStatusNoSuccess, err)
+			return fmt.Errorf("o.pool.Exec [%s]: %w", common.OrderStatusNoSuccess, err)
 		}
 	}
 
@@ -127,7 +127,7 @@ func (o *OrdersDB) GetOrderByID(ctx context.Context, orderID uint) (*Order, erro
 	var order Order
 	var amount null.String
 
-	if err := o.QueryRow(ctx, `SELECT 
+	if err := o.pool.QueryRow(ctx, `SELECT 
 	id,
 	"Type",
 	"ProductType",
@@ -152,7 +152,7 @@ func (o *OrdersDB) GetOrderByID(ctx context.Context, orderID uint) (*Order, erro
 		&order.Currency, &order.Status, &order.OrderLanguage, &order.PaymentDate, &order.StartingDate, &order.Flag, &order.CardDetailsId, &order.Quantity, &order.AmountItem,
 		&order.CreatedAt, &order.UpdatedAt, &order.DeletedAt,
 	); err != nil {
-		return nil, fmt.Errorf("o.QueryRow.Scan: %w", err)
+		return nil, fmt.Errorf("o.pool.QueryRow.Scan: %w", err)
 	}
 
 	if !amount.Valid {
@@ -171,9 +171,9 @@ func (o *OrdersDB) GetOrderByID(ctx context.Context, orderID uint) (*Order, erro
 }
 
 // Get Payment
-func (o *OrdersDB) GetPaymentForOrderID(ctx context.Context, orderID uint) (*Payment, error) {
+func (o *OrdersDB) getPaymentForOrderID(ctx context.Context, orderID uint) (*Payment, error) {
 	var p Payment
-	if err := o.QueryRow(ctx, `SELECT 
+	if err := o.pool.QueryRow(ctx, `SELECT 
 	id,
 	"Amount",
 	"Currency",
@@ -231,7 +231,7 @@ func (o *OrdersDB) GetAccountForOrderID(ctx context.Context, orderID uint) (*Acc
 	}
 
 	var a Account
-	if err := o.QueryRow(ctx, `SELECT 
+	if err := o.pool.QueryRow(ctx, `SELECT 
 	id,
 	"FirstName",
 	"LastName",
@@ -257,7 +257,7 @@ func (o *OrdersDB) GetAccountForOrderID(ctx context.Context, orderID uint) (*Acc
 		&a.AccountType, &a.PaymentToken, &a.PaymentCardID, &a.PaymentCardExpMonth, &a.PaymentCardExpYear, &a.UserKey,
 		&a.AuthNo, &a.CreatedAt, &a.UpdatedAt, &a.DeletedAt,
 	); err != nil {
-		return nil, fmt.Errorf("o.QueryRow.Scan: %w", err)
+		return nil, fmt.Errorf("o.pool.QueryRow.Scan: %w", err)
 	}
 
 	return &a, nil
@@ -270,7 +270,7 @@ func (o *OrdersDB) CreateV2Order(ctx context.Context, order Order) (int, error) 
 	}
 
 	var ID int
-	if err := o.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	if err := o.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&ID); err != nil {
 		return 0, err
 	}
@@ -281,7 +281,7 @@ func (o *OrdersDB) CreateV2Order(ctx context.Context, order Order) (int, error) 
 }
 
 func (o *OrdersDB) SoftDeleteOrderByID(ctx context.Context, orderID int) error {
-	_, err := o.Exec(ctx, "UPDATE orders SET deleted_at = $1 WHERE id = $2", time.Now(), orderID)
+	_, err := o.pool.Exec(ctx, "UPDATE orders SET deleted_at = $1 WHERE id = $2", time.Now(), orderID)
 	if err != nil {
 		return err
 	}
@@ -295,7 +295,7 @@ func (o *OrdersDB) PatchOrderByID(ctx context.Context, order Order, orderId int)
 		return common.ErrInvalidValues
 	}
 
-	updateRes, err := o.Exec(ctx, fmt.Sprintf(`UPDATE orders SET %s WHERE id=%d`, toUpdate, orderId), toUpdateArgs...)
+	updateRes, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE orders SET %s WHERE id=%d`, toUpdate, orderId), toUpdateArgs...)
 	if err != nil {
 		return fmt.Errorf("problem updating order: %w", err)
 	}
@@ -312,7 +312,7 @@ func (o *OrdersDB) GetAllOrders(ctx context.Context, skip int, limit int, fromDa
 	currency string, status string, organisation string, email string, accountID int, keycloakID string, evaluateMembership string,
 	orderByPaymentDate string) (*[]Order, error) {
 	limitOffsetString := fmt.Sprintf(" LIMIT %d OFFSET %d", limit, skip)
-	whereQuery, orderByQuery, queryBuildErr := buildAndGetOrdersWhereQuery(fromDate, toDate, productType, currency, status,
+	whereQuery, orderByQuery, args, queryBuildErr := buildAndGetOrdersWhereQuery(fromDate, toDate, productType, currency, status,
 		organisation, email, accountID, keycloakID, evaluateMembership, orderByPaymentDate)
 
 	if queryBuildErr != nil {
@@ -331,9 +331,9 @@ func (o *OrdersDB) GetAllOrders(ctx context.Context, skip int, limit int, fromDa
 	` + fromQuery + whereQuery + orderByQuery + limitOffsetString
 
 	// utils.LogFor(ctx).Info("GetAllOrders.query", slog.String("sql", query))
-	rows, err := o.Query(ctx, query)
+	rows, err := o.pool.Query(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("o.Query: %w", err)
+		return nil, fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 
@@ -548,8 +548,9 @@ func prepareOrderUpdateQuery(req Order) (string, []interface{}) {
 }
 
 func buildAndGetOrdersWhereQuery(fromDate string, dateTo *time.Time, productType string, currency string, status string,
-	organisation string, email string, accountID int, keycloakID string, evaluateMembership string, orderByPaymentDate string) (string, string, error) {
+	organisation string, email string, accountID int, keycloakID string, evaluateMembership string, orderByPaymentDate string) (string, string, []any, error) {
 
+	var args queryArgs
 	var whereString strings.Builder
 	var orderBy strings.Builder
 	var whereCondition strings.Builder
@@ -565,35 +566,35 @@ func buildAndGetOrdersWhereQuery(fromDate string, dateTo *time.Time, productType
 		fromDateParsed, err := time.Parse(rfcLayout, fromDate)
 
 		if err != nil {
-			return "", "", err
+			return "", "", nil, err
 		}
-		whereCondition.WriteString(fmt.Sprintf(" AND o.updated_at >= '%s'", fromDateParsed.Format("2006-01-02 15:04:05")))
+		whereCondition.WriteString(fmt.Sprintf(" AND o.updated_at >= '%s'", fromDateParsed.Format(time.RFC3339Nano)))
 	}
 
 	if currency != "" {
-		whereCondition.WriteString(fmt.Sprintf(" AND LOWER(o.\"Currency\")=LOWER('%s')", currency))
+		whereCondition.WriteString(` AND LOWER(o."Currency")=LOWER(` + args.arg(currency) + `)`)
 	}
 
 	if status != "" {
-		whereCondition.WriteString(fmt.Sprintf(" AND LOWER(o.\"Status\")=LOWER('%s')", status))
+		whereCondition.WriteString(` AND LOWER(o."Status")=LOWER(` + args.arg(status) + `)`)
 	}
 
 	if productType != "" {
-		whereCondition.WriteString(fmt.Sprintf(" AND LOWER(o.\"ProductType\")=LOWER('%s')", productType))
+		whereCondition.WriteString(` AND LOWER(o."ProductType")=LOWER(` + args.arg(productType) + `)`)
 	}
 
 	if organisation != "" {
-		whereCondition.WriteString(fmt.Sprintf(" AND LOWER(o.\"Organization\")=LOWER('%s')", organisation))
+		whereCondition.WriteString(` AND LOWER(o."Organization")=LOWER(` + args.arg(organisation) + `)`)
 	}
 	if accountID != 0 {
 		whereCondition.WriteString(fmt.Sprintf(" AND o.\"AccountID\" = %d", accountID))
 	}
 	if keycloakID != "" {
-		whereCondition.WriteString(fmt.Sprintf(" AND o.userkey = '%s'", keycloakID))
+		whereCondition.WriteString(" AND o.userkey = " + args.arg(keycloakID))
 	}
 
 	if email != "" {
-		whereCondition.WriteString(fmt.Sprintf(" AND o.\"AccountID\" = a.id AND LOWER(a.\"Email\")=LOWER('%s')", email))
+		whereCondition.WriteString(` AND o."AccountID" = a.id AND LOWER(a."Email")=LOWER(` + args.arg(email) + `)`)
 	}
 
 	if evaluateMembership != "" {
@@ -621,7 +622,7 @@ func buildAndGetOrdersWhereQuery(fromDate string, dateTo *time.Time, productType
 	} else {
 		whereString.Reset()
 	}
-	return whereString.String(), orderBy.String(), nil
+	return whereString.String(), orderBy.String(), args, nil
 }
 
 func (o *OrdersDB) HasPaidMembership(ctx context.Context, email string) (bool, error) {
@@ -694,9 +695,9 @@ func (o *OrdersDB) GetTokensForOrders(ctx context.Context, orderIDs []int) (map[
 		WHERE id IN (%s)
 	`, strings.Join(placeholders, ", "))
 
-	orderRows, err := o.Query(ctx, ordersQuery, args...)
+	orderRows, err := o.pool.Query(ctx, ordersQuery, args...)
 	if err != nil {
-		return nil, fmt.Errorf("o.Query [orders]: %w", err)
+		return nil, fmt.Errorf("o.pool.Query [orders]: %w", err)
 	}
 	defer orderRows.Close()
 
@@ -739,14 +740,13 @@ func (o *OrdersDB) GetTokensForOrders(ctx context.Context, orderIDs []int) (map[
 			INNER JOIN orders o ON o.card_details_id = cd.id
 			WHERE cd.id IN (%s)
 				AND cd.active = true
-				AND cd.token IS NOT NULL
 				AND cd.token != ''
 				AND cd.deleted_at IS NULL
 		`, strings.Join(cardPlaceholders, ", "))
 
-		cardRows, err := o.Query(ctx, cardDetailsQuery, cardArgs...)
+		cardRows, err := o.pool.Query(ctx, cardDetailsQuery, cardArgs...)
 		if err != nil {
-			return nil, fmt.Errorf("o.Query [card_details]: %w", err)
+			return nil, fmt.Errorf("o.pool.Query [card_details]: %w", err)
 		}
 		defer cardRows.Close()
 
@@ -785,8 +785,8 @@ func (o *OrdersDB) GetTokensForOrders(ctx context.Context, orderIDs []int) (map[
 			paymentArgs[i] = id
 		}
 
-		// Use DISTINCT ON to get the first payment for each order (matching GetPaymentForOrderID logic)
-		// GetPaymentForOrderID filters by "PaymentStatus"='success' and uses natural order (by id)
+		// Use DISTINCT ON to get the first payment for each order (matching getPaymentForOrderID logic)
+		// getPaymentForOrderID filters by "PaymentStatus"='success' and uses natural order (by id)
 		paymentsQuery := fmt.Sprintf(`
 			SELECT DISTINCT ON ("OrderID") "OrderID", pelecard_token
 			FROM payments
@@ -795,9 +795,9 @@ func (o *OrdersDB) GetTokensForOrders(ctx context.Context, orderIDs []int) (map[
 			ORDER BY "OrderID", id ASC
 		`, strings.Join(paymentPlaceholders, ", "))
 
-		paymentRows, err := o.Query(ctx, paymentsQuery, paymentArgs...)
+		paymentRows, err := o.pool.Query(ctx, paymentsQuery, paymentArgs...)
 		if err != nil {
-			return nil, fmt.Errorf("o.Query [payments]: %w", err)
+			return nil, fmt.Errorf("o.pool.Query [payments]: %w", err)
 		}
 		defer paymentRows.Close()
 
@@ -829,7 +829,7 @@ func (o *OrdersDB) UpdateOrdersUserKeyFromAccounts(ctx context.Context) error {
 		FROM accounts 
 		WHERE orders."AccountID" = accounts.id
 	`
-	_, err := o.Exec(ctx, query)
+	_, err := o.pool.Exec(ctx, query)
 	return err
 }
 
@@ -848,7 +848,7 @@ func (o *OrdersDB) GetPaidOrdersCount(ctx context.Context, year, month int, last
 	startDate := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
 
 	var count int64
-	err := o.QueryRow(ctx, query, common.ProductTypeGlobalMembership, common.OrderStatusPaid, startDate, lastDay).Scan(&count)
+	err := o.pool.QueryRow(ctx, query, common.ProductTypeGlobalMembership, common.OrderStatusPaid, startDate, lastDay).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("query row scan: %w", err)
 	}
@@ -870,7 +870,7 @@ func (o *OrdersDB) GetOrdersToSkipDouble(ctx context.Context, year, month int, l
 
 	startDate := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
 
-	rows, err := o.Query(ctx, query, common.OrderStatusPaid, common.OrderStatusCancelled, common.ProductTypeGlobalMembership, startDate, lastDay)
+	rows, err := o.pool.Query(ctx, query, common.OrderStatusPaid, common.OrderStatusCancelled, common.ProductTypeGlobalMembership, startDate, lastDay)
 	if err != nil {
 		return nil, fmt.Errorf("query: %w", err)
 	}
@@ -908,7 +908,7 @@ func (o *OrdersDB) GetOrdersToSkipFresh(ctx context.Context, year, month int, la
 
 	startDate := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
 
-	rows, err := o.Query(ctx, query, common.OrderStatusPaid, common.OrderStatusCancelled, common.ProductTypeGlobalMembership, startDate, lastDay)
+	rows, err := o.pool.Query(ctx, query, common.OrderStatusPaid, common.OrderStatusCancelled, common.ProductTypeGlobalMembership, startDate, lastDay)
 	if err != nil {
 		return nil, fmt.Errorf("query: %w", err)
 	}
@@ -941,7 +941,7 @@ func (o *OrdersDB) SkipOrdersByUserKey(ctx context.Context, userkey string) (int
 		AND userkey = $3
 	`
 
-	result, err := o.Exec(ctx, query, common.OrderFlagSkip, common.OrderFlagToRenew, userkey)
+	result, err := o.pool.Exec(ctx, query, common.OrderFlagSkip, common.OrderFlagToRenew, userkey)
 	if err != nil {
 		return 0, fmt.Errorf("exec: %w", err)
 	}

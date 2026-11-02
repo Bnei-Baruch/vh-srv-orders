@@ -148,9 +148,11 @@ func (w *Worker) DoTask() error {
 		}
 		w.emitEvent(ctx,
 			events.TypeCreateSpecial,
+			// vh-srv-profile reads both identifiers with unchecked string
+			// assertions, so an absent one goes out as "", never null.
 			map[string]interface{}{
-				"email":       longest.Email,
-				"keycloak_id": longest.KeycloakId,
+				"email":       longest.Email.String,
+				"keycloak_id": longest.KeycloakId.String,
 				"start_date":  longest.StartDate,
 				"end_date":    longest.EndDate})
 		activated++

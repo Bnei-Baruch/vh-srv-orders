@@ -14,37 +14,43 @@ import (
 )
 
 func (o *OrdersDB) DeleteSpecialById(ctx context.Context, id int) error {
-	// null.String, not string: specials.email is nullable, and handleCreateSpecial
-	// binds repo.Special straight from the request with no email required, so
-	// rows with a NULL email exist. pgx refuses NULL into *string, and this
-	// function is on the revoke path — a row it cannot scan is a special that
-	// cannot be removed through the API or by DeleteSpecialsByKeycloakId.
+	// null.String, not string: specials.email is nullable and rows from before
+	// #53 may hold NULL. pgx refuses NULL into *string, and a scan error here
+	// would hide the real reason the revoke is refused below.
 	var (
 		email      null.String
 		keycloakID null.String
 		err        error
 	)
-	if err = o.QueryRow(ctx, `SELECT email, keycloak_id FROM specials where id=$1`, id).Scan(&email, &keycloakID); err != nil {
+	if err = o.pool.QueryRow(ctx, `SELECT email, keycloak_id FROM specials where id=$1`, id).Scan(&email, &keycloakID); err != nil {
 		return err
 	}
-	res, errUpdate := o.Exec(ctx, `UPDATE  specials SET end_date = now(), updated_at = now() WHERE  id = $1`, id)
+	// vh-srv-profile revokes by email only, so ending a special that has none
+	// would leave the membership active there. Refuse, and leave the row as is.
+	// '' as well as NULL: older rows stored the empty string for "absent".
+	if email.String == "" {
+		return fmt.Errorf("special %d has no email to revoke by: %w", id, common.ErrInvalidValues)
+	}
+	res, errUpdate := o.pool.Exec(ctx, `UPDATE  specials SET end_date = now(), updated_at = now() WHERE  id = $1`, id)
 	if errUpdate != nil {
-		return fmt.Errorf("o.Exec: %w", errUpdate)
+		return fmt.Errorf("o.pool.Exec: %w", errUpdate)
 	}
 
 	if res.RowsAffected() == 0 {
 		return common.ErrNoRowsAffected
 	} else {
-		// keycloak_id alongside the email: a keycloak-only special stores an
-		// empty email, so email alone names nobody a consumer can revoke by —
-		// and against an ilike predicate it names everyone.
+		// keycloak_id alongside the email, so a consumer is not left with only
+		// an address the account may have changed since.
 		o.emitEvent(ctx, events.TypeDeleteSpecial, map[string]interface{}{"email": email.String, "keycloak_id": keycloakID.String})
 	}
 	return nil
 }
 
 func (o *OrdersDB) SetKeycloakIdByEmail(ctx context.Context, email string, keycloakID string) error {
-	_, err := o.Exec(ctx, `UPDATE specials SET keycloak_id = $1, updated_at=now() WHERE email=$2`, keycloakID, email)
+	if email == "" || keycloakID == "" {
+		return fmt.Errorf("%w: email and keycloak_id are required", common.ErrInvalidValues)
+	}
+	_, err := o.pool.Exec(ctx, `UPDATE specials SET keycloak_id = $1, updated_at=now() WHERE email=$2`, keycloakID, email)
 	if err != nil {
 		return fmt.Errorf("SetKeycloakIdByEmail: %w", err)
 	}
@@ -55,11 +61,11 @@ func (o *OrdersDB) SetKeycloakIdByEmail(ctx context.Context, email string, keycl
 // DeleteSpecialById — the single primitive that ends a row and emits delete_special.
 // Past spans keep their history and future spans stay scheduled.
 func (o *OrdersDB) DeleteSpecialsByKeycloakId(ctx context.Context, keycloakID string) error {
-	rows, err := o.Query(ctx,
+	rows, err := o.pool.Query(ctx,
 		`SELECT id FROM specials WHERE keycloak_id=$1 AND start_date <= now() AND end_date > now()`,
 		keycloakID)
 	if err != nil {
-		return fmt.Errorf("o.Query: %w", err)
+		return fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 
@@ -86,7 +92,7 @@ func (o *OrdersDB) DeleteSpecialsByKeycloakId(ctx context.Context, keycloakID st
 
 func (o *OrdersDB) GetSpecialsById(ctx context.Context, id string) ([]*Special, error) {
 	var specials []*Special
-	rows, err := o.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory from specials where id = $1`, id)
+	rows, err := o.pool.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory from specials where id = $1`, id)
 
 	if err != nil {
 		return nil, err
@@ -110,7 +116,7 @@ func (o *OrdersDB) GetSpecialsById(ctx context.Context, id string) ([]*Special, 
 
 func (o *OrdersDB) GetSpecialsByKeycloakId(ctx context.Context, keycloakID string) ([]*Special, error) {
 	var specials []*Special
-	rows, err := o.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory from specials where keycloak_id = $1`, keycloakID)
+	rows, err := o.pool.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory from specials where keycloak_id = $1`, keycloakID)
 
 	if err != nil {
 		return nil, err
@@ -141,7 +147,7 @@ func (o *OrdersDB) GetSpecialsByKeycloakId(ctx context.Context, keycloakID strin
 // pages can overlap or miss rows.
 func (o *OrdersDB) GetAllSpecials(ctx context.Context, skip, limit int) ([]*Special, error) {
 	var specials []*Special
-	rows, err := o.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory from specials
+	rows, err := o.pool.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory from specials
 		 ORDER BY created_at DESC, id DESC LIMIT $1 OFFSET $2`, limit, skip)
 	if err != nil {
 		return specials, err
@@ -170,7 +176,7 @@ func (o *OrdersDB) GetAllSpecials(ctx context.Context, skip, limit int) ([]*Spec
 // that rewrites end_date rather than removing the row.
 func (o *OrdersDB) GetSpecialsStartingBetween(ctx context.Context, from, to time.Time) ([]*Special, error) {
 	var specials []*Special
-	rows, err := o.Query(ctx,
+	rows, err := o.pool.Query(ctx,
 		`SELECT id, keycloak_id, email, start_date, end_date, category, subcategory FROM specials
 		 WHERE start_date >= $1 AND start_date <= $2`, from, to)
 	if err != nil {
@@ -211,18 +217,24 @@ func (o *OrdersDB) HasSpecialMembership(ctx context.Context, email string) (bool
 }
 
 func (o *OrdersDB) CreateSpecial(ctx context.Context, s Special) (int, error) {
-	createString, numString, createQueryArgs := prepareSpecialCreateQuery(s)
-	if len(createQueryArgs) == 0 {
-		return 0, common.ErrInvalidValues
+	// An email is required. A row with neither identifier can be reached by
+	// nothing but its id (the specials_has_identifier CHECK refuses it too),
+	// and a keycloak-only row could be granted but never revoked:
+	// DeleteSpecialById refuses it, because vh-srv-profile revokes by email.
+	if !s.Email.Valid || s.Email.String == "" {
+		return 0, fmt.Errorf("special needs an email: %w", common.ErrInvalidValues)
 	}
+	createString, numString, createQueryArgs := prepareSpecialCreateQuery(s)
 
 	var ID int
-	if err := o.QueryRow(ctx, fmt.Sprintf(`INSERT INTO specials (%s) VALUES (%s) RETURNING id`, createString, numString),
+	if err := o.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO specials (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&ID); err != nil {
 		return 0, err
 	}
+	// As in delete_special: vh-srv-profile reads both identifiers with .(string),
+	// so an absent one goes out as "", never null.
 	o.emitEvent(ctx, events.TypeCreateSpecial,
-		map[string]interface{}{"email": s.Email, "keycloak_id": s.KeycloakId, "start_date": s.StartDate, "end_date": s.EndDate})
+		map[string]interface{}{"email": s.Email.String, "keycloak_id": s.KeycloakId.String, "start_date": s.StartDate, "end_date": s.EndDate})
 	return ID, nil
 }
 
@@ -231,12 +243,12 @@ func prepareSpecialCreateQuery(req Special) (string, string, []interface{}) {
 	var numString []string
 	var args []interface{}
 
-	if req.KeycloakId.Valid {
+	if req.KeycloakId.Valid && req.KeycloakId.String != "" {
 		createStrings = append(createStrings, `"keycloak_id"`)
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.KeycloakId.String)
 	}
-	if req.Email.Valid {
+	if req.Email.Valid && req.Email.String != "" {
 		createStrings = append(createStrings, `"email"`)
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.Email.String)
@@ -285,7 +297,7 @@ func prepareSpecialCreateQuery(req Special) (string, string, []interface{}) {
 // carry an empty string, which a wildcard did match.
 func (o *OrdersDB) GetAllSpecialsByEmail(ctx context.Context, email string) ([]*Special, error) {
 	var specials []*Special
-	rows, err := o.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory,created_at from specials where email ilike $1`, email)
+	rows, err := o.pool.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory,created_at from specials where email ilike $1`, email)
 
 	if err != nil {
 		return nil, err

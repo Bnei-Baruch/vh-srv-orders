@@ -43,26 +43,22 @@ func captureCreatedSpecial(t *testing.T, im *SpecialsImporter) *repo.Special {
 	return &got
 }
 
-// An identifier the sheet does not carry is left unset, so the column inserts
-// NULL rather than an empty string.
-//
-// The empty string was written deliberately for a while, because
-// GetUniqueEmailsFromSpecial and DeleteSpecialById scanned the column into a
-// plain string and pgx refuses NULL there. Both readers are gone or fixed, and
-// the sentinel turned out not to be inert: DeleteAccount and MergeAccounts
-// delete specials by `email = (SELECT "Email" FROM accounts WHERE id = $1)`, so
-// an account whose own email is empty matched every keycloak-only grant in the
-// table.
-func TestCreateSpecial_KeycloakOnlyRowLeavesTheEmailNull(t *testing.T) {
+// A row with a keycloak id and no email is refused before anything is written:
+// vh-srv-profile revokes a special by email, so such a grant could never be
+// ended (#53). The row is reported, and the import goes on.
+func TestCreateSpecial_KeycloakOnlyRowIsRefused(t *testing.T) {
 	im := NewSpecialsImporter()
-	got := captureCreatedSpecial(t, im)
+	mockRepo := mocks.NewMockOrdersRepository(t)
+	im.repo = mockRepo
+	mockRepo.EXPECT().GetAccount(mock.Anything, mock.Anything, mock.Anything).
+		Return(nil, pgx.ErrNoRows).Maybe()
 
 	record := specialRecord()
 	record.KeycloakID = null.StringFrom("kc-1")
-	require.NoError(t, im.createSpecial(record))
-
-	assert.False(t, got.Email.Valid, "an identifier the sheet did not supply must insert NULL, not ''")
-	assert.Equal(t, "kc-1", got.KeycloakId.String)
+	err := im.createSpecial(record)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "email is required")
+	mockRepo.AssertNotCalled(t, "CreateSpecial", mock.Anything, mock.Anything)
 }
 
 func TestCreateSpecial_EmailOnlyRowLeavesTheKeycloakIdNull(t *testing.T) {

@@ -49,7 +49,7 @@ func keycloakIDsOf(t *testing.T, emitted []events.Event) []string {
 	var ids []string
 	for _, e := range emitted {
 		require.Equal(t, events.TypeCreateSpecial, e.Type)
-		ids = append(ids, e.Payload["keycloak_id"].(null.String).String)
+		ids = append(ids, e.Payload["keycloak_id"].(string))
 	}
 	return ids
 }

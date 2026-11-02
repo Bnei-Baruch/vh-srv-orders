@@ -70,7 +70,9 @@ func (o *OrdersAPI) handleSpecialUpdateKeycloakIdByEmail(c *gin.Context) {
 	}
 	err = o.repo.SetKeycloakIdByEmail(c.Request.Context(), req.Email, req.KeycloakId)
 	if err != nil {
-		{
+		if errors.Is(err, common.ErrInvalidValues) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		} else {
 			c.Status(http.StatusInternalServerError)
 			_ = c.Error(fmt.Errorf("repo.SetKeycloakIdByEmail: %w", err))
 		}

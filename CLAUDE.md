@@ -33,9 +33,12 @@ Non-obvious placements: business logic orchestration lives in `domain/` (`billin
 - Prefer early returns to reduce nesting
 
 ### Interfaces
-- When adding a public method to `*OrdersDB`: add it to the `OrdersRepository` interface in `repo/orders_repository.go`, then run `task mocks` to regenerate mocks — not a bare `mockery`, which is a different generator version and possibly a different Go
-- Same applies to `PelecardAPI`, `ProfileService`, `TokenSource` — update interface + regenerate
-- Define interfaces in the same package as the implementation
+- **Declare an interface in the package that calls it, listing only the methods that package calls.** `*OrdersDB` satisfies it implicitly — nothing is added to `repo/`. See `domain.AccountsRepo` (4 methods), `domain/pricing`'s three providers (1 each), `api.couponRepo` (11)
+- Don't put `Close()` in a consumer interface. The pool's lifetime belongs to `App.Shutdown` and the `cmd` entrypoints
+- Unexported is the default for a consumer interface; export it only when its mock is generated or another package must name the type. Mockery follows the interface's own visibility, so an unexported interface yields an unexported mock — which is unreachable from `internal/mocks` and therefore useless to the consumer's tests. That is why `domain.AccountsRepo` is exported and `domain/pricing`'s providers, which have no mocks, are not
+- `OrdersRepository` (`repo/orders_repository.go`) is the pre-existing fat interface. Add a new `*OrdersDB` method there only if `domain/billing`, `cmd` or `importers` calls it; if the caller is `api` or one of the narrow interfaces above, it does not belong in `OrdersRepository` at all
+- After changing any interface that has generated mocks, run `task mocks` — not a bare `mockery`, which is a different generator version and possibly a different Go
+- `PelecardAPI`, `ProfileService`, `TokenSource` are external-dependency interfaces and stay with their implementation: there the interface exists to swap the implementation, not to narrow it
 
 ### Imports
 Three groups separated by blank lines: stdlib, external, internal.
@@ -91,13 +94,19 @@ Logger is enriched per-request in middleware with `request_id`. Workers add `wor
 
 ## Interfaces
 
-`OrdersRepository` (~60 methods) is the central interface. It's large and due for a breakdown, but don't refactor it as part of unrelated work. Mockery generates mocks from it.
+`OrdersRepository` (25 methods) is the interface `domain/billing`, `cmd` and `importers` take whole — they mock it, which is the only remaining reason it is an interface at all. It is being broken up from the consumer side, one package at a time, and it shrinks when the last consumer of a block of methods has its own interface. Don't refactor it as part of unrelated work.
 
-Small interfaces for external dependencies: `PelecardAPI` (1), `ProfileService` (3), `EventEmitter` (2), `EventHandler` (2), `ChargeExecutor` (1), `TokenSource` (2). Defined in the same package as their primary implementation.
+`App.repo` and `OrdersAPI.repo` hold the concrete `*repo.OrdersDB`: nothing substitutes them (the api tests use real Postgres), and typing them as the interface is what forced every narrow interface's methods to stay on `OrdersRepository` too.
+
+Consumer-declared storage interfaces, each holding what one package calls: `domain.AccountsRepo` (4), `domain/pricing`'s `manualDiscountProvider` / `hhGrantProvider` / `couponProvider` (1 each), `api.couponRepo` (11). `*OrdersDB` satisfies all of them implicitly. Only `AccountsRepo` is exported, because it is the only one with a generated mock.
+
+Small interfaces for external dependencies: `PelecardAPI` (1), `ProfileService` (3), `EventEmitter` (2), `EventHandler` (2), `ChargeExecutor` (1), `TokenSource` (2). Defined in the same package as their primary implementation — these exist to substitute the implementation, so they belong to it.
 
 ## Handler Patterns
 
 Handlers are methods on `*OrdersAPI`. They call `o.repo.*` directly — no service layer between handlers and repo.
+
+The coupon endpoints are the exception and the direction of travel: they are methods on `*CouponAPI`, which holds only `couponRepo` (`api/coupon_api.go`), wired alongside `ordersAPI` in `initRoutes`. Peeling a handler group off `OrdersAPI` is a receiver swap plus a route line — no change to handler bodies or tests.
 
 ### Request binding
 
@@ -169,17 +178,17 @@ if !isAuthUser {
 
 ## Repo Patterns
 
-All methods on `*OrdersDB` (embeds `*pgxpool.Pool`). Context always first param. Raw SQL, no ORM.
+All methods on `*OrdersDB`, which holds the pool in an unexported field rather than embedding it. Nothing outside `repo` can reach `Exec`/`Query`/`Begin`, so a handler cannot write SQL past the repo layer and skip the events it emits. Three guards hold that: the compiler covers the unexported field, `TestOrdersDB_HandsOutNoWritableHandle` covers `*OrdersDB`'s exported surface, and `TestRepoPackage_DeclaresNoPoolAccessor` covers the package's exported functions and vars, following the package's own named types into their exported fields — don't add an exported field or a method that hands back a pool, a connection (`*pgxpool.Conn`, `*pgx.Conn`, `*pgconn.PgConn`), a `pgx.Tx` or a `pgx.BatchResults`, including one carried inside a struct you return. Export the operation instead — and the same goes for a package-level `func` or `var`. The package-level guard reads `repo/*.go` only, so a wrapper type declared in another package of this module and returned from here is not covered by anything. `GetDBURL` is the deliberate exception: it hands out a URL, not a live handle. Tests needing raw SQL open their own pool via `testutil.NewTestPool`. Context always first param. Raw SQL, no ORM.
 
 ### Single row
 
 ```go
 func (o *OrdersDB) GetOrderByID(ctx context.Context, orderID uint) (*Order, error) {
     var order Order
-    if err := o.QueryRow(ctx, `SELECT id, "Type", ... FROM orders WHERE id=$1`, orderID).Scan(
+    if err := o.pool.QueryRow(ctx, `SELECT id, "Type", ... FROM orders WHERE id=$1`, orderID).Scan(
         &order.ID, &order.Type, ...
     ); err != nil {
-        return nil, fmt.Errorf("o.QueryRow.Scan: %w", err)
+        return nil, fmt.Errorf("o.pool.QueryRow.Scan: %w", err)
     }
     return &order, nil
 }
@@ -188,9 +197,9 @@ func (o *OrdersDB) GetOrderByID(ctx context.Context, orderID uint) (*Order, erro
 ### Multiple rows
 
 ```go
-rows, err := o.Query(ctx, query)
+rows, err := o.pool.Query(ctx, query)
 if err != nil {
-    return nil, fmt.Errorf("o.Query: %w", err)
+    return nil, fmt.Errorf("o.pool.Query: %w", err)
 }
 defer rows.Close()
 
@@ -211,7 +220,7 @@ return &orders, nil
 ### Exec with rows-affected check
 
 ```go
-res, err := o.Exec(ctx, fmt.Sprintf(`UPDATE orders SET %s WHERE id=%d`, toUpdate, orderId), args...)
+res, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE orders SET %s WHERE id=%d`, toUpdate, orderId), args...)
 if err != nil {
     return fmt.Errorf("problem updating order: %w", err)
 }
@@ -223,9 +232,9 @@ if res.RowsAffected() == 0 {
 ### Transactions
 
 ```go
-tx, err := o.Begin(ctx)
+tx, err := o.pool.Begin(ctx)
 if err != nil {
-    return fmt.Errorf("o.Begin: %w", err)
+    return fmt.Errorf("o.pool.Begin: %w", err)
 }
 defer tx.Rollback(ctx)
 // ... tx.QueryRow, tx.Exec ...
@@ -292,7 +301,20 @@ func TestFlagAndSkipOperations_SkippedWhenFlagsFalse(t *testing.T) { ... }
 func TestChargeOperations_ConcurrentFallbackToEMV(t *testing.T) { ... }
 ```
 
+One exception: when a single scenario checks **one property over a list of
+inputs**, such as every list filter against the same injection payloads, a
+loop with `t.Run` subtests is fine. Splitting it would repeat the same body
+once per input and hide that it is one property. Each case still gets a name
+in the failure output. Anything with its own setup or its own expectation is a
+separate scenario function.
+
 **Integration tests:** Real PostgreSQL via `pgtestdb` (isolated migrated DBs per test). HTTP tests use `httptest` with helpers (`GET`, `POST`, `PATCH_ROOT`).
+
+A test that needs raw SQL — seeding a row, asserting one the repo has no method
+for — opens its own pool with `testutil.NewTestPool(t, dbURL)`, which registers
+its own `t.Cleanup`. It cannot borrow the repo's: `*OrdersDB` holds the pool in
+an unexported field, so `Exec`/`Query` are not reachable through it. Inside
+`api`, `a.testPool(t)` does the same against the App's URL.
 
 **Test context setup:** Use `eventstest.WithTestEventBuilder(t, ctx)` to inject a test event builder into context.
 
@@ -340,7 +362,7 @@ Monthly billing uses a two-phase architecture:
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| `PriceResolver` | `domain/pricing/resolver.go` | Routes v1/v2 by country, caches per account ID |
+| `PriceResolver` | `domain/pricing/resolver.go` | Routes v1/v2 by country |
 | `EvaluateV2Price` | `domain/pricing/v2_evaluation.go` | Profiles + Priority/QuickBooks/Europe donations → discount calculation |
 | `V2Eligible` | `domain/pricing/v2_rollout.go` | Country exclusion list (RU only) |
 | `processOrder` | `domain/billing/renewal.go` | Single order: create payment → charge → finalize |
@@ -366,9 +388,13 @@ Shared flags on `billing` parent: `--dry-run`, `--max-workers`.
 - `pricing_error` flag — set on orders where `LoadRenewalData` or `Resolve` fails. Retried via `billing retry-pricing-errors`.
 - `ErrPrePayment` / `ErrPostPayment` — sentinel errors controlling terminal fallback behavior.
 
-### Priority contribution cache
+### Priority contribution fetching
 
-`pkg/priority/client.go` has an optional TTL cache (30 min) for `GetLastContributions` per email. **Disabled by default** — billing commands enable it via `SetCacheEnabled(true)`. `ErrNoActiveCustomers` sentinel error replaces string matching for "no active customers" responses.
+`GetLastContributionsBatch` (`pkg/priority/client.go`) is the only way Priority contributions are fetched (QuickBooks and European ones come from `pkg/accounting`, in the same `fetchDonationSums`). It resolves many emails to Priority customers and pulls their last-12-months DEBIT sums in a fixed number of chunked OData requests — date range, category filter and field selection all pushed server-side via `$filter`/`$select`/`$expand` — so request count and bytes stay flat as the email count grows.
+
+Uncached. `EvaluateV2Price` calls it once per household per price evaluation, and each call is a small fixed set of requests. The per-email TTL cache that used to sit here belonged to the removed per-email fetch and went with it; `pkg/accounting` keeps its own, enabled by the billing commands.
+
+There is no per-email failure: emails are resolved in chunks of 40 (`batchEmailChunkSize`), and any failed request fails the whole fetch — no partial result for the chunks that succeeded — rather than degrading to "no Priority record" — pricing a donor as if they had never given is the outcome that must not happen.
 
 ## Specials and Sheet Importers
 
@@ -390,8 +416,9 @@ Parsers return a `SheetRow` on each record and every log line uses it. The loop 
 
 The table has no unique key and `CreateSpecial` always INSERTs, so nothing about a rerun is idempotent on its own.
 
-- **Neither column is an identity on its own.** `handleCreateSpecial` requires neither, and the importer writes a row before the account exists, so a person's rows can disagree about which column is populated. Two specials are the same person when they share *any* non-empty identifier — `specialActivator` groups by that, merging on either.
-- **An identifier the sheet does not supply is left out of the INSERT**, never written as `''`. `prepareSpecialCreateQuery` omits the column, so the row takes whatever that column defaults to — NULL today, since both identifier columns are nullable with no default. Writing `''` explicitly is what must not happen: `HardDeleteAllUserDataByAccountID` and `MergeAccountsOrders` delete specials by `email = (SELECT "Email" FROM accounts WHERE id = $1)`, and accounts with an empty email exist, so `''` made one account deletion take every keycloak-only grant in the table. Those queries use `NULLIF` now. If the columns later become `NOT NULL DEFAULT ''`, the same omission stores `''` and none of this code changes.
+- **An email is required** (#53). `vh-srv-profile` revokes a special by email only, so `CreateSpecial` refuses a row without one, the importer reports it as `email is required`, and `DeleteSpecialById` refuses to revoke a legacy email-less row rather than end it here while profile keeps it. Production had no such rows when this landed.
+- **Two specials are the same person when they share *any* non-empty identifier** — `specialActivator` groups by that, merging on either, because older rows can disagree about which column is populated.
+- **An identifier the sheet does not supply is left out of the INSERT**, never written as `''`. `prepareSpecialCreateQuery` omits the column, so a missing keycloak id stores NULL.
 - **The account lookup may only add an identifier, never remove one.** `accounts."UserKey"` is nullable *and* empty on some rows; either value would overwrite a good id from the sheet with one `DeleteSpecialsByKeycloakId` can never match.
 - **Revoking is a soft update** — `DeleteSpecialById` rewrites `end_date` and emits `delete_special`. It is the single revoke primitive; `DeleteSpecialsByKeycloakId` funnels through it.
 - **A blank `subcategory` from a sheet is stored `''`, never NULL** — and never conditioned on `len(row)`. The Sheets API omits trailing empty cells, so the same blank cell arrives as a 5-cell row until someone types a note into column G. Deciding NULL-vs-`''` on row length made the dedup key depend on an unrelated column. The cleanup queries still compare the column (`where subcategory <> 'rav'` does not match NULL), which is why the stored value is `''`.

@@ -11,6 +11,7 @@ import (
 	"github.com/volatiletech/null/v9"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/events"
@@ -19,22 +20,35 @@ import (
 
 func (o *OrdersDB) GetOrCreateAccount(ctx context.Context, a Account) (int, error) {
 
-	var id int
-	err := o.QueryRow(ctx, `select id from accounts where "UserKey" = $1 ORDER BY id DESC LIMIT 1`, a.UserKey.String).
-		Scan(&id)
+	id, err := o.GetAccountIDByKeycloakID(ctx, a.UserKey.String)
 	if err == nil {
 		return id, nil
 	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return 0, fmt.Errorf("o.QueryRow: %w", err)
+	if !errors.Is(err, common.ErrNoRowsAffected) {
+		return 0, fmt.Errorf("o.GetAccountIDByKeycloakID: %w", err)
 	}
 
+	id, _, err = o.createAccountForKey(ctx, a)
+	return id, err
+}
+
+// createAccountForKey creates a's account, or, when a concurrent request has
+// just created one for the same key, returns that one instead (created=false):
+// accounts_userkey_uniq allows a single account per key, so losing the race
+// is not an error.
+func (o *OrdersDB) createAccountForKey(ctx context.Context, a Account) (id int, created bool, err error) {
 	id, err = o.CreateAccount(ctx, a)
-	if err != nil {
-		return 0, fmt.Errorf("o.CreateAccount: %w", err)
+	if err == nil {
+		return id, true, nil
 	}
-
-	return id, nil
+	if !errors.Is(err, common.ErrAccountKeyTaken) {
+		return 0, false, fmt.Errorf("o.CreateAccount: %w", err)
+	}
+	id, err = o.GetAccountIDByKeycloakID(ctx, a.UserKey.String)
+	if err != nil {
+		return 0, false, fmt.Errorf("o.GetAccountIDByKeycloakID after conflict: %w", err)
+	}
+	return id, false, nil
 }
 
 func (o *OrdersDB) CreateAccount(ctx context.Context, a Account) (int, error) {
@@ -44,8 +58,11 @@ func (o *OrdersDB) CreateAccount(ctx context.Context, a Account) (int, error) {
 	}
 
 	var ID int
-	if err := o.QueryRow(ctx, fmt.Sprintf(`INSERT INTO accounts (%s) VALUES (%s) RETURNING id`, createString, numString),
+	if err := o.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO accounts (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&ID); err != nil {
+		if isKeyTaken(err) {
+			return 0, fmt.Errorf("%w: %w", common.ErrAccountKeyTaken, err)
+		}
 		return 0, err
 	}
 
@@ -58,9 +75,9 @@ func (o *OrdersDB) GetAllAccounts(ctx context.Context, skip int, limit int, emai
 	accounts := []Account{}
 
 	limitOffsetString := fmt.Sprintf(" LIMIT %d OFFSET %d", limit, skip)
-	whereQuery, orderByQuery := buildAndGetAccountsWhereQuery(email)
+	whereQuery, orderByQuery, args := buildAndGetAccountsWhereQuery(email)
 
-	rows, err := o.Query(ctx, `
+	rows, err := o.pool.Query(ctx, `
 		SELECT
 		id,
 		"FirstName",
@@ -82,9 +99,9 @@ func (o *OrdersDB) GetAllAccounts(ctx context.Context, skip int, limit int, emai
 		created_at,
 		updated_at,
 		deleted_at
-			FROM accounts`+whereQuery+orderByQuery+limitOffsetString)
+			FROM accounts`+whereQuery+orderByQuery+limitOffsetString, args...)
 	if err != nil {
-		return nil, fmt.Errorf("o.Query: %w", err)
+		return nil, fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 
@@ -129,9 +146,12 @@ func (o *OrdersDB) PatchAccount(ctx context.Context, req Account, accountID int)
 		return common.ErrInvalidValues
 	}
 
-	updateRes, err := o.Exec(ctx, fmt.Sprintf(`UPDATE accounts SET %s WHERE id=%d`, toUpdate, accountID), toUpdateArgs...)
+	updateRes, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE accounts SET %s WHERE id=%d`, toUpdate, accountID), toUpdateArgs...)
 	if err != nil {
-		return fmt.Errorf("o.Exec: %w", err)
+		if isKeyTaken(err) {
+			return fmt.Errorf("%w: %w", common.ErrAccountKeyTaken, err)
+		}
+		return fmt.Errorf("o.pool.Exec: %w", err)
 	}
 	if updateRes.RowsAffected() == 0 {
 		return common.ErrNoRowsAffected
@@ -156,16 +176,22 @@ func (o *OrdersDB) PatchOrCreateAccount(ctx context.Context, a Account) (int, er
 		return 0, fmt.Errorf("o.GetAccountIDByKeycloakID: %w", err)
 	}
 
-	accountID, err = o.CreateAccount(ctx, a)
+	accountID, created, err := o.createAccountForKey(ctx, a)
 	if err != nil {
-		return 0, fmt.Errorf("o.CreateAccount: %w", err)
+		return 0, err
+	}
+	// Lost the race: patch the account the other request just created.
+	if !created {
+		if err := o.PatchAccount(ctx, a, accountID); err != nil {
+			return 0, fmt.Errorf("o.PatchAccount: %w", err)
+		}
 	}
 
 	return accountID, nil
 }
 
 func (o *OrdersDB) SoftDeleteAccount(ctx context.Context, accountID int) error {
-	_, err := o.Exec(ctx, "UPDATE accounts SET deleted_at = $1 WHERE id = $2", time.Now(), accountID)
+	_, err := o.pool.Exec(ctx, "UPDATE accounts SET deleted_at = $1 WHERE id = $2", time.Now(), accountID)
 	if err != nil {
 		return err
 	}
@@ -175,9 +201,9 @@ func (o *OrdersDB) SoftDeleteAccount(ctx context.Context, accountID int) error {
 
 func (o *OrdersDB) HardDeleteAllUserDataByAccountID(ctx context.Context, accountID int, kc_id string) error {
 	// start transaction
-	tx, err := o.Begin(ctx)
+	tx, err := o.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("o.Begin: %w", err)
+		return fmt.Errorf("o.pool.Begin: %w", err)
 	}
 
 	defer tx.Rollback(ctx)
@@ -193,8 +219,9 @@ func (o *OrdersDB) HardDeleteAllUserDataByAccountID(ctx context.Context, account
 		}
 	}
 
-	var email string
-	err = tx.QueryRow(ctx, `SELECT "UserKey", "Email" FROM accounts WHERE id = $1`, accountID).Scan(&kc_id, &email)
+	// Both columns are nullable: an account created without a key has a NULL "UserKey".
+	var storedKey, email null.String
+	err = tx.QueryRow(ctx, `SELECT "UserKey", "Email" FROM accounts WHERE id = $1`, accountID).Scan(&storedKey, &email)
 	if err != nil {
 		return fmt.Errorf("Email from account.id: %w", err)
 	}
@@ -225,11 +252,7 @@ func (o *OrdersDB) HardDeleteAllUserDataByAccountID(ctx context.Context, account
 		return fmt.Errorf("delete from payments_pelecard: %w", err)
 	}
 
-	// NULLIF: an account whose "Email" is the empty string would otherwise match
-	// every special stored with an empty email — i.e. every keycloak-only grant
-	// in the table, for every user. Such accounts exist; GetAccount(ctx, 0, "")
-	// resolving to one is why createSpecial guards its lookup.
-	_, err = tx.Exec(ctx, `DELETE FROM specials where email = (SELECT NULLIF("Email", '') FROM accounts WHERE id = $1)`, accountID)
+	_, err = tx.Exec(ctx, `DELETE FROM specials where email = (SELECT "Email" FROM accounts WHERE id = $1)`, accountID)
 	if err != nil {
 		return fmt.Errorf("delete from specials: %w", err)
 	}
@@ -244,6 +267,13 @@ func (o *OrdersDB) HardDeleteAllUserDataByAccountID(ctx context.Context, account
 		return fmt.Errorf("delete from orders: %w", err)
 	}
 
+	// Migration 29 kept a copy of every account it merged into this one.
+	_, err = tx.Exec(ctx, `WITH m AS (DELETE FROM account_merges WHERE winner_id = $1 RETURNING loser_id)
+		DELETE FROM account_merge_moves WHERE loser_id IN (SELECT loser_id FROM m)`, accountID)
+	if err != nil {
+		return fmt.Errorf("delete from account_merges: %w", err)
+	}
+
 	_, err = tx.Exec(ctx, "DELETE FROM accounts WHERE id = $1", accountID)
 	if err != nil {
 		return fmt.Errorf("delete from accounts: %w", err)
@@ -256,7 +286,7 @@ func (o *OrdersDB) HardDeleteAllUserDataByAccountID(ctx context.Context, account
 
 	o.emitEvent(ctx, events.TypeHardDeleteAccount, map[string]interface{}{
 		"account_id":  accountID,
-		"keycloak_id": kc_id,
+		"keycloak_id": storedKey,
 		"email":       email,
 	})
 
@@ -274,16 +304,16 @@ func (o *OrdersDB) GetAccount(ctx context.Context, id int, email string) (*Accou
 	var orderQuery string
 	var arg any
 	if id != 0 {
-		whereQuery = `where id = $1`
+		whereQuery = "where id = $1"
 		arg = id
 	} else {
 		whereQuery = `where LOWER("Email") = LOWER($1)`
-		orderQuery = " order by created_at desc limit 1"
 		arg = email
+		orderQuery = " order by created_at desc limit 1"
 	}
 
 	var acc Account
-	if err := o.QueryRow(ctx, `SELECT 
+	if err := o.pool.QueryRow(ctx, `SELECT 
 			id,
 			"FirstName",
 			"LastName",
@@ -317,21 +347,13 @@ func (o *OrdersDB) GetAccount(ctx context.Context, id int, email string) (*Accou
 
 func (o *OrdersDB) GetAccountIDByKeycloakID(ctx context.Context, keycloakId string) (int, error) {
 	var accountID int
-	if err := o.QueryRow(ctx, `SELECT id FROM accounts WHERE "UserKey"=$1`, keycloakId).Scan(&accountID); err != nil {
+	if err := o.pool.QueryRow(ctx, `SELECT id FROM accounts WHERE "UserKey"=$1`, keycloakId).Scan(&accountID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return 0, common.ErrNoRowsAffected
 		}
 		return 0, err
 	}
 	return accountID, nil
-}
-
-func (o *OrdersDB) GetEmailByKeycloakID(ctx context.Context, keycloakId string) (string, error) {
-	var email string
-	if err := o.QueryRow(ctx, `SELECT "Email" FROM accounts WHERE "UserKey"=$1`, keycloakId).Scan(&email); err != nil {
-		return "", err
-	}
-	return email, nil
 }
 
 func (o *OrdersDB) MergeAccountsOrders(ctx context.Context, req AccountMergeRequest) error {
@@ -348,33 +370,32 @@ func (o *OrdersDB) MergeAccountsOrders(ctx context.Context, req AccountMergeRequ
 	if err != nil {
 		return fmt.Errorf("o.GetAccountIDByKeycloakID: %w", err)
 	}
-	var sourceAccountEmail string
-	err = o.QueryRow(ctx, `SELECT  "Email" FROM accounts WHERE id = $1`, sourceAccountID).Scan(&sourceAccountEmail)
+	// "Email" is nullable; an account without one can still be merged.
+	var sourceAccountEmail, destinationAccountEmail null.String
+	err = o.pool.QueryRow(ctx, `SELECT  "Email" FROM accounts WHERE id = $1`, sourceAccountID).Scan(&sourceAccountEmail)
 	if err != nil {
 		return fmt.Errorf("Email from source account.id: %w", err)
 	}
 
-	var destinationAccountEmail string
-	err = o.QueryRow(ctx, `SELECT "Email" FROM accounts WHERE id = $1`, destinationAccountID).Scan(&destinationAccountEmail)
+	err = o.pool.QueryRow(ctx, `SELECT "Email" FROM accounts WHERE id = $1`, destinationAccountID).Scan(&destinationAccountEmail)
 	if err != nil {
 		return fmt.Errorf("Email from destaination account.id: %w", err)
 	}
 
-	tx, err := o.Begin(ctx)
+	tx, err := o.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("o.Begin: %w", err)
+		return fmt.Errorf("o.pool.Begin: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
-	_, err = tx.Exec(ctx, `UPDATE card_details SET account_id = $1 WHERE id IN (SELECT card_details_id FROM orders WHERE account_id = $2) 
-		AND  cc_number NOT IN (SELECT cc_number FROM card_details WHERE account_id = $1 )`, destinationAccountID, sourceAccountID)
+	// Every card moves. Deleting the ones whose number the destination already
+	// has would leave the source's orders pointing at a removed card_details row
+	// (orders.card_details_id has no FK), and identical card details on one
+	// account are legitimate (migration 20). Cards no order uses are still saved
+	// payment methods, so they move too.
+	_, err = tx.Exec(ctx, `UPDATE card_details SET account_id = $1 WHERE account_id = $2`, destinationAccountID, sourceAccountID)
 	if err != nil {
-		return fmt.Errorf("UPDATE card_details  AccountIds update : %w", err)
-	}
-
-	_, err = tx.Exec(ctx, `DELETE FROM card_details where account_id = $1`, sourceAccountID)
-	if err != nil {
-		return fmt.Errorf("delete from card_details: %w", err)
+		return fmt.Errorf("UPDATE card_details AccountIds update: %w", err)
 	}
 
 	_, err = tx.Exec(ctx, `UPDATE orders SET "AccountID" = $1 WHERE "AccountID" = $2`, destinationAccountID, sourceAccountID)
@@ -391,7 +412,14 @@ func (o *OrdersDB) MergeAccountsOrders(ctx context.Context, req AccountMergeRequ
 		return fmt.Errorf("UPDATE transaction : %w", err)
 	}
 
-	_, err = tx.Exec(ctx, `DELETE FROM specials where email = (SELECT NULLIF("Email", '') FROM accounts WHERE id = $1)`, sourceAccountID)
+	// Migration 29's copies follow the account they were merged into, so a
+	// later hard delete of the destination removes them too.
+	_, err = tx.Exec(ctx, `UPDATE account_merges SET winner_id = $1 WHERE winner_id = $2`, destinationAccountID, sourceAccountID)
+	if err != nil {
+		return fmt.Errorf("UPDATE account_merges : %w", err)
+	}
+
+	_, err = tx.Exec(ctx, `DELETE FROM specials where email = (SELECT "Email" FROM accounts WHERE id = $1)`, sourceAccountID)
 	if err != nil {
 		return fmt.Errorf("delete from specials: %w", err)
 	}
@@ -415,6 +443,13 @@ func (o *OrdersDB) MergeAccountsOrders(ctx context.Context, req AccountMergeRequ
 	return nil
 }
 
+// isKeyTaken reports whether err is accounts_userkey_uniq refusing a second
+// account for a key.
+func isKeyTaken(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "accounts_userkey_uniq"
+}
+
 func prepareAccountCreateQuery(req Account) (string, string, []interface{}) {
 	var createStrings []string
 	var numString []string
@@ -430,7 +465,7 @@ func prepareAccountCreateQuery(req Account) (string, string, []interface{}) {
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.LastName.String)
 	}
-	if req.Email.Valid {
+	if req.Email.Valid && req.Email.String != "" {
 		createStrings = append(createStrings, `"Email"`)
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.Email.String)
@@ -495,7 +530,7 @@ func prepareAccountCreateQuery(req Account) (string, string, []interface{}) {
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.AuthNo.String)
 	}
-	if req.UserKey.Valid {
+	if req.UserKey.Valid && req.UserKey.String != "" {
 		createStrings = append(createStrings, `"UserKey"`)
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.UserKey.String)
@@ -529,9 +564,10 @@ func prepareAccountUpdateQuery(req Account) (string, []interface{}) {
 		updateStrings = append(updateStrings, fmt.Sprintf(`"LastName"=$%d`, len(updateStrings)+1))
 		args = append(args, req.LastName.String)
 	}
+	// An empty email or key clears it, as storing '' did before: absent is NULL.
 	if req.Email.Valid {
 		updateStrings = append(updateStrings, fmt.Sprintf(`"Email"=$%d`, len(updateStrings)+1))
-		args = append(args, req.Email.String)
+		args = append(args, nullIfEmpty(req.Email))
 	}
 	if req.Phone.Valid {
 		updateStrings = append(updateStrings, fmt.Sprintf(`"Phone"=$%d`, len(updateStrings)+1))
@@ -583,7 +619,7 @@ func prepareAccountUpdateQuery(req Account) (string, []interface{}) {
 	}
 	if req.UserKey.Valid {
 		updateStrings = append(updateStrings, fmt.Sprintf(`"UserKey"=$%d`, len(updateStrings)+1))
-		args = append(args, req.UserKey.String)
+		args = append(args, nullIfEmpty(req.UserKey))
 	}
 
 	if len(args) != 0 {
@@ -596,7 +632,8 @@ func prepareAccountUpdateQuery(req Account) (string, []interface{}) {
 	return updateArgument, args
 }
 
-func buildAndGetAccountsWhereQuery(email string) (string, string) {
+func buildAndGetAccountsWhereQuery(email string) (string, string, []any) {
+	var args queryArgs
 	var whereString strings.Builder
 	var orderBy strings.Builder
 	var whereCondition strings.Builder
@@ -607,7 +644,7 @@ func buildAndGetAccountsWhereQuery(email string) (string, string) {
 		if whereCondition.String() != "" {
 			whereCondition.WriteString(" AND")
 		}
-		whereCondition.WriteString(fmt.Sprintf(` LOWER("Email") = LOWER('%s')`, email))
+		whereCondition.WriteString(` LOWER("Email") = LOWER(` + args.arg(email) + `)`)
 	}
 
 	orderBy.WriteString(fmt.Sprintf(" ORDER BY updated_at %s", "desc"))
@@ -618,11 +655,11 @@ func buildAndGetAccountsWhereQuery(email string) (string, string) {
 		whereString.Reset()
 	}
 
-	return whereString.String(), orderBy.String()
+	return whereString.String(), orderBy.String(), args
 }
 
 func (o *OrdersDB) IsSubjectID(ctx context.Context, keycloakID, accountID string) (bool, error) {
-	row := o.QueryRow(ctx, `SELECT 1 FROM accounts WHERE "UserKey" = $1 AND id = $2`, keycloakID, accountID)
+	row := o.pool.QueryRow(ctx, `SELECT 1 FROM accounts WHERE "UserKey" = $1 AND id = $2`, keycloakID, accountID)
 	var x int
 	if err := row.Scan(&x); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -635,6 +672,9 @@ func (o *OrdersDB) IsSubjectID(ctx context.Context, keycloakID, accountID string
 }
 
 func (o *OrdersDB) GetOrCreateAccountFromProfile(ctx context.Context, keycloakId string) (int, error) {
+	if keycloakId == "" {
+		return 0, fmt.Errorf("%w: empty keycloak id", common.ErrInvalidValues)
+	}
 	var account *Account
 	accountId, err := o.GetAccountIDByKeycloakID(ctx, keycloakId)
 	if err == nil {
@@ -670,9 +710,18 @@ func (o *OrdersDB) GetOrCreateAccountFromProfile(ctx context.Context, keycloakId
 		UserKey:     null.StringFrom(keycloakId),
 	}
 
-	account.ID, err = o.CreateAccount(ctx, *account)
+	account.ID, _, err = o.createAccountForKey(ctx, *account)
 	if err != nil {
-		return 0, fmt.Errorf("repo.CreateAccount: %w", err)
+		return 0, err
 	}
 	return account.ID, nil
+}
+
+// nullIfEmpty binds an empty string as NULL, the only spelling of an absent
+// identity value since migration 28.
+func nullIfEmpty(s null.String) any {
+	if s.String == "" {
+		return nil
+	}
+	return s.String
 }

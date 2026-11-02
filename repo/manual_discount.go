@@ -10,19 +10,13 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/common"
 )
 
-// ManualDiscountProvider fetches the active manual discount for a user.
-// Implemented by *OrdersDB; injected into the pricing resolver.
-type ManualDiscountProvider interface {
-	GetActiveManualDiscount(ctx context.Context, keycloakID string) (*ManualDiscount, error)
-}
-
 // UpsertManualDiscount cancels any other active discounts for the user, then inserts or updates
 // the record. If req.ID is set the existing row is updated; otherwise a new row is inserted.
 // Both operations run in a transaction.
 func (o *OrdersDB) UpsertManualDiscount(ctx context.Context, req ManualDiscountReq) (*ManualDiscount, error) {
-	tx, err := o.Begin(ctx)
+	tx, err := o.pool.Begin(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("o.Begin: %w", err)
+		return nil, fmt.Errorf("o.pool.Begin: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
@@ -68,14 +62,14 @@ func (o *OrdersDB) UpsertManualDiscount(ctx context.Context, req ManualDiscountR
 // CancelManualDiscount sets end_date to yesterday for the user's active discount.
 // Returns ErrNoRowsAffected if there is no active discount.
 func (o *OrdersDB) CancelManualDiscount(ctx context.Context, keycloakID string) error {
-	res, err := o.Exec(ctx,
+	res, err := o.pool.Exec(ctx,
 		`UPDATE manual_discount
 		 SET end_date = NOW() - INTERVAL '1 day', updated_at = NOW()
 		 WHERE keycloak_id = $1 AND end_date > NOW() AND start_date <= NOW()`,
 		keycloakID,
 	)
 	if err != nil {
-		return fmt.Errorf("o.Exec: %w", err)
+		return fmt.Errorf("o.pool.Exec: %w", err)
 	}
 	if res.RowsAffected() == 0 {
 		return common.ErrNoRowsAffected
@@ -86,7 +80,7 @@ func (o *OrdersDB) CancelManualDiscount(ctx context.Context, keycloakID string) 
 // GetActiveManualDiscount returns the active discount for the user, or nil if none exists.
 func (o *OrdersDB) GetActiveManualDiscount(ctx context.Context, keycloakID string) (*ManualDiscount, error) {
 	var md ManualDiscount
-	err := o.QueryRow(ctx,
+	err := o.pool.QueryRow(ctx,
 		`SELECT id, keycloak_id, start_date, end_date, updated_at, type, properties, note
 		 FROM manual_discount
 		 WHERE keycloak_id = $1 AND end_date > NOW() AND start_date <= NOW()
@@ -98,7 +92,7 @@ func (o *OrdersDB) GetActiveManualDiscount(ctx context.Context, keycloakID strin
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("o.QueryRow.Scan: %w", err)
+		return nil, fmt.Errorf("o.pool.QueryRow.Scan: %w", err)
 	}
 	return &md, nil
 }
@@ -114,9 +108,9 @@ func (o *OrdersDB) GetAllManualDiscounts(ctx context.Context, search string) ([]
 	}
 	query += ` ORDER BY id DESC`
 
-	rows, err := o.Query(ctx, query, args...)
+	rows, err := o.pool.Query(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("o.Query: %w", err)
+		return nil, fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 

@@ -27,6 +27,14 @@ func (o *OrdersAPI) handleOrdersFlag(c *gin.Context) {
 
 	switch body.Flag {
 	case common.OrderFlagToRenew:
+		// FlagOrdersToRenew groups by orders.userkey, which only this sync
+		// fills; without it, orders created since the last billing run are
+		// missed. The billing workflow runs the same sync first.
+		if err := o.repo.UpdateOrdersUserKeyFromAccounts(c.Request.Context()); err != nil {
+			c.Status(http.StatusInternalServerError)
+			_ = c.Error(fmt.Errorf("repo.UpdateOrdersUserKeyFromAccounts: %w", err))
+			return
+		}
 		count, err := o.repo.FlagOrdersToRenew(c.Request.Context(), body.Month, body.Year)
 		if err != nil {
 			c.Status(http.StatusInternalServerError)

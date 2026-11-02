@@ -74,8 +74,8 @@ type couponCreateReq struct {
 	MaxRedemptions int       `json:"max_redemptions" binding:"required"`
 }
 
-func (o *OrdersAPI) handleCreateCoupon(c *gin.Context) {
-	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
+func (o *CouponAPI) handleCreateCoupon(c *gin.Context) {
+	if !hasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
 		return
 	}
 
@@ -206,8 +206,8 @@ func couponStatus(it repo.CouponListItem) []string {
 	return labels
 }
 
-func (o *OrdersAPI) handleListCoupons(c *gin.Context) {
-	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
+func (o *CouponAPI) handleListCoupons(c *gin.Context) {
+	if !hasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
 		return
 	}
 	items, err := o.repo.ListCoupons(c.Request.Context())
@@ -234,8 +234,8 @@ type couponRedemptionResponse struct {
 	RevokedAt    string `json:"revoked_at"`
 }
 
-func (o *OrdersAPI) handleGetCouponRedemptions(c *gin.Context) {
-	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
+func (o *CouponAPI) handleGetCouponRedemptions(c *gin.Context) {
+	if !hasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
 		return
 	}
 	id, err := strconv.Atoi(c.Param("id"))
@@ -276,8 +276,8 @@ type couponUpdateReq struct {
 	BenefitMonths  *int             `json:"benefit_months"`
 }
 
-func (o *OrdersAPI) handleUpdateCoupon(c *gin.Context) {
-	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
+func (o *CouponAPI) handleUpdateCoupon(c *gin.Context) {
+	if !hasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
 		return
 	}
 	id, err := strconv.Atoi(c.Param("id"))
@@ -394,8 +394,8 @@ func strPtrVal(s *string) string {
 	return *s
 }
 
-func (o *OrdersAPI) handleRevokeRedemption(c *gin.Context) {
-	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
+func (o *CouponAPI) handleRevokeRedemption(c *gin.Context) {
+	if !hasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
 		return
 	}
 	couponID, err := strconv.Atoi(c.Param("id"))
@@ -436,8 +436,8 @@ type myCouponResponse struct {
 	BenefitEnd   string `json:"benefit_end"` // inclusive last covered day
 }
 
-func (o *OrdersAPI) handleGetMyCoupons(c *gin.Context) {
-	keycloakID, ok := o.getUserKeyFromRequest(c)
+func (o *CouponAPI) handleGetMyCoupons(c *gin.Context) {
+	keycloakID, ok := userKeyFromRequest(c)
 	if !ok {
 		return
 	}
@@ -458,8 +458,8 @@ func (o *OrdersAPI) handleGetMyCoupons(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": resp, "success": true})
 }
 
-func (o *OrdersAPI) handleRedeemCoupon(c *gin.Context) {
-	keycloakID, ok := o.getUserKeyFromRequest(c)
+func (o *CouponAPI) handleRedeemCoupon(c *gin.Context) {
+	keycloakID, ok := userKeyFromRequest(c)
 	if !ok {
 		return
 	}
@@ -507,7 +507,7 @@ func (o *OrdersAPI) handleRedeemCoupon(c *gin.Context) {
 
 // accountCountry resolves the caller's account country, or "" if the account
 // doesn't exist yet or the country field is not set. Real DB failures are returned as errors.
-func (o *OrdersAPI) accountCountry(c *gin.Context, keycloakID string) (string, error) {
+func (o *CouponAPI) accountCountry(c *gin.Context, keycloakID string) (string, error) {
 	accID, err := o.repo.GetAccountIDByKeycloakID(c.Request.Context(), keycloakID)
 	if errors.Is(err, common.ErrNoRowsAffected) {
 		return "", nil // no account yet → no country

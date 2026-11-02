@@ -10,14 +10,19 @@ import (
 )
 
 type OrdersAPI struct {
-	repo                repo.OrdersRepository
+	// Concrete, because nothing substitutes it. Safe now that *OrdersDB holds
+	// the pool in a field rather than embedding it: Exec/Query/Begin are no
+	// longer promoted onto it, so a handler cannot write SQL past
+	// OrdersDB.emitEvent. The compiler holds that, and
+	// TestOrdersDB_DoesNotExposeThePool pins it.
+	repo                *repo.OrdersDB
 	profileService      profiles.ProfileService
 	priorityClient      *priority.Client
 	accountingService   accounting.AccountingService
 	quickbooksCompanyID string
 }
 
-func NewOrdersAPI(db repo.OrdersRepository) *OrdersAPI {
+func NewOrdersAPI(db *repo.OrdersDB) *OrdersAPI {
 	return &OrdersAPI{
 		repo:                db,
 		profileService:      profiles.NewProfileServiceAPI(keycloak.NewClient()),

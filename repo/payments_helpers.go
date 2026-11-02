@@ -18,7 +18,7 @@ func (o *OrdersDB) GetPaymentByID(ctx context.Context, id int) (*Payment, error)
 		pay      Payment
 		addQuery string
 	)
-	if err := o.QueryRow(ctx, `SELECT
+	if err := o.pool.QueryRow(ctx, `SELECT
 	id, created_at, updated_at, deleted_at, "Amount", "Currency", "PaymentStatus", "PaymentType", "OrderID", "ParamX",
 	"Ordkey", "AuthNo", confirmation_key, success, pelecard_token, "TransactionID", "ErrorMsg", "CardHebrewName",
 	"CCAbroadCard", "CCBrand", "CCCompanyClearer", "CCCompanyIssuer", credit_type, "CCExpDate", "CCNumber", "DebitCode",
@@ -37,7 +37,7 @@ func (o *OrdersDB) GetPaymentByID(ctx context.Context, id int) (*Payment, error)
 }
 
 func (o *OrdersDB) SoftDeletePayment(ctx context.Context, paymentID int) error {
-	_, err := o.Exec(ctx, "UPDATE payments SET deleted_at = $1 WHERE id = $2", time.Now(), paymentID)
+	_, err := o.pool.Exec(ctx, "UPDATE payments SET deleted_at = $1 WHERE id = $2", time.Now(), paymentID)
 	if err != nil {
 		return err
 	}
@@ -45,17 +45,25 @@ func (o *OrdersDB) SoftDeletePayment(ctx context.Context, paymentID int) error {
 	return nil
 }
 
-func (o *OrdersDB) GetPaymentActivities(ctx context.Context, email string, productType string, paymentType string, skip int, limit int) ([]PaymentActivitiesRes, error) {
-	userDbWhereQuery, orderByQuery := buildAndGetWherePaymentActQuery(email, productType, paymentType)
+// GetPaymentActivities lists payments with their order and account. A
+// non-empty userKey limits them to the accounts with that keycloak id (a user
+// can have more than one); email is a substring search. A non-admin is pinned
+// by userKey, never by email: they can edit their account's email, so it
+// cannot be what keeps them out of others' data.
+func (o *OrdersDB) GetPaymentActivities(ctx context.Context, userKey string, email string, productType string, paymentType string, skip int, limit int) ([]PaymentActivitiesRes, error) {
+	userDbWhereQuery, orderByQuery, args := buildAndGetWherePaymentActQuery(userKey, email, productType, paymentType)
 
-	rows, err := o.Query(ctx, `SELECT p.created_at,  p."Amount", p."PaymentType",  p."OrderID", 
+	// Built first: args.arg appends to args, and Go does not order that
+	// against reading args for the variadic argument of the same call.
+	query := `SELECT p.created_at,  p."Amount", p."PaymentType",  p."OrderID", 
 	p."ParamX", p."PaymentStatus", p."CCNumber", p."CCExpDate", 
 	o."ProductType", o."Type", o."Currency",
 	a."FirstName", a."LastName", a."Email", a."Country" 
-	from payments as p, orders as o, accounts as a`+
-		userDbWhereQuery+orderByQuery+" LIMIT $1 OFFSET $2", limit, skip)
+	from payments as p, orders as o, accounts as a` +
+		userDbWhereQuery + orderByQuery + " LIMIT " + args.arg(limit) + " OFFSET " + args.arg(skip)
+	rows, err := o.pool.Query(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("o.Query: %w", err)
+		return nil, fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 
@@ -78,34 +86,38 @@ func (o *OrdersDB) GetPaymentActivities(ctx context.Context, email string, produ
 	return PaymentActivities, nil
 }
 
+// GetAllPayments lists payments by the given filters. A non-empty userKey
+// limits them to the accounts with that keycloak id (a user can have more
+// than one); it is what pins a non-admin, and email and accountID only narrow
+// within it.
 func (o *OrdersDB) GetAllPayments(ctx context.Context, skip int, limit int, fromDate string, toDate *time.Time,
-	paymentType string, paymentStatus string, orderType string, email string, accountID int, paymentsWithToken string,
+	paymentType string, paymentStatus string, orderType string, email string, accountID int, userKey string, paymentsWithToken string,
 	intOrderID int, orderByCreatedAt string) ([]Payment, error) {
 
 	limitOffsetString := fmt.Sprintf(" LIMIT %d OFFSET %d", limit, skip)
-	whereQuery, orderByQuery, err := buildAndGetPaymentsWhereQuery(fromDate, toDate, paymentType, paymentStatus,
-		orderType, email, accountID, paymentsWithToken, intOrderID, orderByCreatedAt)
+	whereQuery, orderByQuery, args, err := buildAndGetPaymentsWhereQuery(fromDate, toDate, paymentType, paymentStatus,
+		orderType, email, accountID, userKey, paymentsWithToken, intOrderID, orderByCreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("buildAndGetPaymentsWhereQuery: %w", err)
 	}
 
 	fromQuery := " FROM payments as p"
-	if email != "" || accountID != 0 || orderType != "" {
+	if email != "" || accountID != 0 || userKey != "" || orderType != "" {
 		fromQuery = fromQuery + ", orders as o"
-		if email != "" || accountID != 0 {
+		if email != "" || accountID != 0 || userKey != "" {
 			fromQuery = fromQuery + ", accounts as a"
 		}
 	}
 
-	rows, err := o.Query(ctx, `SELECT 
+	rows, err := o.pool.Query(ctx, `SELECT 
 	p.id, p.created_at, p.updated_at, p.deleted_at, p."Amount", p."Currency", p."PaymentStatus", p."PaymentType", 
 	p."OrderID", p."ParamX", p."Ordkey", p."AuthNo", p.confirmation_key, p.success, p.pelecard_token, p."TransactionID", 
 	p."ErrorMsg", p."CardHebrewName", p."CCAbroadCard", p."CCBrand", p."CCCompanyClearer", p."CCCompanyIssuer", 
 	p.credit_type, p."CCExpDate", p."CCNumber", p."DebitCode", p."DebitCurrency", p."DebitTotal", p."DebitType", 
 	p."FirstPaymentTotal", p."FixedPaymentTotal", p."TotalPayments", p.j_param, p."TransactionInitTime", 
-	p."TransactionUpdateTime", p."VoucherID"`+fromQuery+whereQuery+orderByQuery+limitOffsetString)
+	p."TransactionUpdateTime", p."VoucherID"`+fromQuery+whereQuery+orderByQuery+limitOffsetString, args...)
 	if err != nil {
-		return nil, fmt.Errorf("o.Query: %w", err)
+		return nil, fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 
@@ -132,12 +144,14 @@ func (o *OrdersDB) GetAllPayments(ctx context.Context, skip int, limit int, from
 	return payments, nil
 }
 
-func (o *OrdersDB) GetTotalParticipationStatusCount(ctx context.Context, email string, productType string,
+// GetTotalParticipationStatusCount counts what GetPaymentActivities lists;
+// userKey means the same there.
+func (o *OrdersDB) GetTotalParticipationStatusCount(ctx context.Context, userKey string, email string, productType string,
 	paymentType string) (int, error) {
 	var count int
 
-	userDbWhereQuery, _ := buildAndGetWherePaymentActQuery(email, productType, paymentType)
-	err := o.QueryRow(ctx, `SELECT COUNT(*) FROM payments as p, orders as o, accounts as a`+userDbWhereQuery).
+	userDbWhereQuery, _, args := buildAndGetWherePaymentActQuery(userKey, email, productType, paymentType)
+	err := o.pool.QueryRow(ctx, `SELECT COUNT(*) FROM payments as p, orders as o, accounts as a`+userDbWhereQuery, args...).
 		Scan(&count)
 	if err != nil {
 		return 0, err
@@ -147,7 +161,7 @@ func (o *OrdersDB) GetTotalParticipationStatusCount(ctx context.Context, email s
 }
 
 func (o *OrdersDB) GetPaymentByEmail(ctx context.Context, email string) ([]PaymentByEmail, error) {
-	rows, err := o.Query(ctx, `select p."OrderID", p.created_at, o."PaymentDate", o."Type", o."ProductType", p."Amount", 
+	rows, err := o.pool.Query(ctx, `select p."OrderID", p.created_at, o."PaymentDate", o."Type", o."ProductType", p."Amount", 
 	p."Currency", p."CCNumber", p."ParamX", p."PaymentStatus"
 	from payments as p, orders as o, accounts as a
 	where a."Email" = $1
@@ -155,7 +169,7 @@ func (o *OrdersDB) GetPaymentByEmail(ctx context.Context, email string) ([]Payme
 	and o.id = p."OrderID"
 	order by p.created_at desc`, email)
 	if err != nil {
-		return nil, fmt.Errorf("o.Query: %w", err)
+		return nil, fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 
@@ -181,16 +195,16 @@ func (o *OrdersDB) GetPaymentByEmail(ctx context.Context, email string) ([]Payme
 func (o *OrdersDB) GetOfflinePayments(ctx context.Context, skip int, limit int, method string, orderByCreatedAt string) ([]*OfflinePayment, error) {
 	fromQuery := " FROM payments_offline as p"
 	limitOffsetString := fmt.Sprintf(" LIMIT %d OFFSET %d", limit, skip)
-	whereQuery, orderByQuery, err := buildAndGetOfflinePaymentsWhereQuery(method, orderByCreatedAt)
+	whereQuery, orderByQuery, args, err := buildAndGetOfflinePaymentsWhereQuery(method, orderByCreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("buildAndGetOfflinePaymentsWhereQuery: %w", err)
 	}
 
-	rows, err := o.Query(ctx, `SELECT 
+	rows, err := o.pool.Query(ctx, `SELECT 
 	p.id, p.created_at, p.updated_at, p.deleted_at, p.payment_method, p.receipt, p.extra_info, p.status, p.payment_id,
-	p.properties`+fromQuery+whereQuery+orderByQuery+limitOffsetString)
+	p.properties`+fromQuery+whereQuery+orderByQuery+limitOffsetString, args...)
 	if err != nil {
-		return nil, fmt.Errorf("o.Query: %w", err)
+		return nil, fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 
@@ -237,9 +251,9 @@ func (o *OrdersDB) CreatePayment(ctx context.Context, req RequestOrder, orderID 
 
 	createString, numString, createQueryArgs := preparePaymentCreateQuery(p)
 
-	if err := o.QueryRow(ctx, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createString, numString),
+	if err := o.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&p.ID); err != nil {
-		return nil, fmt.Errorf("o.QueryRow.Scan: %w", err)
+		return nil, fmt.Errorf("o.pool.QueryRow.Scan: %w", err)
 	}
 
 	if paymentType == common.PaymentTypeOffline {
@@ -283,7 +297,7 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 	}
 
 	var p Payment
-	if err := o.QueryRow(ctx, `SELECT 
+	if err := o.pool.QueryRow(ctx, `SELECT 
 	"OrderID",
 	"PaymentStatus",
 	"PaymentType",
@@ -317,7 +331,7 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 		&p.DebitTotal, &p.DebitType, &p.FirstPaymentTotal, &p.FixedPaymentTotal, &p.TotalPayments,
 		&p.JParam, &p.TransactionInitTime, &p.TransactionUpdateTime, &p.VoucherID,
 	); err != nil {
-		return nil, fmt.Errorf("o.QueryRow.Scan [payment]: %w", err)
+		return nil, fmt.Errorf("o.pool.QueryRow.Scan [payment]: %w", err)
 	}
 
 	if req.Success.String == "1" {
@@ -354,16 +368,16 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 	}
 
 	toUpdate, toUpdateArgs := preparePaymentUpdateQuery(p)
-	_, err = o.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=%d`, toUpdate, uint(paymentid)), toUpdateArgs...)
+	_, err = o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=%d`, toUpdate, uint(paymentid)), toUpdateArgs...)
 	if err != nil {
-		return nil, fmt.Errorf("o.Exec [update payment]: %w", err)
+		return nil, fmt.Errorf("o.pool.Exec [update payment]: %w", err)
 	}
 
 	toUpdatePelecard, toUpdateArgsPeleCard := preparePelecardPaymentUpdateViaPaymentStructQuery(p)
-	_, pelecardErr := o.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdatePelecard,
+	_, pelecardErr := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdatePelecard,
 		uint(paymentid)), toUpdateArgsPeleCard...)
 	if pelecardErr != nil {
-		return nil, fmt.Errorf("o.Exec [update pelecard]: %w", err)
+		return nil, fmt.Errorf("o.pool.Exec [update pelecard]: %w", err)
 	}
 
 	o.emitEvent(ctx, events.TypeUpdatePayment, map[string]interface{}{"payment_id": paymentid})
@@ -377,9 +391,9 @@ func (o *OrdersDB) createOfflinePayment(ctx context.Context, req RequestOrder, p
 		return common.ErrInvalidValues
 	}
 
-	_, err := o.Exec(ctx, fmt.Sprintf(`INSERT INTO payments_offline (%s) VALUES (%s)`, createString, numString), createQueryArgs...)
+	_, err := o.pool.Exec(ctx, fmt.Sprintf(`INSERT INTO payments_offline (%s) VALUES (%s)`, createString, numString), createQueryArgs...)
 	if err != nil {
-		return fmt.Errorf("o.Exec: %w", err)
+		return fmt.Errorf("o.pool.Exec: %w", err)
 	}
 
 	return nil
@@ -391,9 +405,9 @@ func (o *OrdersDB) createPelecardPayment(ctx context.Context, req RequestOrder, 
 		return common.ErrInvalidValues
 	}
 
-	_, err := o.Exec(ctx, fmt.Sprintf(`INSERT INTO payments_pelecard (%s) VALUES (%s)`, createString, numString), createQueryArgs...)
+	_, err := o.pool.Exec(ctx, fmt.Sprintf(`INSERT INTO payments_pelecard (%s) VALUES (%s)`, createString, numString), createQueryArgs...)
 	if err != nil {
-		return fmt.Errorf("o.Exec: %w", err)
+		return fmt.Errorf("o.pool.Exec: %w", err)
 	}
 
 	return nil
@@ -405,9 +419,9 @@ func (o *OrdersDB) createHelpHaverPayment(ctx context.Context, req RequestOrder,
 		return common.ErrInvalidValues
 	}
 
-	_, err := o.Exec(ctx, fmt.Sprintf(`INSERT INTO payments_helphaver (%s) VALUES (%s)`, createString, numString), createQueryArgs...)
+	_, err := o.pool.Exec(ctx, fmt.Sprintf(`INSERT INTO payments_helphaver (%s) VALUES (%s)`, createString, numString), createQueryArgs...)
 	if err != nil {
-		return fmt.Errorf("o.Exec: %w", err)
+		return fmt.Errorf("o.pool.Exec: %w", err)
 	}
 
 	return nil
@@ -419,9 +433,9 @@ func (o *OrdersDB) UpdatePelecardPayment(ctx context.Context, req PaymentUpdate)
 		return common.ErrInvalidValues
 	}
 
-	updateRes, err := o.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdate, req.PaymentID.Int), toUpdateArgs...)
+	updateRes, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdate, req.PaymentID.Int), toUpdateArgs...)
 	if err != nil {
-		return fmt.Errorf("o.Exec: %w", err)
+		return fmt.Errorf("o.pool.Exec: %w", err)
 	}
 	if updateRes.RowsAffected() == 0 {
 		return common.ErrNoRowsAffected
@@ -438,9 +452,9 @@ func (o *OrdersDB) UpdateOfflinePayment(ctx context.Context, req PaymentUpdate) 
 		return common.ErrInvalidValues
 	}
 
-	updateRes, err := o.Exec(ctx, fmt.Sprintf(`UPDATE payments_offline SET %s WHERE payment_id=%d`, toUpdate, req.PaymentID.Int), toUpdateArgs...)
+	updateRes, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments_offline SET %s WHERE payment_id=%d`, toUpdate, req.PaymentID.Int), toUpdateArgs...)
 	if err != nil {
-		return fmt.Errorf("o.Exec: %w", err)
+		return fmt.Errorf("o.pool.Exec: %w", err)
 	}
 	if updateRes.RowsAffected() == 0 {
 		return common.ErrNoRowsAffected
@@ -457,9 +471,9 @@ func (o *OrdersDB) UpdateHelpHavePayment(ctx context.Context, req PaymentUpdate)
 		return common.ErrInvalidValues
 	}
 
-	updateRes, err := o.Exec(ctx, fmt.Sprintf(`UPDATE payments_helphaver SET %s WHERE payment_id=%d`, toUpdate, req.PaymentID.Int), toUpdateArgs...)
+	updateRes, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments_helphaver SET %s WHERE payment_id=%d`, toUpdate, req.PaymentID.Int), toUpdateArgs...)
 	if err != nil {
-		return fmt.Errorf("o.Exec: %w", err)
+		return fmt.Errorf("o.pool.Exec: %w", err)
 	}
 	if updateRes.RowsAffected() == 0 {
 		return common.ErrNoRowsAffected
@@ -472,7 +486,7 @@ func (o *OrdersDB) UpdateHelpHavePayment(ctx context.Context, req PaymentUpdate)
 
 func (o *OrdersDB) UpdateParentPaymentTableStatusAndReturnOrderId(ctx context.Context, status string, paymentID int) (int, error) {
 	var orderId int
-	if err := o.QueryRow(ctx, `UPDATE payments SET "PaymentStatus"=$1 WHERE id=$2 RETURNING "OrderID"`, status, paymentID).
+	if err := o.pool.QueryRow(ctx, `UPDATE payments SET "PaymentStatus"=$1 WHERE id=$2 RETURNING "OrderID"`, status, paymentID).
 		Scan(&orderId); err != nil {
 		return 0, err
 	}
@@ -529,7 +543,7 @@ func preparePelecardPaymentCreateQuery(req Payment, paymentID int) (string, stri
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.Success.String)
 	}
-	if req.PelecardToken.Valid {
+	if req.PelecardToken.Valid && req.PelecardToken.String != "" {
 		createStrings = append(createStrings, "pelecard_token")
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.PelecardToken.String)
@@ -696,7 +710,7 @@ func preparePelecardPaymentUpdateQuery(req PaymentUpdate) (string, []interface{}
 		updateStrings = append(updateStrings, fmt.Sprintf("success=$%d", len(updateStrings)+1))
 		args = append(args, req.Success.String)
 	}
-	if req.PelecardToken.Valid {
+	if req.PelecardToken.Valid && req.PelecardToken.String != "" {
 		updateStrings = append(updateStrings, fmt.Sprintf("pelecard_token=$%d", len(updateStrings)+1))
 		args = append(args, req.PelecardToken.String)
 	}
@@ -835,7 +849,7 @@ func preparePelecardPaymentUpdateViaPaymentStructQuery(req Payment) (string, []i
 		updateStrings = append(updateStrings, fmt.Sprintf("success=$%d", len(updateStrings)+1))
 		args = append(args, req.Success.String)
 	}
-	if req.PelecardToken.Valid {
+	if req.PelecardToken.Valid && req.PelecardToken.String != "" {
 		updateStrings = append(updateStrings, fmt.Sprintf("pelecard_token=$%d", len(updateStrings)+1))
 		args = append(args, req.PelecardToken.String)
 	}
@@ -1079,8 +1093,9 @@ func prepareHelpHaverPaymentUpdateQuery(req PaymentUpdate) (string, []interface{
 	return updateArgument, args
 }
 
-func buildAndGetWherePaymentActQuery(email string, productType string, paymentType string) (string, string) {
+func buildAndGetWherePaymentActQuery(userKey string, email string, productType string, paymentType string) (string, string, queryArgs) {
 
+	var args queryArgs
 	var whereString strings.Builder
 	var orderBy strings.Builder
 	var whereCondition strings.Builder
@@ -1090,23 +1105,27 @@ func buildAndGetWherePaymentActQuery(email string, productType string, paymentTy
 	whereCondition.WriteString(` p."OrderID" = o.id AND o."AccountID" = a.id`)
 
 	// WHERE query generation based on parameters
+	if userKey != "" {
+		whereCondition.WriteString(` AND a."UserKey" = ` + args.arg(userKey))
+	}
+
 	if email != "" {
-		whereCondition.WriteString(fmt.Sprintf(` AND LOWER(a."Email") LIKE LOWER('%%%s%%')`, email))
+		whereCondition.WriteString(` AND LOWER(a."Email") LIKE LOWER('%' || ` + args.arg(email) + ` || '%')`)
 	}
 
 	if productType != "" {
 		if whereCondition.String() != "" {
-			whereCondition.WriteString(fmt.Sprintf(` AND LOWER(o."ProductType")=LOWER('%s')`, productType))
+			whereCondition.WriteString(` AND LOWER(o."ProductType")=LOWER(` + args.arg(productType) + `)`)
 		} else {
-			whereCondition.WriteString(fmt.Sprintf(` LOWER(o."ProductType")=LOWER('%s')`, productType))
+			whereCondition.WriteString(` LOWER(o."ProductType")=LOWER(` + args.arg(productType) + `)`)
 		}
 	}
 
 	if paymentType != "" {
 		if whereCondition.String() != "" {
-			whereCondition.WriteString(fmt.Sprintf(` AND LOWER(p."PaymentType")=LOWER('%s')`, paymentType))
+			whereCondition.WriteString(` AND LOWER(p."PaymentType")=LOWER(` + args.arg(paymentType) + `)`)
 		} else {
-			whereCondition.WriteString(fmt.Sprintf(` LOWER(p."PaymentType")=LOWER('%s')`, paymentType))
+			whereCondition.WriteString(` LOWER(p."PaymentType")=LOWER(` + args.arg(paymentType) + `)`)
 		}
 	}
 
@@ -1117,11 +1136,12 @@ func buildAndGetWherePaymentActQuery(email string, productType string, paymentTy
 	} else {
 		whereString.Reset()
 	}
-	return whereString.String(), orderBy.String()
+	return whereString.String(), orderBy.String(), args
 }
 
 func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentType string, paymentStatus string,
-	orderType string, email string, accontID int, paymentsWithToken string, intOrderID int, orderByCreatedAt string) (string, string, error) {
+	orderType string, email string, accontID int, userKey string, paymentsWithToken string, intOrderID int, orderByCreatedAt string) (string, string, []any, error) {
+	var args queryArgs
 	var whereString strings.Builder
 	var orderBy strings.Builder
 	var whereCondition strings.Builder
@@ -1129,7 +1149,7 @@ func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentTy
 	whereCondition.WriteString("")
 
 	if !dateTo.IsZero() {
-		whereCondition.WriteString(fmt.Sprintf(" p.updated_at <= '%s'", dateTo.Format("2006-01-02 15:04:05")))
+		whereCondition.WriteString(fmt.Sprintf(" p.updated_at <= '%s'", dateTo.Format(time.RFC3339Nano)))
 	}
 
 	// WHERE query generation based on parameters
@@ -1138,28 +1158,28 @@ func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentTy
 		fromDateParsed, err := time.Parse(rfcLayout, fromDate)
 
 		if err != nil {
-			return "", "", err
+			return "", "", nil, err
 		}
 		if whereCondition.String() != "" {
-			whereCondition.WriteString(fmt.Sprintf(" AND p.updated_at >= '%s'", fromDateParsed.Format("2006-01-02 15:04:05")))
+			whereCondition.WriteString(fmt.Sprintf(" AND p.updated_at >= '%s'", fromDateParsed.Format(time.RFC3339Nano)))
 		} else {
-			whereCondition.WriteString(fmt.Sprintf(" p.updated_at >= '%s'", fromDateParsed.Format("2006-01-02 15:04:05")))
+			whereCondition.WriteString(fmt.Sprintf(" p.updated_at >= '%s'", fromDateParsed.Format(time.RFC3339Nano)))
 		}
 	}
 
 	if paymentType != "" {
 		if whereCondition.String() != "" {
-			whereCondition.WriteString(fmt.Sprintf(` AND LOWER(p."PaymentType")=LOWER('%s')`, paymentType))
+			whereCondition.WriteString(` AND LOWER(p."PaymentType")=LOWER(` + args.arg(paymentType) + `)`)
 		} else {
-			whereCondition.WriteString(fmt.Sprintf(` LOWER(p."PaymentType")=LOWER('%s')`, paymentType))
+			whereCondition.WriteString(` LOWER(p."PaymentType")=LOWER(` + args.arg(paymentType) + `)`)
 		}
 	}
 
 	if paymentStatus != "" {
 		if whereCondition.String() != "" {
-			whereCondition.WriteString(fmt.Sprintf(` AND LOWER(p."PaymentStatus")=LOWER('%s')`, paymentStatus))
+			whereCondition.WriteString(` AND LOWER(p."PaymentStatus")=LOWER(` + args.arg(paymentStatus) + `)`)
 		} else {
-			whereCondition.WriteString(fmt.Sprintf(` LOWER(p."PaymentStatus")=LOWER('%s')`, paymentStatus))
+			whereCondition.WriteString(` LOWER(p."PaymentStatus")=LOWER(` + args.arg(paymentStatus) + `)`)
 		}
 	}
 
@@ -1167,19 +1187,19 @@ func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentTy
 		//convert string to bool
 		paymentsWithTokenBool, err := strconv.ParseBool(paymentsWithToken)
 		if err != nil {
-			return "", "", err
+			return "", "", nil, err
 		}
 		if paymentsWithTokenBool {
 			if whereCondition.String() != "" {
-				whereCondition.WriteString(" AND p.pelecard_token != ''")
+				whereCondition.WriteString(" AND p.pelecard_token IS NOT NULL")
 			} else {
-				whereCondition.WriteString(" p.pelecard_token != ''")
+				whereCondition.WriteString(" p.pelecard_token IS NOT NULL")
 			}
 		} else {
 			if whereCondition.String() != "" {
-				whereCondition.WriteString(" AND p.pelecard_token = ''")
+				whereCondition.WriteString(" AND p.pelecard_token IS NULL")
 			} else {
-				whereCondition.WriteString(" p.pelecard_token = ''")
+				whereCondition.WriteString(" p.pelecard_token IS NULL")
 			}
 
 		}
@@ -1188,26 +1208,30 @@ func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentTy
 
 	if orderType != "" {
 		if whereCondition.String() != "" {
-			whereCondition.WriteString(fmt.Sprintf(` AND o.id = p."OrderID" AND LOWER(o."Type")=LOWER('%s')`, orderType))
+			whereCondition.WriteString(` AND o.id = p."OrderID" AND LOWER(o."Type")=LOWER(` + args.arg(orderType) + `)`)
 		} else {
-			whereCondition.WriteString(fmt.Sprintf(` o.id = p."OrderID" AND LOWER(o."Type")=LOWER('%s')`, orderType))
+			whereCondition.WriteString(` o.id = p."OrderID" AND LOWER(o."Type")=LOWER(` + args.arg(orderType) + `)`)
 		}
 
 	}
 
-	if email != "" || accontID != 0 {
-		if email != "" {
-			if whereCondition.String() != "" {
-				whereCondition.WriteString(fmt.Sprintf(` AND p."OrderID" = o.id AND a.id = o."AccountID" AND LOWER(a."Email")=LOWER('%s')`, email))
-			} else {
-				whereCondition.WriteString(fmt.Sprintf(` p."OrderID" = o.id AND a.id = o."AccountID" AND LOWER(a."Email")=LOWER('%s')`, email))
-			}
+	// Email, account and keycloak id filter together: for a non-admin the
+	// handler pins userKey to the caller, so neither email nor accontID may
+	// replace it.
+	if email != "" || accontID != 0 || userKey != "" {
+		if whereCondition.String() != "" {
+			whereCondition.WriteString(` AND p."OrderID" = o.id AND a.id = o."AccountID"`)
 		} else {
-			if whereCondition.String() != "" {
-				whereCondition.WriteString(fmt.Sprintf(` AND p."OrderID" = o.id AND a.id = o."AccountID" AND a.id=%d`, accontID))
-			} else {
-				whereCondition.WriteString(fmt.Sprintf(` p."OrderID" = o.id AND a.id = o."AccountID" AND a.id=%d`, accontID))
-			}
+			whereCondition.WriteString(` p."OrderID" = o.id AND a.id = o."AccountID"`)
+		}
+		if email != "" {
+			whereCondition.WriteString(` AND LOWER(a."Email")=LOWER(` + args.arg(email) + `)`)
+		}
+		if accontID != 0 {
+			whereCondition.WriteString(fmt.Sprintf(` AND a.id=%d`, accontID))
+		}
+		if userKey != "" {
+			whereCondition.WriteString(` AND a."UserKey" = ` + args.arg(userKey))
 		}
 	}
 
@@ -1221,9 +1245,9 @@ func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentTy
 
 	if orderType != "" {
 		if whereCondition.String() != "" {
-			whereCondition.WriteString(fmt.Sprintf(` AND o.id = p."OrderID" AND LOWER(o."Type")=LOWER('%s')`, orderType))
+			whereCondition.WriteString(` AND o.id = p."OrderID" AND LOWER(o."Type")=LOWER(` + args.arg(orderType) + `)`)
 		} else {
-			whereCondition.WriteString(fmt.Sprintf(` o.id = p."OrderID" AND LOWER(o."Type")=LOWER('%s')`, orderType))
+			whereCondition.WriteString(` o.id = p."OrderID" AND LOWER(o."Type")=LOWER(` + args.arg(orderType) + `)`)
 		}
 	}
 
@@ -1241,10 +1265,11 @@ func buildAndGetPaymentsWhereQuery(fromDate string, dateTo *time.Time, paymentTy
 	} else {
 		whereString.Reset()
 	}
-	return whereString.String(), orderBy.String(), nil
+	return whereString.String(), orderBy.String(), args, nil
 }
 
-func buildAndGetOfflinePaymentsWhereQuery(method string, orderByCreatedAt string) (string, string, error) {
+func buildAndGetOfflinePaymentsWhereQuery(method string, orderByCreatedAt string) (string, string, []any, error) {
+	var args queryArgs
 	var whereString strings.Builder
 	var orderBy strings.Builder
 	var whereCondition strings.Builder
@@ -1254,9 +1279,9 @@ func buildAndGetOfflinePaymentsWhereQuery(method string, orderByCreatedAt string
 	// WHERE query generation based on parameters
 	if method != "" {
 		if whereCondition.String() != "" {
-			whereCondition.WriteString(fmt.Sprintf(` AND p.payment_method='%s')`, method))
+			whereCondition.WriteString(` AND p.payment_method=` + args.arg(method))
 		} else {
-			whereCondition.WriteString(fmt.Sprintf(` p.payment_method='%s'`, method))
+			whereCondition.WriteString(` p.payment_method=` + args.arg(method))
 		}
 	}
 
@@ -1274,7 +1299,7 @@ func buildAndGetOfflinePaymentsWhereQuery(method string, orderByCreatedAt string
 	} else {
 		whereString.Reset()
 	}
-	return whereString.String(), orderBy.String(), nil
+	return whereString.String(), orderBy.String(), args, nil
 }
 
 func preparePaymentCreateQuery(req Payment) (string, string, []interface{}) {
@@ -1327,7 +1352,7 @@ func preparePaymentCreateQuery(req Payment) (string, string, []interface{}) {
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.Success.String)
 	}
-	if req.PelecardToken.Valid {
+	if req.PelecardToken.Valid && req.PelecardToken.String != "" {
 		createStrings = append(createStrings, "pelecard_token")
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.PelecardToken.String)
@@ -1508,7 +1533,7 @@ func preparePaymentUpdateQuery(req Payment) (string, []interface{}) {
 		updateStrings = append(updateStrings, fmt.Sprintf("success=$%d", len(updateStrings)+1))
 		args = append(args, req.Success.String)
 	}
-	if req.PelecardToken.Valid {
+	if req.PelecardToken.Valid && req.PelecardToken.String != "" {
 		updateStrings = append(updateStrings, fmt.Sprintf("pelecard_token=$%d", len(updateStrings)+1))
 		args = append(args, req.PelecardToken.String)
 	}
@@ -1622,7 +1647,7 @@ func preparePaymentUpdateQuery(req Payment) (string, []interface{}) {
 func (o *OrdersDB) FetchPaymentByParamX(ctx context.Context, paramX string) (*PaymentWithFullName, error) {
 	var p PaymentWithFullName
 
-	if err := o.QueryRow(ctx, `select a."UserKey", a.id, a."FirstName", a."LastName", a."Email", a."Street", a."City", o."OrderLanguage", o."Amount", o."Currency", 
+	if err := o.pool.QueryRow(ctx, `select COALESCE(a."UserKey", ''), a.id, a."FirstName", a."LastName", COALESCE(a."Email", ''), a."Street", a."City", o."OrderLanguage", o."Amount", o."Currency", 
 	p.id, p."Amount", p."PaymentStatus", p."PaymentType", p."OrderID", p."ParamX", p."AuthNo", p.confirmation_key,
 	p.success, p.pelecard_token, p."TransactionID", p."ErrorMsg", p."CardHebrewName", p."CCAbroadCard", p."CCBrand",
 	p."CCCompanyClearer", p."CCCompanyIssuer", p.credit_type, p."CCExpDate", p."CCNumber", p."DebitCode", p."DebitCurrency",

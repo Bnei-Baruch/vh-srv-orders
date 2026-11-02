@@ -6,7 +6,6 @@ package accounting
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -44,7 +43,7 @@ func NewAccountingServiceAPI(tokenSource keycloak.TokenSource) *AccountingServic
 		"User-Agent":   common.ServiceName,
 	})
 
-	client.SetError(APIError{})
+	client.SetError(utils.APIError{})
 
 	return &AccountingServiceAPI{
 		client:      client,
@@ -89,7 +88,7 @@ func (a *AccountingServiceAPI) GetLastContributions(ctx context.Context, email s
 	}
 
 	if resp.IsError() {
-		return nil, respError(resp)
+		return nil, utils.RespError(resp)
 	}
 
 	result := resp.Result().(*contributionsResponse)
@@ -137,7 +136,7 @@ func (a *AccountingServiceAPI) GetEuropeContributions(ctx context.Context, email
 	}
 
 	if resp.IsError() {
-		return nil, respError(resp)
+		return nil, utils.RespError(resp)
 	}
 
 	result := resp.Result().(*europeContributionsResponse)
@@ -206,19 +205,9 @@ func (a *AccountingServiceAPI) executeWithRetry(ctx context.Context,
 		}
 
 		if resp != nil && resp.StatusCode() == http.StatusUnauthorized {
-			return nil, respError(resp)
+			return nil, utils.RespError(resp)
 		}
 	}
 
 	return resp, nil
-}
-
-func respError(resp *resty.Response) error {
-	if resp.IsError() {
-		if apiErr, ok := resp.Error().(*APIError); ok && apiErr.Error != "" {
-			return errors.New(apiErr.Error)
-		}
-		return fmt.Errorf("unexpected response: [%s] %s", resp.Status(), resp.String())
-	}
-	return nil
 }

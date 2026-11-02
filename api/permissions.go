@@ -5,11 +5,16 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/volatiletech/null/v9"
+
 	"gitlab.bbdev.team/vh/pay/orders/api/middleware"
 	"gitlab.bbdev.team/vh/pay/orders/common"
 )
 
-func (o *OrdersAPI) HasAnyRole(c *gin.Context, roles ...string) bool {
+// hasAnyRole and userKeyFromRequest read the request only, so a handler group
+// with its own struct (see CouponAPI) can use them without an *OrdersAPI. The
+// methods delegating to them are for the handlers still on OrdersAPI.
+func hasAnyRole(c *gin.Context, roles ...string) bool {
 
 	authData := c.Request.Context().Value(common.CtxAuthClaims)
 	if authData == nil {
@@ -24,6 +29,10 @@ func (o *OrdersAPI) HasAnyRole(c *gin.Context, roles ...string) bool {
 	}
 
 	return true
+}
+
+func (o *OrdersAPI) HasAnyRole(c *gin.Context, roles ...string) bool {
+	return hasAnyRole(c, roles...)
 }
 
 func (o *OrdersAPI) isSubjectOrHasAnyRole(c *gin.Context, keycloakID string, roles ...string) bool {
@@ -111,7 +120,7 @@ func (o *OrdersAPI) isUserOrHasAnyRole(c *gin.Context, userID string, roles ...s
 	return true
 }
 
-func (o *OrdersAPI) getUserKeyFromRequest(c *gin.Context) (string, bool) {
+func userKeyFromRequest(c *gin.Context) (string, bool) {
 
 	authData := c.Request.Context().Value(common.CtxAuthClaims)
 	if authData == nil {
@@ -125,6 +134,10 @@ func (o *OrdersAPI) getUserKeyFromRequest(c *gin.Context) (string, bool) {
 	}
 
 	return claims.Sub, true
+}
+
+func (o *OrdersAPI) getUserKeyFromRequest(c *gin.Context) (string, bool) {
+	return userKeyFromRequest(c)
 }
 
 // isAuthUserOrHasAnyRole checks whether the user is authenticated and/or has any of the specified roles.
@@ -148,4 +161,26 @@ func (o *OrdersAPI) isAuthUserOrHasAnyRole(c *gin.Context, roles ...string) (boo
 		c.Status(http.StatusForbidden)
 	}
 	return ok, isAdmin, keycloakID
+}
+
+// mayStoreUserKey reports whether the caller may store key as an account's
+// "UserKey": admins any key, everyone else only their own keycloak id (or
+// none). Orders and payments find their account by that key, so a user who
+// could put someone else's on an account would have that person's new orders
+// land on it. Answers 403 itself when the caller may not.
+func (o *OrdersAPI) mayStoreUserKey(c *gin.Context, key null.String) bool {
+	if !key.Valid || key.String == "" {
+		return true
+	}
+	authData := c.Request.Context().Value(common.CtxAuthClaims)
+	if authData == nil {
+		c.Status(http.StatusForbidden)
+		return false
+	}
+	claims := authData.(*middleware.IDTokenClaims)
+	if claims.HasAnyRole(common.RoleRoot, common.RoleAdmin) || claims.Sub == key.String {
+		return true
+	}
+	c.Status(http.StatusForbidden)
+	return false
 }

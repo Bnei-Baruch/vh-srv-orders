@@ -57,7 +57,7 @@ func (o *OrdersDB) PerformOperation(ctx context.Context, req OperationReq) (int,
 		queryArr []string
 	)
 
-	tx, err := o.Begin(ctx)
+	tx, err := o.pool.Begin(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -112,6 +112,10 @@ func (o *OrdersDB) PerformOperation(ctx context.Context, req OperationReq) (int,
 		updatedRes, err := tx.Exec(ctx, query)
 
 		if err != nil {
+			// The new key already has an account: that is a merge, not a rename.
+			if isKeyTaken(err) {
+				return 0, fmt.Errorf("new keycloak id: %w; merge the accounts instead", common.ErrAccountKeyTaken)
+			}
 			return 0, fmt.Errorf("problem updating users: %w", err)
 		}
 
@@ -174,7 +178,7 @@ func (o *OrdersDB) RevertOperation(ctx context.Context, newEmail string, oldEmai
 
 	// get operation by newEmail and oldEmail
 
-	if err := o.QueryRow(ctx, `SELECT id, status, revert FROM operation_trace WHERE input->>'new_email'=$1 AND input->>'old_email'=$2 ORDER BY id DESC LIMIT 1`, newEmail, oldEmail).Scan(
+	if err := o.pool.QueryRow(ctx, `SELECT id, status, revert FROM operation_trace WHERE input->>'new_email'=$1 AND input->>'old_email'=$2 ORDER BY id DESC LIMIT 1`, newEmail, oldEmail).Scan(
 		&operation.ID,
 		&operation.Status,
 		&operation.Revert); err != nil {
@@ -191,13 +195,11 @@ func (o *OrdersDB) RevertOperation(ctx context.Context, newEmail string, oldEmai
 		return fmt.Errorf("problem unmarshalling operation_trace: %w", err)
 	}
 
-	tx, err := o.Begin(ctx)
-
-	defer func() { _ = tx.Rollback(ctx) }()
-
+	tx, err := o.pool.Begin(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("o.pool.Begin: %w", err)
 	}
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	var query string
 	// first query in the Queries array is the query to revert

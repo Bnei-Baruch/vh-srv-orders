@@ -17,7 +17,7 @@ import (
 func insertActiveDiscount(t *testing.T, db *OrdersDB, ctx context.Context, keycloakID string) int {
 	t.Helper()
 	var id int
-	err := db.QueryRow(ctx,
+	err := db.pool.QueryRow(ctx,
 		`INSERT INTO manual_discount (keycloak_id, start_date, end_date, type, properties)
 		 VALUES ($1, NOW() - INTERVAL '1 hour', NOW() + INTERVAL '30 days', 'percent', '{"discount_pct":10}')
 		 RETURNING id`,
@@ -158,7 +158,7 @@ func TestGetActiveManualDiscount_UnknownKeycloakID_ReturnsNil(t *testing.T) {
 
 func TestGetActiveManualDiscount_ExpiredDiscount_ReturnsNil(t *testing.T) {
 	db, ctx := newTestDB(t)
-	_, err := db.Exec(ctx,
+	_, err := db.pool.Exec(ctx,
 		`INSERT INTO manual_discount (keycloak_id, start_date, end_date, type, properties)
 		 VALUES ('kc-expired', NOW() - INTERVAL '10 days', NOW() - INTERVAL '1 day', 'percent', '{"discount_pct":10}')`,
 	)
@@ -172,7 +172,7 @@ func TestGetActiveManualDiscount_ExpiredDiscount_ReturnsNil(t *testing.T) {
 
 func TestGetActiveManualDiscount_FutureDiscount_ReturnsNil(t *testing.T) {
 	db, ctx := newTestDB(t)
-	_, err := db.Exec(ctx,
+	_, err := db.pool.Exec(ctx,
 		`INSERT INTO manual_discount (keycloak_id, start_date, end_date, type, properties)
 		 VALUES ('kc-future', NOW() + INTERVAL '1 day', NOW() + INTERVAL '30 days', 'percent', '{"discount_pct":10}')`,
 	)

@@ -40,7 +40,7 @@ func setupRenewalTestData(t *testing.T, db *OrdersDB, ctx context.Context) (acco
 		Flag:      null.StringFrom(common.OrderFlagToRenew),
 	}
 	createStr, numStr, args := prepareOrderCreateQuery(order)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createStr, numStr), args...).Scan(&orderID)
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createStr, numStr), args...).Scan(&orderID)
 	require.NoError(t, err)
 
 	payment := Payment{
@@ -53,7 +53,7 @@ func setupRenewalTestData(t *testing.T, db *OrdersDB, ctx context.Context) (acco
 		Success:       null.StringFrom("1"),
 	}
 	createPStr, numPStr, pArgs := preparePaymentCreateQuery(payment)
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createPStr, numPStr), pArgs...).Scan(&paymentID)
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createPStr, numPStr), pArgs...).Scan(&paymentID)
 	require.NoError(t, err)
 
 	return accountID, orderID, paymentID
@@ -101,7 +101,7 @@ func TestLoadRenewalData_WithCardDetails(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = db.Exec(ctx, `UPDATE orders SET card_details_id = $1 WHERE id = $2`, cardID, orderID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET card_details_id = $1 WHERE id = $2`, cardID, orderID)
 	require.NoError(t, err)
 
 	data, err := db.LoadRenewalData(ctx, uint(orderID))
@@ -125,7 +125,7 @@ func TestLoadRenewalData_InactiveCard_ReturnsError(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = db.Exec(ctx, `UPDATE orders SET card_details_id = $1 WHERE id = $2`, cardID, orderID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET card_details_id = $1 WHERE id = $2`, cardID, orderID)
 	require.NoError(t, err)
 
 	_, err = db.LoadRenewalData(ctx, uint(orderID))
@@ -148,10 +148,10 @@ func TestLoadRenewalData_EmptyToken_ReturnsError(t *testing.T) {
 	require.NoError(t, err)
 
 	// Manually clear the token to simulate empty (DB column is NOT NULL)
-	_, err = db.Exec(ctx, `UPDATE card_details SET token = '' WHERE id = $1`, cardID)
+	_, err = db.pool.Exec(ctx, `UPDATE card_details SET token = '' WHERE id = $1`, cardID)
 	require.NoError(t, err)
 
-	_, err = db.Exec(ctx, `UPDATE orders SET card_details_id = $1 WHERE id = $2`, cardID, orderID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET card_details_id = $1 WHERE id = $2`, cardID, orderID)
 	require.NoError(t, err)
 
 	_, err = db.LoadRenewalData(ctx, uint(orderID))
@@ -177,7 +177,7 @@ func TestLoadRenewalData_NoPayment(t *testing.T) {
 	order := Order{AccountID: null.IntFrom(accountID), Status: null.StringFrom(common.OrderStatusPaid)}
 	createStr, numStr, args := prepareOrderCreateQuery(order)
 	var orderID int
-	err = db.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createStr, numStr), args...).Scan(&orderID)
+	err = db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createStr, numStr), args...).Scan(&orderID)
 	require.NoError(t, err)
 
 	_, err = db.LoadRenewalData(ctx, uint(orderID))
@@ -235,7 +235,7 @@ func TestCreateRenewalPayment_CardOverridesPrevPaymentToken(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = db.Exec(ctx, `UPDATE orders SET card_details_id = $1 WHERE id = $2`, cardID, orderID)
+	_, err = db.pool.Exec(ctx, `UPDATE orders SET card_details_id = $1 WHERE id = $2`, cardID, orderID)
 	require.NoError(t, err)
 
 	data, err := db.LoadRenewalData(ctx, uint(orderID))
@@ -263,7 +263,7 @@ func TestCreateRenewalPayment_PricingVersionStoredInDB(t *testing.T) {
 
 	// Verify pricing fields are actually in the DB, not just on the struct
 	var dbVersion, dbEval *string
-	err = db.QueryRow(ctx,
+	err = db.pool.QueryRow(ctx,
 		`SELECT pricing_version, pricing_evaluation::text FROM payments WHERE id = $1`, payment.ID).
 		Scan(&dbVersion, &dbEval)
 	require.NoError(t, err)
@@ -285,7 +285,7 @@ func TestCreateRenewalPayment_PelecardRecordCreated(t *testing.T) {
 
 	// Verify pelecard record exists
 	var pelecardCount int
-	err = db.QueryRow(ctx, `SELECT COUNT(*) FROM payments_pelecard WHERE payment_id = $1`, payment.ID).Scan(&pelecardCount)
+	err = db.pool.QueryRow(ctx, `SELECT COUNT(*) FROM payments_pelecard WHERE payment_id = $1`, payment.ID).Scan(&pelecardCount)
 	require.NoError(t, err)
 	assert.Equal(t, 1, pelecardCount)
 }
@@ -363,7 +363,7 @@ func TestFinalizeRenewal_PaymentRecordUpdated(t *testing.T) {
 
 	// Read back the payment and verify it was updated
 	var updatedStatus, updatedSuccess string
-	err = db.QueryRow(ctx, `SELECT "PaymentStatus", success FROM payments WHERE id = $1`, payment.ID).
+	err = db.pool.QueryRow(ctx, `SELECT "PaymentStatus", success FROM payments WHERE id = $1`, payment.ID).
 		Scan(&updatedStatus, &updatedSuccess)
 	require.NoError(t, err)
 	assert.Equal(t, common.PaymentStatusSuccess, updatedStatus)

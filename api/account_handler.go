@@ -71,11 +71,17 @@ func (o *OrdersAPI) handleCreateAccount(c *gin.Context) {
 	if !o.isEmailOwnerOrHasAnyRole(c, req.Email.String, common.RoleRoot, common.RoleAdmin) {
 		return
 	}
+	if !o.mayStoreUserKey(c, req.UserKey) {
+		return
+	}
 	accountId, err := o.repo.CreateAccount(c.Request.Context(), req)
 	if err != nil {
-		if errors.Is(err, common.ErrInvalidValues) {
+		switch {
+		case errors.Is(err, common.ErrInvalidValues):
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		} else {
+		case errors.Is(err, common.ErrAccountKeyTaken):
+			c.JSON(http.StatusConflict, gin.H{"error": common.ErrAccountKeyTaken.Error()})
+		default:
 			c.Status(http.StatusInternalServerError)
 			_ = c.Error(fmt.Errorf("repo.CreateAccount: %w", err))
 		}
@@ -147,12 +153,17 @@ func (o *OrdersAPI) handlePatchAccount(c *gin.Context) {
 	if !o.isUserOrHasAnyRole(c, id, common.RoleRoot, common.RoleAdmin) {
 		return
 	}
+	if !o.mayStoreUserKey(c, req.UserKey) {
+		return
+	}
 	err = o.repo.PatchAccount(c.Request.Context(), req, intID)
 	if err != nil {
 		if errors.Is(err, fmt.Errorf("invalid body")) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		} else if errors.Is(err, common.ErrNoRowsAffected) {
 			c.Status(http.StatusNotFound)
+		} else if errors.Is(err, common.ErrAccountKeyTaken) {
+			c.JSON(http.StatusConflict, gin.H{"error": common.ErrAccountKeyTaken.Error()})
 		} else {
 			c.Status(http.StatusInternalServerError)
 			_ = c.Error(fmt.Errorf("repo.PatchAccount: %w", err))

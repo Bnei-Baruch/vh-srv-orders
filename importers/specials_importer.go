@@ -109,8 +109,10 @@ func (im *SpecialsImporter) getSheetValues() ([]*SpecialRecord, error) {
 
 func (im *SpecialsImporter) createSpecial(rSpecial *SpecialRecord) error {
 
-	if !rSpecial.KeycloakID.IsValid() && !rSpecial.Email.IsValid() {
-		return fmt.Errorf("email & : KeycloakID can't be empty both")
+	// A special without an email could never be revoked: vh-srv-profile
+	// revokes by email. CreateSpecial refuses it too; this names the cause.
+	if rSpecial.Email.String == "" {
+		return fmt.Errorf("email is required (keycloak id %q)", rSpecial.KeycloakID.String)
 	}
 	var special repo.Special
 	special.Email = rSpecial.Email

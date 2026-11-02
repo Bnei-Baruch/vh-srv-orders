@@ -7,10 +7,6 @@ import (
 	uuid "github.com/satori/go.uuid"
 )
 
-type APIError struct {
-	Error string `json:"error"`
-}
-
 var ErrNotFound = errors.New("Not Found")
 
 type Profile struct {

@@ -29,12 +29,12 @@ var interestingEvents = map[string]struct{}{
 var errSkip = errors.New("skip event")
 
 type EventsHandler struct {
-	repo           repo.OrdersRepository
+	repo           AccountsRepo
 	kcTokenSource  keycloak.TokenSource
 	profileService profiles.ProfileService
 }
 
-func NewEventsHandler(repo repo.OrdersRepository) *EventsHandler {
+func NewEventsHandler(repo AccountsRepo) *EventsHandler {
 	eh := new(EventsHandler)
 	eh.repo = repo
 	eh.kcTokenSource = keycloak.NewClient()
@@ -120,7 +120,7 @@ func (eh *EventsHandler) onCreateProfile(ctx context.Context, event profiles.Eve
 
 	_, err := eh.repo.GetOrCreateAccountFromProfile(ctx, keycloakID.(string))
 	if err != nil {
-		return fmt.Errorf("eh.repo.GetOrCreateAccount: %w", err)
+		return fmt.Errorf("eh.repo.GetOrCreateAccountFromProfile: %w", err)
 	}
 
 	return nil

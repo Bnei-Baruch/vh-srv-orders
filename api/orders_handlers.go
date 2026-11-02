@@ -221,12 +221,21 @@ func (o *OrdersAPI) handleOrderFetch(c *gin.Context) {
 		err          error
 	)
 
+	// The repo parses from-date too, but a failure there comes back as a 500.
+	if fromDate != "" {
+		if _, err := time.Parse(time.RFC3339, fromDate); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid from-date"})
+			return
+		}
+	}
+
 	if toDate != "" {
 		rfcLayout := time.RFC3339
 		toDateParsed, err = time.Parse(rfcLayout, toDate)
 
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid date-from"})
+			return
 		}
 	} else {
 		toDateParsed = time.Now()
@@ -254,7 +263,7 @@ func (o *OrdersAPI) handleOrderFetch(c *gin.Context) {
 	if accountID != "" {
 		intAccountID, err = strconv.Atoi(accountID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit value! Accepted value is INTEGER", "success": false})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid account-id value! Accepted value is INTEGER", "success": false})
 			return
 		}
 	} else {
@@ -286,7 +295,7 @@ func (o *OrdersAPI) handleCreateOffline(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"Error": err.Error(), "success": false})
 		return
 	}
-	if !req.KeycloakID.Valid {
+	if req.KeycloakID.String == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing KeycloakID.", "success": false})
 		return
 	}

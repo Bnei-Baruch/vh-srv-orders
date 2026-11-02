@@ -3,12 +3,10 @@ package cmd
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -55,18 +53,10 @@ var accountReceivablesByIDCmd = &cobra.Command{
 
 var lastContributionsCmd = &cobra.Command{
 	Use:   "last-contributions [emails...]",
-	Short: "Get last contributions by email",
-	Long:  "Get the last 12 months of contributions (summed by currency), aggregated across one or more emails, from Priority ERP. Does a full, unfiltered history fetch per customer (one request per email + one per resolved customer) -- unlike last-contributions-batch. Emails may be given as separate args and/or comma-separated. Prints request/byte/duration stats for comparison against last-contributions-batch.",
+	Short: "Get last contributions for one or more emails",
+	Long:  "Get the last 12 months of contributions (summed by currency) from Priority ERP for one or more emails, treated as one group (e.g. aliases of the same person) so a customer matched by more than one email is only counted once. Uses chunked filtered/selected OData requests, so request count and bytes transferred stay flat as the number of emails grows. Emails may be given as separate args and/or comma-separated. Prints request/byte/duration stats.",
 	Args:  cobra.MinimumNArgs(1),
 	Run:   lastContributionsFn,
-}
-
-var lastContributionsBatchCmd = &cobra.Command{
-	Use:   "last-contributions-batch [emails...]",
-	Short: "Get last contributions for multiple emails at once",
-	Long:  "Get the last 12 months of contributions (summed by currency) for multiple emails from Priority ERP, treated as one group (e.g. aliases of the same person) so a customer matched by more than one email is only counted once. Uses chunked filtered/selected OData requests to minimize request count and data transfer regardless of batch size. Emails may be given as separate args and/or comma-separated. Prints request/byte/duration stats for comparison against last-contributions.",
-	Args:  cobra.MinimumNArgs(1),
-	Run:   lastContributionsBatchFn,
 }
 
 func init() {
@@ -79,7 +69,6 @@ func init() {
 	priorityCmd.AddCommand(getCustomerByIDCmd)
 	priorityCmd.AddCommand(accountReceivablesByIDCmd)
 	priorityCmd.AddCommand(lastContributionsCmd)
-	priorityCmd.AddCommand(lastContributionsBatchCmd)
 }
 
 func accountReceivablesFn(cmd *cobra.Command, args []string) {
@@ -296,86 +285,6 @@ func accountReceivablesByIDFn(cmd *cobra.Command, args []string) {
 }
 
 func lastContributionsFn(cmd *cobra.Command, args []string) {
-	emails := make([]string, 0, len(args))
-	for _, arg := range args {
-		for _, e := range strings.Split(arg, ",") {
-			if e = strings.TrimSpace(e); e != "" {
-				emails = append(emails, e)
-			}
-		}
-	}
-	if len(emails) == 0 {
-		fmt.Println("No emails provided")
-		os.Exit(1)
-	}
-
-	// Validate configuration
-	if common.Config.PriorityBaseURL == "" {
-		slog.Error("PRIORITY_BASE_URL environment variable is required")
-		os.Exit(1)
-	}
-	if common.Config.PriorityUsername == "" {
-		slog.Error("PRIORITY_USERNAME environment variable is required")
-		os.Exit(1)
-	}
-	if common.Config.PriorityPassword == "" {
-		slog.Error("PRIORITY_PASSWORD environment variable is required")
-		os.Exit(1)
-	}
-
-	// Create Priority client
-	client := priority.NewClient()
-
-	ctx := context.Background()
-
-	slog.Info("Fetching last contributions from Priority ERP", slog.Int("emails", len(emails)))
-
-	// Fetch last contributions per email (bypasses cache so stats reflect real request
-	// traffic), one full request round-trip per email/customer -- this is the
-	// unoptimized baseline last-contributions-batch is compared against.
-	start := time.Now()
-	sums := make(map[string]float64)
-	var totalStats priority.RequestStats
-
-	for _, email := range emails {
-		contributions, stats, err := client.GetLastContributionsWithStats(ctx, email)
-		totalStats.Requests += stats.Requests
-		totalStats.Bytes += stats.Bytes
-		if err != nil {
-			if errors.Is(err, priority.ErrNoActiveCustomers) {
-				slog.Warn("no active customers found", slog.String("email", email))
-				continue
-			}
-			slog.Error("Failed to fetch last contributions", slog.String("email", email), slog.Any("error", err))
-			os.Exit(1)
-		}
-		for currency, amount := range contributions {
-			sums[currency] += amount
-		}
-	}
-	totalStats.Duration = time.Since(start)
-
-	// Print results
-	if len(sums) == 0 {
-		fmt.Printf("\nNo contributions found for %d email(s) (last 12 months)\n", len(emails))
-	} else {
-		fmt.Printf("\nLast 12 months contributions for %d email(s)\n", len(emails))
-		fmt.Println(strings.Repeat("=", 82))
-
-		// Print contributions grouped by currency
-		for currency, amount := range sums {
-			fmt.Printf("\nCurrency: %s\n", currency)
-			fmt.Printf("  Total Amount: %.2f\n", amount)
-		}
-
-		fmt.Println("\n" + strings.Repeat("=", 82))
-	}
-
-	fmt.Printf("\nPriority requests: %d | bytes received: %d | duration: %s\n",
-		totalStats.Requests, totalStats.Bytes, totalStats.Duration)
-}
-
-func lastContributionsBatchFn(cmd *cobra.Command, args []string) {
 	emails := make([]string, 0, len(args))
 	for _, arg := range args {
 		for _, e := range strings.Split(arg, ",") {

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	uuid "github.com/satori/go.uuid"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/volatiletech/null/v9"
@@ -198,4 +199,27 @@ func AccountFixture() Account {
 		Country:     null.StringFrom("country"),
 		AccountType: null.StringFrom("account type"),
 	}
+}
+
+// An absent email is NULL: writers store "" as absent, and patching an
+// empty email clears it, as storing an empty string did before.
+func TestAccountEmail_AbsentIsNull(t *testing.T) {
+	db, ctx := newTestDB(t)
+	email := func(id int) null.String {
+		t.Helper()
+		var e null.String
+		require.NoError(t, db.pool.QueryRow(ctx, `SELECT "Email" FROM accounts WHERE id = $1`, id).Scan(&e))
+		return e
+	}
+
+	id, err := db.CreateAccount(ctx, Account{UserKey: null.StringFrom("kc-noemail"), Email: null.StringFrom("")})
+	require.NoError(t, err)
+	assert.False(t, email(id).Valid, "an empty email is stored as NULL")
+
+	id, err = db.CreateAccount(ctx, Account{UserKey: null.StringFrom("kc-email"), Email: null.StringFrom("a@test.test")})
+	require.NoError(t, err)
+	assert.Equal(t, "a@test.test", email(id).String)
+
+	require.NoError(t, db.PatchAccount(ctx, Account{Email: null.StringFrom(""), FirstName: null.StringFrom("A")}, id))
+	assert.False(t, email(id).Valid, "patching an empty email clears it")
 }

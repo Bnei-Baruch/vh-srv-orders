@@ -251,17 +251,18 @@ func (o *OrdersAPI) handlePaymentFetch(c *gin.Context) {
 	orderByCreatedAt := c.Query("o-created-at")
 
 	var (
-		currentUserAccountId int
-		err                  error
+		pinUserKey string
+		err        error
 	)
 	if !isAdmin {
-		currentUserAccountId, err = o.repo.GetAccountIDByKeycloakID(c.Request.Context(), keycloakId)
-		if err != nil {
-			c.Status(http.StatusInternalServerError)
-			_ = c.Error(fmt.Errorf("repo.GetAccountIDByKeycloakID: %w", err))
+		// The pin: every account with the caller's keycloak id, as in
+		// handleGetActivities. Not one account id, since a user can have
+		// several; account-id and email then only narrow within them.
+		if keycloakId == "" {
+			c.Status(http.StatusForbidden)
 			return
 		}
-
+		pinUserKey = keycloakId
 	}
 
 	if orderByCreatedAt != "" {
@@ -277,16 +278,32 @@ func (o *OrdersAPI) handlePaymentFetch(c *gin.Context) {
 		intOrderID   int
 	)
 
+	// The repo parses from-date too, but a failure there comes back as a 500.
+	if fromDate != "" {
+		if _, err := time.Parse(time.RFC3339, fromDate); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid from-date"})
+			return
+		}
+	}
+
+	// Same for token-exist: the repo's ParseBool failure would be a 500.
+	if tokenExist != "" {
+		if _, err := strconv.ParseBool(tokenExist); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid token-exist value! Accepted values are true or false"})
+			return
+		}
+	}
+
 	if toDate != "" {
 		rfcLayout := time.RFC3339
 		toDateParsed, err = time.Parse(rfcLayout, toDate)
 
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid date-from"})
+			return
 		}
 	} else {
-		// set null value
-		toDateParsed = time.Time{}
+		toDateParsed = time.Now()
 	}
 
 	if skip == "" {
@@ -312,25 +329,15 @@ func (o *OrdersAPI) handlePaymentFetch(c *gin.Context) {
 	if accountID != "" {
 		intAccountID, err = strconv.Atoi(accountID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit value! Accepted value is INTEGER", "success": false})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid account-id value! Accepted value is INTEGER", "success": false})
 			return
 		}
-
-		if !isAdmin && currentUserAccountId != intAccountID {
-			c.Status(http.StatusForbidden)
-			return
-		}
-	} else {
-		if !isAdmin {
-			intAccountID = currentUserAccountId
-		}
-
 	}
 
 	if orderID != "" {
 		intOrderID, err = strconv.Atoi(orderID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit value! Accepted value is INTEGER", "success": false})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid order-id value! Accepted value is INTEGER", "success": false})
 			return
 		}
 	} else {
@@ -338,7 +345,7 @@ func (o *OrdersAPI) handlePaymentFetch(c *gin.Context) {
 	}
 
 	payments, err := o.repo.GetAllPayments(c.Request.Context(), intSkip, intLimit, fromDate, &toDateParsed, paymentType,
-		paymentStatus, orderType, email, intAccountID, tokenExist, intOrderID, orderByCreatedAt)
+		paymentStatus, orderType, email, intAccountID, pinUserKey, tokenExist, intOrderID, orderByCreatedAt)
 	if err != nil {
 		c.Status(http.StatusInternalServerError)
 		_ = c.Error(fmt.Errorf("repo.GetAllPayments: %w", err))
@@ -370,17 +377,18 @@ func (o *OrdersAPI) handleGetActivities(c *gin.Context) {
 	if !isAuthUser {
 		return
 	}
-	var (
-		currentUserEmail string
-		err              error
-	)
+	var pinUserKey string
 	if !isAdmin {
-		currentUserEmail, err = o.repo.GetEmailByKeycloakID(c.Request.Context(), keycloakId) // getting user email by keycloakId
-		if err != nil {
-			c.Status(http.StatusInternalServerError)
-			_ = c.Error(fmt.Errorf("repo.GetEmailByKeycloakID: %w", err))
+		// The pin: every account with the caller's keycloak id. Not an email,
+		// which the user can edit to someone else's address or to "" (no
+		// filter at all), and which differs between their accounts; not one
+		// account id, since a user can have several. ?email= then only narrows
+		// within their own accounts.
+		if keycloakId == "" {
+			c.Status(http.StatusForbidden)
 			return
 		}
+		pinUserKey = keycloakId
 	}
 
 	skip := c.Query("skip")
@@ -396,13 +404,6 @@ func (o *OrdersAPI) handleGetActivities(c *gin.Context) {
 	if limit == "" {
 		limit = "10"
 	}
-	if !isAdmin && email != "" && currentUserEmail != email {
-		c.Status(http.StatusForbidden)
-		return
-	}
-	if !isAdmin {
-		email = currentUserEmail
-	}
 	intSkip, err := strconv.Atoi(skip)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid skip value! Accepted value is INTEGER", "success": false})
@@ -415,14 +416,14 @@ func (o *OrdersAPI) handleGetActivities(c *gin.Context) {
 		return
 	}
 
-	payAct, err := o.repo.GetPaymentActivities(c.Request.Context(), email, productType, paymentType, intSkip, intLimit)
+	payAct, err := o.repo.GetPaymentActivities(c.Request.Context(), pinUserKey, email, productType, paymentType, intSkip, intLimit)
 	if err != nil {
 		c.Status(http.StatusInternalServerError)
 		_ = c.Error(fmt.Errorf("repo.GetPaymentActivities: %w", err))
 		return
 	}
 
-	count, err := o.repo.GetTotalParticipationStatusCount(c.Request.Context(), email, productType, paymentType)
+	count, err := o.repo.GetTotalParticipationStatusCount(c.Request.Context(), pinUserKey, email, productType, paymentType)
 	if err != nil {
 		c.Status(http.StatusInternalServerError)
 		_ = c.Error(fmt.Errorf("repo.GetTotalParticipationStatusCount: %w", err))

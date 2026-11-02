@@ -7,33 +7,43 @@ import (
 	"strings"
 	"time"
 
+	"github.com/volatiletech/null/v9"
+
 	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/events"
 )
 
 func (o *OrdersDB) DeleteSpecialById(ctx context.Context, id int) error {
 	var (
-		email string
+		email null.String
 		err   error
 	)
-	if err = o.QueryRow(ctx, `SELECT email FROM specials where id=$1`, id).Scan(&email); err != nil {
+	if err = o.pool.QueryRow(ctx, `SELECT email FROM specials where id=$1`, id).Scan(&email); err != nil {
 		return err
 	}
-	res, errUpdate := o.Exec(ctx, `UPDATE  specials SET end_date = now(), updated_at = now() WHERE  id = $1`, id)
+	// vh-srv-profile revokes by email only, so ending a special that has none
+	// would leave the membership active there. Refuse, and leave the row as is.
+	if !email.Valid {
+		return fmt.Errorf("special %d has no email to revoke by: %w", id, common.ErrInvalidValues)
+	}
+	res, errUpdate := o.pool.Exec(ctx, `UPDATE  specials SET end_date = now(), updated_at = now() WHERE  id = $1`, id)
 	if errUpdate != nil {
-		return fmt.Errorf("o.Exec: %w", errUpdate)
+		return fmt.Errorf("o.pool.Exec: %w", errUpdate)
 	}
 
 	if res.RowsAffected() == 0 {
 		return common.ErrNoRowsAffected
 	} else {
-		o.emitEvent(ctx, events.TypeDeleteSpecial, map[string]interface{}{"email": email})
+		o.emitEvent(ctx, events.TypeDeleteSpecial, map[string]interface{}{"email": email.String})
 	}
 	return nil
 }
 
 func (o *OrdersDB) SetKeycloakIdByEmail(ctx context.Context, email string, keycloakID string) error {
-	_, err := o.Exec(ctx, `UPDATE specials SET keycloak_id = $1, updated_at=now() WHERE email=$2`, keycloakID, email)
+	if email == "" || keycloakID == "" {
+		return fmt.Errorf("%w: email and keycloak_id are required", common.ErrInvalidValues)
+	}
+	_, err := o.pool.Exec(ctx, `UPDATE specials SET keycloak_id = $1, updated_at=now() WHERE email=$2`, keycloakID, email)
 	if err != nil {
 		return fmt.Errorf("SetKeycloakIdByEmail: %w", err)
 	}
@@ -44,11 +54,11 @@ func (o *OrdersDB) SetKeycloakIdByEmail(ctx context.Context, email string, keycl
 // DeleteSpecialById — the single primitive that ends a row and emits delete_special.
 // Past spans keep their history and future spans stay scheduled.
 func (o *OrdersDB) DeleteSpecialsByKeycloakId(ctx context.Context, keycloakID string) error {
-	rows, err := o.Query(ctx,
+	rows, err := o.pool.Query(ctx,
 		`SELECT id FROM specials WHERE keycloak_id=$1 AND start_date <= now() AND end_date > now()`,
 		keycloakID)
 	if err != nil {
-		return fmt.Errorf("o.Query: %w", err)
+		return fmt.Errorf("o.pool.Query: %w", err)
 	}
 	defer rows.Close()
 
@@ -75,7 +85,7 @@ func (o *OrdersDB) DeleteSpecialsByKeycloakId(ctx context.Context, keycloakID st
 
 func (o *OrdersDB) GetSpecialsById(ctx context.Context, id string) ([]*Special, error) {
 	var specials []*Special
-	rows, err := o.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory from specials where id = $1`, id)
+	rows, err := o.pool.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory from specials where id = $1`, id)
 
 	if err != nil {
 		return nil, err
@@ -99,7 +109,7 @@ func (o *OrdersDB) GetSpecialsById(ctx context.Context, id string) ([]*Special, 
 
 func (o *OrdersDB) GetSpecialsByKeycloakId(ctx context.Context, keycloakID string) ([]*Special, error) {
 	var specials []*Special
-	rows, err := o.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory from specials where keycloak_id = $1`, keycloakID)
+	rows, err := o.pool.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory from specials where keycloak_id = $1`, keycloakID)
 
 	if err != nil {
 		return nil, err
@@ -123,7 +133,7 @@ func (o *OrdersDB) GetSpecialsByKeycloakId(ctx context.Context, keycloakID strin
 
 func (o *OrdersDB) GetAllSpecials(ctx context.Context) ([]*Special, error) {
 	var specials []*Special
-	rows, err := o.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory from specials`)
+	rows, err := o.pool.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory from specials`)
 	if err != nil {
 		return specials, err
 	}
@@ -151,18 +161,24 @@ func (o *OrdersDB) HasSpecialMembership(ctx context.Context, email string) (bool
 }
 
 func (o *OrdersDB) CreateSpecial(ctx context.Context, s Special) (int, error) {
-	createString, numString, createQueryArgs := prepareSpecialCreateQuery(s)
-	if len(createQueryArgs) == 0 {
-		return 0, common.ErrInvalidValues
+	// An email is required. A row with neither identifier can be reached by
+	// nothing but its id (the specials_has_identifier CHECK refuses it too),
+	// and a keycloak-only row could be granted but never revoked:
+	// DeleteSpecialById refuses it, because vh-srv-profile revokes by email.
+	if !s.Email.Valid || s.Email.String == "" {
+		return 0, fmt.Errorf("special needs an email: %w", common.ErrInvalidValues)
 	}
+	createString, numString, createQueryArgs := prepareSpecialCreateQuery(s)
 
 	var ID int
-	if err := o.QueryRow(ctx, fmt.Sprintf(`INSERT INTO specials (%s) VALUES (%s) RETURNING id`, createString, numString),
+	if err := o.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO specials (%s) VALUES (%s) RETURNING id`, createString, numString),
 		createQueryArgs...).Scan(&ID); err != nil {
 		return 0, err
 	}
+	// As in delete_special: vh-srv-profile reads both identifiers with .(string),
+	// so an absent one goes out as "", never null.
 	o.emitEvent(ctx, events.TypeCreateSpecial,
-		map[string]interface{}{"email": s.Email, "keycloak_id": s.KeycloakId, "start_date": s.StartDate, "end_date": s.EndDate})
+		map[string]interface{}{"email": s.Email.String, "keycloak_id": s.KeycloakId.String, "start_date": s.StartDate, "end_date": s.EndDate})
 	return ID, nil
 }
 
@@ -171,12 +187,12 @@ func prepareSpecialCreateQuery(req Special) (string, string, []interface{}) {
 	var numString []string
 	var args []interface{}
 
-	if req.KeycloakId.Valid {
+	if req.KeycloakId.Valid && req.KeycloakId.String != "" {
 		createStrings = append(createStrings, `"keycloak_id"`)
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.KeycloakId.String)
 	}
-	if req.Email.Valid {
+	if req.Email.Valid && req.Email.String != "" {
 		createStrings = append(createStrings, `"email"`)
 		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
 		args = append(args, req.Email.String)
@@ -217,7 +233,7 @@ func prepareSpecialCreateQuery(req Special) (string, string, []interface{}) {
 
 func (o *OrdersDB) GetAllSpecialsByEmail(ctx context.Context, email string) ([]*Special, error) {
 	var specials []*Special
-	rows, err := o.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory,created_at from specials where email ilike $1`, email)
+	rows, err := o.pool.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory,created_at from specials where email ilike $1`, email)
 
 	if err != nil {
 		return nil, err
@@ -242,7 +258,7 @@ func (o *OrdersDB) GetAllSpecialsByEmail(ctx context.Context, email string) ([]*
 
 func (o *OrdersDB) GetUniqueEmailsFromSpecial(ctx context.Context) ([]string, error) {
 	var emails []string
-	rows, err := o.Query(ctx, `SELECT DISTINCT specials.email from specials`)
+	rows, err := o.pool.Query(ctx, `SELECT DISTINCT specials.email from specials WHERE specials.email IS NOT NULL`)
 
 	if err != nil {
 		return emails, err

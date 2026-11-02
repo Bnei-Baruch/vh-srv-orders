@@ -28,11 +28,17 @@ import (
 )
 
 type App struct {
-	repo                repo.OrdersRepository
+	// Concrete, with the same promoted-pgx caveat as OrdersAPI.repo. Close() in
+	// Shutdown is the one pool method this type should call.
+	repo *repo.OrdersDB
+	// repoClose is what Shutdown calls to close the repo: set with repo by
+	// initDB, and replaced in tests by a Close that blocks or counts.
+	repoClose           func()
 	eventEmitter        events.EventEmitter
 	eventListener       *profiles.EventListener
 	domainEventsHandler *domain.EventsHandler
 	ordersAPI           *OrdersAPI
+	couponAPI           *CouponAPI
 	gEngine             *gin.Engine
 
 	shutdownOnce sync.Once
@@ -65,7 +71,6 @@ func (a *App) Initialize(ctx context.Context, stop func()) error {
 		{"events emitter", a.initEventEmitter},
 		{"database", func() { a.initDB(ctx) }},
 		{"events listener", a.initEventListener},
-		{"api", func() { a.ordersAPI = NewOrdersAPI(a.repo) }},
 		{"gin engine", func() { a.initGinEngine(ctx) }},
 		{"health", a.initHealth},
 	}
@@ -208,6 +213,14 @@ func (a *App) initGinEngine(ctx context.Context) {
 }
 
 func (a *App) initRoutes() {
+	// Constructed here so owning a group and registering its routes are one
+	// step. A route registered on a nil group compiles and starts fine, then
+	// panics on the first request — this branch carried that bug while only
+	// Initialize remembered and NewTestApp did not, fixed in 9cd6a5f. It never
+	// left the branch.
+	a.ordersAPI = NewOrdersAPI(a.repo)
+	a.couponAPI = NewCouponAPI(a.repo)
+
 	// routes
 	orders := a.gEngine.Group("/orders")
 	{
@@ -315,13 +328,13 @@ func (a *App) initRoutes() {
 
 	couponGroup := baseV2Path.Group("/coupon")
 	{
-		couponGroup.POST("/", a.ordersAPI.handleCreateCoupon)
-		couponGroup.GET("/", a.ordersAPI.handleListCoupons)
-		couponGroup.GET("/mine", a.ordersAPI.handleGetMyCoupons)
-		couponGroup.POST("/redeem", a.ordersAPI.handleRedeemCoupon)
-		couponGroup.GET("/:id/redemptions", a.ordersAPI.handleGetCouponRedemptions)
-		couponGroup.PATCH("/:id", a.ordersAPI.handleUpdateCoupon)
-		couponGroup.DELETE("/:id/redemption/:rid", a.ordersAPI.handleRevokeRedemption)
+		couponGroup.POST("/", a.couponAPI.handleCreateCoupon)
+		couponGroup.GET("/", a.couponAPI.handleListCoupons)
+		couponGroup.GET("/mine", a.couponAPI.handleGetMyCoupons)
+		couponGroup.POST("/redeem", a.couponAPI.handleRedeemCoupon)
+		couponGroup.GET("/:id/redemptions", a.couponAPI.handleGetCouponRedemptions)
+		couponGroup.PATCH("/:id", a.couponAPI.handleUpdateCoupon)
+		couponGroup.DELETE("/:id/redemption/:rid", a.couponAPI.handleRevokeRedemption)
 	}
 
 	a.gEngine.GET("/status/:email", a.ordersAPI.status)
@@ -522,8 +535,12 @@ func (a *App) shutdown() {
 	if a.eventListener != nil {
 		runBounded("event listener", profiles.CloseGrace+stepSlack, a.eventListener.Close)
 	}
-	if a.repo != nil {
-		runBounded("repo", poolCloseGrace, a.repo.Close)
+	closeRepo := a.repoClose
+	if closeRepo == nil && a.repo != nil {
+		closeRepo = a.repo.Close
+	}
+	if closeRepo != nil {
+		runBounded("repo", poolCloseGrace, closeRepo)
 	}
 	if a.eventEmitter != nil {
 		runBounded("event emitter", emitterDrainGrace+stepSlack, func() {

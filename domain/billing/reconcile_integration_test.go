@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/volatiletech/null/v9"
@@ -12,20 +13,21 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/events"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/pelecard"
+
 	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
 // setupUnfinalizedOrder creates an order + a pending payment that simulates a CHARGE_SUCCESS_DB_FAIL:
 // gateway charged the customer, but FinalizeRenewal failed leaving the payment in "pending" state.
 // Returns (orderID, paymentID).
-func setupUnfinalizedOrder(t *testing.T, db *repo.OrdersDB, ctx context.Context, country string) (uint, int) {
+func setupUnfinalizedOrder(t *testing.T, db *repo.OrdersDB, pool *pgxpool.Pool, ctx context.Context, country string) (uint, int) {
 	t.Helper()
-	return setupUnfinalizedOrderWithPayment(t, db, ctx, country, 90.0, common.CurrencyNIS, "v2")
+	return setupUnfinalizedOrderWithPayment(t, db, pool, ctx, country, 90.0, common.CurrencyNIS, "v2")
 }
 
 // setupUnfinalizedOrderWithPayment is a parametrized variant that lets tests vary the
 // payment's amount, currency, and pricing_version so consistency checks can be exercised.
-func setupUnfinalizedOrderWithPayment(t *testing.T, db *repo.OrdersDB, ctx context.Context, country string, amount float64, currency, pricingVersion string) (uint, int) {
+func setupUnfinalizedOrderWithPayment(t *testing.T, db *repo.OrdersDB, pool *pgxpool.Pool, ctx context.Context, country string, amount float64, currency, pricingVersion string) (uint, int) {
 	t.Helper()
 
 	accountID, err := db.CreateAccount(ctx, repo.Account{
@@ -40,7 +42,7 @@ func setupUnfinalizedOrderWithPayment(t *testing.T, db *repo.OrdersDB, ctx conte
 	require.NoError(t, err)
 
 	var orderID int
-	err = db.QueryRow(ctx,
+	err = pool.QueryRow(ctx,
 		`INSERT INTO orders ("AccountID", "Amount", "Currency", "Type", "Status", "Flag")
 		 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
 		accountID, amount, currency, "recurring", common.OrderStatusPaid, common.OrderFlagToRenew,
@@ -49,14 +51,14 @@ func setupUnfinalizedOrderWithPayment(t *testing.T, db *repo.OrdersDB, ctx conte
 
 	// Create the "pending" payment that was left behind when FinalizeRenewal failed
 	var paymentID int
-	err = db.QueryRow(ctx,
+	err = pool.QueryRow(ctx,
 		`INSERT INTO payments ("Amount", "Currency", "PaymentStatus", "OrderID", "AuthNo", pelecard_token, success, pricing_version)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
 		amount, currency, common.PaymentStatusPending, orderID, "AUTH-R", "TOKEN-R", "", pricingVersion,
 	).Scan(&paymentID)
 	require.NoError(t, err)
 
-	_, err = db.Exec(ctx, `INSERT INTO payments_pelecard (payment_id) VALUES ($1)`, paymentID)
+	_, err = pool.Exec(ctx, `INSERT INTO payments_pelecard (payment_id) VALUES ($1)`, paymentID)
 	require.NoError(t, err)
 
 	return uint(orderID), paymentID
@@ -67,8 +69,8 @@ func setupUnfinalizedOrderWithPayment(t *testing.T, db *repo.OrdersDB, ctx conte
 // ---------------------------------------------------------------------------
 
 func TestReconcileIntegration_SuccessfulReconciliation(t *testing.T) {
-	db, ctx := newIntegrationDB(t)
-	orderID, paymentID := setupUnfinalizedOrder(t, db, ctx, "IL")
+	db, pool, ctx := newIntegrationDB(t)
+	orderID, paymentID := setupUnfinalizedOrder(t, db, pool, ctx, "IL")
 
 	service := NewBillingService(db, nil, &events.NoopEmitter{}, nil, nil)
 
@@ -88,12 +90,12 @@ func TestReconcileIntegration_SuccessfulReconciliation(t *testing.T) {
 	assert.Equal(t, 0, result.Failed)
 
 	// Verify DB state
-	flag, status := readOrderState(t, db, ctx, orderID)
+	flag, status := readOrderState(t, pool, ctx, orderID)
 	assert.Equal(t, common.OrderFlagRenewed, flag)
 	assert.Equal(t, common.OrderStatusPaid, status)
 
 	var payStatus, paySuccess string
-	err := db.QueryRow(ctx,
+	err := pool.QueryRow(ctx,
 		`SELECT COALESCE("PaymentStatus",''), COALESCE(success,'') FROM payments WHERE id=$1`, paymentID,
 	).Scan(&payStatus, &paySuccess)
 	require.NoError(t, err)
@@ -102,8 +104,8 @@ func TestReconcileIntegration_SuccessfulReconciliation(t *testing.T) {
 }
 
 func TestReconcileIntegration_AlreadyReconciled(t *testing.T) {
-	db, ctx := newIntegrationDB(t)
-	orderID, paymentID := setupUnfinalizedOrder(t, db, ctx, "IL")
+	db, pool, ctx := newIntegrationDB(t)
+	orderID, paymentID := setupUnfinalizedOrder(t, db, pool, ctx, "IL")
 
 	service := NewBillingService(db, nil, &events.NoopEmitter{}, nil, nil)
 
@@ -128,7 +130,7 @@ func TestReconcileIntegration_AlreadyReconciled(t *testing.T) {
 }
 
 func TestReconcileIntegration_PaymentNotFound(t *testing.T) {
-	db, ctx := newIntegrationDB(t)
+	db, _, ctx := newIntegrationDB(t)
 
 	service := NewBillingService(db, nil, &events.NoopEmitter{}, nil, nil)
 
@@ -147,9 +149,9 @@ func TestReconcileIntegration_PaymentNotFound(t *testing.T) {
 }
 
 func TestReconcileIntegration_MultipleEntries(t *testing.T) {
-	db, ctx := newIntegrationDB(t)
-	order1, payment1 := setupUnfinalizedOrderWithPayment(t, db, ctx, "IL", 90, common.CurrencyNIS, "v2")
-	order2, payment2 := setupUnfinalizedOrderWithPayment(t, db, ctx, "US", 20, common.CurrencyUSD, "v1")
+	db, pool, ctx := newIntegrationDB(t)
+	order1, payment1 := setupUnfinalizedOrderWithPayment(t, db, pool, ctx, "IL", 90, common.CurrencyNIS, "v2")
+	order2, payment2 := setupUnfinalizedOrderWithPayment(t, db, pool, ctx, "US", 20, common.CurrencyUSD, "v1")
 
 	service := NewBillingService(db, nil, &events.NoopEmitter{}, nil, nil)
 
@@ -161,8 +163,8 @@ func TestReconcileIntegration_MultipleEntries(t *testing.T) {
 	assert.Equal(t, 2, result.Total)
 	assert.Equal(t, 2, result.Reconciled)
 
-	flag1, _ := readOrderState(t, db, ctx, order1)
-	flag2, _ := readOrderState(t, db, ctx, order2)
+	flag1, _ := readOrderState(t, pool, ctx, order1)
+	flag2, _ := readOrderState(t, pool, ctx, order2)
 	assert.Equal(t, common.OrderFlagRenewed, flag1)
 	assert.Equal(t, common.OrderFlagRenewed, flag2)
 }
@@ -171,8 +173,8 @@ func TestReconcileIntegration_OrderIDMismatch_Failed(t *testing.T) {
 	// Guard: FinalizeRenewal uses both the orderID parameter and payment.OrderID
 	// internally. If they diverge, one order gets Flag=renewed while another gets
 	// Status=paid — silent data corruption. Reconcile must refuse the entry.
-	db, ctx := newIntegrationDB(t)
-	orderID, paymentID := setupUnfinalizedOrder(t, db, ctx, "IL")
+	db, pool, ctx := newIntegrationDB(t)
+	orderID, paymentID := setupUnfinalizedOrder(t, db, pool, ctx, "IL")
 
 	service := NewBillingService(db, nil, &events.NoopEmitter{}, nil, nil)
 
@@ -191,14 +193,14 @@ func TestReconcileIntegration_OrderIDMismatch_Failed(t *testing.T) {
 	assert.Equal(t, 1, result.Failed)
 
 	// The real order should not have been touched.
-	flag, status := readOrderState(t, db, ctx, orderID)
+	flag, status := readOrderState(t, pool, ctx, orderID)
 	assert.Equal(t, common.OrderFlagToRenew, flag)
 	assert.Equal(t, common.OrderStatusPaid, status)
 }
 
 func TestReconcileIntegration_AmountMismatch_Failed(t *testing.T) {
-	db, ctx := newIntegrationDB(t)
-	orderID, paymentID := setupUnfinalizedOrder(t, db, ctx, "IL") // amount=90 NIS
+	db, pool, ctx := newIntegrationDB(t)
+	orderID, paymentID := setupUnfinalizedOrder(t, db, pool, ctx, "IL") // amount=90 NIS
 
 	service := NewBillingService(db, nil, &events.NoopEmitter{}, nil, nil)
 
@@ -216,8 +218,8 @@ func TestReconcileIntegration_AmountMismatch_Failed(t *testing.T) {
 }
 
 func TestReconcileIntegration_CurrencyMismatch_Failed(t *testing.T) {
-	db, ctx := newIntegrationDB(t)
-	orderID, paymentID := setupUnfinalizedOrder(t, db, ctx, "IL") // currency=NIS
+	db, pool, ctx := newIntegrationDB(t)
+	orderID, paymentID := setupUnfinalizedOrder(t, db, pool, ctx, "IL") // currency=NIS
 
 	service := NewBillingService(db, nil, &events.NoopEmitter{}, nil, nil)
 
@@ -234,8 +236,8 @@ func TestReconcileIntegration_CurrencyMismatch_Failed(t *testing.T) {
 }
 
 func TestReconcileIntegration_PricingVersionMismatch_Failed(t *testing.T) {
-	db, ctx := newIntegrationDB(t)
-	orderID, paymentID := setupUnfinalizedOrder(t, db, ctx, "IL") // pricing_version=v2
+	db, pool, ctx := newIntegrationDB(t)
+	orderID, paymentID := setupUnfinalizedOrder(t, db, pool, ctx, "IL") // pricing_version=v2
 
 	service := NewBillingService(db, nil, &events.NoopEmitter{}, nil, nil)
 
@@ -256,11 +258,11 @@ func TestReconcileIntegration_FinalizedAsDeclined_RefusesOverwrite(t *testing.T)
 	// not be flipped to success by reconcile. This state shouldn't normally end up in
 	// a reconcile input, but a stale or reprocessed log could contain it, and silently
 	// converting a declined charge into a successful one would corrupt financial state.
-	db, ctx := newIntegrationDB(t)
-	orderID, paymentID := setupUnfinalizedOrder(t, db, ctx, "IL")
+	db, pool, ctx := newIntegrationDB(t)
+	orderID, paymentID := setupUnfinalizedOrder(t, db, pool, ctx, "IL")
 
 	// Simulate a cleanly-finalized decline: PaymentStatus=failed, success=0.
-	_, err := db.Exec(ctx,
+	_, err := pool.Exec(ctx,
 		`UPDATE payments SET "PaymentStatus"=$1, success=$2 WHERE id=$3`,
 		common.PaymentStatusFailed, "0", paymentID,
 	)
@@ -282,7 +284,7 @@ func TestReconcileIntegration_FinalizedAsDeclined_RefusesOverwrite(t *testing.T)
 
 	// Payment state must remain declined.
 	var payStatus, paySuccess string
-	err = db.QueryRow(ctx,
+	err = pool.QueryRow(ctx,
 		`SELECT COALESCE("PaymentStatus",''), COALESCE(success,'') FROM payments WHERE id=$1`, paymentID,
 	).Scan(&payStatus, &paySuccess)
 	require.NoError(t, err)
@@ -291,8 +293,8 @@ func TestReconcileIntegration_FinalizedAsDeclined_RefusesOverwrite(t *testing.T)
 }
 
 func TestReconcileIntegration_EventEmitted(t *testing.T) {
-	db, ctx := newIntegrationDB(t)
-	orderID, paymentID := setupUnfinalizedOrder(t, db, ctx, "IL")
+	db, pool, ctx := newIntegrationDB(t)
+	orderID, paymentID := setupUnfinalizedOrder(t, db, pool, ctx, "IL")
 
 	service := NewBillingService(db, nil, &events.NoopEmitter{}, nil, nil)
 

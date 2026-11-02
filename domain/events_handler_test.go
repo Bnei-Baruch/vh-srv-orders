@@ -1,4 +1,4 @@
-package domain
+package domain_test
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
+	"gitlab.bbdev.team/vh/pay/orders/domain"
 	"gitlab.bbdev.team/vh/pay/orders/events"
 	"gitlab.bbdev.team/vh/pay/orders/internal/mocks"
 	mockspkg "gitlab.bbdev.team/vh/pay/orders/internal/mocks/pkg"
@@ -21,12 +22,12 @@ import (
 func TestCreateProfile(t *testing.T) {
 	p := profilestest.ProfileFixture()
 
-	ordersRepo := mocks.NewMockOrdersRepository(t)
+	ordersRepo := mocks.NewMockAccountsRepo(t)
 	ordersRepo.EXPECT().GetOrCreateAccountFromProfile(
 		mock.MatchedBy(isExpectedContext), p.KeycloakID.String()).
 		Return(1, nil)
 
-	eh := NewEventsHandler(ordersRepo)
+	eh := domain.NewEventsHandler(ordersRepo)
 
 	eh.HandleProfilesEvent(
 		profilestest.EventFixture(
@@ -39,10 +40,10 @@ func TestCreateProfile(t *testing.T) {
 }
 
 func TestCreateProfileMissingKeycloakID(t *testing.T) {
-	ordersRepo := mocks.NewMockOrdersRepository(t)
+	ordersRepo := mocks.NewMockAccountsRepo(t)
 	ordersRepo.AssertNotCalled(t, "GetOrCreateAccountFromProfile", mock.Anything, mock.Anything)
 
-	eh := NewEventsHandler(ordersRepo)
+	eh := domain.NewEventsHandler(ordersRepo)
 
 	eh.HandleProfilesEvent(
 		profilestest.EventFixture(
@@ -56,13 +57,13 @@ func TestCreateProfileMissingKeycloakID(t *testing.T) {
 func TestUpdateProfile(t *testing.T) {
 	p := profilestest.ProfileFixture()
 
-	ordersRepo := mocks.NewMockOrdersRepository(t)
+	ordersRepo := mocks.NewMockAccountsRepo(t)
 	ordersRepo.EXPECT().PatchOrCreateAccount(
 		mock.MatchedBy(isExpectedContext),
 		mock.MatchedBy(makeProfileAccountMatcher(p)),
 	).Return(1, nil)
 
-	eh := NewEventsHandler(ordersRepo)
+	eh := domain.NewEventsHandler(ordersRepo)
 
 	profileService := mockspkg.NewMockProfileService(t)
 	eh.SetProfileService(profileService)
@@ -82,10 +83,10 @@ func TestUpdateProfile(t *testing.T) {
 }
 
 func TestUpdateProfileMissingKeycloakID(t *testing.T) {
-	ordersRepo := mocks.NewMockOrdersRepository(t)
+	ordersRepo := mocks.NewMockAccountsRepo(t)
 	ordersRepo.AssertNotCalled(t, "PatchOrCreateAccount", mock.Anything, mock.Anything)
 
-	eh := NewEventsHandler(ordersRepo)
+	eh := domain.NewEventsHandler(ordersRepo)
 
 	profileService := mockspkg.NewMockProfileService(t)
 	eh.SetProfileService(profileService)
@@ -101,10 +102,10 @@ func TestUpdateProfileMissingKeycloakID(t *testing.T) {
 }
 
 func TestUpdateProfileNotFound(t *testing.T) {
-	ordersRepo := mocks.NewMockOrdersRepository(t)
+	ordersRepo := mocks.NewMockAccountsRepo(t)
 	ordersRepo.AssertNotCalled(t, "PatchOrCreateAccount", mock.Anything, mock.Anything)
 
-	eh := NewEventsHandler(ordersRepo)
+	eh := domain.NewEventsHandler(ordersRepo)
 
 	profileService := mockspkg.NewMockProfileService(t)
 	eh.SetProfileService(profileService)
@@ -126,10 +127,10 @@ func TestUpdateProfileNotFound(t *testing.T) {
 }
 
 func TestUpdateProfileServiceError(t *testing.T) {
-	ordersRepo := mocks.NewMockOrdersRepository(t)
+	ordersRepo := mocks.NewMockAccountsRepo(t)
 	ordersRepo.AssertNotCalled(t, "PatchOrCreateAccount", mock.Anything, mock.Anything)
 
-	eh := NewEventsHandler(ordersRepo)
+	eh := domain.NewEventsHandler(ordersRepo)
 
 	profileService := mockspkg.NewMockProfileService(t)
 	eh.SetProfileService(profileService)
@@ -153,7 +154,7 @@ func TestUpdateProfileServiceError(t *testing.T) {
 func TestDeleteProfile(t *testing.T) {
 	p := profilestest.ProfileFixture()
 
-	ordersRepo := mocks.NewMockOrdersRepository(t)
+	ordersRepo := mocks.NewMockAccountsRepo(t)
 	ordersRepo.EXPECT().GetAccountIDByKeycloakID(
 		mock.MatchedBy(isExpectedContext),
 		p.KeycloakID.String(),
@@ -163,7 +164,7 @@ func TestDeleteProfile(t *testing.T) {
 		1,
 	).Return(nil)
 
-	eh := NewEventsHandler(ordersRepo)
+	eh := domain.NewEventsHandler(ordersRepo)
 
 	eh.HandleProfilesEvent(
 		profilestest.EventFixture(
@@ -177,14 +178,14 @@ func TestDeleteProfile(t *testing.T) {
 func TestDeleteProfileNotFound(t *testing.T) {
 	p := profilestest.ProfileFixture()
 
-	ordersRepo := mocks.NewMockOrdersRepository(t)
+	ordersRepo := mocks.NewMockAccountsRepo(t)
 	ordersRepo.EXPECT().GetAccountIDByKeycloakID(
 		mock.MatchedBy(isExpectedContext),
 		p.KeycloakID.String(),
 	).Return(0, pgx.ErrNoRows)
 	ordersRepo.AssertNotCalled(t, "SoftDeleteAccount", mock.Anything, mock.Anything)
 
-	eh := NewEventsHandler(ordersRepo)
+	eh := domain.NewEventsHandler(ordersRepo)
 
 	eh.HandleProfilesEvent(
 		profilestest.EventFixture(
@@ -198,14 +199,14 @@ func TestDeleteProfileNotFound(t *testing.T) {
 func TestDeleteProfileDBErr(t *testing.T) {
 	p := profilestest.ProfileFixture()
 
-	ordersRepo := mocks.NewMockOrdersRepository(t)
+	ordersRepo := mocks.NewMockAccountsRepo(t)
 	ordersRepo.EXPECT().GetAccountIDByKeycloakID(
 		mock.MatchedBy(isExpectedContext),
 		p.KeycloakID.String(),
 	).Return(0, errors.New("some db error"))
 	ordersRepo.AssertNotCalled(t, "SoftDeleteAccount", mock.Anything, mock.Anything)
 
-	eh := NewEventsHandler(ordersRepo)
+	eh := domain.NewEventsHandler(ordersRepo)
 
 	eh.HandleProfilesEvent(
 		profilestest.EventFixture(

@@ -33,7 +33,8 @@ func TestHandleMonthlyPriceByKCID_NonAdminCannotAccessOtherUser(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)
 
-	POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom("other-user")}, http.StatusCreated)
+	// Another user's account; only an admin may create one under someone else's key.
+	POST_ROOT(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom("other-user")}, http.StatusCreated)
 
 	// Non-admin querying a different user's ID gets 403 (no JSON body).
 	w := httptest.NewRecorder()

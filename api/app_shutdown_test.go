@@ -24,7 +24,6 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/events"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
-	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
 // Shutdown is reached from the fatal paths as well as from server.go's defer, so
@@ -178,7 +177,6 @@ func freePort(t *testing.T) string {
 // stuckRepo stands in for a pgx pool whose Close blocks — a handler parked on a
 // row lock holds an acquired connection, and pgxpool.Close waits for it.
 type stuckRepo struct {
-	repo.OrdersRepository
 	release chan struct{}
 }
 
@@ -202,7 +200,7 @@ func TestAStuckStepDoesNotSpendTheNextStepsGrace(t *testing.T) {
 	defer close(release)
 
 	emitter := &stubEmitter{}
-	app := App{repo: &stuckRepo{release: release}, eventEmitter: emitter}
+	app := App{repoClose: (&stuckRepo{release: release}).Close, eventEmitter: emitter}
 
 	start := time.Now()
 	app.Shutdown()
@@ -228,7 +226,7 @@ func TestShutdownRunsOnce(t *testing.T) {
 	var closes atomic.Int64
 	release := make(chan struct{})
 	close(release)
-	app := App{repo: &countingRepo{release: release, closes: &closes}}
+	app := App{repoClose: (&countingRepo{release: release, closes: &closes}).Close}
 
 	var wg sync.WaitGroup
 	for i := 0; i < 4; i++ {
@@ -246,7 +244,6 @@ func TestShutdownRunsOnce(t *testing.T) {
 }
 
 type countingRepo struct {
-	repo.OrdersRepository
 	release chan struct{}
 	closes  *atomic.Int64
 }

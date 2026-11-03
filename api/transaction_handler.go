@@ -480,6 +480,12 @@ func (o *OrdersAPI) handleTransactionPaid(c *gin.Context) {
 			return
 		}
 	}
+	if o.alreadyPaid(c.Request.Context(), rp.ParamX.String) {
+		// Confirmed already, by checkout's notify or an earlier return. The
+		// browser's copy of the facts must not overwrite checkout's.
+		c.JSON(http.StatusOK, nil)
+		return
+	}
 	p, err := o.repo.UpdatePayment(c.Request.Context(), rp)
 	if err != nil {
 		// TODO : ask grisha to return more info on error

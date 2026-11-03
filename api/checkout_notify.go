@@ -104,8 +104,8 @@ func (o *OrdersAPI) confirmCheckoutPayment(ctx context.Context, orderKey, paramX
 		return false, err
 	}
 
-	payment, err := o.repo.GetPaymentByID(ctx, int(paymentID))
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && payment.OrderID.Int != int(orderID)) {
+	payment, err := o.repo.GetPaymentByID(ctx, paymentID)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && payment.OrderID.Int != orderID) {
 		return false, fmt.Errorf("%w: payment %d, order %d", errNoSuchPayment, paymentID, orderID)
 	}
 	if err != nil {
@@ -151,22 +151,26 @@ func (o *OrdersAPI) alreadyPaid(ctx context.Context, paramX string) bool {
 	if err != nil {
 		return false
 	}
-	payment, err := o.repo.GetPaymentByID(ctx, int(paymentID))
+	payment, err := o.repo.GetPaymentByID(ctx, paymentID)
 	return err == nil && payment.PaymentStatus.String == common.PaymentStatusSuccess
 }
 
 // keyID reads the number out of an id like "ord-123" or "m-45", the way
-// UpdatePayment does, refusing what it would panic on.
-func keyID(key, prefix string) (uint64, error) {
+// UpdatePayment does, refusing what it would panic on. Ids are int4 serials,
+// so the number is parsed to 32 bits and must be positive.
+func keyID(key, prefix string) (int, error) {
 	parts := strings.Split(key, "-")
 	if len(parts) < 2 || parts[0] != prefix {
 		return 0, fmt.Errorf("%w: %q is not a %s- id", common.ErrInvalidValues, key, prefix)
 	}
-	id, err := strconv.ParseUint(parts[1], 10, 0)
+	id, err := strconv.ParseInt(parts[1], 10, 32)
 	if err != nil {
 		return 0, fmt.Errorf("%w: %q: %w", common.ErrInvalidValues, key, err)
 	}
-	return id, nil
+	if id <= 0 {
+		return 0, fmt.Errorf("%w: %q is not a positive id", common.ErrInvalidValues, key)
+	}
+	return int(id), nil
 }
 
 // paidFromGateway builds the successful-payment update from checkout's record

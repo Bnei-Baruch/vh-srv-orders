@@ -209,6 +209,8 @@ func Test_checkout_notify_with_ids_that_name_no_payment_never_asks_checkout(t *t
 		"no such payment":     {"user_key": p.orderKey, "reference": "m-999999"},
 		"missing reference":   {"user_key": p.orderKey},
 		"negative payment id": {"user_key": p.orderKey, "reference": "m--1"},
+		"zero payment id":     {"user_key": p.orderKey, "reference": "m-0"},
+		"past int4":           {"user_key": p.orderKey, "reference": "m-4294967297"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			w := httptest.NewRecorder()

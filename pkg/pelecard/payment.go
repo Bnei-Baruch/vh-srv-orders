@@ -46,11 +46,11 @@ type GatewayPayment struct {
 	TransactionUpdateTime    string `json:"TransactionUpdateTime"`
 	VoucherId                string `json:"VoucherId"`
 
-	// The card token and approval number renewals charge with. Empty until
-	// external_payments stores them: today they travel only on the browser
-	// redirect.
-	Token      string `json:"Token"`
-	ApprovalNo string `json:"ApprovalNo"`
+	// The card token and approval number renewals charge with, as the Good
+	// callback received them. Named apart from Pelecard's own keys on that
+	// side. Empty for payments recorded before external_payments#17.
+	Token      string `json:"CardToken"`
+	ApprovalNo string `json:"CardApprovalNo"`
 }
 
 // GetPayment asks external_payments what the gateway said about one payment,

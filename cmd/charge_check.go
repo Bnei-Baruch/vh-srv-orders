@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -19,9 +18,10 @@ import (
 // 20th, so a credential that does not land is invisible until it has failed a
 // month of renewals.
 //
-// It charges nothing: the card token it sends is invalid, so the gateway
-// declines it. A 401 means the credential was rejected; anything else means it
-// was accepted and the request reached the gateway. A decline is a pass.
+// It charges nothing: the card token it sends is hard-coded and invalid, so
+// the gateway declines it. Only a 200 decline is a pass. Everything else fails
+// the command: a rejected or missing credential, a malformed request, a wrong
+// URL, a 5xx, a timeout, and above all an accepted card.
 //
 // The default target /token/charge is in observe mode, so a pass there only
 // proves the credential was not rejected — checkout's log settles the rest,
@@ -41,8 +41,6 @@ func init() {
 
 	chargeCheckCmd.Flags().String("terminal", "token", "which terminal to check: token or emv")
 	chargeCheckCmd.Flags().String("reference", "", "reference to send (default: m-authcheck-<pid>)")
-	chargeCheckCmd.Flags().String("card-token", "0000000000000000",
-		"card token to send — invalid on purpose, so nothing can be charged")
 	chargeCheckCmd.Flags().String("url", "",
 		"override the charge URL, e.g. https://checkout.kbb1.com/vh/token/charge — that route "+
 			"requires a caller, so a 401 there is a definitive answer where the shared route's "+
@@ -52,7 +50,6 @@ func init() {
 func chargeCheckFn(cmd *cobra.Command, args []string) {
 	terminalName, _ := cmd.Flags().GetString("terminal")
 	reference, _ := cmd.Flags().GetString("reference")
-	cardToken, _ := cmd.Flags().GetString("card-token")
 	urlOverride, _ := cmd.Flags().GetString("url")
 
 	if common.Config.KeycloakClientID == "" || common.Config.KeycloakClientSecret == "" {
@@ -93,7 +90,9 @@ func chargeCheckFn(cmd *cobra.Command, args []string) {
 	// rejected on the card rather than on validation.
 	request := &pelecard.ChargeRequest{
 		UserKey: reference,
-		Token:   cardToken,
+		// Invalid on purpose: the gateway declines it, so nothing is charged.
+		// Not a flag, so a real token can't be pasted in.
+		Token: chargeCheckCardToken,
 		// Required by validation, which runs before the card is touched. Never
 		// navigated to.
 		GoodURL:      "https://example.invalid/good",
@@ -118,45 +117,36 @@ func chargeCheckFn(cmd *cobra.Command, args []string) {
 	}
 
 	result, err := client.ChargeByToken(ctx, request, terminal)
-
-	switch {
-	case err == nil:
-		// external_payments answers 200 for a declined card and puts the reason in
-		// the body. The renewal path reads this same field rather than the HTTP
-		// status, so this does too.
-		status, _ := result["status"].(string)
-		if status == "success" {
-			log.Warn("PASSED, but the gateway accepted an invalid card token — worth investigating",
-				slog.String("terminal", terminal.Name),
-				slog.String("card_token", cardToken))
-			return
-		}
-
-		log.Info("PASSED: the request reached the gateway and the card was refused",
-			slog.String("terminal", terminal.Name),
-			slog.String("url", terminal.ChargeURL),
-			slog.String("gateway_status", status),
-			slog.Any("gateway_error", result["error"]))
-
-	case errors.Is(err, pelecard.ErrUnauthorized):
-		log.Error("FAILED: external_payments rejected the credential",
-			slog.String("terminal", terminal.Name),
-			slog.Any("err", err))
-		utils.LogFatal("charge calls would fail for every renewal in a run")
-
-	case strings.Contains(err.Error(), "[400]"):
-		// Rejected as malformed, before the card and before the credential
-		// matters, so it proves nothing either way.
-		log.Error("INCONCLUSIVE: external_payments rejected the request as malformed",
-			slog.String("terminal", terminal.Name),
-			slog.Any("err", err))
-		utils.LogFatal("the request never reached the gateway, so nothing was proved")
-
-	default:
-		// Past validation, so the credential was not what stopped it.
-		log.Info("PASSED: the request was not rejected on its credential",
-			slog.String("terminal", terminal.Name),
-			slog.String("url", terminal.ChargeURL),
-			slog.String("gateway_error", err.Error()))
+	status, err := chargeCheckVerdict(result, err)
+	if err != nil {
+		utils.LogFatal("FAILED", slog.String("terminal", terminal.Name),
+			slog.String("url", terminal.ChargeURL), slog.Any("err", err))
 	}
+	log.Info("PASSED: the request reached the gateway and the card was refused",
+		slog.String("terminal", terminal.Name),
+		slog.String("url", terminal.ChargeURL),
+		slog.String("gateway_status", status),
+		slog.Any("gateway_error", result["error"]))
+}
+
+const chargeCheckCardToken = "0000000000000000"
+
+// errCardAccepted means the gateway charged the card. The token is invalid, so
+// this should never happen; if it does, money moved and someone must look.
+var errCardAccepted = errors.New("the gateway ACCEPTED the card: money moved")
+
+// chargeCheckVerdict passes only a 200 whose body is not a success, i.e. the
+// request got past the credential and validation and the card was refused.
+// external_payments answers 200 for a declined card and puts the reason in the
+// body; the renewal path reads this same field, so this does too.
+func chargeCheckVerdict(result map[string]any, err error) (string, error) {
+	if err != nil {
+		// The error already names ErrUnauthorized, ErrNoCredential, [400], [404], …
+		return "", fmt.Errorf("the charge did not reach the gateway and get declined: %w", err)
+	}
+	status, _ := result["status"].(string)
+	if status == common.PaymentStatusSuccess {
+		return status, errCardAccepted
+	}
+	return status, nil
 }

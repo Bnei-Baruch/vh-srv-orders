@@ -165,7 +165,11 @@ func (o *OrdersDB) CreateSpecial(ctx context.Context, s Special) (int, error) {
 	// nothing but its id (the specials_has_identifier CHECK refuses it too),
 	// and a keycloak-only row could be granted but never revoked:
 	// DeleteSpecialById refuses it, because vh-srv-profile revokes by email.
-	if !s.Email.Valid || strings.TrimSpace(s.Email.String) == "" {
+	//
+	// Stored trimmed: every lookup matches the email exactly, so a padded one
+	// (a sheet cell from the importer) could never be found or revoked either.
+	s.Email.String = strings.TrimSpace(s.Email.String)
+	if !s.Email.Valid || s.Email.String == "" {
 		return 0, fmt.Errorf("special needs an email: %w", common.ErrInvalidValues)
 	}
 	createString, numString, createQueryArgs := prepareSpecialCreateQuery(s)

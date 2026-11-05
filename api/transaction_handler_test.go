@@ -164,6 +164,38 @@ func Test_page_rejected_credential_is_retried_once_then_sends_the_error_url(t *t
 	assert.Len(t, calls(), 2, "one retry with a fresh token")
 }
 
+// A 403 is a valid key that is not allowed on /vh: no retry, and the payer is
+// sent to their error page rather than handed the error JSON with a 200.
+func Test_page_forbidden_is_not_retried_and_sends_the_error_url(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	calls := stubPages(t, a, http.StatusForbidden, "application/json", `{"error":"forbidden"}`)
+
+	w := postAsRoot(a, "/v2/transaction/new_token", `{"ErrorURL":"http://test/error"}`)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.JSONEq(t, `{"url":"http://test/error"}`, w.Body.String())
+	assert.Len(t, calls(), 1)
+}
+
+// An order type with no page gets the error URL, and external_payments is not
+// called at all.
+func Test_checkout_unknown_type_sends_the_error_url_without_a_call(t *testing.T) {
+	a := newCheckoutTestApp(t, emptyPriority)
+	createCheckoutAccount(t, a, "IL")
+	calls := stubPages(t, a, http.StatusOK, "application/json", `{"url":"https://pelecard.example/page"}`)
+
+	req := membershipCheckout(1, common.CurrencyUSD)
+	req.ProductType = null.StringFrom("ticket")
+	req.Type = null.StringFrom("weekly")
+	req.TerminalId = null.StringFrom("")
+	req.ErrorURL = null.StringFrom("http://test/error")
+	got := POST_ROOT(t, a, "/v2/transaction/", req, http.StatusOK)
+
+	assert.True(t, strings.HasPrefix(got["url"].(string), "http://test/error/"), got["url"])
+	assert.Empty(t, calls())
+}
+
 // The payer still gets a 200 with their error URL, so the request log and the
 // Sentry middleware never see a failure. reportPageFailure is the only trace
 // left when the credential stops working.

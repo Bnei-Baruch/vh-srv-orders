@@ -202,7 +202,6 @@ func (o *OrdersAPI) handleTransactionOrderAndPay(c *gin.Context) {
 	if req.Reference.String == "testemv" {
 		page = pelecard.PageEmvNew
 	}
-	utils.LogFor(c.Request.Context()).Debug("payment page", slog.String("page", page))
 	if page == "" {
 		utils.LogFor(c.Request.Context()).Error("no payment page for this order type", slog.String("type", req.Type.String))
 		c.JSON(http.StatusOK, gin.H{"url": errorurl})

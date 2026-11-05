@@ -36,7 +36,7 @@ type PelecardAPI interface {
 type Client struct {
 	Client *resty.Client
 	// BaseURL is overridable so tests can point at a stub, not configurable:
-	// the host is hardcoded in five other places here too. See issue #22.
+	// the production host is the default in types.go. See issue #22.
 	BaseURL string
 
 	// Tokens authenticates calls to external_payments.
@@ -53,6 +53,9 @@ type Client struct {
 // different reference, which the duplicate suppression there cannot match, and
 // the member is charged twice. Past its write deadline it cannot answer anyway.
 const chargeRequestTimeout = 150 * time.Second
+
+// pageRequestTimeout bounds OpenPage, retry included.
+const pageRequestTimeout = 30 * time.Second
 
 // NewClient creates a client for external_payments. No Pelecard credentials and
 // no terminal number: this service no longer talks to Pelecard.
@@ -82,6 +85,10 @@ func NewClient() *Client {
 // in front of the handler, after the card was charged.
 func (c *Client) sendAuthorized(ctx context.Context, what string,
 	do func(*resty.Request) (*resty.Response, error)) (*resty.Response, error) {
+
+	if c.Tokens == nil {
+		return nil, fmt.Errorf("no token source configured for external_payments")
+	}
 
 	send := func() (*resty.Response, string, error) {
 		token, err := c.Tokens.Token()
@@ -140,10 +147,6 @@ func (c *Client) invalidate(stale string) {
 // external_payments, keyed by the token being replaced. An empty window is a
 // normal answer, not an error.
 func (c *Client) FetchMuhlafim(ctx context.Context, startDate, endDate string) (map[string]MuhlafimEntry, error) {
-	if c.Tokens == nil {
-		return nil, fmt.Errorf("no token source configured for external_payments")
-	}
-
 	resp, err := c.sendAuthorized(ctx, "muhlafim", func(r *resty.Request) (*resty.Response, error) {
 		return r.SetQueryParams(map[string]string{"StartDate": startDate, "EndDate": endDate}).
 			Get(c.BaseURL + "/token/muhlafim")
@@ -177,11 +180,14 @@ const (
 
 // OpenPage asks external_payments for a Pelecard page, with a bearer, and
 // returns the answer for the caller to parse: the routes answer in different
-// shapes. A 401 that survives the retry is ErrUnauthorized.
+// shapes. A 401 that survives the retry is ErrUnauthorized, and so is a 403:
+// a valid key that is not allowed on /vh, the likely rollout mistake.
+//
+// A payer is waiting in a browser, so the whole call, retry included, gets
+// pageRequestTimeout rather than the charge client's 150s per attempt.
 func (c *Client) OpenPage(ctx context.Context, path string, payload []byte) (*resty.Response, error) {
-	if c.Tokens == nil {
-		return nil, fmt.Errorf("no token source configured for external_payments")
-	}
+	ctx, cancel := context.WithTimeout(ctx, pageRequestTimeout)
+	defer cancel()
 
 	resp, err := c.sendAuthorized(ctx, "page "+path, func(r *resty.Request) (*resty.Response, error) {
 		return r.SetBody(payload).Post(c.BaseURL + path)
@@ -190,8 +196,8 @@ func (c *Client) OpenPage(ctx context.Context, path string, payload []byte) (*re
 		return nil, err
 	}
 
-	if resp.StatusCode() == http.StatusUnauthorized {
-		return nil, fmt.Errorf("%w: %s", ErrUnauthorized, path)
+	if code := resp.StatusCode(); code == http.StatusUnauthorized || code == http.StatusForbidden {
+		return nil, fmt.Errorf("%w (%d): %s", ErrUnauthorized, code, path)
 	}
 
 	return resp, nil
@@ -207,10 +213,6 @@ func (c *Client) ChargeByToken(ctx context.Context, request *ChargeRequest, term
 	if terminal.ChargeURL == "" {
 		return nil, fmt.Errorf("no charge URL for terminal %q", terminal.Name)
 	}
-	if c.Tokens == nil {
-		return nil, fmt.Errorf("no token source configured for external_payments")
-	}
-
 	resp, err := c.sendAuthorized(ctx, "charge", func(r *resty.Request) (*resty.Response, error) {
 		return r.SetBody(request).Post(terminal.ChargeURL)
 	})

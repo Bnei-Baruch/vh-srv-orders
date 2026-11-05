@@ -368,14 +368,15 @@ func TestRunExitsNonZeroWhenItCannotBind(t *testing.T) {
 // mid-call must not abandon a call that may already have charged.
 //
 // A source check because the alternative is a live checkout: what matters is
-// which context reaches PostJSON.
+// which context reaches PostJSON or OpenPage.
 func TestThePaymentPostsAreNotCancelledByTheCaller(t *testing.T) {
 	source, err := os.ReadFile("transaction_handler.go")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if bytes.Contains(source, []byte("utils.PostJSON(c.Request.Context()")) {
+	if bytes.Contains(source, []byte("utils.PostJSON(c.Request.Context()")) ||
+		bytes.Contains(source, []byte("OpenPage(c.Request.Context()")) {
 		t.Error("a payment POST takes the request context directly: a caller that disconnects " +
 			"then cancels a call that may already have charged, with rows already written. " +
 			"Use paymentCallContext, which strips cancellation and keeps the values")

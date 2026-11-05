@@ -4,6 +4,7 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/accounting"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/keycloak"
+	"gitlab.bbdev.team/vh/pay/orders/pkg/pelecard"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/priority"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
 	"gitlab.bbdev.team/vh/pay/orders/repo"
@@ -20,6 +21,9 @@ type OrdersAPI struct {
 	priorityClient      *priority.Client
 	accountingService   accounting.AccountingService
 	quickbooksCompanyID string
+	// pages opens Pelecard pages for payers through external_payments, with a
+	// bearer.
+	pages *pelecard.Client
 }
 
 func NewOrdersAPI(db *repo.OrdersDB) *OrdersAPI {
@@ -29,6 +33,7 @@ func NewOrdersAPI(db *repo.OrdersDB) *OrdersAPI {
 		priorityClient:      priority.NewClient(),
 		accountingService:   accounting.NewAccountingServiceAPI(keycloak.NewClient()),
 		quickbooksCompanyID: common.Config.QuickbooksCompanyID,
+		pages:               pelecard.NewClient(),
 	}
 }
 

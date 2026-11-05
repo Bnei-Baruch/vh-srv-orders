@@ -137,13 +137,15 @@ func (a *App) initGinEngine() {
 	a.gEngine.Use(
 		middleware.EventsBuilder(),
 		middleware.TokenSource(),
-		middleware.Authentication(tokenVerifier),
 	)
 
-	a.initRoutes()
+	a.initRoutes(middleware.Authentication(tokenVerifier))
 }
 
-func (a *App) initRoutes() {
+// initRoutes registers the public routes, then auth, then everything else. A
+// gin middleware added with Use applies only to routes registered after it, so
+// the order here is what keeps every other route behind auth.
+func (a *App) initRoutes(auth ...gin.HandlerFunc) {
 	// Constructed here so owning a group and registering its routes are one
 	// step. A route registered on a nil group compiles and starts fine, then
 	// panics on the first request — this branch carried that bug while only
@@ -151,6 +153,12 @@ func (a *App) initRoutes() {
 	// left the branch.
 	a.ordersAPI = NewOrdersAPI(a.repo)
 	a.couponAPI = NewCouponAPI(a.repo)
+
+	// Public: called server to server by external_payments, which has no
+	// Keycloak identity here. Trusts nothing in the body; see the handler.
+	a.gEngine.POST("/checkout/notify", a.ordersAPI.handleCheckoutNotify)
+
+	a.gEngine.Use(auth...)
 
 	// routes
 	orders := a.gEngine.Group("/orders")

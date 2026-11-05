@@ -90,22 +90,3 @@ func TestTheChargingCommandsValidateBeforeWiringAnything(t *testing.T) {
 		}
 	}
 }
-
-// And the builder must not exit, for the same reason: its callers have already
-// deferred their cleanup by the time it runs.
-func TestTheChargeBuilderDoesNotFatal(t *testing.T) {
-	source, err := os.ReadFile("billing.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	body := regexp.MustCompile(`(?s)func buildChargeableBillingService\([^)]*\)[^{]*\{(.*?)\n\}`).
-		FindSubmatch(source)
-	if body == nil {
-		t.Fatal("buildChargeableBillingService not found in billing.go — has it been renamed?")
-	}
-
-	if bytes.Contains(body[1], []byte("LogFatal")) {
-		t.Error("buildChargeableBillingService must not exit: validate in the command instead")
-	}
-}

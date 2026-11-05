@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/volatiletech/null/v9"
@@ -111,7 +112,7 @@ func (im *SpecialsImporter) createSpecial(rSpecial *SpecialRecord) error {
 
 	// A special without an email could never be revoked: vh-srv-profile
 	// revokes by email. CreateSpecial refuses it too; this names the cause.
-	if rSpecial.Email.String == "" {
+	if strings.TrimSpace(rSpecial.Email.String) == "" {
 		return fmt.Errorf("email is required (keycloak id %q)", rSpecial.KeycloakID.String)
 	}
 	var special repo.Special

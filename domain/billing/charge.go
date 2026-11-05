@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"runtime/debug"
 	"sync"
+	"sync/atomic"
 
 	"github.com/getsentry/sentry-go"
 
@@ -22,6 +23,37 @@ type resolvedOrder struct {
 	OrderID uint
 	Data    *repo.RenewalData
 	Price   *pricing.ChargePrice
+}
+
+// credentialStopThreshold is how many orders in a row may fail on the
+// credential before the run stops. Every charge uses the same credential, so
+// past this point the rest of the run would fail the same way, each order
+// leaving a failed payment row and telling the member their payment failed.
+// Stopping leaves those orders untouched for a re-run once the credential works.
+const credentialStopThreshold = 10
+
+// ErrChargeStoppedOnCredential is returned when the charge phase stopped early
+// because orders kept failing on the credential.
+var ErrChargeStoppedOnCredential = errors.New("charge stopped: orders keep failing on the credential")
+
+// credentialBreaker counts consecutive orders that failed on the credential.
+// Any other outcome resets the count. With several workers, "consecutive" is
+// in completion order, which is what matters: a credential that works for
+// anyone resets it.
+type credentialBreaker struct {
+	threshold   int64
+	consecutive atomic.Int64
+	tripped     atomic.Bool
+}
+
+func (b *credentialBreaker) record(credentialFailed bool) {
+	if !credentialFailed {
+		b.consecutive.Store(0)
+		return
+	}
+	if b.consecutive.Add(1) >= b.threshold {
+		b.tripped.Store(true)
+	}
 }
 
 // chargeWithPricing runs the two-phase charge process:
@@ -154,6 +186,11 @@ func (s *BillingService) chargeResolved(ctx context.Context, orders []resolvedOr
 
 	stats := newChargeStats(int64(len(orders)))
 
+	// Not a cancelled context: FinalizeRenewal runs on ctx, and an order already
+	// charged must still be finalized.
+	breaker := credentialBreaker{threshold: credentialStopThreshold}
+	var processed atomic.Int64
+
 	orderChan := make(chan resolvedOrder, maxWorkers)
 	var wg sync.WaitGroup
 
@@ -167,7 +204,13 @@ func (s *BillingService) chargeResolved(ctx context.Context, orders []resolvedOr
 					log.Info("Context cancelled, worker exiting", slog.Int("worker_id", workerID))
 					return
 				default:
-					s.processWithRecovery(ctx, workerID, ro, &stats)
+					// Orders already queued when the breaker tripped are left
+					// untouched too.
+					if breaker.tripped.Load() {
+						continue
+					}
+					processed.Add(1)
+					breaker.record(s.processWithRecovery(ctx, workerID, ro, &stats))
 				}
 			}
 		}(i)
@@ -175,6 +218,9 @@ func (s *BillingService) chargeResolved(ctx context.Context, orders []resolvedOr
 
 dispatchLoop:
 	for _, ro := range orders {
+		if breaker.tripped.Load() {
+			break
+		}
 		select {
 		case <-ctx.Done():
 			log.Info("Context cancelled, stopping dispatch")
@@ -184,6 +230,8 @@ dispatchLoop:
 	}
 	close(orderChan)
 	wg.Wait()
+
+	untouched := int64(len(orders)) - processed.Load()
 
 	successCount := stats.successCount.Get(pelecard.TokenTerminal.Name) + stats.successCount.Get(pelecard.EMVTerminal.Name)
 	log.Info("Charge phase completed",
@@ -212,6 +260,7 @@ dispatchLoop:
 		slog.Float64("unauthorized_failed_usd", stats.reasonFailedSum.Get("unauthorized:"+common.CurrencyUSD)),
 		slog.Float64("unauthorized_failed_eur", stats.reasonFailedSum.Get("unauthorized:"+common.CurrencyEUR)),
 		slog.Int64("panics", stats.errorCount.Get("panic")),
+		slog.Int64("untouched_orders", untouched),
 		// --- Per pricing version (v2 only; version-tagging is removed in the DB-cleanup step) ---
 		slog.Int64("v2_orders", stats.pricingVersionCount.Get("v2")),
 		slog.Int64("v2_discounted", stats.v2DiscountCount.Get("eligible")),
@@ -232,11 +281,21 @@ dispatchLoop:
 		slog.Float64("post_payment_failed_usd", stats.reasonFailedSum.Get("post_payment:"+common.CurrencyUSD)),
 		slog.Float64("post_payment_failed_eur", stats.reasonFailedSum.Get("post_payment:"+common.CurrencyEUR)))
 
+	if breaker.tripped.Load() {
+		err := fmt.Errorf("%w: %d orders in a row; %d of %d orders left untouched for a re-run",
+			ErrChargeStoppedOnCredential, credentialStopThreshold, untouched, len(orders))
+		log.Error("Charge phase stopped on credential failures", slog.Any("err", err))
+		utils.SentryFor(ctx).CaptureException(err)
+		return int(successCount), err
+	}
+
 	return int(successCount), nil
 }
 
 // processWithRecovery processes a single resolved order with panic recovery and terminal fallback.
-func (s *BillingService) processWithRecovery(ctx context.Context, workerID int, ro resolvedOrder, stats *chargeStats) {
+// It reports whether the order failed on the credential, which the caller
+// counts towards stopping the run.
+func (s *BillingService) processWithRecovery(ctx context.Context, workerID int, ro resolvedOrder, stats *chargeStats) (credentialFailed bool) {
 	ctx = context.WithValue(ctx, common.CtxLogger, utils.LogFor(ctx).With(
 		slog.Int("worker_id", workerID),
 		slog.Uint64("order_id", uint64(ro.OrderID))))
@@ -287,7 +346,7 @@ func (s *BillingService) processWithRecovery(ctx context.Context, workerID int, 
 		}
 		// Token declined — fall through to EMV
 	} else if handleNonRetryableError(ctx, hub, stats, pelecard.TokenTerminal.Name, ro.Price, tokenPayment, tokenErr) {
-		return
+		return credentialFailureReason(tokenErr) != ""
 	} else {
 		log.Error("Token terminal gateway error, falling back to EMV", slog.Any("err", tokenErr))
 		captureError(hub, pelecard.TokenTerminal.Name, "gateway", tokenErr)
@@ -308,7 +367,7 @@ func (s *BillingService) processWithRecovery(ctx context.Context, workerID int, 
 	}
 
 	if handleNonRetryableError(ctx, hub, stats, pelecard.EMVTerminal.Name, ro.Price, emvPayment, emvErr) {
-		return
+		return credentialFailureReason(emvErr) != ""
 	}
 
 	// Gateway error on both terminals
@@ -318,6 +377,7 @@ func (s *BillingService) processWithRecovery(ctx context.Context, workerID int, 
 	stats.failedSum.Inc(ro.Price.Currency, ro.Price.Amount)
 	stats.versionFailedSum.Inc(ro.Price.PricingVersion+":"+ro.Price.Currency, ro.Price.Amount)
 	stats.reasonFailedSum.Inc("gateway:"+ro.Price.Currency, ro.Price.Amount)
+	return false
 }
 
 func newChargeStats(totalOrders int64) chargeStats {

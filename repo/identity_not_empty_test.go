@@ -182,6 +182,30 @@ func TestCreateSpecial_RequiresAnEmail(t *testing.T) {
 	empty.Email = null.StringFrom("")
 	_, err = db.CreateSpecial(ctx, empty)
 	assert.ErrorIs(t, err, common.ErrInvalidValues, "empty identifiers are no identifiers")
+
+	blank := base
+	blank.KeycloakId = null.StringFrom("kc-blank-email")
+	blank.Email = null.StringFrom("  ")
+	_, err = db.CreateSpecial(ctx, blank)
+	assert.ErrorIs(t, err, common.ErrInvalidValues, "a blank email is no email")
+}
+
+// Every lookup matches a special's email exactly, so a padded one is stored
+// trimmed: otherwise it could never be found, or revoked by vh-srv-profile.
+func TestCreateSpecial_StoresTheEmailTrimmed(t *testing.T) {
+	db, ctx := newTestDB(t)
+
+	_, err := db.CreateSpecial(ctx, Special{
+		Email:     null.StringFrom("  padded@test.test \t"),
+		StartDate: null.TimeFrom(time.Now().Add(-time.Hour)),
+		EndDate:   null.TimeFrom(time.Now().Add(time.Hour)),
+		Category:  null.StringFrom("hh"),
+	})
+	require.NoError(t, err)
+
+	found, err := db.HasSpecialMembership(ctx, "padded@test.test")
+	require.NoError(t, err)
+	assert.True(t, found, "a special stored with its padding is not found by its address")
 }
 
 // An empty key used to match any account stored with an empty "UserKey", attaching

@@ -225,3 +225,69 @@ func Test_page_failure_is_logged_at_error(t *testing.T) {
 	assert.Contains(t, found["err"], pelecard.PageRenewCard)
 	assert.Contains(t, found["err"], pelecard.ErrUnauthorized.Error())
 }
+
+// stubPageBodies is stubPages for tests that need what was posted: it records
+// each request body.
+func stubPageBodies(t *testing.T, a *App) func() []map[string]any {
+	t.Helper()
+	var (
+		mu     sync.Mutex
+		bodies []map[string]any
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		mu.Lock()
+		bodies = append(bodies, body)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"url":"https://pelecard.example/page"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	a.ordersAPI.pages = &pelecard.Client{
+		Client:  resty.New(),
+		BaseURL: srv.URL,
+		Tokens:  keycloak.StaticTokenSource("tok"),
+	}
+	return func() []map[string]any {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]map[string]any(nil), bodies...)
+	}
+}
+
+// postAs sends a raw request as USER_KEY with the given realm roles.
+func postAs(a *App, path, body string, roles ...string) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	claims := &middleware.IDTokenClaims{Sub: USER_KEY, RealmAccess: middleware.Roles{Roles: roles}}
+	a.gEngine.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), common.CtxAuthClaims, claims)))
+	return w
+}
+
+// A member can open a card-update page only under their own key, whatever the
+// body names: external_payments files the attempt and its result by UserKey.
+func Test_new_token_member_cannot_name_another_user_key(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	bodies := stubPageBodies(t, a)
+
+	w := postAs(a, "/v2/transaction/new_token", `{"UserKey":"someone-else","Reference":"new_token_1"}`)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Len(t, bodies(), 1)
+	assert.Equal(t, USER_KEY, bodies()[0]["UserKey"])
+}
+
+func Test_new_token_admin_keeps_the_user_key_from_the_body(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	bodies := stubPageBodies(t, a)
+
+	w := postAs(a, "/v2/transaction/new_token", `{"UserKey":"someone-else","Reference":"new_token_1"}`, common.RoleAdmin)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Len(t, bodies(), 1)
+	assert.Equal(t, "someone-else", bodies()[0]["UserKey"])
+}

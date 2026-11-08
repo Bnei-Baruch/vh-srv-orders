@@ -64,6 +64,9 @@ type DonationsDiscountProperties struct {
 	DonationsFetchedEmails []string `json:"donations_fetched_emails,omitempty"`
 	DonationsFetchNote     string   `json:"donations_fetch_note,omitempty"`
 
+	// Donated: any donation found in the last 12 months (yes/no only, never an amount)
+	Donated bool `json:"donated"`
+
 	// Annual threshold reference (monthly base × 12, in base currency — not a donation amount)
 	AnnualBase Price `json:"annual_base"`
 }
@@ -323,6 +326,7 @@ func buildDonationsDiscount(
 		SpouseGetsDiscount:     spouseGetsDiscount,
 		DonationsFetchedEmails: sums.successEmails,
 		DonationsFetchNote:     sums.fetchNote,
+		Donated:                sums.totalNIS > 0,
 		AnnualBase:             Price{Amount: base.Amount * 12, Currency: base.Currency},
 	}
 	propsJSON, _ := json.Marshal(props)
@@ -631,7 +635,11 @@ func buildExplain(inputs *V2PricingEvaluation) []string {
 	}
 
 	// Step 3: aggregation — acknowledge NIS conversion but show no amounts
-	lines[2] = "3. sum all donations per currency → convert each to NIS"
+	donated := "no"
+	if props.Donated {
+		donated = "yes"
+	}
+	lines[2] = "3. sum all donations per currency → convert each to NIS → donated: " + donated
 
 	// Step 4: threshold logic — thresholds in original currency; append (→ NIS) only when not already NIS
 	nisMarker := ""

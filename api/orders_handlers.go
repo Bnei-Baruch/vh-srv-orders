@@ -232,9 +232,7 @@ func (o *OrdersAPI) handleOrderFetch(c *gin.Context) {
 	}
 
 	if toDate != "" {
-		rfcLayout := time.RFC3339
-		toDateParsed, err = time.Parse(rfcLayout, toDate)
-
+		toDateParsed, err = time.Parse(time.RFC3339, toDate)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid to-date"})
 			return

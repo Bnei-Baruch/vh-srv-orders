@@ -334,7 +334,7 @@ func (o *OrdersAPI) handleTransactionNewToken(c *gin.Context) {
 		var i interface{}
 		if err := json.Unmarshal(body, &i); err != nil {
 			c.Status(http.StatusInternalServerError)
-			_ = c.Error(fmt.Errorf("getToken response json.Unmarshal: %w", err))
+			_ = c.Error(fmt.Errorf("handleTransactionNewToken json.Unmarshal: %w", err))
 			return
 		}
 
@@ -429,7 +429,7 @@ func (o *OrdersAPI) handleTransactionNewTokenNoCVV(c *gin.Context) {
 		var i interface{}
 		if err := json.Unmarshal(body, &i); err != nil {
 			c.Status(http.StatusInternalServerError)
-			_ = c.Error(fmt.Errorf("getToken response json.Unmarshal: %w", err))
+			_ = c.Error(fmt.Errorf("handleTransactionNewTokenNoCVV json.Unmarshal: %w", err))
 			return
 		}
 

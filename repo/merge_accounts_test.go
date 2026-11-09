@@ -117,7 +117,7 @@ func specialExists(t *testing.T, db *OrdersDB, ctx context.Context, id int) bool
 
 // The merge deletes the source's specials by its email. When the destination
 // has the same email (in any case), that would delete the destination's own
-// specials too, so none are deleted.
+// specials too, so none are deleted, and the source's move to the destination.
 func TestMergeAccountsOrders_SharedEmailKeepsSpecials(t *testing.T) {
 	db, ctx := newTestDB(t)
 
@@ -133,6 +133,10 @@ func TestMergeAccountsOrders_SharedEmailKeepsSpecials(t *testing.T) {
 
 	assert.True(t, specialExists(t, db, ctx, srcSpecial))
 	assert.True(t, specialExists(t, db, ctx, dstSpecial), "the destination keeps its specials")
+
+	var key string
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT keycloak_id FROM specials WHERE id = $1`, srcSpecial).Scan(&key))
+	assert.Equal(t, "kc-dst", key, "the kept special moves to the destination")
 }
 
 // With different emails the source's specials are still deleted, and the

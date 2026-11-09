@@ -126,7 +126,7 @@ func (o *OrdersAPI) handleOrderUpdateByID(c *gin.Context) {
 // decide whose card billing charges, and PaymentDate and the rest decide
 // whether it charges.
 func ownerMayPatch(req repo.Order) bool {
-	if req.Status.Valid && req.Status.String != "cancelled" {
+	if req.Status.Valid && req.Status.String != common.OrderStatusCancelled {
 		return false
 	}
 	v := reflect.ValueOf(req)

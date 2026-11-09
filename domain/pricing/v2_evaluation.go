@@ -64,7 +64,9 @@ type DonationsDiscountProperties struct {
 	DonationsFetchedEmails []string `json:"donations_fetched_emails,omitempty"`
 	DonationsFetchNote     string   `json:"donations_fetch_note,omitempty"`
 
-	// Donated: any donation found in the last 12 months (yes/no only, never an amount)
+	// Donated: net donations > 0 in the last 12 months, all sources, household total if spouse. Yes/no only, never an amount.
+	// Info only, for offline analysis; nothing depends on it. Known edge case, accepted for simpler code:
+	// refunds subtract, so a member who gave and got a refund in the window can read "no".
 	Donated bool `json:"donated"`
 
 	// Annual threshold reference (monthly base × 12, in base currency — not a donation amount)
@@ -326,7 +328,7 @@ func buildDonationsDiscount(
 		SpouseGetsDiscount:     spouseGetsDiscount,
 		DonationsFetchedEmails: sums.successEmails,
 		DonationsFetchNote:     sums.fetchNote,
-		Donated:                sums.totalNIS > 0,
+		Donated:                sums.totalNIS > 0.005, // ignore float residue (< half an agora)
 		AnnualBase:             Price{Amount: base.Amount * 12, Currency: base.Currency},
 	}
 	propsJSON, _ := json.Marshal(props)

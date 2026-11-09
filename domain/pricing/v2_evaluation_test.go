@@ -188,6 +188,14 @@ func TestBuildDonationsDiscount_NoDonations_DonatedFalse(t *testing.T) {
 	assert.False(t, unmarshalDonationsProps(t, d).Donated)
 }
 
+func TestBuildDonationsDiscount_FloatResidue_DonatedFalse(t *testing.T) {
+	// Fully reversed gifts leave 4.4e-16. gift is a variable so the sum runs in float64 (constants are exact).
+	gift := 1.10
+	sums := donationSums{perCurrency: map[string]float64{}, totalNIS: gift + 2.20 - 3.30}
+	d, _ := buildDonationsDiscount(sums, nisBase(180), 180, 1, 0, "")
+	assert.False(t, unmarshalDonationsProps(t, d).Donated)
+}
+
 func TestBuildDonationsDiscount_NoSpouse_AboveAnnual_PrimaryGets(t *testing.T) {
 	// combined = 2200 >= 2160
 	base := nisBase(180)

@@ -91,3 +91,16 @@ func TestChargeResolved_SuccessResetsTheCredentialCount(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, count)
 }
+
+// Once tripped, the breaker stays tripped: an order already in flight that
+// then succeeds resets the count but must not restart a stopped run.
+func TestCredentialBreakerStaysTrippedAfterASuccess(t *testing.T) {
+	var b credentialBreaker
+	for range credentialStopThreshold {
+		b.record(true)
+	}
+	require.True(t, b.tripped.Load(), "ten credential failures in a row must trip it")
+
+	b.record(false)
+	require.True(t, b.tripped.Load(), "a later success must not untrip it")
+}

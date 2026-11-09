@@ -30,6 +30,13 @@ type resolvedOrder struct {
 // past this point the rest of the run would fail the same way, each order
 // leaving a failed payment row and telling the member their payment failed.
 // Stopping leaves those orders untouched for a re-run once the credential works.
+//
+// Why 10: above one wave of in-flight orders (RENEWAL_MAX_WORKERS, default 5),
+// so one failed token refresh that fails every worker at once does not stop
+// the run, yet low enough to cap a real outage at a handful of members.
+// Orders already in flight when it trips still finish, so up to
+// credentialStopThreshold+maxWorkers-1 orders can fail before the stop. Keep
+// --max-workers below 10, or a single wave can trip it.
 const credentialStopThreshold = 10
 
 // ErrChargeStoppedOnCredential is returned when the charge phase stopped early
@@ -41,7 +48,6 @@ var ErrChargeStoppedOnCredential = errors.New("charge stopped: orders keep faili
 // in completion order, which is what matters: a credential that works for
 // anyone resets it.
 type credentialBreaker struct {
-	threshold   int64
 	consecutive atomic.Int64
 	tripped     atomic.Bool
 }
@@ -51,7 +57,7 @@ func (b *credentialBreaker) record(credentialFailed bool) {
 		b.consecutive.Store(0)
 		return
 	}
-	if b.consecutive.Add(1) >= b.threshold {
+	if b.consecutive.Add(1) >= credentialStopThreshold {
 		b.tripped.Store(true)
 	}
 }
@@ -188,7 +194,7 @@ func (s *BillingService) chargeResolved(ctx context.Context, orders []resolvedOr
 
 	// Not a cancelled context: FinalizeRenewal runs on ctx, and an order already
 	// charged must still be finalized.
-	breaker := credentialBreaker{threshold: credentialStopThreshold}
+	var breaker credentialBreaker
 	var processed atomic.Int64
 
 	orderChan := make(chan resolvedOrder, maxWorkers)
@@ -282,11 +288,10 @@ dispatchLoop:
 		slog.Float64("post_payment_failed_eur", stats.reasonFailedSum.Get("post_payment:"+common.CurrencyEUR)))
 
 	if breaker.tripped.Load() {
-		err := fmt.Errorf("%w: %d orders in a row; %d of %d orders left untouched for a re-run",
+		// The callers report it to Sentry and the log; reporting it here too gave
+		// two events per stop.
+		return int(successCount), fmt.Errorf("%w: at least %d orders in a row; %d of %d orders left untouched (flag torenew) for a re-run of billing start",
 			ErrChargeStoppedOnCredential, credentialStopThreshold, untouched, len(orders))
-		log.Error("Charge phase stopped on credential failures", slog.Any("err", err))
-		utils.SentryFor(ctx).CaptureException(err)
-		return int(successCount), err
 	}
 
 	return int(successCount), nil

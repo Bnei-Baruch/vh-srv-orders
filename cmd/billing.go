@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -119,6 +120,8 @@ func runBillingRetryPricingErrors(cmd *cobra.Command, args []string) {
 		utils.LogFatal("Failed to parse flags", slog.Any("error", err))
 	}
 
+	// Must stay before wiring: no test catches its removal, since the tests
+	// cover only what chargeConfigError returns.
 	validateChargeConfig()
 
 	eventEmitter, ordersDB, cleanup, err := initBillingInfra()
@@ -265,13 +268,8 @@ func validateChargeConfig() {
 
 // chargeConfigError is the check, split from the exit so it can be tested.
 func chargeConfigError() error {
-	if err := pricing.ValidateConfig(); err != nil {
-		return fmt.Errorf("pricing.ValidateConfig: %w", err)
-	}
-	if err := keycloakConfigError(); err != nil {
-		return fmt.Errorf("keycloakConfigError: %w", err)
-	}
-	return nil
+	// Joined, so one run names every missing setting, not only the first.
+	return errors.Join(pricing.ValidateConfig(), keycloakConfigError())
 }
 
 // buildChargeableBillingService wires a BillingService with charge executor and pricing resolver.

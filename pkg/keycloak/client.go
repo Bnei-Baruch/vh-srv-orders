@@ -53,7 +53,8 @@ func NewClient(scopes ...string) *Client {
 // tokenRequestTimeout bounds one HTTP request, not one AccessToken call: a
 // single holder of the mutex can issue four — refresh and its certificate
 // fetch, then login and its own — so the worst case per holder is 4x this.
-// That 4x is the floor for loginFailureBackoff, guarded below.
+// That 4x is the floor for loginFailureBackoff, which
+// TestBackoffConstantsHaveTheirIntendedValues checks.
 const tokenRequestTimeout = 10 * time.Second
 
 // loginFailureBackoff is how long consecutive failures suppress further
@@ -72,15 +73,6 @@ const (
 	loginFailureBackoff   = 45 * time.Second
 	loginFailureThreshold = 3
 )
-
-// Compile-time guard: the window must outlast one attempt's worst case. Strict
-// and in nanoseconds, so a window exactly 4x the timeout fails and a sub-second
-// overrun cannot hide behind truncation. uint64, not uint, because the value is
-// ~5e9 and would overflow a 32-bit build.
-//
-// The 4 is a literal nothing derives: a fifth request inside the mutex changes
-// no constant here, so raise the multiplier by hand if one is added.
-const _ = uint64(loginFailureBackoff - 4*tokenRequestTimeout - 1)
 
 func (c *Client) Token() (string, error) {
 	token := c.AccessToken(context.Background())

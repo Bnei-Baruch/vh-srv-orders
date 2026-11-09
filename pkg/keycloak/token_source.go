@@ -9,6 +9,10 @@ import (
 type TokenSource interface {
 	Token() (string, error)
 	Invalidate()
+	// InvalidateToken drops stale only if it is still the cached token, so a
+	// caller reacting to a 401 cannot discard a token another caller just
+	// replaced.
+	InvalidateToken(stale string)
 }
 
 // AuthHeaderTokenSource will strip the token from the header and reuse it forever
@@ -54,10 +58,18 @@ func (s staticTokenSource) Invalidate() {
 	// No-op: StaticTokenSource uses a static token that cannot be invalidated
 }
 
+func (s staticTokenSource) InvalidateToken(string) {
+	// No-op, as Invalidate.
+}
+
 func (s authHeaderTokenSource) Token() (string, error) {
 	return s.token, s.err
 }
 
 func (s authHeaderTokenSource) Invalidate() {
 	// No-op: AuthHeaderTokenSource uses a static token that cannot be invalidated
+}
+
+func (s authHeaderTokenSource) InvalidateToken(string) {
+	// No-op, as Invalidate.
 }

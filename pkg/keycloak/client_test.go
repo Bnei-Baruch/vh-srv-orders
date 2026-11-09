@@ -176,9 +176,9 @@ func TestAccessTokenSkipsOnlyAfterConsecutiveFailures(t *testing.T) {
 // bounds from the constant, which restates it instead of constraining it — a
 // threshold of 1 or of 100 keeps those green.
 //
-// The window's lower bound is the exact complement of the compile-time guard in
-// client.go, so it can only fire if that guard is deleted. The upper bound is a
-// literal and is the one that can fire otherwise.
+// The window has to outlast one attempt's worst case, four requests at
+// tokenRequestTimeout. The 4 is a literal nothing derives: a fifth request
+// inside the mutex changes no constant, so raise it by hand if one is added.
 func TestBackoffConstantsHaveTheirIntendedValues(t *testing.T) {
 	if loginFailureThreshold != 3 {
 		t.Errorf("threshold is %d: 1 suppresses on a single blip, and a suppressed "+

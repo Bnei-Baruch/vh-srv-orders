@@ -9,11 +9,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A user's own activities are filtered by their account's email. With no
-// account, or an account with no email, there are none; the request must
-// neither fail scanning a NULL email nor run with an empty email filter, which
-// would list everyone's activities.
-func TestGetActivities_UserWithoutEmailSeesNothing(t *testing.T) {
+// A user's activities are restricted to their keycloak id. With no account
+// under it they have none, and must not see anyone else's. (A user whose
+// account has no email is Test_activities_non_admin_without_email_sees_nothing_of_others.)
+func TestGetActivities_UserWithoutAccountSeesNothing(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)
 	pool := a.testPool(t)
@@ -28,18 +27,7 @@ func TestGetActivities_UserWithoutEmailSeesNothing(t *testing.T) {
 	_, err := pool.Exec(ctx, `INSERT INTO payments ("OrderID") VALUES ($1)`, otherOrder)
 	require.NoError(t, err)
 
-	t.Run("no account", func(t *testing.T) {
-		got := GET(t, a, "/payments/activities", http.StatusOK)
-		assert.Empty(t, got["data"])
-		assert.EqualValues(t, 0, got["totalCount"])
-	})
-
-	_, err = pool.Exec(ctx, `INSERT INTO accounts ("UserKey") VALUES ($1)`, USER_KEY)
-	require.NoError(t, err)
-
-	t.Run("account without email", func(t *testing.T) {
-		got := GET(t, a, "/payments/activities", http.StatusOK)
-		assert.Empty(t, got["data"])
-		assert.EqualValues(t, 0, got["totalCount"])
-	})
+	got := GET(t, a, "/payments/activities", http.StatusOK)
+	assert.Empty(t, got["data"])
+	assert.EqualValues(t, 0, got["totalCount"])
 }

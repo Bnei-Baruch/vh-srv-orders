@@ -480,7 +480,13 @@ func (o *OrdersAPI) handleTransactionPaid(c *gin.Context) {
 			return
 		}
 	}
-	if paid := o.paidPayment(c.Request.Context(), rp.ParamX.String); paid != nil {
+	paid, err := o.paidPayment(c.Request.Context(), rp.ParamX.String)
+	if err != nil {
+		c.Status(http.StatusInternalServerError)
+		_ = c.Error(fmt.Errorf("o.paidPayment: %w", err))
+		return
+	}
+	if paid != nil {
 		// Confirmed already, by checkout's notify or an earlier return. The
 		// browser's copy of the facts must not overwrite checkout's; only an
 		// order an earlier confirm left unsettled is finished.

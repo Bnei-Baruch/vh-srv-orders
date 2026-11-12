@@ -475,3 +475,24 @@ func Test_checkout_notify_not_enforced_confirms_an_unsigned_notice(t *testing.T)
 	assert.Equal(t, http.StatusOK, postNotify(a, p, nil).Code)
 	assert.Equal(t, "paid", readPaymentState(t, a, p).orderStatus)
 }
+
+// If the payment cannot be read, the browser return stops with 500. Treating
+// the failed read as "not paid" would write the browser's facts over a payment
+// checkout's notify already confirmed.
+func Test_paid_return_when_the_payment_cannot_be_read_writes_nothing(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "regular")
+	stubCheckout(t, a, http.StatusOK, gatewayRecord(p))
+	notify(t, a, p, http.StatusOK)
+	// Breaks GetPaymentByID's read only; UpdatePayment does not select it.
+	_, err := a.testPool(t).Exec(context.Background(), `ALTER TABLE payments RENAME COLUMN pricing_version TO pricing_version_gone`)
+	require.NoError(t, err)
+
+	POST_ROOT(t, a, "/orders/paid", gin.H{
+		"user_key": p.orderKey, "additional_details_param_x": p.paramX,
+		"success": "1", "token": "from-the-browser", "authNo": "999",
+	}, http.StatusInternalServerError)
+
+	assert.Equal(t, paymentState{"success", "card-token", "0123456", "paid"}, readPaymentState(t, a, p))
+}

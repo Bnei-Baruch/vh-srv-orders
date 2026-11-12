@@ -150,12 +150,9 @@ func (o *OrdersAPI) confirmCheckoutPayment(ctx context.Context, orderKey, paramX
 	paid, err := o.repo.UpdatePayment(ctx, paidFromGateway(facts))
 	if errors.Is(err, common.ErrAlreadyPaid) {
 		// A browser return or another notify confirmed it between the check
-		// above and this write. Same as finding it paid above, read afresh:
-		// the copy read above predates that write.
-		if paid := o.paidPayment(ctx, paramX); paid != nil {
-			if err := o.settleOrder(ctx, paid); err != nil {
-				return false, err
-			}
+		// above and this write. Same as finding it paid above.
+		if err := o.settleConfirmed(ctx, paramX); err != nil {
+			return false, err
 		}
 		return true, nil
 	}
@@ -182,6 +179,22 @@ func (o *OrdersAPI) paidPayment(ctx context.Context, paramX string) *repo.Paymen
 		return nil
 	}
 	return payment
+}
+
+// settleConfirmed finishes the order of a payment the write found already
+// confirmed. It reads the payment afresh, since whatever copy the caller holds
+// predates that confirm, and reports a failed read instead of treating it as
+// nothing to do.
+func (o *OrdersAPI) settleConfirmed(ctx context.Context, paramX string) error {
+	paymentID, err := keyID(paramX, "m")
+	if err != nil {
+		return err
+	}
+	payment, err := o.repo.GetPaymentByID(ctx, paymentID)
+	if err != nil {
+		return fmt.Errorf("o.repo.GetPaymentByID: %w", err)
+	}
+	return o.settleOrder(ctx, payment)
 }
 
 // settleOrder finishes the order of a successful payment when an earlier

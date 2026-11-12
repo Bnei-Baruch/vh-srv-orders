@@ -293,8 +293,20 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 		return nil, fmt.Errorf("strconv.ParseUint [additional_details_param_x]: %w", err)
 	}
 
+	// One transaction, the payment row locked: the status check, the payments
+	// write and the payments_pelecard write happen together or not at all. A
+	// successful payment is then written once — a notify and a browser return
+	// racing each other cannot both write, and a late success=0 cannot flip it
+	// to failed — and a failure between the two writes leaves neither, so a
+	// retry writes both.
+	tx, err := o.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("o.pool.Begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
 	var p Payment
-	if err := o.pool.QueryRow(ctx, `SELECT 
+	if err := tx.QueryRow(ctx, `SELECT 
 	"OrderID",
 	"PaymentStatus",
 	"PaymentType",
@@ -321,14 +333,17 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 	j_param,
 	"TransactionInitTime",
 	"TransactionUpdateTime",
-	"VoucherID" FROM payments WHERE "OrderID"=$1 AND id=$2`, uint(orderid), uint(paymentid)).Scan(
+	"VoucherID" FROM payments WHERE "OrderID"=$1 AND id=$2 FOR UPDATE`, uint(orderid), uint(paymentid)).Scan(
 		&p.OrderID, &p.PaymentStatus, &p.PaymentType, &p.ParamX, &p.AuthNo, &p.ConfirmationKey, &p.Success,
 		&p.PelecardToken, &p.TransactionID, &p.CCBrand, &p.CardHebrewName, &p.CCAbroadCard,
 		&p.CCCompanyClearer, &p.CreditType, &p.CCExpDate, &p.CCNumber, &p.DebitCode, &p.DebitCurrency,
 		&p.DebitTotal, &p.DebitType, &p.FirstPaymentTotal, &p.FixedPaymentTotal, &p.TotalPayments,
 		&p.JParam, &p.TransactionInitTime, &p.TransactionUpdateTime, &p.VoucherID,
 	); err != nil {
-		return nil, fmt.Errorf("o.pool.QueryRow.Scan [payment]: %w", err)
+		return nil, fmt.Errorf("tx.QueryRow.Scan [payment]: %w", err)
+	}
+	if p.PaymentStatus.String == common.PaymentStatusSuccess {
+		return nil, common.ErrAlreadyPaid
 	}
 
 	if req.Success.String == "1" {
@@ -364,25 +379,25 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 		p.PaymentType = null.StringFrom(common.PaymentTypePelecard)
 	}
 
-	// Conditional, so a successful payment is written once. The check and the
-	// write are one statement: a notify and a browser return racing each other
-	// cannot both write, and a late success=0 cannot flip a payment that
-	// succeeded to failed.
 	toUpdate, toUpdateArgs := preparePaymentUpdateQuery(p)
-	tag, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=%d AND "PaymentStatus" IS DISTINCT FROM 'success'`,
-		toUpdate, uint(paymentid)), toUpdateArgs...)
+	tag, err := tx.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=%d`, toUpdate, uint(paymentid)), toUpdateArgs...)
 	if err != nil {
-		return nil, fmt.Errorf("o.pool.Exec [update payment]: %w", err)
+		return nil, fmt.Errorf("tx.Exec [update payment]: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return nil, common.ErrAlreadyPaid
+		// The row is locked, so this should not happen; say what was seen
+		// rather than claim it was paid.
+		return nil, fmt.Errorf("update payment %d: %w", paymentid, common.ErrNoRowsAffected)
 	}
 
 	toUpdatePelecard, toUpdateArgsPeleCard := preparePelecardPaymentUpdateViaPaymentStructQuery(p)
-	_, pelecardErr := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdatePelecard,
-		uint(paymentid)), toUpdateArgsPeleCard...)
-	if pelecardErr != nil {
-		return nil, fmt.Errorf("o.pool.Exec [update pelecard]: %w", pelecardErr)
+	if _, err := tx.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdatePelecard,
+		uint(paymentid)), toUpdateArgsPeleCard...); err != nil {
+		return nil, fmt.Errorf("tx.Exec [update pelecard]: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("tx.Commit: %w", err)
 	}
 
 	o.emitEvent(ctx, events.TypeUpdatePayment, map[string]interface{}{"payment_id": paymentid})

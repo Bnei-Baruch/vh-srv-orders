@@ -420,3 +420,61 @@ func Test_checkout_notify_racing_a_browser_return_writes_nothing(t *testing.T) {
 
 	assert.Equal(t, paymentState{"success", "browser", "", "paid"}, readPaymentState(t, a, p))
 }
+
+// The payments write and the payments_pelecard write commit together. If the
+// second fails, neither is kept, and a retry writes both.
+func Test_UpdatePayment_rolls_back_both_writes_when_one_fails(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "regular")
+	pool := a.testPool(t)
+	ctx := eventstest.WithTestEventBuilder(t, context.Background())
+	_, err := pool.Exec(ctx, `
+		CREATE FUNCTION fail_pelecard_update() RETURNS trigger LANGUAGE plpgsql AS
+		$$ BEGIN RAISE EXCEPTION 'pelecard write failed'; END $$;
+		CREATE TRIGGER fail_pelecard BEFORE UPDATE ON payments_pelecard
+		FOR EACH ROW EXECUTE FUNCTION fail_pelecard_update();`)
+	require.NoError(t, err)
+	record := gatewayRecord(p)
+	rp := paidFromGateway(&record)
+
+	_, err = a.repo.UpdatePayment(ctx, rp)
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, common.ErrAlreadyPaid)
+	assert.Equal(t, "pending", readPaymentState(t, a, p).paymentStatus)
+
+	_, err = pool.Exec(ctx, `DROP TRIGGER fail_pelecard ON payments_pelecard`)
+	require.NoError(t, err)
+	_, err = a.repo.UpdatePayment(ctx, rp)
+	require.NoError(t, err)
+	assert.Equal(t, "success", readPaymentState(t, a, p).paymentStatus)
+}
+
+// A late browser return carrying an error, for a payment checkout's notify
+// already confirmed, is done: 200, and nothing changes.
+func Test_paid_return_with_an_error_for_a_confirmed_payment_is_done(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "regular")
+	stubCheckout(t, a, http.StatusOK, gatewayRecord(p))
+	notify(t, a, p, http.StatusOK)
+
+	POST_ROOT(t, a, "/orders/paid", gin.H{
+		"user_key": p.orderKey, "additional_details_param_x": p.paramX, "error": "301",
+	}, http.StatusOK)
+
+	assert.Equal(t, paymentState{"success", "card-token", "0123456", "paid"}, readPaymentState(t, a, p))
+}
+
+// Without a confirmed payment, a return carrying an error is still refused.
+func Test_paid_return_with_an_error_for_a_pending_payment_is_refused(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "regular")
+
+	POST_ROOT(t, a, "/orders/paid", gin.H{
+		"user_key": p.orderKey, "additional_details_param_x": p.paramX, "error": "301",
+	}, http.StatusUnprocessableEntity)
+
+	assert.Equal(t, "pending", readPaymentState(t, a, p).paymentStatus)
+}

@@ -365,15 +365,15 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 	}
 
 	toUpdate, toUpdateArgs := preparePaymentUpdateQuery(p)
-	_, err = o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=%d`, toUpdate, uint(paymentid)), toUpdateArgs...)
+	_, err = o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=$%d`, toUpdate, len(toUpdateArgs)+1),
+		append(toUpdateArgs, int64(paymentid))...)
 	if err != nil {
 		return nil, fmt.Errorf("o.pool.Exec [update payment]: %w", err)
 	}
 
 	toUpdatePelecard, toUpdateArgsPeleCard := preparePelecardPaymentUpdateViaPaymentStructQuery(p)
-	_, pelecardErr := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdatePelecard,
-		uint(paymentid)), toUpdateArgsPeleCard...)
-	if pelecardErr != nil {
+	if _, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=$%d`, toUpdatePelecard,
+		len(toUpdateArgsPeleCard)+1), append(toUpdateArgsPeleCard, int64(paymentid))...); err != nil {
 		return nil, fmt.Errorf("o.pool.Exec [update pelecard]: %w", err)
 	}
 

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // updated_at is timestamptz. A bound written without its offset is read in the
@@ -18,7 +19,7 @@ func TestOrdersWhere_DateBoundsKeepOffset(t *testing.T) {
 
 	// Bound, not formatted: the values carry their own offset to Postgres.
 	assert.Contains(t, where, `o.updated_at <= $1 AND o.updated_at >= $2`)
-	assert.Equal(t, []any{to, from}, args)
+	require.Equal(t, []any{to, from}, args)
 	assert.Equal(t, "+03:00", args[0].(time.Time).Format("-07:00"))
 }
 
@@ -30,7 +31,7 @@ func TestPaymentsWhere_DateBoundsKeepOffset(t *testing.T) {
 		"", "", "", "", 0, "", nil, 0, "")
 
 	assert.Contains(t, where, `p.updated_at <= $1 AND p.updated_at >= $2`)
-	assert.Equal(t, []any{to, from}, args)
+	require.Equal(t, []any{to, from}, args)
 	assert.Equal(t, "+03:00", args[0].(time.Time).Format("-07:00"))
 }
 

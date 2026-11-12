@@ -278,8 +278,8 @@ func seedTransaction(t *testing.T, a *App, userKey string) int {
 }
 
 // A member reads their own transaction and not another member's. The account
-// filter used to be formatted from a *int, so it held the pointer and nobody's
-// lookup ever matched; an admin's matched account 0.
+// filter used to be formatted from a *int, so it held the pointer's address
+// and nobody's lookup ever matched, an admin's included.
 func Test_get_transaction_is_scoped_to_the_callers_account(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)

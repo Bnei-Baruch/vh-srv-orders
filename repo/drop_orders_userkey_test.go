@@ -36,9 +36,9 @@ func TestGetAllOrders_KeycloakFilterFindsNewOrders(t *testing.T) {
 	assert.Equal(t, orderID, (*orders)[0].ID)
 }
 
-// Migration 30 drops orders.userkey; its down migration recreates the column
+// Migration 31 drops orders.userkey; its down migration recreates the column
 // from each order's account, leaving orders without an account NULL.
-func TestMigration30_DropsOrdersUserkey_AndReverts(t *testing.T) {
+func TestMigration31_DropsOrdersUserkey_AndReverts(t *testing.T) {
 	dbURL, err := testutil.NewTestOrdersDB(t, context.Background())
 	require.NoError(t, err)
 	db, err := NewOrdersDBUrl(context.Background(), dbURL, new(events.NoopEmitter))
@@ -58,7 +58,7 @@ func TestMigration30_DropsOrdersUserkey_AndReverts(t *testing.T) {
 	var exists bool
 	require.NoError(t, db.pool.QueryRow(ctx,
 		`SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'orders' AND column_name = 'userkey')`).Scan(&exists))
-	require.False(t, exists, "test DB is at 30: the column is gone")
+	require.False(t, exists, "test DB is migrated: the column is gone")
 
 	require.NoError(t, m.Migrate(29))
 

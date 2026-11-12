@@ -480,9 +480,15 @@ func (o *OrdersAPI) handleTransactionPaid(c *gin.Context) {
 			return
 		}
 	}
-	if o.alreadyPaid(c.Request.Context(), rp.ParamX.String) {
+	if paid := o.paidPayment(c.Request.Context(), rp.ParamX.String); paid != nil {
 		// Confirmed already, by checkout's notify or an earlier return. The
-		// browser's copy of the facts must not overwrite checkout's.
+		// browser's copy of the facts must not overwrite checkout's; only an
+		// order an earlier confirm left unsettled is finished.
+		if err := o.settleOrder(c.Request.Context(), paid); err != nil {
+			c.Status(http.StatusInternalServerError)
+			_ = c.Error(fmt.Errorf("o.settleOrder: %w", err))
+			return
+		}
 		c.JSON(http.StatusOK, nil)
 		return
 	}

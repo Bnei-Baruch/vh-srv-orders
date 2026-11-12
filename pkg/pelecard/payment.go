@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/go-resty/resty/v2"
 
@@ -53,15 +54,27 @@ type GatewayPayment struct {
 	ApprovalNo string `json:"CardApprovalNo"`
 }
 
+// paymentReadTimeout bounds one payment read. The client's own timeout is
+// sized for charges, which wait on the card network; this is a database read.
+const paymentReadTimeout = 15 * time.Second
+
 // GetPayment asks external_payments what the gateway said about one payment,
 // so this service does not have to take the facts from the browser.
-func (c *Client) GetPayment(ctx context.Context, userKey string) (*GatewayPayment, error) {
+//
+// The reference (the payment's ParamX) picks the payment: an order's user key
+// is reused, by a member who pays twice or by renewals, and without it the
+// newest payment of the order answers for all of them.
+func (c *Client) GetPayment(ctx context.Context, userKey, reference string) (*GatewayPayment, error) {
 	if c.Tokens == nil {
 		return nil, fmt.Errorf("no token source configured for external_payments")
 	}
 
+	ctx, cancel := context.WithTimeout(ctx, paymentReadTimeout)
+	defer cancel()
+
 	resp, err := c.sendAuthorized(ctx, "payment", func(r *resty.Request) (*resty.Response, error) {
-		return r.Get(c.BaseURL + "/vh/payment/" + url.PathEscape(userKey))
+		return r.SetQueryParam("reference", reference).
+			Get(c.BaseURL + "/vh/payment/" + url.PathEscape(userKey))
 	})
 	if err != nil {
 		return nil, err

@@ -21,12 +21,9 @@ type OrdersAPI struct {
 	priorityClient      *priority.Client
 	accountingService   accounting.AccountingService
 	quickbooksCompanyID string
-	// pages opens Pelecard pages for payers through external_payments, with a
-	// bearer.
+	// pages talks to external_payments with a bearer: it opens Pelecard pages
+	// for payers and reads back what checkout recorded about a payment.
 	pages *pelecard.Client
-	// checkout reads what external_payments recorded about a payment, with a
-	// bearer, so a payment is confirmed from the gateway's facts.
-	checkout *pelecard.Client
 }
 
 func NewOrdersAPI(db *repo.OrdersDB) *OrdersAPI {
@@ -37,7 +34,6 @@ func NewOrdersAPI(db *repo.OrdersDB) *OrdersAPI {
 		accountingService:   accounting.NewAccountingServiceAPI(keycloak.NewClient()),
 		quickbooksCompanyID: common.Config.QuickbooksCompanyID,
 		pages:               pelecard.NewClient(),
-		checkout:            pelecard.NewClient(),
 	}
 }
 

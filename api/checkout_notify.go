@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 
@@ -42,18 +43,23 @@ type checkoutNotification struct {
 // this service's bearer.
 //
 // The status tells checkout whether to retry: 200 done (or done before), 4xx
-// other than 409 never, 409 and 5xx later.
+// other than 409 never, 409 and 5xx later. The bodies say nothing more: the
+// route is public and the ids are sequential, so an answer that told paid from
+// unknown from mismatched would let anyone map orders and payments. The
+// details go to the log.
 func (o *OrdersAPI) handleCheckoutNotify(c *gin.Context) {
 	var req checkoutNotification
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, notifyRefused)
 		return
 	}
 
-	ctx := c.Request.Context()
+	// Not cancelled with the caller: a confirm half-written because checkout
+	// hung up is worse than a late one.
+	ctx := context.WithoutCancel(c.Request.Context())
 	alreadyPaid, err := o.confirmCheckoutPayment(ctx, req.UserKey, req.Reference)
 	if err != nil {
-		o.respondConfirmError(c, req, err)
+		o.respondConfirmError(c, ctx, req, err)
 		return
 	}
 
@@ -63,24 +69,28 @@ func (o *OrdersAPI) handleCheckoutNotify(c *gin.Context) {
 	}
 	utils.LogFor(ctx).Info("checkout notify", slog.String("user_key", req.UserKey),
 		slog.String("reference", req.Reference), slog.String("status", status))
-	c.JSON(http.StatusOK, gin.H{"status": status})
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
-func (o *OrdersAPI) respondConfirmError(c *gin.Context, req checkoutNotification, err error) {
-	log := utils.LogFor(c.Request.Context()).With(slog.String("user_key", req.UserKey),
+// notifyRefused is the one body every 4xx answer carries.
+var notifyRefused = gin.H{"error": "cannot confirm this payment"}
+
+func (o *OrdersAPI) respondConfirmError(c *gin.Context, ctx context.Context, req checkoutNotification, err error) {
+	log := utils.LogFor(ctx).With(slog.String("user_key", req.UserKey),
 		slog.String("reference", req.Reference), slog.Any("err", err))
 
 	switch {
 	case errors.Is(err, common.ErrInvalidValues), errors.Is(err, errNoSuchPayment):
 		log.Warn("checkout notify for an unknown payment")
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+		c.JSON(http.StatusUnprocessableEntity, notifyRefused)
 	case errors.Is(err, errGatewayMismatch):
-		log.Error("checkout notify: checkout's record does not match")
-		utils.SentryFor(c.Request.Context()).CaptureException(err)
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+		// Warn, not Sentry: anyone can post a pair that reaches this, and it
+		// must not page anyone per call.
+		log.Warn("checkout notify: checkout's record does not match")
+		c.JSON(http.StatusUnprocessableEntity, notifyRefused)
 	case errors.Is(err, pelecard.ErrPaymentNotFound), errors.Is(err, errNoTokenYet):
 		log.Warn("checkout notify: nothing to confirm yet")
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		c.JSON(http.StatusConflict, notifyRefused)
 	case errors.Is(err, pelecard.ErrUnauthorized), errors.Is(err, pelecard.ErrNoCredential):
 		c.Status(http.StatusBadGateway)
 		_ = c.Error(fmt.Errorf("o.confirmCheckoutPayment: %w", err))
@@ -91,9 +101,10 @@ func (o *OrdersAPI) respondConfirmError(c *gin.Context, req checkoutNotification
 }
 
 // confirmCheckoutPayment marks one payment paid from what checkout recorded,
-// never from what a caller says. A payment already marked successful is left
-// alone and reported as alreadyPaid, so a repeated notify or a late browser
-// return rewrites nothing.
+// never from what a caller says. A payment already marked successful is not
+// rewritten and is reported as alreadyPaid, so a repeated notify or a late
+// browser return changes none of checkout's facts; only an order left unsettled
+// by an earlier, half-finished confirm is finished.
 func (o *OrdersAPI) confirmCheckoutPayment(ctx context.Context, orderKey, paramX string) (alreadyPaid bool, err error) {
 	orderID, err := keyID(orderKey, "ord")
 	if err != nil {
@@ -112,12 +123,15 @@ func (o *OrdersAPI) confirmCheckoutPayment(ctx context.Context, orderKey, paramX
 		return false, fmt.Errorf("o.repo.GetPaymentByID: %w", err)
 	}
 	if payment.PaymentStatus.String == common.PaymentStatusSuccess {
+		if err := o.settleOrder(ctx, payment); err != nil {
+			return false, err
+		}
 		return true, nil
 	}
 
-	facts, err := o.checkout.GetPayment(ctx, orderKey)
+	facts, err := o.pages.GetPayment(ctx, orderKey, paramX)
 	if err != nil {
-		return false, fmt.Errorf("o.checkout.GetPayment: %w", err)
+		return false, fmt.Errorf("o.pages.GetPayment: %w", err)
 	}
 	if facts.UserKey != orderKey || facts.AdditionalDetailsParamX != paramX {
 		return false, fmt.Errorf("%w: checkout has user_key %q, reference %q", errGatewayMismatch,
@@ -128,7 +142,8 @@ func (o *OrdersAPI) confirmCheckoutPayment(ctx context.Context, orderKey, paramX
 	if err != nil {
 		return false, fmt.Errorf("o.repo.GetOrderByID: %w", err)
 	}
-	if order.Type.String == common.OrderTypeRecurring && facts.Token == "" {
+	// Renewals charge with both, so a recurring order needs both.
+	if order.Type.String == common.OrderTypeRecurring && (facts.Token == "" || facts.ApprovalNo == "") {
 		return false, errNoTokenYet
 	}
 
@@ -143,32 +158,54 @@ func (o *OrdersAPI) confirmCheckoutPayment(ctx context.Context, orderKey, paramX
 	return false, nil
 }
 
-// alreadyPaid reports whether the payment paramX names is marked successful.
-// Anything it cannot read counts as not paid, leaving the caller's own checks
-// to report it.
-func (o *OrdersAPI) alreadyPaid(ctx context.Context, paramX string) bool {
+// paidPayment returns the payment paramX names when it is marked successful,
+// else nil. Anything it cannot read counts as not paid, leaving the caller's
+// own checks to report it.
+func (o *OrdersAPI) paidPayment(ctx context.Context, paramX string) *repo.Payment {
 	paymentID, err := keyID(paramX, "m")
 	if err != nil {
-		return false
+		return nil
 	}
 	payment, err := o.repo.GetPaymentByID(ctx, paymentID)
-	return err == nil && payment.PaymentStatus.String == common.PaymentStatusSuccess
+	if err != nil || payment.PaymentStatus.String != common.PaymentStatusSuccess {
+		return nil
+	}
+	return payment
 }
 
-// keyID reads the number out of an id like "ord-123" or "m-45", the way
-// UpdatePayment does, refusing what it would panic on. Ids are int4 serials,
-// so the number is parsed to 32 bits and must be positive.
-func keyID(key, prefix string) (int, error) {
-	parts := strings.Split(key, "-")
-	if len(parts) < 2 || parts[0] != prefix {
-		return 0, fmt.Errorf("%w: %q is not a %s- id", common.ErrInvalidValues, key, prefix)
+// settleOrder finishes the order of a successful payment when an earlier
+// confirm wrote the payment and then failed before the order: without it, the
+// retry stops at "already paid" and the order stays new although the member
+// paid. An order with a PaymentDate was settled and is left alone.
+func (o *OrdersAPI) settleOrder(ctx context.Context, payment *repo.Payment) error {
+	if payment.Success.String != "1" {
+		return nil
 	}
-	id, err := strconv.ParseInt(parts[1], 10, 32)
+	order, err := o.repo.GetOrderByID(ctx, uint(payment.OrderID.Int))
 	if err != nil {
-		return 0, fmt.Errorf("%w: %q: %w", common.ErrInvalidValues, key, err)
+		return fmt.Errorf("o.repo.GetOrderByID: %w", err)
 	}
-	if id <= 0 {
-		return 0, fmt.Errorf("%w: %q is not a positive id", common.ErrInvalidValues, key)
+	if order.PaymentDate.Valid {
+		return nil
+	}
+	if err := o.repo.UpdateOrderAfterPayment(ctx, *payment); err != nil {
+		return fmt.Errorf("o.repo.UpdateOrderAfterPayment: %w", err)
+	}
+	return nil
+}
+
+// keyID reads the number out of an id in exactly the form this service builds
+// it: "ord-123" or "m-45" followed by this environment's SUFX ("-G1" on dev).
+// An id with another environment's suffix, or anything after the number, is
+// refused, so a dev pair cannot confirm a prod payment with the same numbers.
+// Ids are int4 serials, so the number is parsed to 32 bits and must be positive.
+func keyID(key, prefix string) (int, error) {
+	suffix := os.Getenv("SUFX")
+	n, okPrefix := strings.CutPrefix(key, prefix+"-")
+	n, okSuffix := strings.CutSuffix(n, suffix)
+	id, err := strconv.ParseInt(n, 10, 32)
+	if !okPrefix || !okSuffix || err != nil || id <= 0 {
+		return 0, fmt.Errorf("%w: %q is not a %s-<id>%s id", common.ErrInvalidValues, key, prefix, suffix)
 	}
 	return int(id), nil
 }
@@ -188,7 +225,6 @@ func paidFromGateway(facts *pelecard.GatewayPayment) repo.RequestPaid {
 		CCAbroadCard:          str(facts.CreditCardAbroadCard),
 		CCBrand:               str(facts.CreditCardBrand),
 		CCCompanyClearer:      str(facts.CreditCardCompanyClearer),
-		CCCompanyIssuer:       str(facts.CreditCardCompanyIssuer),
 		CreditType:            str(facts.CreditType),
 		CCNumber:              str(facts.CreditCardNumber),
 		CCExpDate:             str(facts.CreditCardExpDate),
@@ -201,7 +237,6 @@ func paidFromGateway(facts *pelecard.GatewayPayment) repo.RequestPaid {
 		TotalPayments:         str(facts.TotalPayments),
 		JParam:                str(facts.JParam),
 		TransactionInitTime:   str(facts.TransactionInitTime),
-		TransactionPelecardID: str(facts.TransactionPelecardId),
 		TransactionUpdateTime: str(facts.TransactionUpdateTime),
 		VoucherID:             str(facts.VoucherId),
 	}

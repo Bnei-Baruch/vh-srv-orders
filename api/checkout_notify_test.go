@@ -15,11 +15,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/keycloak"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/pelecard"
 )
 
-type checkoutCall struct{ path, auth string }
+type checkoutCall struct{ path, reference, auth string }
 
 // stubCheckout points the app's checkout client at a server answering every
 // payment read with status and body, and returns the calls it received.
@@ -31,7 +32,7 @@ func stubCheckout(t *testing.T, a *App, status int, body any) func() []checkoutC
 	)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
-		calls = append(calls, checkoutCall{r.URL.Path, r.Header.Get("Authorization")})
+		calls = append(calls, checkoutCall{r.URL.Path, r.URL.Query().Get("reference"), r.Header.Get("Authorization")})
 		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
@@ -42,7 +43,7 @@ func stubCheckout(t *testing.T, a *App, status int, body any) func() []checkoutC
 	client := pelecard.NewClient()
 	client.BaseURL = srv.URL
 	client.Tokens = keycloak.StaticTokenSource("tok")
-	a.ordersAPI.checkout = client
+	a.ordersAPI.pages = client
 
 	return func() []checkoutCall {
 		mu.Lock()
@@ -121,8 +122,8 @@ func Test_checkout_notify_marks_the_payment_paid_from_checkouts_record(t *testin
 
 	got := notify(t, a, p, http.StatusOK)
 
-	assert.Equal(t, "paid", got["status"])
-	assert.Equal(t, []checkoutCall{{"/vh/payment/" + p.orderKey, "Bearer tok"}}, calls())
+	assert.Equal(t, "ok", got["status"])
+	assert.Equal(t, []checkoutCall{{"/vh/payment/" + p.orderKey, p.paramX, "Bearer tok"}}, calls())
 	assert.Equal(t, paymentState{"success", "card-token", "0123456", "paid"}, readPaymentState(t, a, p))
 }
 
@@ -137,7 +138,7 @@ func Test_checkout_notify_for_a_paid_payment_changes_nothing_and_asks_nobody(t *
 
 	got := notify(t, a, p, http.StatusOK)
 
-	assert.Equal(t, "already_paid", got["status"])
+	assert.Equal(t, "ok", got["status"])
 	assert.Empty(t, calls())
 	assert.Equal(t, "first", readPaymentState(t, a, p).token)
 }
@@ -161,7 +162,10 @@ func Test_checkout_notify_whose_record_names_another_payment_is_refused(t *testi
 	record.AdditionalDetailsParamX = "m-999999"
 	stubCheckout(t, a, http.StatusOK, record)
 
-	notify(t, a, p, http.StatusUnprocessableEntity)
+	got := notify(t, a, p, http.StatusUnprocessableEntity)
+
+	// Nothing of checkout's record is echoed to a public caller.
+	assert.Equal(t, "cannot confirm this payment", got["error"])
 
 	assert.Equal(t, paymentState{"pending", "", "", "new"}, readPaymentState(t, a, p))
 }
@@ -256,4 +260,94 @@ func Test_paid_return_for_a_confirmed_payment_changes_nothing(t *testing.T) {
 	}, http.StatusOK)
 
 	assert.Equal(t, paymentState{"success", "card-token", "0123456", "paid"}, readPaymentState(t, a, p))
+}
+
+// Renewals charge with both the token and the approval number, so a recurring
+// order waits until checkout has both.
+func Test_checkout_notify_for_a_recurring_order_without_an_approval_number_waits(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "recurring")
+	record := gatewayRecord(p)
+	record.ApprovalNo = ""
+	stubCheckout(t, a, http.StatusOK, record)
+
+	notify(t, a, p, http.StatusConflict)
+
+	assert.Equal(t, "pending", readPaymentState(t, a, p).paymentStatus)
+}
+
+// writeHalfConfirm leaves p the way a confirm that wrote the payment and then
+// failed before the order leaves it: payment successful, order still new.
+func writeHalfConfirm(t *testing.T, a *App, p pendingPayment) {
+	t.Helper()
+	_, err := a.testPool(t).Exec(context.Background(),
+		`UPDATE payments SET "PaymentStatus" = 'success', success = '1', pelecard_token = 'first' WHERE id = $1`, p.paymentID)
+	require.NoError(t, err)
+}
+
+// A retried notify finishes an order an earlier confirm left unsettled, and
+// still rewrites none of the payment's facts.
+func Test_checkout_notify_finishes_a_half_written_confirm(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "regular")
+	writeHalfConfirm(t, a, p)
+	calls := stubCheckout(t, a, http.StatusOK, gatewayRecord(p))
+
+	notify(t, a, p, http.StatusOK)
+
+	assert.Equal(t, paymentState{"success", "first", "", "paid"}, readPaymentState(t, a, p))
+	assert.Empty(t, calls())
+}
+
+// The browser return repairs it the same way.
+func Test_paid_return_finishes_a_half_written_confirm(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "regular")
+	writeHalfConfirm(t, a, p)
+
+	POST_ROOT(t, a, "/orders/paid", gin.H{
+		"user_key": p.orderKey, "additional_details_param_x": p.paramX,
+		"success": "1", "token": "from-the-browser", "authNo": "999",
+	}, http.StatusOK)
+
+	assert.Equal(t, paymentState{"success", "first", "", "paid"}, readPaymentState(t, a, p))
+}
+
+// A settled order is not settled again: its PaymentDate and status stay.
+func Test_checkout_notify_leaves_a_settled_order_alone(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "regular")
+	writeHalfConfirm(t, a, p)
+	_, err := a.testPool(t).Exec(context.Background(),
+		`UPDATE orders SET "Status" = 'cancelled', "PaymentDate" = '2026-01-02' WHERE id = $1`, p.orderID)
+	require.NoError(t, err)
+	stubCheckout(t, a, http.StatusOK, gatewayRecord(p))
+
+	notify(t, a, p, http.StatusOK)
+
+	assert.Equal(t, "cancelled", readPaymentState(t, a, p).orderStatus)
+}
+
+// Ids are read in exactly the form this environment builds them, suffix
+// included; another environment's id is refused.
+func Test_keyID_reads_only_this_environments_ids(t *testing.T) {
+	t.Setenv("SUFX", "-G1")
+	id, err := keyID("ord-5-G1", "ord")
+	require.NoError(t, err)
+	assert.Equal(t, 5, id)
+	for _, key := range []string{"ord-5", "ord-5-G2", "ord-5-G1-x", "m-5-G1", "ord--5-G1", "ord-0-G1", "ord-4294967297-G1"} {
+		_, err := keyID(key, "ord")
+		assert.ErrorIs(t, err, common.ErrInvalidValues, key)
+	}
+
+	t.Setenv("SUFX", "")
+	_, err = keyID("m-7-G1", "m")
+	assert.ErrorIs(t, err, common.ErrInvalidValues, "a dev id on prod")
+	id, err = keyID("m-7", "m")
+	require.NoError(t, err)
+	assert.Equal(t, 7, id)
 }

@@ -213,9 +213,15 @@ func (o *OrdersAPI) settleOrder(ctx context.Context, payment *repo.Payment) erro
 }
 
 // keyID reads the number out of an id in exactly the form this service builds
-// it: "ord-123" or "m-45" followed by this environment's SUFX ("-G1" on dev).
-// An id with another environment's suffix, or anything after the number, is
-// refused, so a dev pair cannot confirm a prod payment with the same numbers.
+// for payment pages (transaction_handler.go): "ord-123" or "m-45" followed by
+// this environment's SUFX ("-G1" on dev). An id with another environment's
+// suffix, or anything after the number, is refused, so a dev pair cannot
+// confirm a prod payment with the same numbers.
+//
+// Renewal payments carry a second form, "m-45" + SUFX + the terminal's PMX
+// (repo/renewal.go), which this refuses. They never reach the callers: a
+// renewal is charged and finalized in-process, with no page, no browser
+// return and no notify.
 // The number is plain decimal digits as FormatUint writes them: no sign, no
 // leading zero. Ids are int4 serials, so it must fit in 31 bits and be
 // positive.

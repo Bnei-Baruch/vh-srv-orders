@@ -11,7 +11,8 @@ import (
 func strp(s string) *string { return &s }
 
 type identityState struct {
-	accountEmail, accountKey, orderKey, specialEmail, specialKey, ordkey string
+	accountEmail, accountKey, specialEmail, specialKey, ordkey string
+	orderAccount                                               int
 }
 
 func seedIdentity(t *testing.T, db *OrdersDB, ctx context.Context, email, key string) (accountID, orderID, specialID, paymentID int) {
@@ -19,7 +20,7 @@ func seedIdentity(t *testing.T, db *OrdersDB, ctx context.Context, email, key st
 	require.NoError(t, db.pool.QueryRow(ctx,
 		`INSERT INTO accounts ("Email", "UserKey") VALUES ($1, $2) RETURNING id`, email, key).Scan(&accountID))
 	require.NoError(t, db.pool.QueryRow(ctx,
-		`INSERT INTO orders ("AccountID", userkey) VALUES ($1, $2) RETURNING id`, accountID, key).Scan(&orderID))
+		`INSERT INTO orders ("AccountID") VALUES ($1) RETURNING id`, accountID).Scan(&orderID))
 	require.NoError(t, db.pool.QueryRow(ctx,
 		`INSERT INTO specials (keycloak_id, email, start_date, end_date, category) VALUES ($1, $2, now(), now(), 'x') RETURNING id`,
 		key, email).Scan(&specialID))
@@ -32,14 +33,14 @@ func readIdentity(t *testing.T, db *OrdersDB, ctx context.Context, accountID, or
 	t.Helper()
 	var s identityState
 	require.NoError(t, db.pool.QueryRow(ctx, `SELECT "Email", "UserKey" FROM accounts WHERE id = $1`, accountID).Scan(&s.accountEmail, &s.accountKey))
-	require.NoError(t, db.pool.QueryRow(ctx, `SELECT userkey FROM orders WHERE id = $1`, orderID).Scan(&s.orderKey))
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT "AccountID" FROM orders WHERE id = $1`, orderID).Scan(&s.orderAccount))
 	require.NoError(t, db.pool.QueryRow(ctx, `SELECT email, keycloak_id FROM specials WHERE id = $1`, specialID).Scan(&s.specialEmail, &s.specialKey))
 	require.NoError(t, db.pool.QueryRow(ctx, `SELECT "Ordkey" FROM payments WHERE id = $1`, paymentID).Scan(&s.ordkey))
 	return s
 }
 
-// A keycloak-id change moves the account, the orders' userkey and the
-// specials to the new email and key; the revert puts every one back. Payment
+// A keycloak-id change moves the account and the specials to the new email
+// and key; the orders stay on the account; the revert puts every one back. Payment
 // order keys are not keycloak ids and stay as they are. The emails carry a
 // quote: the old code concatenated them into SQL.
 func TestPerformOperation_KeycloakChange_AndRevert(t *testing.T) {
@@ -55,14 +56,14 @@ func TestPerformOperation_KeycloakChange_AndRevert(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, identityState{
-		accountEmail: newEmail, accountKey: "kc-new", orderKey: "kc-new",
+		accountEmail: newEmail, accountKey: "kc-new", orderAccount: a,
 		specialEmail: newEmail, specialKey: "kc-new", ordkey: "ord-12345",
 	}, readIdentity(t, db, ctx, a, o, s, p))
 
 	var status, output string
 	require.NoError(t, db.pool.QueryRow(ctx, `SELECT status, output::text FROM operation_trace WHERE id = $1`, id).Scan(&status, &output))
 	assert.Equal(t, "success", status)
-	assert.JSONEq(t, `{"accounts":1,"orders":1,"specials.email":1,"specials.keycloak_id":1}`, output)
+	assert.JSONEq(t, `{"accounts":1,"specials.email":1,"specials.keycloak_id":1}`, output)
 
 	require.NoError(t, db.RevertOperation(ctx, newEmail, oldEmail))
 	assert.Equal(t, before, readIdentity(t, db, ctx, a, o, s, p))

@@ -13,11 +13,10 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/common"
 )
 
-// Orders get their userkey only from UpdateOrdersUserKeyFromAccounts, which the
-// billing run calls before flagging. The flag endpoint did not, so an order
-// created since the last run was never flagged (and before the repo fix, its
-// NULL key panicked the request after the keyed users were flagged).
-func TestOrdersFlag_ToRenew_SyncsUserKeysFirst(t *testing.T) {
+// An order created since the last billing run is flagged through the endpoint:
+// flagging reads the order's account, not a copied key that only the billing
+// run refreshed.
+func TestOrdersFlag_ToRenew_FlagsNewOrders(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)
 	pool := a.testPool(t)

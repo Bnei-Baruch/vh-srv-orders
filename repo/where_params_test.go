@@ -29,8 +29,8 @@ func seedFilterRows(t *testing.T, db *OrdersDB, ctx context.Context) {
 		require.NoError(t, db.pool.QueryRow(ctx,
 			`INSERT INTO accounts ("Email", "UserKey") VALUES ($1, $2) RETURNING id`, row.email, row.key).Scan(&accountID))
 		require.NoError(t, db.pool.QueryRow(ctx,
-			`INSERT INTO orders ("AccountID", userkey, "Currency", "Status", "ProductType", "Organization", "Type")
-			 VALUES ($1, $2, 'ILS', 'paid', 'hh', 'org', 'single') RETURNING id`, accountID, row.key).Scan(&orderID))
+			`INSERT INTO orders ("AccountID", "Currency", "Status", "ProductType", "Organization", "Type")
+			 VALUES ($1, 'ILS', 'paid', 'hh', 'org', 'single') RETURNING id`, accountID).Scan(&orderID))
 		require.NoError(t, db.pool.QueryRow(ctx,
 			`INSERT INTO payments ("OrderID", "PaymentType", "PaymentStatus") VALUES ($1, 'cc', 'ok') RETURNING id`,
 			orderID).Scan(&paymentID))

@@ -23,18 +23,14 @@ func createTestAccount(t *testing.T, db *OrdersDB, ctx context.Context, email st
 	return accountID
 }
 
-// insertOrder inserts an order and sets its userkey. Returns the order ID.
-func insertOrder(t *testing.T, db *OrdersDB, ctx context.Context, order Order, userkey string) int {
+// insertOrder inserts an order and returns its ID.
+func insertOrder(t *testing.T, db *OrdersDB, ctx context.Context, order Order) int {
 	t.Helper()
 	createString, numString, args := prepareOrderCreateQuery(order)
 	var id int
 	err := db.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
 		args...).Scan(&id)
 	require.NoError(t, err)
-	if userkey != "" {
-		_, err = db.pool.Exec(ctx, `UPDATE orders SET userkey = $1 WHERE id = $2`, userkey, id)
-		require.NoError(t, err)
-	}
 	return id
 }
 
@@ -78,8 +74,7 @@ func TestFlagOrdersToRenew_SingleUserSingleOrder(t *testing.T) {
 
 	// Order with payment date in May, billing for June -> eligible
 	orderID := insertOrder(t, db, ctx,
-		renewableOrder(accountID, common.OrderStatusPaid, time.Date(2024, 5, 15, 0, 0, 0, 0, time.UTC)),
-		"user1-key")
+		renewableOrder(accountID, common.OrderStatusPaid, time.Date(2024, 5, 15, 0, 0, 0, 0, time.UTC)))
 
 	count, err := db.FlagOrdersToRenew(ctx, 6, 2024)
 
@@ -88,18 +83,17 @@ func TestFlagOrdersToRenew_SingleUserSingleOrder(t *testing.T) {
 	assert.Equal(t, common.OrderFlagToRenew, getOrderFlag(t, db, ctx, orderID))
 }
 
-// An eligible order whose userkey was never synced (or that has no account)
-// formed a NULL group whose nil key was dereferenced: the run panicked after
-// flagging every keyed user. It is skipped now; the keyed user is still
-// flagged.
-func TestFlagOrdersToRenew_NullUserkeyIsSkipped(t *testing.T) {
+// An eligible order with no account identifies nobody: it is skipped, and the
+// account's order is still flagged.
+func TestFlagOrdersToRenew_OrderWithoutAccountIsSkipped(t *testing.T) {
 	db, ctx := newTestDB(t)
-	keyed := createTestAccount(t, db, ctx, "keyed@test.com")
-	unsynced := createTestAccount(t, db, ctx, "unsynced@test.com")
+	owner := createTestAccount(t, db, ctx, "owner@test.com")
 	may := time.Date(2024, 5, 15, 0, 0, 0, 0, time.UTC)
 
-	keyedOrder := insertOrder(t, db, ctx, renewableOrder(keyed, common.OrderStatusPaid, may), "keyed-key")
-	unsyncedOrder := insertOrder(t, db, ctx, renewableOrder(unsynced, common.OrderStatusPaid, may), "")
+	keyedOrder := insertOrder(t, db, ctx, renewableOrder(owner, common.OrderStatusPaid, may))
+	orphan := renewableOrder(owner, common.OrderStatusPaid, may)
+	orphan.AccountID = null.Int{}
+	unsyncedOrder := insertOrder(t, db, ctx, orphan)
 
 	var count int64
 	require.NotPanics(t, func() {
@@ -118,8 +112,7 @@ func TestFlagOrdersToRenew_PaymentDateInBillingMonth_NotFlagged(t *testing.T) {
 
 	// Payment date is June 1 (first of billing month) -> NOT before billing date -> skip
 	insertOrder(t, db, ctx,
-		renewableOrder(accountID, common.OrderStatusPaid, time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)),
-		"user1-key")
+		renewableOrder(accountID, common.OrderStatusPaid, time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)))
 
 	count, err := db.FlagOrdersToRenew(ctx, 6, 2024)
 
@@ -133,8 +126,7 @@ func TestFlagOrdersToRenew_PaymentDateAfterBillingMonth_NotFlagged(t *testing.T)
 
 	// Payment date in July, billing for June -> future payment -> skip
 	insertOrder(t, db, ctx,
-		renewableOrder(accountID, common.OrderStatusPaid, time.Date(2024, 7, 10, 0, 0, 0, 0, time.UTC)),
-		"user1-key")
+		renewableOrder(accountID, common.OrderStatusPaid, time.Date(2024, 7, 10, 0, 0, 0, 0, time.UTC)))
 
 	count, err := db.FlagOrdersToRenew(ctx, 6, 2024)
 
@@ -147,8 +139,7 @@ func TestFlagOrdersToRenew_NoSuccessStatusEligible(t *testing.T) {
 	accountID := createTestAccount(t, db, ctx, "user1@test.com")
 
 	orderID := insertOrder(t, db, ctx,
-		renewableOrder(accountID, common.OrderStatusNoSuccess, time.Date(2024, 5, 15, 0, 0, 0, 0, time.UTC)),
-		"user1-key")
+		renewableOrder(accountID, common.OrderStatusNoSuccess, time.Date(2024, 5, 15, 0, 0, 0, 0, time.UTC)))
 
 	count, err := db.FlagOrdersToRenew(ctx, 6, 2024)
 
@@ -168,7 +159,7 @@ func TestFlagOrdersToRenew_CancelledStatusNotEligible(t *testing.T) {
 		ProductType: null.StringFrom(common.ProductTypeGlobalMembership),
 		Type:        null.StringFrom(common.OrderTypeRecurring),
 		PaymentDate: null.TimeFrom(time.Date(2024, 5, 15, 0, 0, 0, 0, time.UTC)),
-	}, "user1-key")
+	})
 
 	count, err := db.FlagOrdersToRenew(ctx, 6, 2024)
 
@@ -187,7 +178,7 @@ func TestFlagOrdersToRenew_RegularTypeNotEligible(t *testing.T) {
 		ProductType: null.StringFrom(common.ProductTypeGlobalMembership),
 		Type:        null.StringFrom(common.OrderTypeRegular),
 		PaymentDate: null.TimeFrom(time.Date(2024, 5, 15, 0, 0, 0, 0, time.UTC)),
-	}, "user1-key")
+	})
 
 	count, err := db.FlagOrdersToRenew(ctx, 6, 2024)
 
@@ -206,7 +197,7 @@ func TestFlagOrdersToRenew_DonationProductNotEligible(t *testing.T) {
 		ProductType: null.StringFrom(common.ProductTypeDonation),
 		Type:        null.StringFrom(common.OrderTypeRecurring),
 		PaymentDate: null.TimeFrom(time.Date(2024, 5, 15, 0, 0, 0, 0, time.UTC)),
-	}, "user1-key")
+	})
 
 	count, err := db.FlagOrdersToRenew(ctx, 6, 2024)
 
@@ -221,14 +212,11 @@ func TestFlagOrdersToRenew_MultipleUsers(t *testing.T) {
 	acc3 := createTestAccount(t, db, ctx, "user3@test.com")
 
 	id1 := insertOrder(t, db, ctx,
-		renewableOrder(acc1, common.OrderStatusPaid, time.Date(2024, 5, 15, 0, 0, 0, 0, time.UTC)),
-		"user1-key")
+		renewableOrder(acc1, common.OrderStatusPaid, time.Date(2024, 5, 15, 0, 0, 0, 0, time.UTC)))
 	id2 := insertOrder(t, db, ctx,
-		renewableOrder(acc2, common.OrderStatusPaid, time.Date(2024, 4, 10, 0, 0, 0, 0, time.UTC)),
-		"user2-key")
+		renewableOrder(acc2, common.OrderStatusPaid, time.Date(2024, 4, 10, 0, 0, 0, 0, time.UTC)))
 	id3 := insertOrder(t, db, ctx,
-		renewableOrder(acc3, common.OrderStatusNoSuccess, time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC)),
-		"user3-key")
+		renewableOrder(acc3, common.OrderStatusNoSuccess, time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC)))
 
 	count, err := db.FlagOrdersToRenew(ctx, 6, 2024)
 
@@ -245,12 +233,10 @@ func TestFlagOrdersToRenew_MultipleOrdersSameUser_OnlyMostRecent(t *testing.T) {
 
 	// Older order (January)
 	olderID := insertOrder(t, db, ctx,
-		renewableOrder(accountID, common.OrderStatusPaid, time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)),
-		"user1-key")
+		renewableOrder(accountID, common.OrderStatusPaid, time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)))
 	// Newer order (May) - this one should be selected (LIMIT 1, ORDER BY PaymentDate DESC)
 	newerID := insertOrder(t, db, ctx,
-		renewableOrder(accountID, common.OrderStatusPaid, time.Date(2024, 5, 20, 0, 0, 0, 0, time.UTC)),
-		"user1-key")
+		renewableOrder(accountID, common.OrderStatusPaid, time.Date(2024, 5, 20, 0, 0, 0, 0, time.UTC)))
 
 	count, err := db.FlagOrdersToRenew(ctx, 6, 2024)
 
@@ -267,12 +253,10 @@ func TestFlagOrdersToRenew_MultipleOrdersSameUser_MostRecentInBillingMonth_Nothi
 
 	// Older order eligible by date
 	insertOrder(t, db, ctx,
-		renewableOrder(accountID, common.OrderStatusPaid, time.Date(2024, 3, 15, 0, 0, 0, 0, time.UTC)),
-		"user1-key")
+		renewableOrder(accountID, common.OrderStatusPaid, time.Date(2024, 3, 15, 0, 0, 0, 0, time.UTC)))
 	// Most recent order has payment date in billing month -> selected but skipped
 	insertOrder(t, db, ctx,
-		renewableOrder(accountID, common.OrderStatusPaid, time.Date(2024, 6, 5, 0, 0, 0, 0, time.UTC)),
-		"user1-key")
+		renewableOrder(accountID, common.OrderStatusPaid, time.Date(2024, 6, 5, 0, 0, 0, 0, time.UTC)))
 
 	count, err := db.FlagOrdersToRenew(ctx, 6, 2024)
 
@@ -286,8 +270,7 @@ func TestFlagOrdersToRenew_PaymentDateLastDayBeforeBillingMonth(t *testing.T) {
 
 	// May 31, 23:59:59 - just before June 1 -> should be flagged
 	orderID := insertOrder(t, db, ctx,
-		renewableOrder(accountID, common.OrderStatusPaid, time.Date(2024, 5, 31, 23, 59, 59, 0, time.UTC)),
-		"user1-key")
+		renewableOrder(accountID, common.OrderStatusPaid, time.Date(2024, 5, 31, 23, 59, 59, 0, time.UTC)))
 
 	count, err := db.FlagOrdersToRenew(ctx, 6, 2024)
 
@@ -305,8 +288,7 @@ func TestFlagOrdersToRenew_MixOfEligibleAndIneligible(t *testing.T) {
 
 	// Eligible: paid, recurring, globalmembership, payment before billing month
 	eligibleID := insertOrder(t, db, ctx,
-		renewableOrder(acc1, common.OrderStatusPaid, time.Date(2024, 5, 15, 0, 0, 0, 0, time.UTC)),
-		"user1-key")
+		renewableOrder(acc1, common.OrderStatusPaid, time.Date(2024, 5, 15, 0, 0, 0, 0, time.UTC)))
 
 	// Ineligible: cancelled status
 	insertOrder(t, db, ctx, Order{
@@ -316,7 +298,7 @@ func TestFlagOrdersToRenew_MixOfEligibleAndIneligible(t *testing.T) {
 		ProductType: null.StringFrom(common.ProductTypeGlobalMembership),
 		Type:        null.StringFrom(common.OrderTypeRecurring),
 		PaymentDate: null.TimeFrom(time.Date(2024, 5, 15, 0, 0, 0, 0, time.UTC)),
-	}, "user2-key")
+	})
 
 	// Ineligible: regular type
 	insertOrder(t, db, ctx, Order{
@@ -326,12 +308,11 @@ func TestFlagOrdersToRenew_MixOfEligibleAndIneligible(t *testing.T) {
 		ProductType: null.StringFrom(common.ProductTypeGlobalMembership),
 		Type:        null.StringFrom(common.OrderTypeRegular),
 		PaymentDate: null.TimeFrom(time.Date(2024, 5, 15, 0, 0, 0, 0, time.UTC)),
-	}, "user3-key")
+	})
 
 	// Ineligible: payment date in billing month
 	insertOrder(t, db, ctx,
-		renewableOrder(acc4, common.OrderStatusPaid, time.Date(2024, 6, 10, 0, 0, 0, 0, time.UTC)),
-		"user4-key")
+		renewableOrder(acc4, common.OrderStatusPaid, time.Date(2024, 6, 10, 0, 0, 0, 0, time.UTC)))
 
 	count, err := db.FlagOrdersToRenew(ctx, 6, 2024)
 
@@ -346,8 +327,7 @@ func TestFlagOrdersToRenew_JanuaryBilling(t *testing.T) {
 
 	// Payment date in December, billing for January -> eligible
 	orderID := insertOrder(t, db, ctx,
-		renewableOrder(accountID, common.OrderStatusPaid, time.Date(2023, 12, 15, 0, 0, 0, 0, time.UTC)),
-		"user1-key")
+		renewableOrder(accountID, common.OrderStatusPaid, time.Date(2023, 12, 15, 0, 0, 0, 0, time.UTC)))
 
 	count, err := db.FlagOrdersToRenew(ctx, 1, 2024)
 
@@ -430,7 +410,7 @@ func TestGetOrderIDsWithPricingError_Empty(t *testing.T) {
 		Status:    null.StringFrom(common.OrderStatusPaid),
 		Type:      null.StringFrom(common.OrderTypeRecurring),
 		Flag:      null.StringFrom(common.OrderFlagToRenew),
-	}, "")
+	})
 
 	ids, err := db.GetOrderIDsWithPricingError(ctx)
 	require.NoError(t, err)
@@ -449,14 +429,14 @@ func TestGetOrderIDsWithPricingError_ReturnsFlaggedOrders(t *testing.T) {
 		Status:    null.StringFrom(common.OrderStatusPaid),
 		Type:      null.StringFrom(common.OrderTypeRecurring),
 		Flag:      null.StringFrom(common.OrderFlagPricingError),
-	}, "")
+	})
 	id2 := insertOrder(t, db, ctx, Order{
 		AccountID: null.IntFrom(acc2),
 		Amount:    null.Float64From(100),
 		Status:    null.StringFrom(common.OrderStatusNoSuccess),
 		Type:      null.StringFrom(common.OrderTypeRecurring),
 		Flag:      null.StringFrom(common.OrderFlagPricingError),
-	}, "")
+	})
 	// torenew order — should NOT appear
 	insertOrder(t, db, ctx, Order{
 		AccountID: null.IntFrom(acc3),
@@ -464,7 +444,7 @@ func TestGetOrderIDsWithPricingError_ReturnsFlaggedOrders(t *testing.T) {
 		Status:    null.StringFrom(common.OrderStatusPaid),
 		Type:      null.StringFrom(common.OrderTypeRecurring),
 		Flag:      null.StringFrom(common.OrderFlagToRenew),
-	}, "")
+	})
 
 	ids, err := db.GetOrderIDsWithPricingError(ctx)
 	require.NoError(t, err)
@@ -488,7 +468,7 @@ func TestGetOrderIDsWithPricingError_IgnoresNonRecurring(t *testing.T) {
 		Status:    null.StringFrom(common.OrderStatusPaid),
 		Type:      null.StringFrom("one-time"),
 		Flag:      null.StringFrom(common.OrderFlagPricingError),
-	}, "")
+	})
 
 	ids, err := db.GetOrderIDsWithPricingError(ctx)
 	require.NoError(t, err)
@@ -519,14 +499,14 @@ func TestMarkResolvedForRenew_TransitionsPricingErrorToToRenew(t *testing.T) {
 		Status:    null.StringFrom(common.OrderStatusPaid),
 		Type:      null.StringFrom(common.OrderTypeRecurring),
 		Flag:      null.StringFrom(common.OrderFlagPricingError),
-	}, "")
+	})
 	id2 := insertOrder(t, db, ctx, Order{
 		AccountID: null.IntFrom(acc),
 		Amount:    null.Float64From(100),
 		Status:    null.StringFrom(common.OrderStatusNoSuccess),
 		Type:      null.StringFrom(common.OrderTypeRecurring),
 		Flag:      null.StringFrom(common.OrderFlagPricingError),
-	}, "")
+	})
 
 	err := db.MarkResolvedForRenew(ctx, []uint{uint(id1), uint(id2)})
 	require.NoError(t, err)
@@ -546,7 +526,7 @@ func TestMarkResolvedForRenew_LeavesNonPricingErrorFlagsIntact(t *testing.T) {
 		Status:    null.StringFrom(common.OrderStatusPaid),
 		Type:      null.StringFrom(common.OrderTypeRecurring),
 		Flag:      null.StringFrom(common.OrderFlagToRenew),
-	}, "")
+	})
 	// Order with renewed flag — should NOT be changed.
 	renewedID := insertOrder(t, db, ctx, Order{
 		AccountID: null.IntFrom(acc),
@@ -554,7 +534,7 @@ func TestMarkResolvedForRenew_LeavesNonPricingErrorFlagsIntact(t *testing.T) {
 		Status:    null.StringFrom(common.OrderStatusPaid),
 		Type:      null.StringFrom(common.OrderTypeRecurring),
 		Flag:      null.StringFrom(common.OrderFlagRenewed),
-	}, "")
+	})
 	// Order with pricing_error flag — should transition.
 	pricingErrorID := insertOrder(t, db, ctx, Order{
 		AccountID: null.IntFrom(acc),
@@ -562,7 +542,7 @@ func TestMarkResolvedForRenew_LeavesNonPricingErrorFlagsIntact(t *testing.T) {
 		Status:    null.StringFrom(common.OrderStatusPaid),
 		Type:      null.StringFrom(common.OrderTypeRecurring),
 		Flag:      null.StringFrom(common.OrderFlagPricingError),
-	}, "")
+	})
 
 	err := db.MarkResolvedForRenew(ctx, []uint{uint(toRenewID), uint(renewedID), uint(pricingErrorID)})
 	require.NoError(t, err)
@@ -581,7 +561,7 @@ func TestMarkResolvedForRenew_Idempotent(t *testing.T) {
 		Status:    null.StringFrom(common.OrderStatusPaid),
 		Type:      null.StringFrom(common.OrderTypeRecurring),
 		Flag:      null.StringFrom(common.OrderFlagPricingError),
-	}, "")
+	})
 
 	require.NoError(t, db.MarkResolvedForRenew(ctx, []uint{uint(id)}))
 	require.NoError(t, db.MarkResolvedForRenew(ctx, []uint{uint(id)})) // flag already torenew — no-op
@@ -603,7 +583,7 @@ func TestMarkResolvedForRenew_HandlesBatchBoundary(t *testing.T) {
 			Status:    null.StringFrom(common.OrderStatusPaid),
 			Type:      null.StringFrom(common.OrderTypeRecurring),
 			Flag:      null.StringFrom(common.OrderFlagPricingError),
-		}, "")
+		})
 		ids[i] = uint(id)
 	}
 

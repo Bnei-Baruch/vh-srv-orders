@@ -484,7 +484,7 @@ func (o *OrdersAPI) handleTransactionPaid(c *gin.Context) {
 	// at the payment, so ask first: if checkout's notify already confirmed the
 	// payment, the late error is stale and the return is done.
 	if !rp.Error.IsZero() {
-		paid, err := o.paidPayment(c.Request.Context(), rp.ParamX.String)
+		paid, err := o.paidPayment(c.Request.Context(), rp.UserKey.String, rp.ParamX.String)
 		if err != nil {
 			c.Status(http.StatusInternalServerError)
 			_ = c.Error(fmt.Errorf("o.paidPayment: %w", err))
@@ -500,7 +500,7 @@ func (o *OrdersAPI) handleTransactionPaid(c *gin.Context) {
 		// Confirmed already, by checkout's notify or an earlier return, and the
 		// write refused to replace checkout's facts with the browser's. Only an
 		// order an earlier confirm left unsettled is finished.
-		if err := o.settleConfirmed(c.Request.Context(), rp.ParamX.String); err != nil {
+		if err := o.settleConfirmed(c.Request.Context(), rp.UserKey.String, rp.ParamX.String); err != nil {
 			c.Status(http.StatusInternalServerError)
 			_ = c.Error(fmt.Errorf("o.settleConfirmed: %w", err))
 			return

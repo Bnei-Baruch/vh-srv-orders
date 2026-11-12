@@ -106,22 +106,11 @@ func (o *OrdersAPI) respondConfirmError(c *gin.Context, ctx context.Context, req
 // browser return changes none of checkout's facts; only an order left unsettled
 // by an earlier, half-finished confirm is finished.
 func (o *OrdersAPI) confirmCheckoutPayment(ctx context.Context, orderKey, paramX string) (alreadyPaid bool, err error) {
-	orderID, err := keyID(orderKey, "ord")
+	payment, err := o.paymentOfOrder(ctx, orderKey, paramX)
 	if err != nil {
 		return false, err
 	}
-	paymentID, err := keyID(paramX, "m")
-	if err != nil {
-		return false, err
-	}
-
-	payment, err := o.repo.GetPaymentByID(ctx, paymentID)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && payment.OrderID.Int != orderID) {
-		return false, fmt.Errorf("%w: payment %d, order %d", errNoSuchPayment, paymentID, orderID)
-	}
-	if err != nil {
-		return false, fmt.Errorf("o.repo.GetPaymentByID: %w", err)
-	}
+	orderID := payment.OrderID.Int
 	if payment.PaymentStatus.String == common.PaymentStatusSuccess {
 		if err := o.settleOrder(ctx, payment); err != nil {
 			return false, err
@@ -151,7 +140,7 @@ func (o *OrdersAPI) confirmCheckoutPayment(ctx context.Context, orderKey, paramX
 	if errors.Is(err, common.ErrAlreadyPaid) {
 		// A browser return or another notify confirmed it between the check
 		// above and this write. Same as finding it paid above.
-		if err := o.settleConfirmed(ctx, paramX); err != nil {
+		if err := o.settleConfirmed(ctx, orderKey, paramX); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -166,22 +155,43 @@ func (o *OrdersAPI) confirmCheckoutPayment(ctx context.Context, orderKey, paramX
 	return false, nil
 }
 
-// paidPayment returns the payment paramX names when it is marked successful,
-// else nil. An id it cannot parse, or a payment that does not exist, is not
-// paid, and the caller's own checks report it. A failed read is an error, not
-// "not paid": the caller would go on to write the browser's facts over a
-// payment checkout may already have confirmed.
-func (o *OrdersAPI) paidPayment(ctx context.Context, paramX string) (*repo.Payment, error) {
+// paymentOfOrder reads the payment paramX names, and refuses it unless it
+// belongs to the order orderKey names. Every lookup of a payment from a
+// caller's ids goes through here: a caller is checked against the order in
+// user_key, so a payment found from the reference alone could be another
+// member's.
+func (o *OrdersAPI) paymentOfOrder(ctx context.Context, orderKey, paramX string) (*repo.Payment, error) {
+	orderID, err := keyID(orderKey, "ord")
+	if err != nil {
+		return nil, err
+	}
 	paymentID, err := keyID(paramX, "m")
 	if err != nil {
-		return nil, nil
+		return nil, err
 	}
 	payment, err := o.repo.GetPaymentByID(ctx, paymentID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && payment.OrderID.Int != orderID) {
+		return nil, fmt.Errorf("%w: payment %d, order %d", errNoSuchPayment, paymentID, orderID)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("o.repo.GetPaymentByID: %w", err)
+	}
+	return payment, nil
+}
+
+// paidPayment returns the payment paramX names when it belongs to orderKey's
+// order and is marked successful, else nil. Ids it cannot parse, or that name
+// no payment of that order, are not paid, and the caller's own checks report
+// them. A failed read is an error, not "not paid": the caller would go on to
+// write the browser's facts over a payment checkout may already have
+// confirmed.
+func (o *OrdersAPI) paidPayment(ctx context.Context, orderKey, paramX string) (*repo.Payment, error) {
+	payment, err := o.paymentOfOrder(ctx, orderKey, paramX)
+	if errors.Is(err, common.ErrInvalidValues) || errors.Is(err, errNoSuchPayment) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
 	}
 	if payment.PaymentStatus.String != common.PaymentStatusSuccess {
 		return nil, nil
@@ -193,14 +203,10 @@ func (o *OrdersAPI) paidPayment(ctx context.Context, paramX string) (*repo.Payme
 // confirmed. It reads the payment afresh, since whatever copy the caller holds
 // predates that confirm, and reports a failed read instead of treating it as
 // nothing to do.
-func (o *OrdersAPI) settleConfirmed(ctx context.Context, paramX string) error {
-	paymentID, err := keyID(paramX, "m")
+func (o *OrdersAPI) settleConfirmed(ctx context.Context, orderKey, paramX string) error {
+	payment, err := o.paymentOfOrder(ctx, orderKey, paramX)
 	if err != nil {
 		return err
-	}
-	payment, err := o.repo.GetPaymentByID(ctx, paymentID)
-	if err != nil {
-		return fmt.Errorf("o.repo.GetPaymentByID: %w", err)
 	}
 	return o.settleOrder(ctx, payment)
 }
@@ -230,13 +236,16 @@ func (o *OrdersAPI) settleOrder(ctx context.Context, payment *repo.Payment) erro
 // it: "ord-123" or "m-45" followed by this environment's SUFX ("-G1" on dev).
 // An id with another environment's suffix, or anything after the number, is
 // refused, so a dev pair cannot confirm a prod payment with the same numbers.
-// Ids are int4 serials, so the number is parsed to 32 bits and must be positive.
+// The number is plain decimal digits as FormatUint writes them: no sign, no
+// leading zero. Ids are int4 serials, so it must fit in 31 bits and be
+// positive.
 func keyID(key, prefix string) (int, error) {
 	suffix := os.Getenv("SUFX")
 	n, okPrefix := strings.CutPrefix(key, prefix+"-")
 	n, okSuffix := strings.CutSuffix(n, suffix)
+	digits := n != "" && n[0] != '0' && strings.Trim(n, "0123456789") == ""
 	id, err := strconv.ParseInt(n, 10, 32)
-	if !okPrefix || !okSuffix || err != nil || id <= 0 {
+	if !okPrefix || !okSuffix || !digits || err != nil || id <= 0 {
 		return 0, fmt.Errorf("%w: %q is not a %s-<id>%s id", common.ErrInvalidValues, key, prefix, suffix)
 	}
 	return int(id), nil

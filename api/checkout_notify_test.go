@@ -789,18 +789,20 @@ func Test_UpdatePayment_creates_a_missing_pelecard_row(t *testing.T) {
 	_, err := pool.Exec(ctx, `DELETE FROM payments_pelecard WHERE payment_id = $1`, p.paymentID)
 	require.NoError(t, err)
 	record := gatewayRecord(p)
+	record.CreditCardCompanyIssuer = "2"
 
 	_, err = a.repo.UpdatePayment(ctx, paidFromGateway(&record))
 	require.NoError(t, err)
 
 	var rows int
-	var token, authNo string
+	var token, authNo, issuer string
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT count(*) OVER (), COALESCE(pelecard_token, ''), COALESCE(auth_no, '')
-		FROM payments_pelecard WHERE payment_id = $1`, p.paymentID).Scan(&rows, &token, &authNo))
+		SELECT count(*) OVER (), COALESCE(pelecard_token, ''), COALESCE(auth_no, ''), COALESCE(cc_company_issuer, '')
+		FROM payments_pelecard WHERE payment_id = $1`, p.paymentID).Scan(&rows, &token, &authNo, &issuer))
 	assert.Equal(t, 1, rows)
 	assert.Equal(t, "card-token", token)
 	assert.Equal(t, "0123456", authNo)
+	assert.Equal(t, "2", issuer)
 	assert.Equal(t, "success", readPaymentState(t, a, p).paymentStatus)
 }
 

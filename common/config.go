@@ -54,6 +54,15 @@ type envConfig struct {
 	PriorityBaseURL  string `envconfig:"PRIORITY_BASE_URL"`
 	PriorityUsername string `envconfig:"PRIORITY_USERNAME"`
 	PriorityPassword string `envconfig:"PRIORITY_PASSWORD"`
+
+	// CheckoutNotifyHMACKeys verify the signature external_payments puts on
+	// POST /checkout/notify: the same value as its NOTIFY_HMAC_KEY_<CLIENT>.
+	// Comma-separated, so a new key can be added before the old is dropped.
+	CheckoutNotifyHMACKeys []string `envconfig:"CHECKOUT_NOTIFY_HMAC_KEY"`
+	// CheckoutNotifyHMACEnforce refuses a notify whose signature is missing or
+	// wrong. Off, a bad signature is only logged: the switch-over step, since a
+	// refused notify is one checkout never retries.
+	CheckoutNotifyHMACEnforce bool `envconfig:"CHECKOUT_NOTIFY_HMAC_ENFORCE" default:"false"`
 }
 
 var Config = new(envConfig)

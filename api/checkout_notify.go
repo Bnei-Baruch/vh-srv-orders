@@ -1,14 +1,20 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
@@ -38,9 +44,11 @@ type checkoutNotification struct {
 }
 
 // handleCheckoutNotify is called by external_payments, server to server, when a
-// payment request turns valid. Unauthenticated by design: the body is two ids
-// and nothing in it is trusted. The facts come from asking checkout back, with
-// this service's bearer.
+// payment request turns valid. No Keycloak identity: the body is two ids and
+// nothing in it is trusted. The facts come from asking checkout back, with
+// this service's bearer. external_payments signs each notice with a shared
+// HMAC key (see verifyNotifySignature); with CHECKOUT_NOTIFY_HMAC_ENFORCE a
+// notice without a valid signature is refused before any lookup.
 //
 // The status tells checkout whether to retry: 200 done (or done before), 4xx
 // other than 409 never, 409 and 5xx later. The bodies say nothing more: the
@@ -48,6 +56,24 @@ type checkoutNotification struct {
 // unknown from mismatched would let anyone map orders and payments. The
 // details go to the log.
 func (o *OrdersAPI) handleCheckoutNotify(c *gin.Context) {
+	// The signature covers the exact bytes, so read them before binding.
+	raw, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, maxNotifyBody))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, notifyRefused)
+		return
+	}
+	if err := verifyNotifySignature(raw, c.GetHeader("X-Notify-Timestamp"), c.GetHeader("X-Notify-Signature"),
+		common.Config.CheckoutNotifyHMACKeys, time.Now()); err != nil {
+		log := utils.LogFor(c.Request.Context()).With(slog.Any("err", err))
+		if common.Config.CheckoutNotifyHMACEnforce {
+			log.Warn("checkout notify refused: signature")
+			c.JSON(http.StatusUnauthorized, notifyRefused)
+			return
+		}
+		log.Warn("checkout notify: signature would be refused")
+	}
+	c.Request.Body = io.NopCloser(bytes.NewReader(raw))
+
 	var req checkoutNotification
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, notifyRefused)
@@ -70,6 +96,58 @@ func (o *OrdersAPI) handleCheckoutNotify(c *gin.Context) {
 	utils.LogFor(ctx).Info("checkout notify", slog.String("user_key", req.UserKey),
 		slog.String("reference", req.Reference), slog.String("status", status))
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+// maxNotifyBody bounds what an unauthenticated caller can make us read. A
+// notice is two short ids.
+const maxNotifyBody = 4 << 10
+
+// notifyMaxSkew is how far a signed timestamp may be from now. Retries are
+// signed afresh, so only a replayed request is ever this old.
+const notifyMaxSkew = 5 * time.Minute
+
+var (
+	errNotifyNoKey     = errors.New("no CHECKOUT_NOTIFY_HMAC_KEY configured")
+	errNotifyUnsigned  = errors.New("no signature")
+	errNotifyStale     = errors.New("signature timestamp too old or in the future")
+	errNotifyBadFormat = errors.New("signature not in the v1=<hex> form")
+	errNotifyMismatch  = errors.New("signature does not match")
+)
+
+// verifyNotifySignature checks external_payments' signature on a notice:
+// X-Notify-Signature is v1=hex(HMAC-SHA256(key, X-Notify-Timestamp + "." +
+// body)) under any of keys, and the timestamp is within notifyMaxSkew of now.
+func verifyNotifySignature(body []byte, ts, sig string, keys []string, now time.Time) error {
+	if len(keys) == 0 {
+		return errNotifyNoKey
+	}
+	if ts == "" || sig == "" {
+		return errNotifyUnsigned
+	}
+	secs, err := strconv.ParseInt(ts, 10, 64)
+	if err != nil {
+		return errNotifyStale
+	}
+	if d := now.Sub(time.Unix(secs, 0)); d > notifyMaxSkew || d < -notifyMaxSkew {
+		return errNotifyStale
+	}
+	hexSig, ok := strings.CutPrefix(sig, "v1=")
+	got, err := hex.DecodeString(hexSig)
+	if !ok || err != nil {
+		return errNotifyBadFormat
+	}
+	for _, key := range keys {
+		if key == "" {
+			continue
+		}
+		mac := hmac.New(sha256.New, []byte(key))
+		mac.Write([]byte(ts + "."))
+		mac.Write(body)
+		if hmac.Equal(got, mac.Sum(nil)) {
+			return nil
+		}
+	}
+	return errNotifyMismatch
 }
 
 // notifyRefused is the one body every 4xx answer carries.

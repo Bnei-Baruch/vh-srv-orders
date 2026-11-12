@@ -350,35 +350,36 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 	}
 
 	if req.Success.String == "1" {
+		// A browser return can send a field explicitly empty, which would be
+		// stored as ''; checkout's notify sends NULL for it. Every field is
+		// taken through blankAsNull so both paths store the same.
 		p.PaymentStatus = null.NewString("success", true)
 		p.PaymentType = null.StringFrom(common.PaymentTypePelecard)
 		p.ParamX = req.ParamX
-		p.AuthNo = req.AuthNo
-		p.ConfirmationKey = req.ConfirmationKey
+		p.AuthNo = blankAsNull(req.AuthNo)
+		p.ConfirmationKey = blankAsNull(req.ConfirmationKey)
 		p.Success = req.Success
-		p.PelecardToken = req.Token
-		p.TransactionID = req.TransactionID
-		p.CCBrand = req.CCBrand
-		p.CardHebrewName = req.CardHebrewName
-		p.CCAbroadCard = req.CCAbroadCard
-		// A browser return binds an absent company as "", which would be
-		// stored as ''; checkout's notify already sends NULL for it.
+		p.PelecardToken = blankAsNull(req.Token)
+		p.TransactionID = blankAsNull(req.TransactionID)
+		p.CCBrand = blankAsNull(req.CCBrand)
+		p.CardHebrewName = blankAsNull(req.CardHebrewName)
+		p.CCAbroadCard = blankAsNull(req.CCAbroadCard)
 		p.CCCompanyClearer = blankAsNull(req.CCCompanyClearer)
 		p.CCCompanyIssuer = blankAsNull(req.CCCompanyIssuer)
-		p.CreditType = req.CreditType
-		p.CCExpDate = req.CCExpDate
-		p.CCNumber = req.CCNumber
-		p.DebitCode = req.DebitCode
-		p.DebitCurrency = req.DebitCurrency
-		p.DebitTotal = req.DebitTotal
-		p.DebitType = req.DebitType
-		p.FirstPaymentTotal = req.FirstPaymentTotal
-		p.FixedPaymentTotal = req.FixedPaymentTotal
-		p.TotalPayments = req.TotalPayments
-		p.JParam = req.JParam
-		p.TransactionInitTime = req.TransactionInitTime
-		p.TransactionUpdateTime = req.TransactionUpdateTime
-		p.VoucherID = req.VoucherID
+		p.CreditType = blankAsNull(req.CreditType)
+		p.CCExpDate = blankAsNull(req.CCExpDate)
+		p.CCNumber = blankAsNull(req.CCNumber)
+		p.DebitCode = blankAsNull(req.DebitCode)
+		p.DebitCurrency = blankAsNull(req.DebitCurrency)
+		p.DebitTotal = blankAsNull(req.DebitTotal)
+		p.DebitType = blankAsNull(req.DebitType)
+		p.FirstPaymentTotal = blankAsNull(req.FirstPaymentTotal)
+		p.FixedPaymentTotal = blankAsNull(req.FixedPaymentTotal)
+		p.TotalPayments = blankAsNull(req.TotalPayments)
+		p.JParam = blankAsNull(req.JParam)
+		p.TransactionInitTime = blankAsNull(req.TransactionInitTime)
+		p.TransactionUpdateTime = blankAsNull(req.TransactionUpdateTime)
+		p.VoucherID = blankAsNull(req.VoucherID)
 	} else {
 		p.PaymentStatus = null.NewString("failed", true)
 		p.ErrorMsg = null.NewString("Failed", true) // TODO: improve

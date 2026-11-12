@@ -6,6 +6,11 @@ var (
 	ErrInvalidValues  = fmt.Errorf("invalid values")
 	ErrNoRowsAffected = fmt.Errorf("no rows affected")
 
+	// ErrAlreadyPaid: the payment was already marked successful, so the write
+	// was not made. A confirmed payment is written once; whoever comes second
+	// (a repeated notify, a late browser return, a racing one) changes nothing.
+	ErrAlreadyPaid = fmt.Errorf("payment already marked successful")
+
 	// ErrAccountKeyTaken: the keycloak id already has an account, and
 	// accounts_userkey_uniq allows one per key.
 	ErrAccountKeyTaken = fmt.Errorf("an account already exists for this keycloak id")

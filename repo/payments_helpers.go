@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/volatiletech/null/v9"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
@@ -284,18 +285,36 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 		return nil, fmt.Errorf("req.Error: %s", req.Error.String)
 	}
 
-	orderid, err := strconv.ParseUint(strings.Split(req.UserKey.String, "-")[1], 10, 0)
+	// Ids are int4: parsing within 32 bits makes the int conversion exact.
+	parsedOrder, err := strconv.ParseInt(strings.Split(req.UserKey.String, "-")[1], 10, 32)
 	if err != nil {
-		return nil, fmt.Errorf("strconv.ParseUint [user_key]: %w", err)
+		return nil, fmt.Errorf("strconv.ParseInt [user_key]: %w", err)
 	}
-	paymentid, err := strconv.ParseUint(strings.Split(req.ParamX.String, "-")[1], 10, 0)
+	parsedPayment, err := strconv.ParseInt(strings.Split(req.ParamX.String, "-")[1], 10, 32)
 	if err != nil {
-		return nil, fmt.Errorf("strconv.ParseUint [additional_details_param_x]: %w", err)
+		return nil, fmt.Errorf("strconv.ParseInt [additional_details_param_x]: %w", err)
 	}
+	orderid, paymentid := int(parsedOrder), int(parsedPayment)
+
+	// One transaction, the payment row locked: the status check, the payments
+	// write and the payments_pelecard write happen together or not at all. A
+	// successful payment is then written once — a notify and a browser return
+	// racing each other cannot both write, and a late success=0 cannot flip it
+	// to failed — and a failure between the two writes leaves neither, so a
+	// retry writes both.
+	tx, err := o.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("o.pool.Begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	var p Payment
-	if err := o.pool.QueryRow(ctx, `SELECT 
+	// Amount and Ordkey are read for writePelecardFacts: a missing
+	// payments_pelecard row is created from this payment.
+	if err := tx.QueryRow(ctx, `SELECT
 	"OrderID",
+	"Amount",
+	"Ordkey",
 	"PaymentStatus",
 	"PaymentType",
 	"ParamX",
@@ -321,43 +340,50 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 	j_param,
 	"TransactionInitTime",
 	"TransactionUpdateTime",
-	"VoucherID" FROM payments WHERE "OrderID"=$1 AND id=$2`, uint(orderid), uint(paymentid)).Scan(
-		&p.OrderID, &p.PaymentStatus, &p.PaymentType, &p.ParamX, &p.AuthNo, &p.ConfirmationKey, &p.Success,
+	"VoucherID" FROM payments WHERE "OrderID"=$1 AND id=$2 FOR UPDATE`, orderid, paymentid).Scan(
+		&p.OrderID, &p.Amount, &p.Ordkey, &p.PaymentStatus, &p.PaymentType, &p.ParamX, &p.AuthNo, &p.ConfirmationKey, &p.Success,
 		&p.PelecardToken, &p.TransactionID, &p.CCBrand, &p.CardHebrewName, &p.CCAbroadCard,
 		&p.CCCompanyClearer, &p.CreditType, &p.CCExpDate, &p.CCNumber, &p.DebitCode, &p.DebitCurrency,
 		&p.DebitTotal, &p.DebitType, &p.FirstPaymentTotal, &p.FixedPaymentTotal, &p.TotalPayments,
 		&p.JParam, &p.TransactionInitTime, &p.TransactionUpdateTime, &p.VoucherID,
 	); err != nil {
-		return nil, fmt.Errorf("o.pool.QueryRow.Scan [payment]: %w", err)
+		return nil, fmt.Errorf("tx.QueryRow.Scan [payment]: %w", err)
+	}
+	if p.PaymentStatus.String == common.PaymentStatusSuccess {
+		return nil, common.ErrAlreadyPaid
 	}
 
 	if req.Success.String == "1" {
+		// A browser return can send a field explicitly empty, which would be
+		// stored as ''; checkout's notify sends NULL for it. Every field is
+		// taken through blankAsNull so both paths store the same.
 		p.PaymentStatus = null.NewString("success", true)
 		p.PaymentType = null.StringFrom(common.PaymentTypePelecard)
 		p.ParamX = req.ParamX
-		p.AuthNo = req.AuthNo
-		p.ConfirmationKey = req.ConfirmationKey
+		p.AuthNo = blankAsNull(req.AuthNo)
+		p.ConfirmationKey = blankAsNull(req.ConfirmationKey)
 		p.Success = req.Success
-		p.PelecardToken = req.Token
-		p.TransactionID = req.TransactionID
-		p.CCBrand = req.CCBrand
-		p.CardHebrewName = req.CardHebrewName
-		p.CCAbroadCard = req.CCAbroadCard
-		p.CCCompanyClearer = req.CCCompanyClearer
-		p.CreditType = req.CreditType
-		p.CCExpDate = req.CCExpDate
-		p.CCNumber = req.CCNumber
-		p.DebitCode = req.DebitCode
-		p.DebitCurrency = req.DebitCurrency
-		p.DebitTotal = req.DebitTotal
-		p.DebitType = req.DebitType
-		p.FirstPaymentTotal = req.FirstPaymentTotal
-		p.FixedPaymentTotal = req.FixedPaymentTotal
-		p.TotalPayments = req.TotalPayments
-		p.JParam = req.JParam
-		p.TransactionInitTime = req.TransactionInitTime
-		p.TransactionUpdateTime = req.TransactionUpdateTime
-		p.VoucherID = req.VoucherID
+		p.PelecardToken = blankAsNull(req.Token)
+		p.TransactionID = blankAsNull(req.TransactionID)
+		p.CCBrand = blankAsNull(req.CCBrand)
+		p.CardHebrewName = blankAsNull(req.CardHebrewName)
+		p.CCAbroadCard = blankAsNull(req.CCAbroadCard)
+		p.CCCompanyClearer = blankAsNull(req.CCCompanyClearer)
+		p.CCCompanyIssuer = blankAsNull(req.CCCompanyIssuer)
+		p.CreditType = blankAsNull(req.CreditType)
+		p.CCExpDate = blankAsNull(req.CCExpDate)
+		p.CCNumber = blankAsNull(req.CCNumber)
+		p.DebitCode = blankAsNull(req.DebitCode)
+		p.DebitCurrency = blankAsNull(req.DebitCurrency)
+		p.DebitTotal = blankAsNull(req.DebitTotal)
+		p.DebitType = blankAsNull(req.DebitType)
+		p.FirstPaymentTotal = blankAsNull(req.FirstPaymentTotal)
+		p.FixedPaymentTotal = blankAsNull(req.FixedPaymentTotal)
+		p.TotalPayments = blankAsNull(req.TotalPayments)
+		p.JParam = blankAsNull(req.JParam)
+		p.TransactionInitTime = blankAsNull(req.TransactionInitTime)
+		p.TransactionUpdateTime = blankAsNull(req.TransactionUpdateTime)
+		p.VoucherID = blankAsNull(req.VoucherID)
 	} else {
 		p.PaymentStatus = null.NewString("failed", true)
 		p.ErrorMsg = null.NewString("Failed", true) // TODO: improve
@@ -365,21 +391,46 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 	}
 
 	toUpdate, toUpdateArgs := preparePaymentUpdateQuery(p)
-	_, err = o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=%d`, toUpdate, uint(paymentid)), toUpdateArgs...)
-	if err != nil {
-		return nil, fmt.Errorf("o.pool.Exec [update payment]: %w", err)
+	// The id is bound like every other value, not formatted into the SQL.
+	// The row is held FOR UPDATE above, so this write finds it.
+	if _, err := tx.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=$%d`, toUpdate, len(toUpdateArgs)+1),
+		append(toUpdateArgs, paymentid)...); err != nil {
+		return nil, fmt.Errorf("tx.Exec [update payment]: %w", err)
 	}
 
-	toUpdatePelecard, toUpdateArgsPeleCard := preparePelecardPaymentUpdateViaPaymentStructQuery(p)
-	_, pelecardErr := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdatePelecard,
-		uint(paymentid)), toUpdateArgsPeleCard...)
-	if pelecardErr != nil {
-		return nil, fmt.Errorf("o.pool.Exec [update pelecard]: %w", err)
+	if err := writePelecardFacts(ctx, tx, p, paymentid); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("tx.Commit: %w", err)
 	}
 
 	o.emitEvent(ctx, events.TypeUpdatePayment, map[string]interface{}{"payment_id": paymentid})
 
 	return &p, nil
+}
+
+// writePelecardFacts stores the gateway's facts in the payment's
+// payments_pelecard row, inside the payment's transaction. Older payments
+// (and a few recent ones) have no such row; one is created rather than
+// committing a confirmed payment without its card facts.
+func writePelecardFacts(ctx context.Context, tx pgx.Tx, p Payment, paymentID int) error {
+	toUpdate, args := preparePelecardPaymentUpdateViaPaymentStructQuery(p)
+	tag, err := tx.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=$%d`, toUpdate, len(args)+1),
+		append(args, int64(paymentID))...)
+	if err != nil {
+		return fmt.Errorf("tx.Exec [update pelecard]: %w", err)
+	}
+	if tag.RowsAffected() > 0 {
+		return nil
+	}
+	columns, placeholders, createArgs := preparePelecardPaymentCreateQuery(p, paymentID)
+	if _, err := tx.Exec(ctx, fmt.Sprintf(`INSERT INTO payments_pelecard (%s) VALUES (%s)`, columns, placeholders),
+		createArgs...); err != nil {
+		return fmt.Errorf("tx.Exec [insert pelecard]: %w", err)
+	}
+	return nil
 }
 
 func (o *OrdersDB) createOfflinePayment(ctx context.Context, req RequestOrder, paymentID int, status string) error {
@@ -1656,4 +1707,13 @@ func (o *OrdersDB) FetchPaymentByParamX(ctx context.Context, paramX string) (*Pa
 	}
 
 	return &p, nil
+}
+
+// blankAsNull treats an empty string as absent, so it is left unwritten
+// rather than stored as ''.
+func blankAsNull(s null.String) null.String {
+	if s.String == "" {
+		return null.String{}
+	}
+	return s
 }

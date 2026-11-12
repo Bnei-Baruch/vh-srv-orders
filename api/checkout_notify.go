@@ -137,6 +137,14 @@ func (o *OrdersAPI) confirmCheckoutPayment(ctx context.Context, orderKey, paramX
 	}
 
 	paid, err := o.repo.UpdatePayment(ctx, paidFromGateway(facts))
+	if errors.Is(err, common.ErrAlreadyPaid) {
+		// A browser return or another notify confirmed it between the check
+		// above and this write. Same as finding it paid above.
+		if err := o.settleConfirmed(ctx, orderKey, paramX); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
 	if err != nil {
 		return false, fmt.Errorf("o.repo.UpdatePayment: %w", err)
 	}
@@ -189,6 +197,18 @@ func (o *OrdersAPI) paidPayment(ctx context.Context, orderKey, paramX string) (*
 		return nil, nil
 	}
 	return payment, nil
+}
+
+// settleConfirmed finishes the order of a payment the write found already
+// confirmed. It reads the payment afresh, since whatever copy the caller holds
+// predates that confirm, and reports a failed read instead of treating it as
+// nothing to do.
+func (o *OrdersAPI) settleConfirmed(ctx context.Context, orderKey, paramX string) error {
+	payment, err := o.paymentOfOrder(ctx, orderKey, paramX)
+	if err != nil {
+		return err
+	}
+	return o.settleOrder(ctx, payment)
 }
 
 // settleOrder finishes the order of a successful payment when an earlier
@@ -260,6 +280,7 @@ func paidFromGateway(facts *pelecard.GatewayPayment) repo.RequestPaid {
 		CCAbroadCard:          str(facts.CreditCardAbroadCard),
 		CCBrand:               str(facts.CreditCardBrand),
 		CCCompanyClearer:      str(facts.CreditCardCompanyClearer),
+		CCCompanyIssuer:       str(facts.CreditCardCompanyIssuer),
 		CreditType:            str(facts.CreditType),
 		CCNumber:              str(facts.CreditCardNumber),
 		CCExpDate:             str(facts.CreditCardExpDate),

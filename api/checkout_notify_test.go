@@ -372,3 +372,65 @@ func Test_paid_return_when_the_payment_cannot_be_read_writes_nothing(t *testing.
 
 	assert.Equal(t, paymentState{"success", "card-token", "0123456", "paid"}, readPaymentState(t, a, p))
 }
+
+// A member sends their own order's user_key with another order's payment. The
+// payment must not be found from the reference alone: the other order stays
+// unsettled, and the answer does not depend on whether that payment succeeded.
+func Test_paid_return_with_another_orders_payment_is_refused(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	mine := seedPendingPayment(t, a, "regular")
+	theirs := seedPendingPayment(t, a, "regular")
+	_, err := a.testPool(t).Exec(context.Background(),
+		`UPDATE accounts SET "UserKey" = $1 WHERE id = (SELECT "AccountID" FROM orders WHERE id = $2)`, USER_KEY, mine.orderID)
+	require.NoError(t, err)
+	body := gin.H{"user_key": mine.orderKey, "additional_details_param_x": theirs.paramX, "success": "1"}
+
+	// Pending: refused.
+	POST(t, a, "/orders/paid", body, http.StatusUnprocessableEntity)
+
+	// Succeeded, order left unsettled: refused the same way, nothing settled.
+	writeHalfConfirm(t, a, theirs)
+	POST(t, a, "/orders/paid", body, http.StatusUnprocessableEntity)
+	assert.Equal(t, "new", readPaymentState(t, a, theirs).orderStatus)
+}
+
+// The number is written by FormatUint, so a sign or a leading zero is not an
+// id this service built; int4 ends at 2^31-1.
+func Test_keyID_takes_only_plain_digits_within_int4(t *testing.T) {
+	t.Setenv("SUFX", "")
+	id, err := keyID("ord-2147483647", "ord")
+	require.NoError(t, err)
+	assert.Equal(t, 2147483647, id)
+	for _, key := range []string{"ord-2147483648", "ord-+5", "ord-007", "ord-0", "ord- 5", "ord-5 ", "ord-"} {
+		_, err := keyID(key, "ord")
+		assert.ErrorIs(t, err, common.ErrInvalidValues, key)
+	}
+}
+
+// Every route registered after auth is behind it; only the notify is not.
+// Walks the router, so a route added later is covered without editing this.
+func Test_every_route_but_the_notify_is_behind_auth(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	a.gEngine = gin.New()
+	a.initRoutes(func(c *gin.Context) { c.AbortWithStatus(http.StatusUnauthorized) })
+
+	routes := a.gEngine.Routes()
+	require.NotEmpty(t, routes)
+	for _, r := range routes {
+		path := r.Path
+		for _, seg := range strings.Split(r.Path, "/") {
+			if strings.HasPrefix(seg, ":") || strings.HasPrefix(seg, "*") {
+				path = strings.Replace(path, seg, "1", 1)
+			}
+		}
+		w := httptest.NewRecorder()
+		a.gEngine.ServeHTTP(w, httptest.NewRequest(r.Method, path, strings.NewReader("{}")))
+		if r.Path == "/checkout/notify" {
+			assert.NotEqual(t, http.StatusUnauthorized, w.Code, "the notify must stay public")
+			continue
+		}
+		assert.Equal(t, http.StatusUnauthorized, w.Code, "%s %s", r.Method, r.Path)
+	}
+}

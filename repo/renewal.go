@@ -103,10 +103,8 @@ func (o *OrdersDB) CreateRenewalPayment(ctx context.Context, data *RenewalData, 
 		p.CCExpDate = data.Card.CCExpDate
 	}
 
-	toUpdate, toUpdateArgs := preparePaymentUpdateQuery(p)
-	_, err = o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=%d`, toUpdate, p.ID), toUpdateArgs...)
-	if err != nil {
-		return nil, fmt.Errorf("o.pool.Exec [update payment]: %w", err)
+	if err := updatePaymentRow(ctx, o.pool, p, p.ID); err != nil {
+		return nil, fmt.Errorf("updatePaymentRow: %w", err)
 	}
 
 	return &p, nil
@@ -129,19 +127,8 @@ func (o *OrdersDB) FinalizeRenewal(ctx context.Context, orderID uint, payment *P
 		}
 	}
 
-	toUpdate, toUpdateArgs := preparePaymentUpdateQuery(*payment)
-	_, err = tx.Exec(ctx,
-		fmt.Sprintf(`UPDATE payments SET %s WHERE id=%d`, toUpdate, payment.ID), toUpdateArgs...)
-	if err != nil {
-		return fmt.Errorf("%w: tx.Exec [update payment]: %w", common.ErrPostPayment, err)
-	}
-
-	toUpdatePelecard, toUpdateArgsPeleCard := preparePelecardPaymentUpdateViaPaymentStructQuery(*payment)
-	_, err = tx.Exec(ctx,
-		fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdatePelecard, payment.ID),
-		toUpdateArgsPeleCard...)
-	if err != nil {
-		return fmt.Errorf("%w: tx.Exec [update pelecard_payment]: %w", common.ErrPostPayment, err)
+	if err := writePaymentFacts(ctx, tx, *payment, payment.ID); err != nil {
+		return fmt.Errorf("%w: writePaymentFacts: %w", common.ErrPostPayment, err)
 	}
 
 	now := time.Now()

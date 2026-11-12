@@ -1,16 +1,22 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -358,6 +364,126 @@ func Test_keyID_reads_only_this_environments_ids(t *testing.T) {
 	id, err = keyID("m-7", "m")
 	require.NoError(t, err)
 	assert.Equal(t, 7, id)
+}
+
+// Known answer shared with external_payments' notify tests:
+// printf '1.{}' | openssl dgst -sha256 -hmac key
+const knownNotifySig = "v1=1ba6b8171186efc613e8bcc0cbdab2748f24984d7c5a84faa2637afa0e40d224"
+
+func Test_verifyNotifySignature(t *testing.T) {
+	at := time.Unix(1, 0)
+	body := []byte("{}")
+	for name, tc := range map[string]struct {
+		body    []byte
+		ts, sig string
+		keys    []string
+		now     time.Time
+		want    error
+	}{
+		"valid":                {body, "1", knownNotifySig, []string{"key"}, at, nil},
+		"second key, rotation": {body, "1", knownNotifySig, []string{"new", "key"}, at, nil},
+		"spaces after a comma": {body, "1", knownNotifySig, []string{"new", " key "}, at, nil},
+		"only blank keys":      {body, "1", knownNotifySig, []string{" ", ""}, at, errNotifyNoKey},
+		"edge of the window":   {body, "1", knownNotifySig, []string{"key"}, at.Add(notifyMaxSkew), nil},
+		"no key configured":    {body, "1", knownNotifySig, nil, at, errNotifyNoKey},
+		"no signature":         {body, "1", "", []string{"key"}, at, errNotifyUnsigned},
+		"no timestamp":         {body, "", knownNotifySig, []string{"key"}, at, errNotifyUnsigned},
+		"replayed later":       {body, "1", knownNotifySig, []string{"key"}, at.Add(notifyMaxSkew + time.Second), errNotifyStale},
+		"from the future":      {body, "1", knownNotifySig, []string{"key"}, at.Add(-notifyMaxSkew - time.Second), errNotifyStale},
+		"timestamp not a num":  {body, "x", knownNotifySig, []string{"key"}, at, errNotifyStale},
+		"no v1 prefix":         {body, "1", knownNotifySig[3:], []string{"key"}, at, errNotifyBadFormat},
+		"not hex":              {body, "1", "v1=zz", []string{"key"}, at, errNotifyBadFormat},
+		"wrong key":            {body, "1", knownNotifySig, []string{"other"}, at, errNotifyMismatch},
+		"body changed":         {[]byte(`{"a":1}`), "1", knownNotifySig, []string{"key"}, at, errNotifyMismatch},
+		"timestamp changed":    {body, "2", knownNotifySig, []string{"key"}, at, errNotifyMismatch},
+	} {
+		t.Run(name, func(t *testing.T) {
+			assert.ErrorIs(t, verifyNotifySignature(tc.body, tc.ts, tc.sig, tc.keys, tc.now), tc.want)
+			if tc.want == nil {
+				assert.NoError(t, verifyNotifySignature(tc.body, tc.ts, tc.sig, tc.keys, tc.now))
+			}
+		})
+	}
+}
+
+func signNotify(key string, ts int64, body []byte) (string, string) {
+	t := strconv.FormatInt(ts, 10)
+	mac := hmac.New(sha256.New, []byte(key))
+	mac.Write([]byte(t + "."))
+	mac.Write(body)
+	return t, "v1=" + hex.EncodeToString(mac.Sum(nil))
+}
+
+func enforceNotifyHMAC(t *testing.T, keys ...string) {
+	t.Helper()
+	oldKeys, oldEnforce := common.Config.CheckoutNotifyHMACKeys, common.Config.CheckoutNotifyHMACEnforce
+	common.Config.CheckoutNotifyHMACKeys, common.Config.CheckoutNotifyHMACEnforce = keys, true
+	t.Cleanup(func() {
+		common.Config.CheckoutNotifyHMACKeys, common.Config.CheckoutNotifyHMACEnforce = oldKeys, oldEnforce
+	})
+}
+
+func postNotify(a *App, p pendingPayment, headers map[string]string) *httptest.ResponseRecorder {
+	raw, _ := json.Marshal(gin.H{"user_key": p.orderKey, "reference": p.paramX})
+	r := httptest.NewRequest(http.MethodPost, "/checkout/notify", bytes.NewReader(raw))
+	r.Header.Set("Content-Type", "application/json")
+	for k, v := range headers {
+		r.Header.Set(k, v)
+	}
+	w := httptest.NewRecorder()
+	a.gEngine.ServeHTTP(w, r)
+	return w
+}
+
+// Enforced: an unsigned or wrongly signed notice is refused before any lookup,
+// with the same body as every other refusal.
+func Test_checkout_notify_enforced_refuses_a_bad_signature(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	enforceNotifyHMAC(t, "k3y")
+	p := seedPendingPayment(t, a, "regular")
+	calls := stubCheckout(t, a, http.StatusOK, gatewayRecord(p))
+	raw, _ := json.Marshal(gin.H{"user_key": p.orderKey, "reference": p.paramX})
+	ts, wrong := signNotify("not-the-key", time.Now().Unix(), raw)
+
+	for name, h := range map[string]map[string]string{
+		"unsigned":  nil,
+		"wrong key": {"X-Notify-Timestamp": ts, "X-Notify-Signature": wrong},
+	} {
+		w := postNotify(a, p, h)
+		assert.Equal(t, http.StatusUnauthorized, w.Code, name)
+		assert.JSONEq(t, `{"error":"cannot confirm this payment"}`, w.Body.String(), name)
+	}
+	assert.Empty(t, calls())
+	assert.Equal(t, "pending", readPaymentState(t, a, p).paymentStatus)
+}
+
+func Test_checkout_notify_enforced_accepts_a_signed_notice(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	enforceNotifyHMAC(t, "k3y")
+	p := seedPendingPayment(t, a, "regular")
+	stubCheckout(t, a, http.StatusOK, gatewayRecord(p))
+	raw, _ := json.Marshal(gin.H{"user_key": p.orderKey, "reference": p.paramX})
+	ts, sig := signNotify("k3y", time.Now().Unix(), raw)
+
+	w := postNotify(a, p, map[string]string{"X-Notify-Timestamp": ts, "X-Notify-Signature": sig})
+
+	assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, "paid", readPaymentState(t, a, p).orderStatus)
+}
+
+// Not enforced (the switch-over step): an unsigned notice is still confirmed.
+func Test_checkout_notify_not_enforced_confirms_an_unsigned_notice(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	enforceNotifyHMAC(t, "k3y")
+	common.Config.CheckoutNotifyHMACEnforce = false
+	p := seedPendingPayment(t, a, "regular")
+	stubCheckout(t, a, http.StatusOK, gatewayRecord(p))
+
+	assert.Equal(t, http.StatusOK, postNotify(a, p, nil).Code)
+	assert.Equal(t, "paid", readPaymentState(t, a, p).orderStatus)
 }
 
 // If the payment cannot be read, the browser return stops with 500. Treating

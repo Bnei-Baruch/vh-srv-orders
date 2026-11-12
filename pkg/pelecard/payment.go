@@ -56,7 +56,8 @@ type GatewayPayment struct {
 
 // paymentReadTimeout bounds one payment read. The client's own timeout is
 // sized for charges, which wait on the card network; this is a database read.
-const paymentReadTimeout = 15 * time.Second
+// A variable only so a test can shorten it.
+var paymentReadTimeout = 15 * time.Second
 
 // GetPayment asks external_payments what the gateway said about one payment,
 // so this service does not have to take the facts from the browser.

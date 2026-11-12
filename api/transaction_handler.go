@@ -462,10 +462,11 @@ func (o *OrdersAPI) handleTransactionPaid(c *gin.Context) {
 		return
 	}
 	// Both ids must be in exactly the form this service builds for payment
-	// pages (see keyID), before anything reads them. The ownership check, the already-paid guard and
-	// UpdatePayment each parse them; if one accepted a form another refused
-	// ("ord-1-x", "ord-01"), the guard could be skipped while the write still
-	// found the payment, and the browser's facts would replace checkout's.
+	// pages (see keyID), before anything reads them. The ownership check,
+	// the already-paid lookup for a return carrying an error, and UpdatePayment
+	// (whose status check is the guard for every other return) each parse them;
+	// if one accepted a form another refused ("ord-1-x", "ord-01"), a check
+	// could miss the payment the write still found.
 	orderid, err := keyID(rp.UserKey.String, "ord")
 	if err == nil {
 		_, err = keyID(rp.ParamX.String, "m")
@@ -487,25 +488,34 @@ func (o *OrdersAPI) handleTransactionPaid(c *gin.Context) {
 			return
 		}
 	}
-	paid, err := o.paidPayment(c.Request.Context(), rp.UserKey.String, rp.ParamX.String)
-	if err != nil {
-		c.Status(http.StatusInternalServerError)
-		_ = c.Error(fmt.Errorf("o.paidPayment: %w", err))
-		return
-	}
-	if paid != nil {
-		// Confirmed already, by checkout's notify or an earlier return. The
-		// browser's copy of the facts must not overwrite checkout's; only an
-		// order an earlier confirm left unsettled is finished.
-		if err := o.settleOrder(c.Request.Context(), paid); err != nil {
+	// A return carrying an error is refused by UpdatePayment before it looks
+	// at the payment, so ask first: if checkout's notify already confirmed the
+	// payment, the late error is stale and the return is done.
+	if !rp.Error.IsZero() {
+		paid, err := o.paidPayment(c.Request.Context(), rp.UserKey.String, rp.ParamX.String)
+		if err != nil {
 			c.Status(http.StatusInternalServerError)
-			_ = c.Error(fmt.Errorf("o.settleOrder: %w", err))
+			_ = c.Error(fmt.Errorf("o.paidPayment: %w", err))
+			return
+		}
+		if paid != nil {
+			c.JSON(http.StatusOK, nil)
+			return
+		}
+	}
+	p, err := o.repo.UpdatePayment(c.Request.Context(), rp)
+	if errors.Is(err, common.ErrAlreadyPaid) {
+		// Confirmed already, by checkout's notify or an earlier return, and the
+		// write refused to replace checkout's facts with the browser's. Only an
+		// order an earlier confirm left unsettled is finished.
+		if err := o.settleConfirmed(c.Request.Context(), rp.UserKey.String, rp.ParamX.String); err != nil {
+			c.Status(http.StatusInternalServerError)
+			_ = c.Error(fmt.Errorf("o.settleConfirmed: %w", err))
 			return
 		}
 		c.JSON(http.StatusOK, nil)
 		return
 	}
-	p, err := o.repo.UpdatePayment(c.Request.Context(), rp)
 	if err != nil {
 		// TODO : ask grisha to return more info on error
 		utils.LogFor(c.Request.Context()).Warn("repo.UpdatePayment", slog.Any("err", err))

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/volatiletech/null/v9"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
@@ -293,8 +294,20 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 		return nil, fmt.Errorf("strconv.ParseUint [additional_details_param_x]: %w", err)
 	}
 
+	// One transaction, the payment row locked: the status check, the payments
+	// write and the payments_pelecard write happen together or not at all. A
+	// successful payment is then written once — a notify and a browser return
+	// racing each other cannot both write, and a late success=0 cannot flip it
+	// to failed — and a failure between the two writes leaves neither, so a
+	// retry writes both.
+	tx, err := o.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("o.pool.Begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
 	var p Payment
-	if err := o.pool.QueryRow(ctx, `SELECT 
+	if err := tx.QueryRow(ctx, `SELECT 
 	"OrderID",
 	"PaymentStatus",
 	"PaymentType",
@@ -321,14 +334,17 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 	j_param,
 	"TransactionInitTime",
 	"TransactionUpdateTime",
-	"VoucherID" FROM payments WHERE "OrderID"=$1 AND id=$2`, uint(orderid), uint(paymentid)).Scan(
+	"VoucherID" FROM payments WHERE "OrderID"=$1 AND id=$2 FOR UPDATE`, uint(orderid), uint(paymentid)).Scan(
 		&p.OrderID, &p.PaymentStatus, &p.PaymentType, &p.ParamX, &p.AuthNo, &p.ConfirmationKey, &p.Success,
 		&p.PelecardToken, &p.TransactionID, &p.CCBrand, &p.CardHebrewName, &p.CCAbroadCard,
 		&p.CCCompanyClearer, &p.CreditType, &p.CCExpDate, &p.CCNumber, &p.DebitCode, &p.DebitCurrency,
 		&p.DebitTotal, &p.DebitType, &p.FirstPaymentTotal, &p.FixedPaymentTotal, &p.TotalPayments,
 		&p.JParam, &p.TransactionInitTime, &p.TransactionUpdateTime, &p.VoucherID,
 	); err != nil {
-		return nil, fmt.Errorf("o.pool.QueryRow.Scan [payment]: %w", err)
+		return nil, fmt.Errorf("tx.QueryRow.Scan [payment]: %w", err)
+	}
+	if p.PaymentStatus.String == common.PaymentStatusSuccess {
+		return nil, common.ErrAlreadyPaid
 	}
 
 	if req.Success.String == "1" {
@@ -366,21 +382,46 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 	}
 
 	toUpdate, toUpdateArgs := preparePaymentUpdateQuery(p)
-	_, err = o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=%d`, toUpdate, uint(paymentid)), toUpdateArgs...)
-	if err != nil {
-		return nil, fmt.Errorf("o.pool.Exec [update payment]: %w", err)
+	// The id is bound like every other value, not formatted into the SQL.
+	// The row is held FOR UPDATE above, so this write finds it.
+	if _, err := tx.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=$%d`, toUpdate, len(toUpdateArgs)+1),
+		append(toUpdateArgs, int64(paymentid))...); err != nil {
+		return nil, fmt.Errorf("tx.Exec [update payment]: %w", err)
 	}
 
-	toUpdatePelecard, toUpdateArgsPeleCard := preparePelecardPaymentUpdateViaPaymentStructQuery(p)
-	_, pelecardErr := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdatePelecard,
-		uint(paymentid)), toUpdateArgsPeleCard...)
-	if pelecardErr != nil {
-		return nil, fmt.Errorf("o.pool.Exec [update pelecard]: %w", err)
+	if err := writePelecardFacts(ctx, tx, p, int(paymentid)); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("tx.Commit: %w", err)
 	}
 
 	o.emitEvent(ctx, events.TypeUpdatePayment, map[string]interface{}{"payment_id": paymentid})
 
 	return &p, nil
+}
+
+// writePelecardFacts stores the gateway's facts in the payment's
+// payments_pelecard row, inside the payment's transaction. Older payments
+// (and a few recent ones) have no such row; one is created rather than
+// committing a confirmed payment without its card facts.
+func writePelecardFacts(ctx context.Context, tx pgx.Tx, p Payment, paymentID int) error {
+	toUpdate, args := preparePelecardPaymentUpdateViaPaymentStructQuery(p)
+	tag, err := tx.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=$%d`, toUpdate, len(args)+1),
+		append(args, int64(paymentID))...)
+	if err != nil {
+		return fmt.Errorf("tx.Exec [update pelecard]: %w", err)
+	}
+	if tag.RowsAffected() > 0 {
+		return nil
+	}
+	columns, placeholders, createArgs := preparePelecardPaymentCreateQuery(p, paymentID)
+	if _, err := tx.Exec(ctx, fmt.Sprintf(`INSERT INTO payments_pelecard (%s) VALUES (%s)`, columns, placeholders),
+		createArgs...); err != nil {
+		return fmt.Errorf("tx.Exec [insert pelecard]: %w", err)
+	}
+	return nil
 }
 
 func (o *OrdersDB) createOfflinePayment(ctx context.Context, req RequestOrder, paymentID int, status string) error {

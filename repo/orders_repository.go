@@ -50,7 +50,7 @@ type OrdersRepository interface {
 
 	CreateSpecial(ctx context.Context, s Special) (int, error)
 	GetAllSpecialsByEmail(ctx context.Context, email string) ([]*Special, error)
-	GetUniqueEmailsFromSpecial(ctx context.Context) ([]string, error)
+	GetSpecialsStartingBetween(ctx context.Context, from, to time.Time) ([]*Special, error)
 
 	Close()
 }

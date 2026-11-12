@@ -294,6 +294,12 @@ func (o *OrdersDB) HardDeleteAllUserDataByAccountID(ctx context.Context, account
 }
 
 func (o *OrdersDB) GetAccount(ctx context.Context, id int, email string) (*Account, error) {
+	// $1, not an interpolated literal. Both importers reach here with a cell
+	// straight out of a Google Sheet, and the accounts handler with a query
+	// parameter, so the old fmt.Sprintf into the WHERE clause let an email of
+	// the right shape rewrite the predicate: a probe of the form
+	// `x') OR 1=1 --` returned an unrelated account where the plain lookup
+	// matched no rows.
 	var whereQuery string
 	var orderQuery string
 	var arg any

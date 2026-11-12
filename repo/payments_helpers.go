@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/volatiletech/null/v9"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
@@ -381,21 +382,14 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 
 	toUpdate, toUpdateArgs := preparePaymentUpdateQuery(p)
 	// The id is bound like every other value, not formatted into the SQL.
-	tag, err := tx.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=$%d`, toUpdate, len(toUpdateArgs)+1),
-		append(toUpdateArgs, int64(paymentid))...)
-	if err != nil {
+	// The row is held FOR UPDATE above, so this write finds it.
+	if _, err := tx.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=$%d`, toUpdate, len(toUpdateArgs)+1),
+		append(toUpdateArgs, int64(paymentid))...); err != nil {
 		return nil, fmt.Errorf("tx.Exec [update payment]: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
-		// The row is locked, so this should not happen; say what was seen
-		// rather than claim it was paid.
-		return nil, fmt.Errorf("update payment %d: %w", paymentid, common.ErrNoRowsAffected)
-	}
 
-	toUpdatePelecard, toUpdateArgsPeleCard := preparePelecardPaymentUpdateViaPaymentStructQuery(p)
-	if _, err := tx.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=$%d`, toUpdatePelecard,
-		len(toUpdateArgsPeleCard)+1), append(toUpdateArgsPeleCard, int64(paymentid))...); err != nil {
-		return nil, fmt.Errorf("tx.Exec [update pelecard]: %w", err)
+	if err := writePelecardFacts(ctx, tx, p, int(paymentid)); err != nil {
+		return nil, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -405,6 +399,28 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 	o.emitEvent(ctx, events.TypeUpdatePayment, map[string]interface{}{"payment_id": paymentid})
 
 	return &p, nil
+}
+
+// writePelecardFacts stores the gateway's facts in the payment's
+// payments_pelecard row, inside the payment's transaction. Older payments
+// (and a few recent ones) have no such row; one is created rather than
+// committing a confirmed payment without its card facts.
+func writePelecardFacts(ctx context.Context, tx pgx.Tx, p Payment, paymentID int) error {
+	toUpdate, args := preparePelecardPaymentUpdateViaPaymentStructQuery(p)
+	tag, err := tx.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=$%d`, toUpdate, len(args)+1),
+		append(args, int64(paymentID))...)
+	if err != nil {
+		return fmt.Errorf("tx.Exec [update pelecard]: %w", err)
+	}
+	if tag.RowsAffected() > 0 {
+		return nil
+	}
+	columns, placeholders, createArgs := preparePelecardPaymentCreateQuery(p, paymentID)
+	if _, err := tx.Exec(ctx, fmt.Sprintf(`INSERT INTO payments_pelecard (%s) VALUES (%s)`, columns, placeholders),
+		createArgs...); err != nil {
+		return fmt.Errorf("tx.Exec [insert pelecard]: %w", err)
+	}
+	return nil
 }
 
 func (o *OrdersDB) createOfflinePayment(ctx context.Context, req RequestOrder, paymentID int, status string) error {

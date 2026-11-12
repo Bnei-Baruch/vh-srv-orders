@@ -729,3 +729,59 @@ func Test_checkout_notify_finishes_when_checkout_hangs_up(t *testing.T) {
 
 	assert.Equal(t, paymentState{"success", "card-token", "0123456", "paid"}, readPaymentState(t, a, p))
 }
+
+// A payment created before payments_pelecard rows were always written has
+// none. The confirm creates it with the card facts instead of committing the
+// payment without them.
+func Test_UpdatePayment_creates_a_missing_pelecard_row(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "regular")
+	pool := a.testPool(t)
+	ctx := eventstest.WithTestEventBuilder(t, context.Background())
+	_, err := pool.Exec(ctx, `DELETE FROM payments_pelecard WHERE payment_id = $1`, p.paymentID)
+	require.NoError(t, err)
+	record := gatewayRecord(p)
+
+	_, err = a.repo.UpdatePayment(ctx, paidFromGateway(&record))
+	require.NoError(t, err)
+
+	var rows int
+	var token, authNo string
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT count(*) OVER (), COALESCE(pelecard_token, ''), COALESCE(auth_no, '')
+		FROM payments_pelecard WHERE payment_id = $1`, p.paymentID).Scan(&rows, &token, &authNo))
+	assert.Equal(t, 1, rows)
+	assert.Equal(t, "card-token", token)
+	assert.Equal(t, "0123456", authNo)
+	assert.Equal(t, "success", readPaymentState(t, a, p).paymentStatus)
+}
+
+// The browser return confirms the payment while the notify reads checkout,
+// and then the payment cannot be read. The notify answers 500 so checkout
+// retries, rather than calling the order settled.
+func Test_checkout_notify_racing_a_browser_return_fails_when_the_payment_cannot_be_reread(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "regular")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pool := a.testPool(t)
+		_, err := pool.Exec(context.Background(),
+			`UPDATE payments SET "PaymentStatus" = 'success', success = '1', pelecard_token = 'browser' WHERE id = $1`, p.paymentID)
+		require.NoError(t, err)
+		// Breaks GetPaymentByID's read only; UpdatePayment does not select it.
+		_, err = pool.Exec(context.Background(), `ALTER TABLE payments RENAME COLUMN pricing_version TO pricing_version_gone`)
+		require.NoError(t, err)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(gatewayRecord(p))
+	}))
+	t.Cleanup(srv.Close)
+	client := pelecard.NewClient()
+	client.BaseURL = srv.URL
+	client.Tokens = keycloak.StaticTokenSource("tok")
+	a.ordersAPI.pages = client
+
+	notify(t, a, p, http.StatusInternalServerError)
+
+	assert.Equal(t, paymentState{"success", "browser", "", "new"}, readPaymentState(t, a, p))
+}

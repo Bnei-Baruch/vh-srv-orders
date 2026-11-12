@@ -462,10 +462,11 @@ func (o *OrdersAPI) handleTransactionPaid(c *gin.Context) {
 		return
 	}
 	// Both ids must be in exactly the form this service builds for payment
-	// pages (see keyID), before anything reads them. The ownership check, the already-paid guard and
-	// UpdatePayment each parse them; if one accepted a form another refused
-	// ("ord-1-x", "ord-01"), the guard could be skipped while the write still
-	// found the payment, and the browser's facts would replace checkout's.
+	// pages (see keyID), before anything reads them. The ownership check,
+	// the already-paid lookup for a return carrying an error, and UpdatePayment
+	// (whose status check is the guard for every other return) each parse them;
+	// if one accepted a form another refused ("ord-1-x", "ord-01"), a check
+	// could miss the payment the write still found.
 	orderid, err := keyID(rp.UserKey.String, "ord")
 	if err == nil {
 		_, err = keyID(rp.ParamX.String, "m")

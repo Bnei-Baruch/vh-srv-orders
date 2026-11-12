@@ -180,14 +180,14 @@ func (o *OrdersAPI) paymentOfOrder(ctx context.Context, orderKey, paramX string)
 }
 
 // paidPayment returns the payment paramX names when it belongs to orderKey's
-// order and is marked successful, else nil. Ids it cannot parse, or that name
-// no payment of that order, are not paid, and the caller's own checks report
-// them. A failed read is an error, not "not paid": the caller would go on to
-// write the browser's facts over a payment checkout may already have
-// confirmed.
+// order and is marked successful, else nil. The caller checks both ids with
+// keyID first. Ids that name no payment of that order are not paid, and the
+// caller's own checks report them. A failed read is an error, not "not paid":
+// the caller would go on to write the browser's facts over a payment checkout
+// may already have confirmed.
 func (o *OrdersAPI) paidPayment(ctx context.Context, orderKey, paramX string) (*repo.Payment, error) {
 	payment, err := o.paymentOfOrder(ctx, orderKey, paramX)
-	if errors.Is(err, common.ErrInvalidValues) || errors.Is(err, errNoSuchPayment) {
+	if errors.Is(err, errNoSuchPayment) {
 		return nil, nil
 	}
 	if err != nil {
@@ -215,8 +215,16 @@ func (o *OrdersAPI) settleConfirmed(ctx context.Context, orderKey, paramX string
 // confirm wrote the payment and then failed before the order: without it, the
 // retry stops at "already paid" and the order stays new although the member
 // paid. An order with a PaymentDate was settled and is left alone.
+//
+// "Paid" here is PaymentStatus success, the same test that stops the payment
+// being rewritten. UpdateOrderAfterPayment decides from Success, though, and
+// would mark the order failed without "1"; a row with one and not the other is
+// not ours to guess about, so it is left unsettled, loudly.
 func (o *OrdersAPI) settleOrder(ctx context.Context, payment *repo.Payment) error {
 	if payment.Success.String != "1" {
+		utils.LogFor(ctx).Warn("payment is successful but its success flag is not 1; order left as it is",
+			slog.Int("payment_id", int(payment.ID)), slog.Int("order_id", payment.OrderID.Int),
+			slog.String("success", payment.Success.String))
 		return nil
 	}
 	order, err := o.repo.GetOrderByID(ctx, uint(payment.OrderID.Int))

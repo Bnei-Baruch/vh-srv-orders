@@ -893,3 +893,24 @@ func Test_UpdatePayment_concurrent_confirms_write_once(t *testing.T) {
 		require.Equal(t, winner, s.authNo, "round %d", round)
 	}
 }
+
+// A browser return that sends the card companies empty stores them as NULL,
+// as the notify does, not as ''.
+func Test_paid_return_stores_empty_card_companies_as_null(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "regular")
+
+	POST_ROOT(t, a, "/orders/paid", gin.H{
+		"user_key": p.orderKey, "additional_details_param_x": p.paramX,
+		"success": "1", "credit_card_company_issuer": "", "credit_card_company_clearer": "",
+	}, http.StatusOK)
+
+	var nulls [4]bool
+	require.NoError(t, a.testPool(t).QueryRow(context.Background(), `
+		SELECT p."CCCompanyIssuer" IS NULL, p."CCCompanyClearer" IS NULL,
+		       pp.cc_company_issuer IS NULL, pp.cc_company_clearer IS NULL
+		FROM payments p JOIN payments_pelecard pp ON pp.payment_id = p.id WHERE p.id = $1`, p.paymentID).
+		Scan(&nulls[0], &nulls[1], &nulls[2], &nulls[3]))
+	assert.Equal(t, [4]bool{true, true, true, true}, nulls)
+}

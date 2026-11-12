@@ -361,8 +361,10 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 		p.CCBrand = req.CCBrand
 		p.CardHebrewName = req.CardHebrewName
 		p.CCAbroadCard = req.CCAbroadCard
-		p.CCCompanyClearer = req.CCCompanyClearer
-		p.CCCompanyIssuer = req.CCCompanyIssuer
+		// A browser return binds an absent company as "", which would be
+		// stored as ''; checkout's notify already sends NULL for it.
+		p.CCCompanyClearer = blankAsNull(req.CCCompanyClearer)
+		p.CCCompanyIssuer = blankAsNull(req.CCCompanyIssuer)
 		p.CreditType = req.CreditType
 		p.CCExpDate = req.CCExpDate
 		p.CCNumber = req.CCNumber
@@ -1700,4 +1702,13 @@ func (o *OrdersDB) FetchPaymentByParamX(ctx context.Context, paramX string) (*Pa
 	}
 
 	return &p, nil
+}
+
+// blankAsNull treats an empty string as absent, so it is left unwritten
+// rather than stored as ''.
+func blankAsNull(s null.String) null.String {
+	if s.String == "" {
+		return null.String{}
+	}
+	return s
 }

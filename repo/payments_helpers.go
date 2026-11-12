@@ -285,14 +285,16 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 		return nil, fmt.Errorf("req.Error: %s", req.Error.String)
 	}
 
-	orderid, err := strconv.ParseUint(strings.Split(req.UserKey.String, "-")[1], 10, 0)
+	// Ids are int4: parsing within 32 bits makes the int conversion exact.
+	parsedOrder, err := strconv.ParseInt(strings.Split(req.UserKey.String, "-")[1], 10, 32)
 	if err != nil {
-		return nil, fmt.Errorf("strconv.ParseUint [user_key]: %w", err)
+		return nil, fmt.Errorf("strconv.ParseInt [user_key]: %w", err)
 	}
-	paymentid, err := strconv.ParseUint(strings.Split(req.ParamX.String, "-")[1], 10, 0)
+	parsedPayment, err := strconv.ParseInt(strings.Split(req.ParamX.String, "-")[1], 10, 32)
 	if err != nil {
-		return nil, fmt.Errorf("strconv.ParseUint [additional_details_param_x]: %w", err)
+		return nil, fmt.Errorf("strconv.ParseInt [additional_details_param_x]: %w", err)
 	}
+	orderid, paymentid := int(parsedOrder), int(parsedPayment)
 
 	// One transaction, the payment row locked: the status check, the payments
 	// write and the payments_pelecard write happen together or not at all. A
@@ -334,7 +336,7 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 	j_param,
 	"TransactionInitTime",
 	"TransactionUpdateTime",
-	"VoucherID" FROM payments WHERE "OrderID"=$1 AND id=$2 FOR UPDATE`, uint(orderid), uint(paymentid)).Scan(
+	"VoucherID" FROM payments WHERE "OrderID"=$1 AND id=$2 FOR UPDATE`, orderid, paymentid).Scan(
 		&p.OrderID, &p.PaymentStatus, &p.PaymentType, &p.ParamX, &p.AuthNo, &p.ConfirmationKey, &p.Success,
 		&p.PelecardToken, &p.TransactionID, &p.CCBrand, &p.CardHebrewName, &p.CCAbroadCard,
 		&p.CCCompanyClearer, &p.CreditType, &p.CCExpDate, &p.CCNumber, &p.DebitCode, &p.DebitCurrency,
@@ -385,11 +387,11 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 	// The id is bound like every other value, not formatted into the SQL.
 	// The row is held FOR UPDATE above, so this write finds it.
 	if _, err := tx.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=$%d`, toUpdate, len(toUpdateArgs)+1),
-		append(toUpdateArgs, int64(paymentid))...); err != nil {
+		append(toUpdateArgs, paymentid)...); err != nil {
 		return nil, fmt.Errorf("tx.Exec [update payment]: %w", err)
 	}
 
-	if err := writePelecardFacts(ctx, tx, p, int(paymentid)); err != nil {
+	if err := writePelecardFacts(ctx, tx, p, paymentid); err != nil {
 		return nil, err
 	}
 

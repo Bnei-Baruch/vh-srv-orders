@@ -785,3 +785,62 @@ func Test_checkout_notify_racing_a_browser_return_fails_when_the_payment_cannot_
 
 	assert.Equal(t, paymentState{"success", "browser", "", "new"}, readPaymentState(t, a, p))
 }
+
+// A browser return carrying an error, for a payment an earlier confirm wrote
+// without finishing the order, still finishes it.
+func Test_paid_return_with_an_error_finishes_a_half_written_confirm(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "regular")
+	writeHalfConfirm(t, a, p)
+
+	POST_ROOT(t, a, "/orders/paid", gin.H{
+		"user_key": p.orderKey, "additional_details_param_x": p.paramX, "error": "301",
+	}, http.StatusOK)
+
+	assert.Equal(t, paymentState{"success", "first", "", "paid"}, readPaymentState(t, a, p))
+}
+
+// Two confirms of one pending payment running at once: the row lock lets
+// exactly one write, the other is refused as already paid, and the facts are
+// the winner's. Repeated, since a single pair may happen not to overlap.
+func Test_UpdatePayment_concurrent_confirms_write_once(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	ctx := eventstest.WithTestEventBuilder(t, context.Background())
+
+	for round := 0; round < 40; round++ {
+		p := seedPendingPayment(t, a, "regular")
+		tokens := []string{"first", "second"}
+		errs := make([]error, len(tokens))
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		for i, token := range tokens {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				_, errs[i] = a.repo.UpdatePayment(ctx, paidFromGateway(&pelecard.GatewayPayment{
+					UserKey: p.orderKey, AdditionalDetailsParamX: p.paramX, Token: token, ApprovalNo: token,
+				}))
+			}()
+		}
+		close(start)
+		wg.Wait()
+
+		winners := 0
+		winner := ""
+		for i, err := range errs {
+			if err == nil {
+				winners++
+				winner = tokens[i]
+				continue
+			}
+			require.ErrorIs(t, err, common.ErrAlreadyPaid, "round %d", round)
+		}
+		require.Equal(t, 1, winners, "round %d: both concurrent writes succeeded", round)
+		s := readPaymentState(t, a, p)
+		require.Equal(t, winner, s.token, "round %d", round)
+		require.Equal(t, winner, s.authNo, "round %d", round)
+	}
+}

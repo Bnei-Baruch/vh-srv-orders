@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -19,7 +20,9 @@ import (
 // The updates below now bind their row id. These tests cannot tell a bound id
 // from one formatted with %d (both reach the same row), so they pin what the
 // change must keep, not how it is done: each writes one of two seeded rows by
-// id, leaves the other alone, and reports an id naming no row.
+// id, leaves the other alone, and refuses an id naming no row: with
+// ErrNoRowsAffected from the plain updates, and with pgx.ErrNoRows from
+// UpdatePayment and RevertOperation, which look their row up first.
 
 type seededPayment struct {
 	orderID, paymentID int
@@ -148,6 +151,13 @@ func TestUpdatePayment_WritesOnlyThatPayment(t *testing.T) {
 			Scan(&states[i].status, &states[i].token, &states[i].pelecardAuthNo))
 	}
 	assert.Equal(t, []state{{"success", "card-token", "0123456"}, {"pending", "", ""}}, states)
+
+	_, err = db.UpdatePayment(ctx, RequestPaid{
+		UserKey: null.StringFrom(fmt.Sprintf("ord-%d", seeded[1].orderID)),
+		ParamX:  null.StringFrom(fmt.Sprintf("m-%d", seeded[1].paymentID+1000)),
+		Success: null.StringFrom("1"),
+	})
+	assert.ErrorIs(t, err, pgx.ErrNoRows)
 }
 
 func TestRevertOperation_MarksOnlyThatOperation(t *testing.T) {
@@ -167,6 +177,7 @@ func TestRevertOperation_MarksOnlyThatOperation(t *testing.T) {
 		require.NoError(t, pool.QueryRow(ctx, `SELECT status FROM operation_trace WHERE id = $1`, id).Scan(&statuses[i]))
 	}
 	assert.Equal(t, []string{"reverted", "done"}, statuses)
+	assert.ErrorIs(t, db.RevertOperation(ctx, "nobody@test.test", "old1@test.test"), pgx.ErrNoRows)
 }
 
 // A failed payments_pelecard write reports its own error. It used to wrap the

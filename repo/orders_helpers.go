@@ -295,7 +295,7 @@ func (o *OrdersDB) PatchOrderByID(ctx context.Context, order Order, orderId int)
 		return common.ErrInvalidValues
 	}
 
-	updateRes, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE orders SET %s WHERE id=%d`, toUpdate, orderId), toUpdateArgs...)
+	updateRes, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE orders SET %s WHERE id=$%d`, toUpdate, len(toUpdateArgs)+1), append(toUpdateArgs, orderId)...)
 	if err != nil {
 		return fmt.Errorf("problem updating order: %w", err)
 	}
@@ -554,11 +554,11 @@ func buildAndGetOrdersWhereQuery(fromDate *time.Time, dateTo *time.Time, product
 	whereCondition.WriteString("")
 
 	// time format with timezone
-	whereCondition.WriteString(fmt.Sprintf(" o.updated_at <= '%s'", dateTo.Format(time.RFC3339Nano)))
+	whereCondition.WriteString(" o.updated_at <= " + args.arg(*dateTo))
 
 	// WHERE query generation based on parameters
 	if fromDate != nil {
-		whereCondition.WriteString(fmt.Sprintf(" AND o.updated_at >= '%s'", fromDate.Format(time.RFC3339Nano)))
+		whereCondition.WriteString(" AND o.updated_at >= " + args.arg(*fromDate))
 	}
 
 	if currency != "" {
@@ -577,7 +577,7 @@ func buildAndGetOrdersWhereQuery(fromDate *time.Time, dateTo *time.Time, product
 		whereCondition.WriteString(` AND LOWER(o."Organization")=LOWER(` + args.arg(organisation) + `)`)
 	}
 	if accountID != 0 {
-		whereCondition.WriteString(fmt.Sprintf(" AND o.\"AccountID\" = %d", accountID))
+		whereCondition.WriteString(` AND o."AccountID" = ` + args.arg(accountID))
 	}
 	if keycloakID != "" {
 		whereCondition.WriteString(" AND o.userkey = " + args.arg(keycloakID))

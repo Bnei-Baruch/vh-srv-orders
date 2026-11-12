@@ -104,7 +104,7 @@ func (o *OrdersDB) CreateRenewalPayment(ctx context.Context, data *RenewalData, 
 	}
 
 	toUpdate, toUpdateArgs := preparePaymentUpdateQuery(p)
-	_, err = o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=%d`, toUpdate, p.ID), toUpdateArgs...)
+	_, err = o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=$%d`, toUpdate, len(toUpdateArgs)+1), append(toUpdateArgs, p.ID)...)
 	if err != nil {
 		return nil, fmt.Errorf("o.pool.Exec [update payment]: %w", err)
 	}
@@ -131,15 +131,15 @@ func (o *OrdersDB) FinalizeRenewal(ctx context.Context, orderID uint, payment *P
 
 	toUpdate, toUpdateArgs := preparePaymentUpdateQuery(*payment)
 	_, err = tx.Exec(ctx,
-		fmt.Sprintf(`UPDATE payments SET %s WHERE id=%d`, toUpdate, payment.ID), toUpdateArgs...)
+		fmt.Sprintf(`UPDATE payments SET %s WHERE id=$%d`, toUpdate, len(toUpdateArgs)+1), append(toUpdateArgs, payment.ID)...)
 	if err != nil {
 		return fmt.Errorf("%w: tx.Exec [update payment]: %w", common.ErrPostPayment, err)
 	}
 
 	toUpdatePelecard, toUpdateArgsPeleCard := preparePelecardPaymentUpdateViaPaymentStructQuery(*payment)
 	_, err = tx.Exec(ctx,
-		fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdatePelecard, payment.ID),
-		toUpdateArgsPeleCard...)
+		fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=$%d`, toUpdatePelecard, len(toUpdateArgsPeleCard)+1),
+		append(toUpdateArgsPeleCard, payment.ID)...)
 	if err != nil {
 		return fmt.Errorf("%w: tx.Exec [update pelecard_payment]: %w", common.ErrPostPayment, err)
 	}

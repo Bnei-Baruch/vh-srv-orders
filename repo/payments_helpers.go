@@ -430,7 +430,7 @@ func (o *OrdersDB) UpdatePelecardPayment(ctx context.Context, req PaymentUpdate)
 		return common.ErrInvalidValues
 	}
 
-	updateRes, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdate, req.PaymentID.Int), toUpdateArgs...)
+	updateRes, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=$%d`, toUpdate, len(toUpdateArgs)+1), append(toUpdateArgs, req.PaymentID.Int)...)
 	if err != nil {
 		return fmt.Errorf("o.pool.Exec: %w", err)
 	}
@@ -449,7 +449,7 @@ func (o *OrdersDB) UpdateOfflinePayment(ctx context.Context, req PaymentUpdate) 
 		return common.ErrInvalidValues
 	}
 
-	updateRes, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments_offline SET %s WHERE payment_id=%d`, toUpdate, req.PaymentID.Int), toUpdateArgs...)
+	updateRes, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments_offline SET %s WHERE payment_id=$%d`, toUpdate, len(toUpdateArgs)+1), append(toUpdateArgs, req.PaymentID.Int)...)
 	if err != nil {
 		return fmt.Errorf("o.pool.Exec: %w", err)
 	}
@@ -468,7 +468,7 @@ func (o *OrdersDB) UpdateHelpHavePayment(ctx context.Context, req PaymentUpdate)
 		return common.ErrInvalidValues
 	}
 
-	updateRes, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments_helphaver SET %s WHERE payment_id=%d`, toUpdate, req.PaymentID.Int), toUpdateArgs...)
+	updateRes, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments_helphaver SET %s WHERE payment_id=$%d`, toUpdate, len(toUpdateArgs)+1), append(toUpdateArgs, req.PaymentID.Int)...)
 	if err != nil {
 		return fmt.Errorf("o.pool.Exec: %w", err)
 	}
@@ -1146,15 +1146,15 @@ func buildAndGetPaymentsWhereQuery(fromDate *time.Time, dateTo *time.Time, payme
 	whereCondition.WriteString("")
 
 	if !dateTo.IsZero() {
-		whereCondition.WriteString(fmt.Sprintf(" p.updated_at <= '%s'", dateTo.Format(time.RFC3339Nano)))
+		whereCondition.WriteString(" p.updated_at <= " + args.arg(*dateTo))
 	}
 
 	// WHERE query generation based on parameters
 	if fromDate != nil {
 		if whereCondition.String() != "" {
-			whereCondition.WriteString(fmt.Sprintf(" AND p.updated_at >= '%s'", fromDate.Format(time.RFC3339Nano)))
+			whereCondition.WriteString(" AND p.updated_at >= " + args.arg(*fromDate))
 		} else {
-			whereCondition.WriteString(fmt.Sprintf(" p.updated_at >= '%s'", fromDate.Format(time.RFC3339Nano)))
+			whereCondition.WriteString(" p.updated_at >= " + args.arg(*fromDate))
 		}
 	}
 
@@ -1214,7 +1214,7 @@ func buildAndGetPaymentsWhereQuery(fromDate *time.Time, dateTo *time.Time, payme
 			whereCondition.WriteString(` AND LOWER(a."Email")=LOWER(` + args.arg(email) + `)`)
 		}
 		if accontID != 0 {
-			whereCondition.WriteString(fmt.Sprintf(` AND a.id=%d`, accontID))
+			whereCondition.WriteString(` AND a.id=` + args.arg(accontID))
 		}
 		if userKey != "" {
 			whereCondition.WriteString(` AND a."UserKey" = ` + args.arg(userKey))
@@ -1223,9 +1223,9 @@ func buildAndGetPaymentsWhereQuery(fromDate *time.Time, dateTo *time.Time, payme
 
 	if intOrderID != 0 {
 		if whereCondition.String() != "" {
-			whereCondition.WriteString(fmt.Sprintf(` AND p."OrderID" = %d`, intOrderID))
+			whereCondition.WriteString(` AND p."OrderID" = ` + args.arg(intOrderID))
 		} else {
-			whereCondition.WriteString(fmt.Sprintf(` p."OrderID" = %d`, intOrderID))
+			whereCondition.WriteString(` p."OrderID" = ` + args.arg(intOrderID))
 		}
 	}
 

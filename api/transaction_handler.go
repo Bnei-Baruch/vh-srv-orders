@@ -33,16 +33,19 @@ func (o *OrdersAPI) handleTransactionGetByID(c *gin.Context) {
 	if !isActiveUser {
 		return
 	}
-	var accountId int
+	// An admin reads any transaction: no account filter, rather than
+	// account_id = 0, which matches nothing.
+	var accountFilter *int
 	if !isAdmin {
-		accountId, err = o.repo.GetAccountIDByKeycloakID(c.Request.Context(), keycloakId)
+		accountId, err := o.repo.GetAccountIDByKeycloakID(c.Request.Context(), keycloakId)
 		if err != nil {
 			c.Status(http.StatusForbidden)
 			return
 		}
+		accountFilter = &accountId
 	}
 
-	transaction, err := o.repo.GetTransactionById(c.Request.Context(), id, &accountId)
+	transaction, err := o.repo.GetTransactionById(c.Request.Context(), id, accountFilter)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			c.Status(http.StatusNotFound)

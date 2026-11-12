@@ -406,6 +406,8 @@ func TestFinalizeRenewal_CreatesAMissingPelecardRow(t *testing.T) {
 
 // If the payments_pelecard write fails, the payment write and the order
 // update roll back with it, and the error is a post-payment one.
+// FinalizeRenewal had this before writePaymentFacts; the test guards that the
+// move to the helper kept it, and is not coverage of anything new.
 func TestFinalizeRenewal_RollsBackWhenThePelecardWriteFails(t *testing.T) {
 	db, pool, ctx := newTestDBWithPool(t)
 	_, orderID, _ := setupRenewalTestData(t, db, ctx)

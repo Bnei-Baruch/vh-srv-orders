@@ -406,9 +406,11 @@ type execer interface {
 }
 
 // writePaymentFacts writes a Pelecard payment's row and its payments_pelecard
-// row. Every confirm of a Pelecard payment goes through here, so the two
-// writes cannot drift apart again; callers run it in a transaction so both
-// land or neither does.
+// row from a gateway result: checkout's notify and the browser return
+// (UpdatePayment) and a renewal charge (FinalizeRenewal). Callers run it in a
+// transaction so both land or neither does. The admin PATCH is not one of
+// these: UpdatePelecardPayment writes the fields an admin chose, from a
+// PaymentUpdate, and the handler sets the payment status separately.
 func writePaymentFacts(ctx context.Context, tx execer, p Payment, paymentID int) error {
 	if err := updatePaymentRow(ctx, tx, p, paymentID); err != nil {
 		return err

@@ -284,13 +284,13 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 		return nil, fmt.Errorf("req.Error: %s", req.Error.String)
 	}
 
-	orderid, err := strconv.ParseUint(strings.Split(req.UserKey.String, "-")[1], 10, 0)
+	orderid, err := strconv.ParseInt(strings.Split(req.UserKey.String, "-")[1], 10, 64)
 	if err != nil {
-		return nil, fmt.Errorf("strconv.ParseUint [user_key]: %w", err)
+		return nil, fmt.Errorf("strconv.ParseInt [user_key]: %w", err)
 	}
-	paymentid, err := strconv.ParseUint(strings.Split(req.ParamX.String, "-")[1], 10, 0)
+	paymentid, err := strconv.ParseInt(strings.Split(req.ParamX.String, "-")[1], 10, 64)
 	if err != nil {
-		return nil, fmt.Errorf("strconv.ParseUint [additional_details_param_x]: %w", err)
+		return nil, fmt.Errorf("strconv.ParseInt [additional_details_param_x]: %w", err)
 	}
 
 	var p Payment
@@ -321,7 +321,7 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 	j_param,
 	"TransactionInitTime",
 	"TransactionUpdateTime",
-	"VoucherID" FROM payments WHERE "OrderID"=$1 AND id=$2`, int64(orderid), int64(paymentid)).Scan(
+	"VoucherID" FROM payments WHERE "OrderID"=$1 AND id=$2`, orderid, paymentid).Scan(
 		&p.OrderID, &p.PaymentStatus, &p.PaymentType, &p.ParamX, &p.AuthNo, &p.ConfirmationKey, &p.Success,
 		&p.PelecardToken, &p.TransactionID, &p.CCBrand, &p.CardHebrewName, &p.CCAbroadCard,
 		&p.CCCompanyClearer, &p.CreditType, &p.CCExpDate, &p.CCNumber, &p.DebitCode, &p.DebitCurrency,
@@ -366,14 +366,14 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 
 	toUpdate, toUpdateArgs := preparePaymentUpdateQuery(p)
 	_, err = o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=$%d`, toUpdate, len(toUpdateArgs)+1),
-		append(toUpdateArgs, int64(paymentid))...)
+		append(toUpdateArgs, paymentid)...)
 	if err != nil {
 		return nil, fmt.Errorf("o.pool.Exec [update payment]: %w", err)
 	}
 
 	toUpdatePelecard, toUpdateArgsPeleCard := preparePelecardPaymentUpdateViaPaymentStructQuery(p)
 	if _, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=$%d`, toUpdatePelecard,
-		len(toUpdateArgsPeleCard)+1), append(toUpdateArgsPeleCard, int64(paymentid))...); err != nil {
+		len(toUpdateArgsPeleCard)+1), append(toUpdateArgsPeleCard, paymentid)...); err != nil {
 		return nil, fmt.Errorf("o.pool.Exec [update pelecard]: %w", err)
 	}
 

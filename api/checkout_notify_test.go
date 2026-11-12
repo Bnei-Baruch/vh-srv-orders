@@ -701,3 +701,30 @@ func Test_checkout_notify_leaves_an_inconsistent_payment_alone(t *testing.T) {
 	assert.Equal(t, paymentState{"success", "first", "", "new"}, readPaymentState(t, a, p))
 	assert.Empty(t, calls())
 }
+
+// Checkout hangs up while the notify is reading its record. The confirm is not
+// cancelled with it: the payment and the order are both written, rather than
+// left for a retry to repair.
+func Test_checkout_notify_finishes_when_checkout_hangs_up(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "regular")
+	reqCtx, hangUp := context.WithCancel(context.Background())
+	defer hangUp()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hangUp() // the caller goes away mid-confirm
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(gatewayRecord(p))
+	}))
+	t.Cleanup(srv.Close)
+	client := pelecard.NewClient()
+	client.BaseURL = srv.URL
+	client.Tokens = keycloak.StaticTokenSource("tok")
+	a.ordersAPI.pages = client
+
+	raw, _ := json.Marshal(gin.H{"user_key": p.orderKey, "reference": p.paramX})
+	r := httptest.NewRequest(http.MethodPost, "/checkout/notify", strings.NewReader(string(raw))).WithContext(reqCtx)
+	a.gEngine.ServeHTTP(httptest.NewRecorder(), r)
+
+	assert.Equal(t, paymentState{"success", "card-token", "0123456", "paid"}, readPaymentState(t, a, p))
+}

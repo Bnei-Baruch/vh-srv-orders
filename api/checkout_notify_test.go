@@ -895,7 +895,8 @@ func Test_UpdatePayment_concurrent_confirms_write_once(t *testing.T) {
 }
 
 // A browser return that sends fields explicitly empty stores them as NULL, as
-// the notify does, not as ''.
+// the notify does, not as ''. An empty token is not checked: the update
+// queries already skip it, so it stays NULL with or without blankAsNull.
 func Test_paid_return_stores_empty_fields_as_null(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)
@@ -904,21 +905,20 @@ func Test_paid_return_stores_empty_fields_as_null(t *testing.T) {
 	POST_ROOT(t, a, "/orders/paid", gin.H{
 		"user_key": p.orderKey, "additional_details_param_x": p.paramX, "success": "1",
 		"credit_card_company_issuer": "", "credit_card_company_clearer": "", "credit_card_brand": "",
-		"card_hebrew_name": "", "credit_card_number": "", "token": "", "authNo": "", "voucher_id": "",
+		"card_hebrew_name": "", "credit_card_number": "", "authNo": "", "voucher_id": "",
 	}, http.StatusOK)
 
-	var nulls [8]bool
+	var nulls [7]bool
 	require.NoError(t, a.testPool(t).QueryRow(context.Background(), `
 		SELECT p."CCCompanyIssuer" IS NULL, p."CCCompanyClearer" IS NULL, p."CCBrand" IS NULL,
-		       p."CardHebrewName" IS NULL, p."CCNumber" IS NULL, p.pelecard_token IS NULL, p."AuthNo" IS NULL,
-		       p."VoucherID" IS NULL
+		       p."CardHebrewName" IS NULL, p."CCNumber" IS NULL, p."AuthNo" IS NULL, p."VoucherID" IS NULL
 		FROM payments p WHERE p.id = $1`, p.paymentID).
-		Scan(&nulls[0], &nulls[1], &nulls[2], &nulls[3], &nulls[4], &nulls[5], &nulls[6], &nulls[7]))
-	assert.Equal(t, [8]bool{true, true, true, true, true, true, true, true}, nulls)
-	var pelecardNulls [3]bool
+		Scan(&nulls[0], &nulls[1], &nulls[2], &nulls[3], &nulls[4], &nulls[5], &nulls[6]))
+	assert.Equal(t, [7]bool{true, true, true, true, true, true, true}, nulls)
+	var pelecardNulls [4]bool
 	require.NoError(t, a.testPool(t).QueryRow(context.Background(), `
-		SELECT cc_company_issuer IS NULL, cc_company_clearer IS NULL, pelecard_token IS NULL
+		SELECT cc_company_issuer IS NULL, cc_company_clearer IS NULL, cc_brand IS NULL, voucher_id IS NULL
 		FROM payments_pelecard WHERE payment_id = $1`, p.paymentID).
-		Scan(&pelecardNulls[0], &pelecardNulls[1], &pelecardNulls[2]))
-	assert.Equal(t, [3]bool{true, true, true}, pelecardNulls)
+		Scan(&pelecardNulls[0], &pelecardNulls[1], &pelecardNulls[2], &pelecardNulls[3]))
+	assert.Equal(t, [4]bool{true, true, true, true}, pelecardNulls)
 }

@@ -58,6 +58,7 @@ type envConfig struct {
 	// CheckoutNotifyHMACKeys verify the signature external_payments puts on
 	// POST /checkout/notify: the same value as its NOTIFY_HMAC_KEY_<CLIENT>.
 	// Comma-separated, so a new key can be added before the old is dropped.
+	// Spaces around each key are ignored (verifyNotifySignature trims them).
 	CheckoutNotifyHMACKeys []string `envconfig:"CHECKOUT_NOTIFY_HMAC_KEY"`
 	// CheckoutNotifyHMACEnforce refuses a notify whose signature is missing or
 	// wrong. Off, a bad signature is only logged: the switch-over step, since a

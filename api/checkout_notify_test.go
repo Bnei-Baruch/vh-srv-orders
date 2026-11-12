@@ -382,6 +382,8 @@ func Test_verifyNotifySignature(t *testing.T) {
 	}{
 		"valid":                {body, "1", knownNotifySig, []string{"key"}, at, nil},
 		"second key, rotation": {body, "1", knownNotifySig, []string{"new", "key"}, at, nil},
+		"spaces after a comma": {body, "1", knownNotifySig, []string{"new", " key "}, at, nil},
+		"only blank keys":      {body, "1", knownNotifySig, []string{" ", ""}, at, errNotifyNoKey},
 		"edge of the window":   {body, "1", knownNotifySig, []string{"key"}, at.Add(notifyMaxSkew), nil},
 		"no key configured":    {body, "1", knownNotifySig, nil, at, errNotifyNoKey},
 		"no signature":         {body, "1", "", []string{"key"}, at, errNotifyUnsigned},

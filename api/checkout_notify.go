@@ -117,7 +117,15 @@ var (
 // verifyNotifySignature checks external_payments' signature on a notice:
 // X-Notify-Signature is v1=hex(HMAC-SHA256(key, X-Notify-Timestamp + "." +
 // body)) under any of keys, and the timestamp is within notifyMaxSkew of now.
-func verifyNotifySignature(body []byte, ts, sig string, keys []string, now time.Time) error {
+func verifyNotifySignature(body []byte, ts, sig string, configured []string, now time.Time) error {
+	// envconfig splits on "," and keeps the spaces, so "old, new" would give
+	// " new" and every notice signed with it would fail.
+	var keys []string
+	for _, k := range configured {
+		if k = strings.TrimSpace(k); k != "" {
+			keys = append(keys, k)
+		}
+	}
 	if len(keys) == 0 {
 		return errNotifyNoKey
 	}
@@ -137,9 +145,6 @@ func verifyNotifySignature(body []byte, ts, sig string, keys []string, now time.
 		return errNotifyBadFormat
 	}
 	for _, key := range keys {
-		if key == "" {
-			continue
-		}
 		mac := hmac.New(sha256.New, []byte(key))
 		mac.Write([]byte(ts + "."))
 		mac.Write(body)

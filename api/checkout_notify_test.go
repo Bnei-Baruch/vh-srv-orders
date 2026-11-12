@@ -470,8 +470,12 @@ func Test_paid_return_with_ids_in_another_form_is_refused(t *testing.T) {
 	assert.Equal(t, paymentState{"success", "card-token", "0123456", "paid"}, readPaymentState(t, a, p))
 }
 
-// Every field checkout records is carried into the update, each to its own
-// column, and success is implied.
+// Every field of checkout's record that UpdatePayment stores is carried into
+// the update, each to its own field, and success is implied. The issuer and
+// Pelecard's transaction id are passed in and must come out empty:
+// UpdatePayment has never stored either (the browser return does not get
+// them stored either), so mapping them would look like data that is not
+// kept.
 func Test_paidFromGateway_maps_every_field(t *testing.T) {
 	got := paidFromGateway(&pelecard.GatewayPayment{
 		UserKey: "ord-1", AdditionalDetailsParamX: "m-2", TransactionId: "tx",

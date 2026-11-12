@@ -480,7 +480,7 @@ func (o *OrdersAPI) handleTransactionPaid(c *gin.Context) {
 			return
 		}
 	}
-	paid, err := o.paidPayment(c.Request.Context(), rp.ParamX.String)
+	paid, err := o.paidPayment(c.Request.Context(), rp.UserKey.String, rp.ParamX.String)
 	if err != nil {
 		c.Status(http.StatusInternalServerError)
 		_ = c.Error(fmt.Errorf("o.paidPayment: %w", err))

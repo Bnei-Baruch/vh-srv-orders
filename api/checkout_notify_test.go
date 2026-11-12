@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -20,10 +21,12 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/volatiletech/null/v9"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/keycloak"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/pelecard"
+	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
 type checkoutCall struct{ path, reference, auth string }
@@ -211,22 +214,27 @@ func Test_checkout_notify_with_ids_that_name_no_payment_never_asks_checkout(t *t
 	other := seedPendingPayment(t, a, "regular")
 	calls := stubCheckout(t, a, http.StatusOK, gatewayRecord(p))
 
-	for name, body := range map[string]gin.H{
-		"no dash":             {"user_key": "ord", "reference": p.paramX},
-		"not a number":        {"user_key": "ord-x", "reference": p.paramX},
-		"wrong prefix":        {"user_key": p.paramX, "reference": p.orderKey},
-		"another order's":     {"user_key": other.orderKey, "reference": p.paramX},
-		"no such payment":     {"user_key": p.orderKey, "reference": "m-999999"},
-		"missing reference":   {"user_key": p.orderKey},
-		"negative payment id": {"user_key": p.orderKey, "reference": "m--1"},
-		"zero payment id":     {"user_key": p.orderKey, "reference": "m-0"},
-		"past int4":           {"user_key": p.orderKey, "reference": "m-4294967297"},
+	for name, tc := range map[string]struct {
+		body gin.H
+		want int
+	}{
+		// Missing field: the body does not bind.
+		"missing reference": {gin.H{"user_key": p.orderKey}, http.StatusBadRequest},
+		// Binds, but names no payment of that order.
+		"no dash":             {gin.H{"user_key": "ord", "reference": p.paramX}, http.StatusUnprocessableEntity},
+		"not a number":        {gin.H{"user_key": "ord-x", "reference": p.paramX}, http.StatusUnprocessableEntity},
+		"wrong prefix":        {gin.H{"user_key": p.paramX, "reference": p.orderKey}, http.StatusUnprocessableEntity},
+		"another order's":     {gin.H{"user_key": other.orderKey, "reference": p.paramX}, http.StatusUnprocessableEntity},
+		"no such payment":     {gin.H{"user_key": p.orderKey, "reference": "m-999999"}, http.StatusUnprocessableEntity},
+		"negative payment id": {gin.H{"user_key": p.orderKey, "reference": "m--1"}, http.StatusUnprocessableEntity},
+		"zero payment id":     {gin.H{"user_key": p.orderKey, "reference": "m-0"}, http.StatusUnprocessableEntity},
+		"past int4":           {gin.H{"user_key": p.orderKey, "reference": "m-2147483648"}, http.StatusUnprocessableEntity},
 	} {
 		t.Run(name, func(t *testing.T) {
 			w := httptest.NewRecorder()
-			raw, _ := json.Marshal(body)
+			raw, _ := json.Marshal(tc.body)
 			a.gEngine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/checkout/notify", strings.NewReader(string(raw))))
-			assert.Contains(t, []int{http.StatusBadRequest, http.StatusUnprocessableEntity}, w.Code, w.Body.String())
+			assert.Equal(t, tc.want, w.Code, w.Body.String())
 		})
 	}
 	assert.Empty(t, calls())
@@ -584,4 +592,108 @@ func Test_paid_return_with_ids_in_another_form_is_refused(t *testing.T) {
 	}
 
 	assert.Equal(t, paymentState{"success", "card-token", "0123456", "paid"}, readPaymentState(t, a, p))
+}
+
+// Every field checkout records is carried into the update, each to its own
+// column, and success is implied.
+func Test_paidFromGateway_maps_every_field(t *testing.T) {
+	got := paidFromGateway(&pelecard.GatewayPayment{
+		UserKey: "ord-1", AdditionalDetailsParamX: "m-2", TransactionId: "tx",
+		CardHebrewName: "heb", CreditCardAbroadCard: "abroad", CreditCardBrand: "brand",
+		CreditCardCompanyClearer: "clearer", CreditCardCompanyIssuer: "issuer", CreditType: "ctype",
+		CreditCardNumber: "4580", CreditCardExpDate: "1230", DebitCode: "dcode", DebitCurrency: "1",
+		DebitTotal: "18000", DebitType: "dtype", FirstPaymentTotal: "first", FixedPaymentTotal: "fixed",
+		TotalPayments: "3", JParam: "4", TransactionInitTime: "init", TransactionPelecardId: "pid",
+		TransactionUpdateTime: "upd", VoucherId: "v-1", Token: "tok", ApprovalNo: "0123456",
+	})
+	s := null.StringFrom
+	assert.Equal(t, repo.RequestPaid{
+		UserKey: s("ord-1"), ParamX: s("m-2"), Success: s("1"), TransactionID: s("tx"),
+		Token: s("tok"), AuthNo: s("0123456"), CardHebrewName: s("heb"), CCAbroadCard: s("abroad"),
+		CCBrand: s("brand"), CCCompanyClearer: s("clearer"), CreditType: s("ctype"),
+		CCNumber: s("4580"), CCExpDate: s("1230"), DebitCode: s("dcode"), DebitCurrency: s("1"),
+		DebitTotal: s("18000"), DebitType: s("dtype"), FirstPaymentTotal: s("first"),
+		FixedPaymentTotal: s("fixed"), TotalPayments: s("3"), JParam: s("4"),
+		TransactionInitTime: s("init"), TransactionUpdateTime: s("upd"), VoucherID: s("v-1"),
+	}, got)
+
+	// An empty field is left out, not written as "".
+	assert.False(t, paidFromGateway(&pelecard.GatewayPayment{UserKey: "ord-1"}).VoucherID.Valid)
+}
+
+// What the notify stores is checkout's record, field by field.
+func Test_checkout_notify_stores_checkouts_facts(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "regular")
+	record := gatewayRecord(p)
+	record.VoucherId = "v-77"
+	stubCheckout(t, a, http.StatusOK, record)
+
+	notify(t, a, p, http.StatusOK)
+
+	var tx, ccNumber, ccExp, debitTotal, voucher string
+	require.NoError(t, a.testPool(t).QueryRow(context.Background(), `
+		SELECT COALESCE("TransactionID", ''), COALESCE("CCNumber", ''), COALESCE("CCExpDate", ''),
+		       COALESCE("DebitTotal", ''), COALESCE("VoucherID", '')
+		FROM payments WHERE id = $1`, p.paymentID).Scan(&tx, &ccNumber, &ccExp, &debitTotal, &voucher))
+	assert.Equal(t, []string{"tx-1", "458000******1234", "1230", "18000", "v-77"},
+		[]string{tx, ccNumber, ccExp, debitTotal, voucher})
+}
+
+type failingTokens struct{}
+
+func (failingTokens) Token() (string, error) { return "", errors.New("keycloak down") }
+func (failingTokens) Invalidate()            {}
+func (failingTokens) InvalidateToken(string) {}
+
+// Checkout refusing our bearer, or no bearer to be had, is 502 (retry later);
+// anything else that goes wrong reading checkout is 500.
+func Test_checkout_notify_maps_checkout_read_failures(t *testing.T) {
+	for name, tc := range map[string]struct {
+		status int
+		body   string
+		tokens keycloak.TokenSource
+		want   int
+	}{
+		"bearer refused":   {http.StatusUnauthorized, `{}`, keycloak.StaticTokenSource("tok"), http.StatusBadGateway},
+		"no bearer":        {http.StatusOK, `{}`, failingTokens{}, http.StatusBadGateway},
+		"malformed record": {http.StatusOK, `{"UserKey":`, keycloak.StaticTokenSource("tok"), http.StatusInternalServerError},
+	} {
+		t.Run(name, func(t *testing.T) {
+			a := NewTestApp(t)
+			defer CloseTestApp(a)
+			p := seedPendingPayment(t, a, "regular")
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			t.Cleanup(srv.Close)
+			client := pelecard.NewClient()
+			client.BaseURL = srv.URL
+			client.Tokens = tc.tokens
+			a.ordersAPI.pages = client
+
+			notify(t, a, p, tc.want)
+
+			assert.Equal(t, "pending", readPaymentState(t, a, p).paymentStatus)
+		})
+	}
+}
+
+// A payment marked successful whose success flag is not "1" is not rewritten,
+// and its order is not settled: UpdateOrderAfterPayment would mark it failed.
+func Test_checkout_notify_leaves_an_inconsistent_payment_alone(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "regular")
+	_, err := a.testPool(t).Exec(context.Background(),
+		`UPDATE payments SET "PaymentStatus" = 'success', pelecard_token = 'first' WHERE id = $1`, p.paymentID)
+	require.NoError(t, err)
+	calls := stubCheckout(t, a, http.StatusOK, gatewayRecord(p))
+
+	notify(t, a, p, http.StatusOK)
+
+	assert.Equal(t, paymentState{"success", "first", "", "new"}, readPaymentState(t, a, p))
+	assert.Empty(t, calls())
 }

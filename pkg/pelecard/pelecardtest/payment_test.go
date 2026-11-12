@@ -75,3 +75,9 @@ func TestGetPayment_ServerErrorIsAnError(t *testing.T) {
 	require.Error(t, err)
 	assert.NotErrorIs(t, err, pelecard.ErrPaymentNotFound)
 }
+
+func TestGetPayment_WithoutATokenSourceIsAnError(t *testing.T) {
+	c := &pelecard.Client{Client: resty.New(), BaseURL: "http://127.0.0.1:1"}
+	_, err := c.GetPayment(context.Background(), "ord-5", "m-7")
+	assert.ErrorContains(t, err, "no token source")
+}

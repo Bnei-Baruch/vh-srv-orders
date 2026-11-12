@@ -18,6 +18,7 @@ import (
 	"github.com/volatiletech/null/v9"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
+	"gitlab.bbdev.team/vh/pay/orders/events/eventstest"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/keycloak"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/pelecard"
 	"gitlab.bbdev.team/vh/pay/orders/repo"
@@ -360,6 +361,130 @@ func Test_keyID_reads_only_this_environments_ids(t *testing.T) {
 	assert.Equal(t, 7, id)
 }
 
+// A successful payment is written once: a second confirm, or a late failure,
+// is refused by the write itself and changes nothing.
+func Test_UpdatePayment_writes_a_successful_payment_once(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "regular")
+	ctx := eventstest.WithTestEventBuilder(t, context.Background())
+	_, err := a.repo.UpdatePayment(ctx, paidFromGateway(&pelecard.GatewayPayment{
+		UserKey: p.orderKey, AdditionalDetailsParamX: p.paramX, Token: "first", ApprovalNo: "111",
+	}))
+	require.NoError(t, err)
+
+	for name, rp := range map[string]repo.RequestPaid{
+		"second success": paidFromGateway(&pelecard.GatewayPayment{
+			UserKey: p.orderKey, AdditionalDetailsParamX: p.paramX, Token: "second", ApprovalNo: "222"}),
+		"late failure": {UserKey: null.StringFrom(p.orderKey), ParamX: null.StringFrom(p.paramX), Success: null.StringFrom("0")},
+	} {
+		_, err := a.repo.UpdatePayment(ctx, rp)
+		assert.ErrorIs(t, err, common.ErrAlreadyPaid, name)
+	}
+	s := readPaymentState(t, a, p)
+	assert.Equal(t, "success", s.paymentStatus)
+	assert.Equal(t, "first", s.token)
+	assert.Equal(t, "111", s.authNo)
+}
+
+// A failed browser return after the payment succeeded no longer flips it.
+func Test_paid_return_with_a_late_failure_keeps_the_payment_successful(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "regular")
+	stubCheckout(t, a, http.StatusOK, gatewayRecord(p))
+	notify(t, a, p, http.StatusOK)
+
+	POST_ROOT(t, a, "/orders/paid", gin.H{
+		"user_key": p.orderKey, "additional_details_param_x": p.paramX, "success": "0",
+	}, http.StatusOK)
+
+	assert.Equal(t, paymentState{"success", "card-token", "0123456", "paid"}, readPaymentState(t, a, p))
+}
+
+// The browser return confirms the payment while the notify is reading
+// checkout. The notify's write is refused, it answers 200, keeps the browser's
+// facts, and still settles the order.
+func Test_checkout_notify_racing_a_browser_return_writes_nothing(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "regular")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, err := a.testPool(t).Exec(context.Background(),
+			`UPDATE payments SET "PaymentStatus" = 'success', success = '1', pelecard_token = 'browser' WHERE id = $1`, p.paymentID)
+		require.NoError(t, err)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(gatewayRecord(p))
+	}))
+	t.Cleanup(srv.Close)
+	client := pelecard.NewClient()
+	client.BaseURL = srv.URL
+	client.Tokens = keycloak.StaticTokenSource("tok")
+	a.ordersAPI.pages = client
+
+	notify(t, a, p, http.StatusOK)
+
+	assert.Equal(t, paymentState{"success", "browser", "", "paid"}, readPaymentState(t, a, p))
+}
+
+// The payments write and the payments_pelecard write commit together. If the
+// second fails, neither is kept, and a retry writes both.
+func Test_UpdatePayment_rolls_back_both_writes_when_one_fails(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "regular")
+	pool := a.testPool(t)
+	ctx := eventstest.WithTestEventBuilder(t, context.Background())
+	_, err := pool.Exec(ctx, `
+		CREATE FUNCTION fail_pelecard_update() RETURNS trigger LANGUAGE plpgsql AS
+		$$ BEGIN RAISE EXCEPTION 'pelecard write failed'; END $$;
+		CREATE TRIGGER fail_pelecard BEFORE UPDATE ON payments_pelecard
+		FOR EACH ROW EXECUTE FUNCTION fail_pelecard_update();`)
+	require.NoError(t, err)
+	record := gatewayRecord(p)
+	rp := paidFromGateway(&record)
+
+	_, err = a.repo.UpdatePayment(ctx, rp)
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, common.ErrAlreadyPaid)
+	assert.Equal(t, "pending", readPaymentState(t, a, p).paymentStatus)
+
+	_, err = pool.Exec(ctx, `DROP TRIGGER fail_pelecard ON payments_pelecard`)
+	require.NoError(t, err)
+	_, err = a.repo.UpdatePayment(ctx, rp)
+	require.NoError(t, err)
+	assert.Equal(t, "success", readPaymentState(t, a, p).paymentStatus)
+}
+
+// A late browser return carrying an error, for a payment checkout's notify
+// already confirmed, is done: 200, and nothing changes.
+func Test_paid_return_with_an_error_for_a_confirmed_payment_is_done(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "regular")
+	stubCheckout(t, a, http.StatusOK, gatewayRecord(p))
+	notify(t, a, p, http.StatusOK)
+
+	POST_ROOT(t, a, "/orders/paid", gin.H{
+		"user_key": p.orderKey, "additional_details_param_x": p.paramX, "error": "301",
+	}, http.StatusOK)
+
+	assert.Equal(t, paymentState{"success", "card-token", "0123456", "paid"}, readPaymentState(t, a, p))
+}
+
+// Without a confirmed payment, a return carrying an error is still refused.
+func Test_paid_return_with_an_error_for_a_pending_payment_is_refused(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "regular")
+
+	POST_ROOT(t, a, "/orders/paid", gin.H{
+		"user_key": p.orderKey, "additional_details_param_x": p.paramX, "error": "301",
+	}, http.StatusUnprocessableEntity)
+
+	assert.Equal(t, "pending", readPaymentState(t, a, p).paymentStatus)
+}
+
 // If the payment cannot be read, the browser return stops with 500. Treating
 // the failed read as "not paid" would write the browser's facts over a payment
 // checkout's notify already confirmed.
@@ -603,4 +728,125 @@ func Test_checkout_notify_finishes_when_checkout_hangs_up(t *testing.T) {
 	a.gEngine.ServeHTTP(httptest.NewRecorder(), r)
 
 	assert.Equal(t, paymentState{"success", "card-token", "0123456", "paid"}, readPaymentState(t, a, p))
+}
+
+// A payment created before payments_pelecard rows were always written has
+// none. The confirm creates it with the card facts instead of committing the
+// payment without them.
+func Test_UpdatePayment_creates_a_missing_pelecard_row(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "regular")
+	pool := a.testPool(t)
+	ctx := eventstest.WithTestEventBuilder(t, context.Background())
+	_, err := pool.Exec(ctx, `DELETE FROM payments_pelecard WHERE payment_id = $1`, p.paymentID)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `UPDATE payments SET "Ordkey" = $1 WHERE id = $2`, p.orderKey, p.paymentID)
+	require.NoError(t, err)
+	record := gatewayRecord(p)
+
+	_, err = a.repo.UpdatePayment(ctx, paidFromGateway(&record))
+	require.NoError(t, err)
+
+	var rows int
+	var token, authNo, ordKey string
+	var amount null.Float64
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT count(*) OVER (), COALESCE(pelecard_token, ''), COALESCE(auth_no, ''), amount, COALESCE(ord_key, '')
+		FROM payments_pelecard WHERE payment_id = $1`, p.paymentID).Scan(&rows, &token, &authNo, &amount, &ordKey))
+	assert.Equal(t, 1, rows)
+	assert.Equal(t, "card-token", token)
+	assert.Equal(t, "0123456", authNo)
+	// Taken from the payment: the gateway's record carries neither.
+	assert.Equal(t, null.Float64From(180), amount)
+	assert.Equal(t, p.orderKey, ordKey)
+	assert.Equal(t, "success", readPaymentState(t, a, p).paymentStatus)
+}
+
+// The browser return confirms the payment while the notify reads checkout,
+// and then the payment cannot be read. The notify answers 500 so checkout
+// retries, rather than calling the order settled.
+func Test_checkout_notify_racing_a_browser_return_fails_when_the_payment_cannot_be_reread(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "regular")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pool := a.testPool(t)
+		_, err := pool.Exec(context.Background(),
+			`UPDATE payments SET "PaymentStatus" = 'success', success = '1', pelecard_token = 'browser' WHERE id = $1`, p.paymentID)
+		require.NoError(t, err)
+		// Breaks GetPaymentByID's read only; UpdatePayment does not select it.
+		_, err = pool.Exec(context.Background(), `ALTER TABLE payments RENAME COLUMN pricing_version TO pricing_version_gone`)
+		require.NoError(t, err)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(gatewayRecord(p))
+	}))
+	t.Cleanup(srv.Close)
+	client := pelecard.NewClient()
+	client.BaseURL = srv.URL
+	client.Tokens = keycloak.StaticTokenSource("tok")
+	a.ordersAPI.pages = client
+
+	notify(t, a, p, http.StatusInternalServerError)
+
+	assert.Equal(t, paymentState{"success", "browser", "", "new"}, readPaymentState(t, a, p))
+}
+
+// A browser return carrying an error, for a payment an earlier confirm wrote
+// without finishing the order, still finishes it.
+func Test_paid_return_with_an_error_finishes_a_half_written_confirm(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "regular")
+	writeHalfConfirm(t, a, p)
+
+	POST_ROOT(t, a, "/orders/paid", gin.H{
+		"user_key": p.orderKey, "additional_details_param_x": p.paramX, "error": "301",
+	}, http.StatusOK)
+
+	assert.Equal(t, paymentState{"success", "first", "", "paid"}, readPaymentState(t, a, p))
+}
+
+// Two confirms of one pending payment running at once: the row lock lets
+// exactly one write, the other is refused as already paid, and the facts are
+// the winner's. Repeated, since a single pair may happen not to overlap.
+func Test_UpdatePayment_concurrent_confirms_write_once(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	ctx := eventstest.WithTestEventBuilder(t, context.Background())
+
+	for round := 0; round < 40; round++ {
+		p := seedPendingPayment(t, a, "regular")
+		tokens := []string{"first", "second"}
+		errs := make([]error, len(tokens))
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		for i, token := range tokens {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				_, errs[i] = a.repo.UpdatePayment(ctx, paidFromGateway(&pelecard.GatewayPayment{
+					UserKey: p.orderKey, AdditionalDetailsParamX: p.paramX, Token: token, ApprovalNo: token,
+				}))
+			}()
+		}
+		close(start)
+		wg.Wait()
+
+		winners := 0
+		winner := ""
+		for i, err := range errs {
+			if err == nil {
+				winners++
+				winner = tokens[i]
+				continue
+			}
+			require.ErrorIs(t, err, common.ErrAlreadyPaid, "round %d", round)
+		}
+		require.Equal(t, 1, winners, "round %d: both concurrent writes succeeded", round)
+		s := readPaymentState(t, a, p)
+		require.Equal(t, winner, s.token, "round %d", round)
+		require.Equal(t, winner, s.authNo, "round %d", round)
+	}
 }

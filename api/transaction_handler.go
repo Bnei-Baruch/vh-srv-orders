@@ -480,19 +480,21 @@ func (o *OrdersAPI) handleTransactionPaid(c *gin.Context) {
 			return
 		}
 	}
-	if paid := o.paidPayment(c.Request.Context(), rp.ParamX.String); paid != nil {
-		// Confirmed already, by checkout's notify or an earlier return. The
-		// browser's copy of the facts must not overwrite checkout's; only an
+	p, err := o.repo.UpdatePayment(c.Request.Context(), rp)
+	if errors.Is(err, common.ErrAlreadyPaid) {
+		// Confirmed already, by checkout's notify or an earlier return, and the
+		// write refused to replace checkout's facts with the browser's. Only an
 		// order an earlier confirm left unsettled is finished.
-		if err := o.settleOrder(c.Request.Context(), paid); err != nil {
-			c.Status(http.StatusInternalServerError)
-			_ = c.Error(fmt.Errorf("o.settleOrder: %w", err))
-			return
+		if paid := o.paidPayment(c.Request.Context(), rp.ParamX.String); paid != nil {
+			if err := o.settleOrder(c.Request.Context(), paid); err != nil {
+				c.Status(http.StatusInternalServerError)
+				_ = c.Error(fmt.Errorf("o.settleOrder: %w", err))
+				return
+			}
 		}
 		c.JSON(http.StatusOK, nil)
 		return
 	}
-	p, err := o.repo.UpdatePayment(c.Request.Context(), rp)
 	if err != nil {
 		// TODO : ask grisha to return more info on error
 		utils.LogFor(c.Request.Context()).Warn("repo.UpdatePayment", slog.Any("err", err))

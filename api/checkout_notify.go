@@ -148,6 +148,17 @@ func (o *OrdersAPI) confirmCheckoutPayment(ctx context.Context, orderKey, paramX
 	}
 
 	paid, err := o.repo.UpdatePayment(ctx, paidFromGateway(facts))
+	if errors.Is(err, common.ErrAlreadyPaid) {
+		// A browser return or another notify confirmed it between the check
+		// above and this write. Same as finding it paid above, read afresh:
+		// the copy read above predates that write.
+		if paid := o.paidPayment(ctx, paramX); paid != nil {
+			if err := o.settleOrder(ctx, paid); err != nil {
+				return false, err
+			}
+		}
+		return true, nil
+	}
 	if err != nil {
 		return false, fmt.Errorf("o.repo.UpdatePayment: %w", err)
 	}

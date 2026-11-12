@@ -364,17 +364,25 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 		p.PaymentType = null.StringFrom(common.PaymentTypePelecard)
 	}
 
+	// Conditional, so a successful payment is written once. The check and the
+	// write are one statement: a notify and a browser return racing each other
+	// cannot both write, and a late success=0 cannot flip a payment that
+	// succeeded to failed.
 	toUpdate, toUpdateArgs := preparePaymentUpdateQuery(p)
-	_, err = o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=%d`, toUpdate, uint(paymentid)), toUpdateArgs...)
+	tag, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=%d AND "PaymentStatus" IS DISTINCT FROM 'success'`,
+		toUpdate, uint(paymentid)), toUpdateArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("o.pool.Exec [update payment]: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, common.ErrAlreadyPaid
 	}
 
 	toUpdatePelecard, toUpdateArgsPeleCard := preparePelecardPaymentUpdateViaPaymentStructQuery(p)
 	_, pelecardErr := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdatePelecard,
 		uint(paymentid)), toUpdateArgsPeleCard...)
 	if pelecardErr != nil {
-		return nil, fmt.Errorf("o.pool.Exec [update pelecard]: %w", err)
+		return nil, fmt.Errorf("o.pool.Exec [update pelecard]: %w", pelecardErr)
 	}
 
 	o.emitEvent(ctx, events.TypeUpdatePayment, map[string]interface{}{"payment_id": paymentid})

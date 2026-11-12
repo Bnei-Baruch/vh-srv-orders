@@ -14,10 +14,13 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/volatiletech/null/v9"
 
 	"gitlab.bbdev.team/vh/pay/orders/common"
+	"gitlab.bbdev.team/vh/pay/orders/events/eventstest"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/keycloak"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/pelecard"
+	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
 type checkoutCall struct{ path, reference, auth string }
@@ -350,4 +353,70 @@ func Test_keyID_reads_only_this_environments_ids(t *testing.T) {
 	id, err = keyID("m-7", "m")
 	require.NoError(t, err)
 	assert.Equal(t, 7, id)
+}
+
+// A successful payment is written once: a second confirm, or a late failure,
+// is refused by the write itself and changes nothing.
+func Test_UpdatePayment_writes_a_successful_payment_once(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "regular")
+	ctx := eventstest.WithTestEventBuilder(t, context.Background())
+	_, err := a.repo.UpdatePayment(ctx, paidFromGateway(&pelecard.GatewayPayment{
+		UserKey: p.orderKey, AdditionalDetailsParamX: p.paramX, Token: "first", ApprovalNo: "111",
+	}))
+	require.NoError(t, err)
+
+	for name, rp := range map[string]repo.RequestPaid{
+		"second success": paidFromGateway(&pelecard.GatewayPayment{
+			UserKey: p.orderKey, AdditionalDetailsParamX: p.paramX, Token: "second", ApprovalNo: "222"}),
+		"late failure": {UserKey: null.StringFrom(p.orderKey), ParamX: null.StringFrom(p.paramX), Success: null.StringFrom("0")},
+	} {
+		_, err := a.repo.UpdatePayment(ctx, rp)
+		assert.ErrorIs(t, err, common.ErrAlreadyPaid, name)
+	}
+	s := readPaymentState(t, a, p)
+	assert.Equal(t, "success", s.paymentStatus)
+	assert.Equal(t, "first", s.token)
+	assert.Equal(t, "111", s.authNo)
+}
+
+// A failed browser return after the payment succeeded no longer flips it.
+func Test_paid_return_with_a_late_failure_keeps_the_payment_successful(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "regular")
+	stubCheckout(t, a, http.StatusOK, gatewayRecord(p))
+	notify(t, a, p, http.StatusOK)
+
+	POST_ROOT(t, a, "/orders/paid", gin.H{
+		"user_key": p.orderKey, "additional_details_param_x": p.paramX, "success": "0",
+	}, http.StatusOK)
+
+	assert.Equal(t, paymentState{"success", "card-token", "0123456", "paid"}, readPaymentState(t, a, p))
+}
+
+// The browser return confirms the payment while the notify is reading
+// checkout. The notify's write is refused, it answers 200, keeps the browser's
+// facts, and still settles the order.
+func Test_checkout_notify_racing_a_browser_return_writes_nothing(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "regular")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, err := a.testPool(t).Exec(context.Background(),
+			`UPDATE payments SET "PaymentStatus" = 'success', success = '1', pelecard_token = 'browser' WHERE id = $1`, p.paymentID)
+		require.NoError(t, err)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(gatewayRecord(p))
+	}))
+	t.Cleanup(srv.Close)
+	client := pelecard.NewClient()
+	client.BaseURL = srv.URL
+	client.Tokens = keycloak.StaticTokenSource("tok")
+	a.ordersAPI.pages = client
+
+	notify(t, a, p, http.StatusOK)
+
+	assert.Equal(t, paymentState{"success", "browser", "", "paid"}, readPaymentState(t, a, p))
 }

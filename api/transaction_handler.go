@@ -259,6 +259,16 @@ func (o *OrdersAPI) handleTransactionNewToken(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	isAuthUser, isAdmin, keycloakID := o.isAuthUserOrHasAnyRole(c, common.RoleRoot, common.RoleAdmin)
+	if !isAuthUser {
+		return
+	}
+	// A member opens a card-update page for themselves only: external_payments
+	// files the attempt and its result under this key. Staff may name anyone,
+	// as in checkout.
+	if !isAdmin {
+		req.UserKey = null.StringFrom(keycloakID)
+	}
 
 	var phone string
 	var country string

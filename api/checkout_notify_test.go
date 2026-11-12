@@ -434,3 +434,30 @@ func Test_every_route_but_the_notify_is_behind_auth(t *testing.T) {
 		assert.Equal(t, http.StatusUnauthorized, w.Code, "%s %s", r.Method, r.Path)
 	}
 }
+
+// Ids that another parser would read as the same order or payment, but that
+// this service never built, are refused before anything reads them. Before,
+// "ord-1-x" skipped the already-paid guard and the browser's token replaced
+// checkout's on a confirmed payment.
+func Test_paid_return_with_ids_in_another_form_is_refused(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "recurring")
+	stubCheckout(t, a, http.StatusOK, gatewayRecord(p))
+	notify(t, a, p, http.StatusOK)
+
+	for _, ids := range [][2]string{
+		{p.orderKey + "-x", p.paramX},
+		{fmt.Sprintf("ord-0%d", p.orderID), p.paramX},
+		{p.orderKey, p.paramX + "-x"},
+		{p.orderKey, fmt.Sprintf("m-0%d", p.paymentID)},
+		{p.orderKey, ""},
+	} {
+		POST_ROOT(t, a, "/orders/paid", gin.H{
+			"user_key": ids[0], "additional_details_param_x": ids[1],
+			"success": "1", "token": "from-the-browser", "authNo": "999",
+		}, http.StatusUnprocessableEntity)
+	}
+
+	assert.Equal(t, paymentState{"success", "card-token", "0123456", "paid"}, readPaymentState(t, a, p))
+}

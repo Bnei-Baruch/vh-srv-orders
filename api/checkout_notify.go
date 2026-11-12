@@ -225,7 +225,7 @@ func keyID(key, prefix string) (int, error) {
 	n, okSuffix := strings.CutSuffix(n, suffix)
 	digits := n != "" && n[0] != '0' && strings.Trim(n, "0123456789") == ""
 	id, err := strconv.ParseInt(n, 10, 32)
-	if !okPrefix || !okSuffix || !digits || err != nil || id <= 0 {
+	if !okPrefix || !okSuffix || !digits || err != nil {
 		return 0, fmt.Errorf("%w: %q is not a %s-<id>%s id", common.ErrInvalidValues, key, prefix, suffix)
 	}
 	return int(id), nil

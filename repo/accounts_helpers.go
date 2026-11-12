@@ -146,7 +146,7 @@ func (o *OrdersDB) PatchAccount(ctx context.Context, req Account, accountID int)
 		return common.ErrInvalidValues
 	}
 
-	updateRes, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE accounts SET %s WHERE id=%d`, toUpdate, accountID), toUpdateArgs...)
+	updateRes, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE accounts SET %s WHERE id=$%d`, toUpdate, len(toUpdateArgs)+1), append(toUpdateArgs, accountID)...)
 	if err != nil {
 		if isKeyTaken(err) {
 			return fmt.Errorf("%w: %w", common.ErrAccountKeyTaken, err)

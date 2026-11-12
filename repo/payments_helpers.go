@@ -284,13 +284,13 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 		return nil, fmt.Errorf("req.Error: %s", req.Error.String)
 	}
 
-	orderid, err := strconv.ParseUint(strings.Split(req.UserKey.String, "-")[1], 10, 0)
+	orderid, err := strconv.ParseInt(strings.Split(req.UserKey.String, "-")[1], 10, 64)
 	if err != nil {
-		return nil, fmt.Errorf("strconv.ParseUint [user_key]: %w", err)
+		return nil, fmt.Errorf("strconv.ParseInt [user_key]: %w", err)
 	}
-	paymentid, err := strconv.ParseUint(strings.Split(req.ParamX.String, "-")[1], 10, 0)
+	paymentid, err := strconv.ParseInt(strings.Split(req.ParamX.String, "-")[1], 10, 64)
 	if err != nil {
-		return nil, fmt.Errorf("strconv.ParseUint [additional_details_param_x]: %w", err)
+		return nil, fmt.Errorf("strconv.ParseInt [additional_details_param_x]: %w", err)
 	}
 
 	var p Payment
@@ -321,7 +321,7 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 	j_param,
 	"TransactionInitTime",
 	"TransactionUpdateTime",
-	"VoucherID" FROM payments WHERE "OrderID"=$1 AND id=$2`, uint(orderid), uint(paymentid)).Scan(
+	"VoucherID" FROM payments WHERE "OrderID"=$1 AND id=$2`, orderid, paymentid).Scan(
 		&p.OrderID, &p.PaymentStatus, &p.PaymentType, &p.ParamX, &p.AuthNo, &p.ConfirmationKey, &p.Success,
 		&p.PelecardToken, &p.TransactionID, &p.CCBrand, &p.CardHebrewName, &p.CCAbroadCard,
 		&p.CCCompanyClearer, &p.CreditType, &p.CCExpDate, &p.CCNumber, &p.DebitCode, &p.DebitCurrency,
@@ -365,15 +365,15 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 	}
 
 	toUpdate, toUpdateArgs := preparePaymentUpdateQuery(p)
-	_, err = o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=%d`, toUpdate, uint(paymentid)), toUpdateArgs...)
+	_, err = o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=$%d`, toUpdate, len(toUpdateArgs)+1),
+		append(toUpdateArgs, paymentid)...)
 	if err != nil {
 		return nil, fmt.Errorf("o.pool.Exec [update payment]: %w", err)
 	}
 
 	toUpdatePelecard, toUpdateArgsPeleCard := preparePelecardPaymentUpdateViaPaymentStructQuery(p)
-	_, pelecardErr := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdatePelecard,
-		uint(paymentid)), toUpdateArgsPeleCard...)
-	if pelecardErr != nil {
+	if _, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=$%d`, toUpdatePelecard,
+		len(toUpdateArgsPeleCard)+1), append(toUpdateArgsPeleCard, paymentid)...); err != nil {
 		return nil, fmt.Errorf("o.pool.Exec [update pelecard]: %w", err)
 	}
 
@@ -430,7 +430,7 @@ func (o *OrdersDB) UpdatePelecardPayment(ctx context.Context, req PaymentUpdate)
 		return common.ErrInvalidValues
 	}
 
-	updateRes, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdate, req.PaymentID.Int), toUpdateArgs...)
+	updateRes, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=$%d`, toUpdate, len(toUpdateArgs)+1), append(toUpdateArgs, req.PaymentID.Int)...)
 	if err != nil {
 		return fmt.Errorf("o.pool.Exec: %w", err)
 	}
@@ -449,7 +449,7 @@ func (o *OrdersDB) UpdateOfflinePayment(ctx context.Context, req PaymentUpdate) 
 		return common.ErrInvalidValues
 	}
 
-	updateRes, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments_offline SET %s WHERE payment_id=%d`, toUpdate, req.PaymentID.Int), toUpdateArgs...)
+	updateRes, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments_offline SET %s WHERE payment_id=$%d`, toUpdate, len(toUpdateArgs)+1), append(toUpdateArgs, req.PaymentID.Int)...)
 	if err != nil {
 		return fmt.Errorf("o.pool.Exec: %w", err)
 	}
@@ -468,7 +468,7 @@ func (o *OrdersDB) UpdateHelpHavePayment(ctx context.Context, req PaymentUpdate)
 		return common.ErrInvalidValues
 	}
 
-	updateRes, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments_helphaver SET %s WHERE payment_id=%d`, toUpdate, req.PaymentID.Int), toUpdateArgs...)
+	updateRes, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE payments_helphaver SET %s WHERE payment_id=$%d`, toUpdate, len(toUpdateArgs)+1), append(toUpdateArgs, req.PaymentID.Int)...)
 	if err != nil {
 		return fmt.Errorf("o.pool.Exec: %w", err)
 	}
@@ -1146,15 +1146,15 @@ func buildAndGetPaymentsWhereQuery(fromDate *time.Time, dateTo *time.Time, payme
 	whereCondition.WriteString("")
 
 	if !dateTo.IsZero() {
-		whereCondition.WriteString(fmt.Sprintf(" p.updated_at <= '%s'", dateTo.Format(time.RFC3339Nano)))
+		whereCondition.WriteString(" p.updated_at <= " + args.arg(*dateTo))
 	}
 
 	// WHERE query generation based on parameters
 	if fromDate != nil {
 		if whereCondition.String() != "" {
-			whereCondition.WriteString(fmt.Sprintf(" AND p.updated_at >= '%s'", fromDate.Format(time.RFC3339Nano)))
+			whereCondition.WriteString(" AND p.updated_at >= " + args.arg(*fromDate))
 		} else {
-			whereCondition.WriteString(fmt.Sprintf(" p.updated_at >= '%s'", fromDate.Format(time.RFC3339Nano)))
+			whereCondition.WriteString(" p.updated_at >= " + args.arg(*fromDate))
 		}
 	}
 
@@ -1214,7 +1214,7 @@ func buildAndGetPaymentsWhereQuery(fromDate *time.Time, dateTo *time.Time, payme
 			whereCondition.WriteString(` AND LOWER(a."Email")=LOWER(` + args.arg(email) + `)`)
 		}
 		if accontID != 0 {
-			whereCondition.WriteString(fmt.Sprintf(` AND a.id=%d`, accontID))
+			whereCondition.WriteString(` AND a.id=` + args.arg(accontID))
 		}
 		if userKey != "" {
 			whereCondition.WriteString(` AND a."UserKey" = ` + args.arg(userKey))
@@ -1223,9 +1223,9 @@ func buildAndGetPaymentsWhereQuery(fromDate *time.Time, dateTo *time.Time, payme
 
 	if intOrderID != 0 {
 		if whereCondition.String() != "" {
-			whereCondition.WriteString(fmt.Sprintf(` AND p."OrderID" = %d`, intOrderID))
+			whereCondition.WriteString(` AND p."OrderID" = ` + args.arg(intOrderID))
 		} else {
-			whereCondition.WriteString(fmt.Sprintf(` p."OrderID" = %d`, intOrderID))
+			whereCondition.WriteString(` p."OrderID" = ` + args.arg(intOrderID))
 		}
 	}
 

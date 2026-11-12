@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"log/slog"
 	"net/http"
@@ -253,4 +254,56 @@ func Test_page_failure_is_logged_at_error(t *testing.T) {
 	assert.Equal(t, "ERROR", found["level"])
 	assert.Contains(t, found["err"], pelecard.PageRenewCard)
 	assert.Contains(t, found["err"], pelecard.ErrUnauthorized.Error())
+}
+
+// seedTransaction stores an account keyed userKey with one order, payment and
+// transaction, and returns the transaction id.
+func seedTransaction(t *testing.T, a *App, userKey string) int {
+	t.Helper()
+	pool := a.testPool(t)
+	ctx := context.Background()
+	var accountID, orderID, paymentID, txID int
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO accounts ("Email", "UserKey") VALUES ($1, $2) RETURNING id`, userKey+"@test.test", userKey).Scan(&accountID))
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO orders ("AccountID", "Type", "Status", "Amount", "Currency") VALUES ($1, 'regular', 'new', 180, 'ILS') RETURNING id`,
+		accountID).Scan(&orderID))
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO payments ("OrderID", "PaymentStatus", "Amount", "Currency") VALUES ($1, 'pending', 180, 'ILS') RETURNING id`,
+		orderID).Scan(&paymentID))
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO transaction (order_id, payment_id, account_id, terminal_id) VALUES ($1, $2, $3, 'ben_regular_pelecard') RETURNING id`,
+		orderID, paymentID, accountID).Scan(&txID))
+	return txID
+}
+
+// A member reads their own transaction and not another member's. The account
+// filter used to be formatted from a *int, so it held the pointer's address
+// and nobody's lookup ever matched, an admin's included.
+func Test_get_transaction_is_scoped_to_the_callers_account(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	mine := seedTransaction(t, a, USER_KEY)
+	theirs := seedTransaction(t, a, "kc-someone-else")
+
+	got := GET(t, a, fmt.Sprintf("/v2/transaction/%d", mine), http.StatusOK)
+	assert.Equal(t, float64(mine), got["data"].(map[string]any)["id"])
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/v2/transaction/%d", theirs), nil)
+	claims := &middleware.IDTokenClaims{Sub: USER_KEY, RealmAccess: middleware.Roles{Roles: []string{"some-role"}}}
+	a.gEngine.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), common.CtxAuthClaims, claims)))
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func Test_get_transaction_as_admin_reads_any(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	theirs := seedTransaction(t, a, "kc-someone-else")
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/v2/transaction/%d", theirs), nil)
+	claims := &middleware.IDTokenClaims{Sub: USER_KEY, RealmAccess: middleware.Roles{Roles: []string{common.RoleRoot}}}
+	a.gEngine.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), common.CtxAuthClaims, claims)))
+	assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
 }

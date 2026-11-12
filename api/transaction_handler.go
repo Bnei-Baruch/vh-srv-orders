@@ -461,14 +461,21 @@ func (o *OrdersAPI) handleTransactionPaid(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "No order id provided in UserKey"})
 		return
 	}
+	// Both ids must be in exactly the form this service built them, before
+	// anything reads them. The ownership check, the already-paid guard and
+	// UpdatePayment each parse them; if one accepted a form another refused
+	// ("ord-1-x", "ord-01"), the guard could be skipped while the write still
+	// found the payment, and the browser's facts would replace checkout's.
+	orderid, err := keyID(rp.UserKey.String, "ord")
+	if err == nil {
+		_, err = keyID(rp.ParamX.String, "m")
+	}
+	if err != nil {
+		utils.SentryFor(c.Request.Context()).CaptureException(err)
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+		return
+	}
 	if !isAdmin { //if user not root or admin
-		orderid, err := strconv.ParseUint(strings.Split(rp.UserKey.String, "-")[1], 10, 0)
-		if err != nil {
-			errf := fmt.Errorf("strconv.ParseUint [user_key]: %w", err)
-			utils.SentryFor(c.Request.Context()).CaptureException(errf)
-			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": errf.Error()})
-			return
-		}
 		account, err := o.repo.GetAccountForOrderID(c.Request.Context(), uint(orderid))
 		if err != nil {
 			c.Status(http.StatusInternalServerError)

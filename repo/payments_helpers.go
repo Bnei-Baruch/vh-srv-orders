@@ -380,7 +380,9 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 	}
 
 	toUpdate, toUpdateArgs := preparePaymentUpdateQuery(p)
-	tag, err := tx.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=%d`, toUpdate, uint(paymentid)), toUpdateArgs...)
+	// The id is bound like every other value, not formatted into the SQL.
+	tag, err := tx.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=$%d`, toUpdate, len(toUpdateArgs)+1),
+		append(toUpdateArgs, int64(paymentid))...)
 	if err != nil {
 		return nil, fmt.Errorf("tx.Exec [update payment]: %w", err)
 	}
@@ -391,8 +393,8 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 	}
 
 	toUpdatePelecard, toUpdateArgsPeleCard := preparePelecardPaymentUpdateViaPaymentStructQuery(p)
-	if _, err := tx.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=%d`, toUpdatePelecard,
-		uint(paymentid)), toUpdateArgsPeleCard...); err != nil {
+	if _, err := tx.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=$%d`, toUpdatePelecard,
+		len(toUpdateArgsPeleCard)+1), append(toUpdateArgsPeleCard, int64(paymentid))...); err != nil {
 		return nil, fmt.Errorf("tx.Exec [update pelecard]: %w", err)
 	}
 

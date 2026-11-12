@@ -260,6 +260,7 @@ func paidFromGateway(facts *pelecard.GatewayPayment) repo.RequestPaid {
 		CCAbroadCard:          str(facts.CreditCardAbroadCard),
 		CCBrand:               str(facts.CreditCardBrand),
 		CCCompanyClearer:      str(facts.CreditCardCompanyClearer),
+		CCCompanyIssuer:       str(facts.CreditCardCompanyIssuer),
 		CreditType:            str(facts.CreditType),
 		CCNumber:              str(facts.CreditCardNumber),
 		CCExpDate:             str(facts.CreditCardExpDate),

@@ -344,6 +344,7 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 		p.CardHebrewName = req.CardHebrewName
 		p.CCAbroadCard = req.CCAbroadCard
 		p.CCCompanyClearer = req.CCCompanyClearer
+		p.CCCompanyIssuer = req.CCCompanyIssuer
 		p.CreditType = req.CreditType
 		p.CCExpDate = req.CCExpDate
 		p.CCNumber = req.CCNumber

@@ -471,11 +471,9 @@ func Test_paid_return_with_ids_in_another_form_is_refused(t *testing.T) {
 }
 
 // Every field of checkout's record that UpdatePayment stores is carried into
-// the update, each to its own field, and success is implied. The issuer and
-// Pelecard's transaction id are passed in and must come out empty:
-// UpdatePayment has never stored either (the browser return does not get
-// them stored either), so mapping them would look like data that is not
-// kept.
+// the update, each to its own field, and success is implied. Pelecard's
+// transaction id is passed in and must come out empty: UpdatePayment does not
+// store it, so mapping it would look like data that is kept.
 func Test_paidFromGateway_maps_every_field(t *testing.T) {
 	got := paidFromGateway(&pelecard.GatewayPayment{
 		UserKey: "ord-1", AdditionalDetailsParamX: "m-2", TransactionId: "tx",
@@ -490,7 +488,7 @@ func Test_paidFromGateway_maps_every_field(t *testing.T) {
 	assert.Equal(t, repo.RequestPaid{
 		UserKey: s("ord-1"), ParamX: s("m-2"), Success: s("1"), TransactionID: s("tx"),
 		Token: s("tok"), AuthNo: s("0123456"), CardHebrewName: s("heb"), CCAbroadCard: s("abroad"),
-		CCBrand: s("brand"), CCCompanyClearer: s("clearer"), CreditType: s("ctype"),
+		CCBrand: s("brand"), CCCompanyClearer: s("clearer"), CCCompanyIssuer: s("issuer"), CreditType: s("ctype"),
 		CCNumber: s("4580"), CCExpDate: s("1230"), DebitCode: s("dcode"), DebitCurrency: s("1"),
 		DebitTotal: s("18000"), DebitType: s("dtype"), FirstPaymentTotal: s("first"),
 		FixedPaymentTotal: s("fixed"), TotalPayments: s("3"), JParam: s("4"),
@@ -576,4 +574,53 @@ func Test_checkout_notify_leaves_an_inconsistent_payment_alone(t *testing.T) {
 
 	assert.Equal(t, paymentState{"success", "first", "", "new"}, readPaymentState(t, a, p))
 	assert.Empty(t, calls())
+}
+
+func readIssuer(t *testing.T, a *App, p pendingPayment) (payments, pelecard string) {
+	t.Helper()
+	require.NoError(t, a.testPool(t).QueryRow(context.Background(), `
+		SELECT COALESCE(p."CCCompanyIssuer", ''), COALESCE(pp.cc_company_issuer, '')
+		FROM payments p JOIN payments_pelecard pp ON pp.payment_id = p.id WHERE p.id = $1`, p.paymentID).
+		Scan(&payments, &pelecard))
+	return
+}
+
+// The card's issuer is stored on a confirmed payment, from checkout's record,
+// in payments and payments_pelecard alike, as a payment created by a charge
+// already is.
+func Test_checkout_notify_stores_the_card_issuer(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "regular")
+	record := gatewayRecord(p)
+	record.CreditCardCompanyIssuer = "2"
+	stubCheckout(t, a, http.StatusOK, record)
+
+	notify(t, a, p, http.StatusOK)
+
+	payments, pelecard := readIssuer(t, a, p)
+	assert.Equal(t, "2", payments)
+	assert.Equal(t, "2", pelecard)
+}
+
+// The browser return stores it the same way.
+func Test_paid_return_stores_the_card_issuer(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "regular")
+
+	POST_ROOT(t, a, "/orders/paid", gin.H{
+		"user_key": p.orderKey, "additional_details_param_x": p.paramX,
+		"success": "1", "credit_card_company_issuer": "6", "credit_card_company_clearer": "1",
+	}, http.StatusOK)
+
+	payments, pelecard := readIssuer(t, a, p)
+	assert.Equal(t, "6", payments)
+	assert.Equal(t, "6", pelecard)
+	// The clearer was already copied; its payments_pelecard column had the
+	// same misnamed-column problem on a database built from migrations.
+	var clearer string
+	require.NoError(t, a.testPool(t).QueryRow(context.Background(),
+		`SELECT COALESCE(cc_company_clearer, '') FROM payments_pelecard WHERE payment_id = $1`, p.paymentID).Scan(&clearer))
+	assert.Equal(t, "1", clearer)
 }

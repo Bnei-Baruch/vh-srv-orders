@@ -483,9 +483,17 @@ func (o *OrdersAPI) handleTransactionPaid(c *gin.Context) {
 	// A return carrying an error is refused by UpdatePayment before it looks
 	// at the payment, so ask first: if checkout's notify already confirmed the
 	// payment, the late error is stale and the return is done.
-	if !rp.Error.IsZero() && o.paidPayment(c.Request.Context(), rp.ParamX.String) != nil {
-		c.JSON(http.StatusOK, nil)
-		return
+	if !rp.Error.IsZero() {
+		paid, err := o.paidPayment(c.Request.Context(), rp.ParamX.String)
+		if err != nil {
+			c.Status(http.StatusInternalServerError)
+			_ = c.Error(fmt.Errorf("o.paidPayment: %w", err))
+			return
+		}
+		if paid != nil {
+			c.JSON(http.StatusOK, nil)
+			return
+		}
 	}
 	p, err := o.repo.UpdatePayment(c.Request.Context(), rp)
 	if errors.Is(err, common.ErrAlreadyPaid) {

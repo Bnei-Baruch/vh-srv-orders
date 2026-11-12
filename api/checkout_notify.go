@@ -167,18 +167,26 @@ func (o *OrdersAPI) confirmCheckoutPayment(ctx context.Context, orderKey, paramX
 }
 
 // paidPayment returns the payment paramX names when it is marked successful,
-// else nil. Anything it cannot read counts as not paid, leaving the caller's
-// own checks to report it.
-func (o *OrdersAPI) paidPayment(ctx context.Context, paramX string) *repo.Payment {
+// else nil. An id it cannot parse, or a payment that does not exist, is not
+// paid, and the caller's own checks report it. A failed read is an error, not
+// "not paid": the caller would go on to write the browser's facts over a
+// payment checkout may already have confirmed.
+func (o *OrdersAPI) paidPayment(ctx context.Context, paramX string) (*repo.Payment, error) {
 	paymentID, err := keyID(paramX, "m")
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	payment, err := o.repo.GetPaymentByID(ctx, paymentID)
-	if err != nil || payment.PaymentStatus.String != common.PaymentStatusSuccess {
-		return nil
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
 	}
-	return payment
+	if err != nil {
+		return nil, fmt.Errorf("o.repo.GetPaymentByID: %w", err)
+	}
+	if payment.PaymentStatus.String != common.PaymentStatusSuccess {
+		return nil, nil
+	}
+	return payment, nil
 }
 
 // settleConfirmed finishes the order of a payment the write found already

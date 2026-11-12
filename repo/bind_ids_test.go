@@ -16,9 +16,10 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/pkg/testutil"
 )
 
-// Each update below binds its row id instead of formatting it into the SQL.
-// The tests write one of two seeded rows by id and check the other is left
-// alone, and that an id naming no row is reported rather than ignored.
+// The updates below now bind their row id. These tests cannot tell a bound id
+// from one formatted with %d (both reach the same row), so they pin what the
+// change must keep, not how it is done: each writes one of two seeded rows by
+// id, leaves the other alone, and reports an id naming no row.
 
 type seededPayment struct {
 	orderID, paymentID int

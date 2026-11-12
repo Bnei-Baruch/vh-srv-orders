@@ -461,8 +461,8 @@ func (o *OrdersAPI) handleTransactionPaid(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "No order id provided in UserKey"})
 		return
 	}
-	// Both ids must be in exactly the form this service built them, before
-	// anything reads them. The ownership check, the already-paid guard and
+	// Both ids must be in exactly the form this service builds for payment
+	// pages (see keyID), before anything reads them. The ownership check, the already-paid guard and
 	// UpdatePayment each parse them; if one accepted a form another refused
 	// ("ord-1-x", "ord-01"), the guard could be skipped while the write still
 	// found the payment, and the browser's facts would replace checkout's.

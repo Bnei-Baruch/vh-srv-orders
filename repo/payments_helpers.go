@@ -309,8 +309,12 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	var p Payment
-	if err := tx.QueryRow(ctx, `SELECT 
+	// Amount and Ordkey are read for writePelecardFacts: a missing
+	// payments_pelecard row is created from this payment.
+	if err := tx.QueryRow(ctx, `SELECT
 	"OrderID",
+	"Amount",
+	"Ordkey",
 	"PaymentStatus",
 	"PaymentType",
 	"ParamX",
@@ -337,7 +341,7 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 	"TransactionInitTime",
 	"TransactionUpdateTime",
 	"VoucherID" FROM payments WHERE "OrderID"=$1 AND id=$2 FOR UPDATE`, orderid, paymentid).Scan(
-		&p.OrderID, &p.PaymentStatus, &p.PaymentType, &p.ParamX, &p.AuthNo, &p.ConfirmationKey, &p.Success,
+		&p.OrderID, &p.Amount, &p.Ordkey, &p.PaymentStatus, &p.PaymentType, &p.ParamX, &p.AuthNo, &p.ConfirmationKey, &p.Success,
 		&p.PelecardToken, &p.TransactionID, &p.CCBrand, &p.CardHebrewName, &p.CCAbroadCard,
 		&p.CCCompanyClearer, &p.CreditType, &p.CCExpDate, &p.CCNumber, &p.DebitCode, &p.DebitCurrency,
 		&p.DebitTotal, &p.DebitType, &p.FirstPaymentTotal, &p.FixedPaymentTotal, &p.TotalPayments,

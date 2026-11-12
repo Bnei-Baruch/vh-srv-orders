@@ -788,6 +788,8 @@ func Test_UpdatePayment_creates_a_missing_pelecard_row(t *testing.T) {
 	ctx := eventstest.WithTestEventBuilder(t, context.Background())
 	_, err := pool.Exec(ctx, `DELETE FROM payments_pelecard WHERE payment_id = $1`, p.paymentID)
 	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `UPDATE payments SET "Ordkey" = $1 WHERE id = $2`, p.orderKey, p.paymentID)
+	require.NoError(t, err)
 	record := gatewayRecord(p)
 	record.CreditCardCompanyIssuer = "2"
 
@@ -795,14 +797,19 @@ func Test_UpdatePayment_creates_a_missing_pelecard_row(t *testing.T) {
 	require.NoError(t, err)
 
 	var rows int
-	var token, authNo, issuer string
+	var token, authNo, issuer, ordKey string
+	var amount null.Float64
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT count(*) OVER (), COALESCE(pelecard_token, ''), COALESCE(auth_no, ''), COALESCE(cc_company_issuer, '')
-		FROM payments_pelecard WHERE payment_id = $1`, p.paymentID).Scan(&rows, &token, &authNo, &issuer))
+		SELECT count(*) OVER (), COALESCE(pelecard_token, ''), COALESCE(auth_no, ''), COALESCE(cc_company_issuer, ''),
+		       amount, COALESCE(ord_key, '')
+		FROM payments_pelecard WHERE payment_id = $1`, p.paymentID).Scan(&rows, &token, &authNo, &issuer, &amount, &ordKey))
 	assert.Equal(t, 1, rows)
 	assert.Equal(t, "card-token", token)
 	assert.Equal(t, "0123456", authNo)
 	assert.Equal(t, "2", issuer)
+	// Taken from the payment: the gateway's record carries neither.
+	assert.Equal(t, null.Float64From(180), amount)
+	assert.Equal(t, p.orderKey, ordKey)
 	assert.Equal(t, "success", readPaymentState(t, a, p).paymentStatus)
 }
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/volatiletech/null/v9"
@@ -368,4 +369,69 @@ func TestFinalizeRenewal_PaymentRecordUpdated(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, common.PaymentStatusSuccess, updatedStatus)
 	assert.Equal(t, "1", updatedSuccess)
+}
+
+func newTestDBWithPool(t *testing.T) (*OrdersDB, *pgxpool.Pool, context.Context) {
+	t.Helper()
+	dbURL, err := testutil.NewTestOrdersDB(t, context.Background())
+	require.NoError(t, err)
+	db, err := NewOrdersDBUrl(context.Background(), dbURL, new(events.NoopEmitter))
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Close() })
+	return db, testutil.NewTestPool(t, dbURL), eventstest.WithTestEventBuilder(t, context.Background())
+}
+
+// A renewal payment whose payments_pelecard row is missing gets one, the same
+// as a checkout confirm: both go through writePaymentFacts.
+func TestFinalizeRenewal_CreatesAMissingPelecardRow(t *testing.T) {
+	db, pool, ctx := newTestDBWithPool(t)
+	_, orderID, _ := setupRenewalTestData(t, db, ctx)
+	data, err := db.LoadRenewalData(ctx, uint(orderID))
+	require.NoError(t, err)
+	payment, err := db.CreateRenewalPayment(ctx, data, 80, common.CurrencyNIS, "v1", null.JSON{}, "t")
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `DELETE FROM payments_pelecard WHERE payment_id = $1`, payment.ID)
+	require.NoError(t, err)
+
+	payment.PaymentStatus = null.StringFrom(common.PaymentStatusSuccess)
+	payment.Success = null.StringFrom("1")
+	payment.AuthNo = null.StringFrom("0123456")
+	require.NoError(t, db.FinalizeRenewal(ctx, uint(orderID), payment))
+
+	var authNo string
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT COALESCE(auth_no, '') FROM payments_pelecard WHERE payment_id = $1`, payment.ID).Scan(&authNo))
+	assert.Equal(t, "0123456", authNo)
+}
+
+// If the payments_pelecard write fails, the payment write and the order
+// update roll back with it, and the error is a post-payment one.
+// FinalizeRenewal had this before writePaymentFacts; the test guards that the
+// move to the helper kept it, and is not coverage of anything new.
+func TestFinalizeRenewal_RollsBackWhenThePelecardWriteFails(t *testing.T) {
+	db, pool, ctx := newTestDBWithPool(t)
+	_, orderID, _ := setupRenewalTestData(t, db, ctx)
+	data, err := db.LoadRenewalData(ctx, uint(orderID))
+	require.NoError(t, err)
+	payment, err := db.CreateRenewalPayment(ctx, data, 80, common.CurrencyNIS, "v1", null.JSON{}, "t")
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `
+		CREATE FUNCTION fail_pelecard_update() RETURNS trigger LANGUAGE plpgsql AS
+		$$ BEGIN RAISE EXCEPTION 'pelecard write failed'; END $$;
+		CREATE TRIGGER fail_pelecard BEFORE UPDATE ON payments_pelecard
+		FOR EACH ROW EXECUTE FUNCTION fail_pelecard_update();`)
+	require.NoError(t, err)
+
+	payment.PaymentStatus = null.StringFrom(common.PaymentStatusSuccess)
+	payment.Success = null.StringFrom("1")
+	err = db.FinalizeRenewal(ctx, uint(orderID), payment)
+	require.ErrorIs(t, err, common.ErrPostPayment)
+	assert.Contains(t, err.Error(), "pelecard write failed")
+
+	var status string
+	require.NoError(t, pool.QueryRow(ctx, `SELECT "PaymentStatus" FROM payments WHERE id = $1`, payment.ID).Scan(&status))
+	assert.Equal(t, common.PaymentStatusPending, status)
+	order, err := db.GetOrderByID(ctx, uint(orderID))
+	require.NoError(t, err)
+	assert.Equal(t, common.OrderFlagToRenew, order.Flag.String)
 }

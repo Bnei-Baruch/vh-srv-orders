@@ -39,6 +39,11 @@ services:
       PRIORITY_PASSWORD: ${PRIORITY_PASSWORD}
       ACCOUNTING_SERVICE_URL: ${ACCOUNTING_SERVICE_URL}
       QUICKBOOKS_COMPANY_ID: ${QUICKBOOKS_COMPANY_ID}
+      # Verifies external_payments' signature on POST /checkout/notify; same
+      # value as its NOTIFY_HMAC_KEY_<CLIENT>. Listed here or the container
+      # never sees it: this file has no env_file.
+      CHECKOUT_NOTIFY_HMAC_KEY: ${CHECKOUT_NOTIFY_HMAC_KEY:-}
+      CHECKOUT_NOTIFY_HMAC_ENFORCE: ${CHECKOUT_NOTIFY_HMAC_ENFORCE:-false}
     mem_limit: 250M
     ports:
       # Bound to loopback: host nginx is the only thing that talks to this, and

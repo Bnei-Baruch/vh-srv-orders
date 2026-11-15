@@ -302,8 +302,7 @@ func (s *BillingService) processWithRecovery(ctx context.Context, workerID int, 
 		slog.Uint64("order_id", uint64(ro.OrderID))))
 
 	hub := utils.SentryFor(ctx).Clone()
-	hub.Scope().SetExtra("worker_id", workerID)
-	hub.Scope().SetExtra("order_id", ro.OrderID)
+	hub.Scope().SetContext("renewal", sentry.Context{"worker_id": workerID, "order_id": ro.OrderID})
 	ctx = sentry.SetHubOnContext(ctx, hub)
 
 	defer func() {
@@ -313,7 +312,7 @@ func (s *BillingService) processWithRecovery(ctx context.Context, workerID int, 
 				slog.Any("panic", r),
 				slog.String("stack", stack))
 			hub.WithScope(func(scope *sentry.Scope) {
-				scope.SetExtra("stack", stack)
+				scope.SetContext("panic", sentry.Context{"stack": stack})
 				hub.CaptureException(fmt.Errorf("panic in order renewal: %v", r))
 			})
 			stats.errorCount.Inc("panic", 1)
@@ -467,8 +466,8 @@ func credentialFailureReason(err error) string {
 
 func captureError(hub *sentry.Hub, terminal, errorType string, err error) {
 	hub.WithScope(func(scope *sentry.Scope) {
-		scope.SetExtra("terminal", terminal)
-		scope.SetExtra("error_type", errorType)
+		scope.SetTag("terminal", terminal)
+		scope.SetTag("error_type", errorType)
 		hub.CaptureException(err)
 	})
 }
@@ -493,11 +492,11 @@ func recordPostPaymentError(ctx context.Context, hub *sentry.Hub, stats *chargeS
 			slog.Any("err", err))
 	}
 	hub.WithScope(func(scope *sentry.Scope) {
-		scope.SetExtra("terminal", terminal)
-		scope.SetExtra("error_type", "post_payment")
+		scope.SetTag("terminal", terminal)
+		scope.SetTag("error_type", "post_payment")
 		if payment != nil {
-			scope.SetExtra("payment_status", payment.PaymentStatus.String)
-			scope.SetExtra("payment_success", payment.Success.String)
+			scope.SetTag("payment_status", payment.PaymentStatus.String)
+			scope.SetTag("payment_success", payment.Success.String)
 		}
 		hub.CaptureException(err)
 	})

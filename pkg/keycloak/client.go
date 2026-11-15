@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/Nerzal/gocloak/v13"
-	"github.com/golang-jwt/jwt/v4"
+	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/Bnei-Baruch/vh-srv-orders/common"
 	"github.com/Bnei-Baruch/vh-srv-orders/pkg/utils"
@@ -94,7 +94,7 @@ func (c *Client) AccessToken(ctx context.Context) string {
 	// A valid cached token is returned before anything else, so a caller holding
 	// one is never refused by a backoff that concerns obtaining a new one.
 	if c.token != nil {
-		if err = c.claims.Valid(); err == nil {
+		if err = claimsValid(c.claims); err == nil {
 			return c.token.AccessToken
 		}
 	}
@@ -116,13 +116,13 @@ func (c *Client) AccessToken(ctx context.Context) string {
 	}
 
 	// we have a token now, let's use it if it's valid
-	if err = c.claims.Valid(); err == nil {
+	if err = claimsValid(c.claims); err == nil {
 		return c.token.AccessToken
 	}
 
 	// our token has probably expired, let's try to refresh
 	if err = c.refresh(ctx, c.token.RefreshToken); err == nil {
-		if err = c.claims.Valid(); err == nil {
+		if err = claimsValid(c.claims); err == nil {
 			return c.token.AccessToken
 		}
 	}
@@ -134,7 +134,7 @@ func (c *Client) AccessToken(ctx context.Context) string {
 		c.recordFailure()
 		return ""
 	}
-	if err = c.claims.Valid(); err != nil {
+	if err = claimsValid(c.claims); err != nil {
 		utils.LogFor(ctx).Warn("keycloak.Client.AccessToken() login after failed refresh got invalid claims", slog.Any("err", err))
 		c.recordFailure()
 		return ""
@@ -240,4 +240,17 @@ func (c *Client) decodeToken(ctx context.Context, token string) error {
 	}
 	c.claims = claims
 	return nil
+}
+
+// claimsValidator checks what jwt/v4's MapClaims.Valid did: exp, nbf and iat,
+// each only when present.
+var claimsValidator = jwt.NewValidator(jwt.WithIssuedAt())
+
+var errNoClaims = errors.New("no token claims")
+
+func claimsValid(claims *jwt.MapClaims) error {
+	if claims == nil {
+		return errNoClaims
+	}
+	return claimsValidator.Validate(*claims)
 }

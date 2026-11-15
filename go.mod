@@ -4,6 +4,7 @@ go 1.27
 
 require (
 	github.com/Nerzal/gocloak/v13 v13.9.0
+	github.com/aarondl/null/v9 v9.0.1
 	github.com/aws/aws-sdk-go-v2 v1.48.0
 	github.com/aws/aws-sdk-go-v2/credentials v1.21.0
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.10
@@ -29,7 +30,6 @@ require (
 	github.com/satori/go.uuid v1.2.0
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
-	github.com/volatiletech/null/v9 v9.0.0
 	golang.org/x/sync v0.25.0
 	google.golang.org/api v0.315.0
 )

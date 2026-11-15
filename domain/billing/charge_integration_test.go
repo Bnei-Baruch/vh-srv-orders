@@ -7,10 +7,10 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/aarondl/null/v9"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/volatiletech/null/v9"
 
 	"github.com/Bnei-Baruch/vh-srv-orders/common"
 	"github.com/Bnei-Baruch/vh-srv-orders/domain/pricing"

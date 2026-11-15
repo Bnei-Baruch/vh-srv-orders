@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/aarondl/null/v9"
 	"github.com/getsentry/sentry-go"
 	"github.com/jackc/pgx/v5"
-	"github.com/volatiletech/null/v9"
 
 	"github.com/Bnei-Baruch/vh-srv-orders/common"
 	"github.com/Bnei-Baruch/vh-srv-orders/events"

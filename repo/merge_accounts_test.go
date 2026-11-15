@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/aarondl/null/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/volatiletech/null/v9"
 )
 
 func insertMergeAccount(t *testing.T, db *OrdersDB, ctx context.Context, key string, email null.String) int {

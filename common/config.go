@@ -3,6 +3,7 @@ package common
 import (
 	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/kelseyhightower/envconfig"
 )
@@ -73,4 +74,18 @@ func LoadConfig() {
 		slog.Error("envconfig.Process", slog.Any("err", err))
 		os.Exit(1)
 	}
+	// Not fatal: one endpoint's setting must not take the service down. The
+	// notify answers 503 meanwhile, which checkout retries.
+	if Config.CheckoutNotifyHMACEnforce && !hasNonBlank(Config.CheckoutNotifyHMACKeys) {
+		slog.Error("CHECKOUT_NOTIFY_HMAC_ENFORCE is on but CHECKOUT_NOTIFY_HMAC_KEY is empty: every checkout notify will get 503")
+	}
+}
+
+func hasNonBlank(values []string) bool {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return true
+		}
+	}
+	return false
 }

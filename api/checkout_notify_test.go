@@ -458,6 +458,25 @@ func Test_checkout_notify_enforced_refuses_a_bad_signature(t *testing.T) {
 	assert.Equal(t, "pending", readPaymentState(t, a, p).paymentStatus)
 }
 
+// Enforced with no key configured (e.g. the .env lost it on a redeploy): 503,
+// which checkout retries, not 401, which it drops. Nothing is looked up.
+func Test_checkout_notify_enforced_without_a_key_answers_503(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	enforceNotifyHMAC(t, " ")
+	p := seedPendingPayment(t, a, "regular")
+	calls := stubCheckout(t, a, http.StatusOK, gatewayRecord(p))
+	raw, _ := json.Marshal(gin.H{"user_key": p.orderKey, "reference": p.paramX})
+	ts, sig := signNotify("k3y", time.Now().Unix(), raw)
+
+	w := postNotify(a, p, map[string]string{"X-Notify-Timestamp": ts, "X-Notify-Signature": sig})
+
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	assert.JSONEq(t, `{"error":"cannot confirm this payment"}`, w.Body.String())
+	assert.Empty(t, calls())
+	assert.Equal(t, "pending", readPaymentState(t, a, p).paymentStatus)
+}
+
 func Test_checkout_notify_enforced_accepts_a_signed_notice(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)

@@ -65,6 +65,13 @@ func (o *OrdersAPI) handleCheckoutNotify(c *gin.Context) {
 	if err := verifyNotifySignature(raw, c.GetHeader("X-Notify-Timestamp"), c.GetHeader("X-Notify-Signature"),
 		common.Config.CheckoutNotifyHMACKeys, time.Now()); err != nil {
 		log := utils.LogFor(c.Request.Context()).With(slog.Any("err", err))
+		// Enforced with no key is our misconfiguration, not a bad notice: 503
+		// makes checkout retry until the key is back, where 401 would drop it.
+		if common.Config.CheckoutNotifyHMACEnforce && errors.Is(err, errNotifyNoKey) {
+			log.Error("checkout notify: enforce is on but no key is configured")
+			c.JSON(http.StatusServiceUnavailable, notifyRefused)
+			return
+		}
 		if common.Config.CheckoutNotifyHMACEnforce {
 			log.Warn("checkout notify refused: signature")
 			c.JSON(http.StatusUnauthorized, notifyRefused)

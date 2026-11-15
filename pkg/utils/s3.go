@@ -2,13 +2,15 @@ package utils
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net/http"
+	"strings"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 
 	"github.com/Bnei-Baruch/vh-srv-orders/common"
 )
@@ -19,45 +21,42 @@ type UploadFileToS3Func func(buffer []byte, fileName string) (string, error)
 
 var UploadFileToS3 = uploadFileToS3
 
-// UploadFileToS3 will upload a single file to S3, it will require a file buffer and filename
-// It'll will set file info like content type and encryption on the uploaded file.
-// TODO (edo): use io.Reader instead of []byte
+// uploadFileToS3 puts buffer at fileName in the configured bucket, publicly
+// readable, and returns its URL.
 func uploadFileToS3(buffer []byte, fileName string) (string, error) {
-	// Creating a new session with the given configuration.
-	s3Config := &aws.Config{
-		Credentials:      credentials.NewStaticCredentials(common.Config.S3AccesstKey, common.Config.S3SecretKey, ""),
-		Endpoint:         aws.String(common.Config.S3Endpoint),
-		Region:           aws.String(common.Config.S3Region),
-		DisableSSL:       aws.Bool(true),
-		S3ForcePathStyle: aws.Bool(true),
-	}
-	newSession, newSessErr := session.NewSession(s3Config)
+	client := s3.New(s3.Options{
+		Credentials:  credentials.NewStaticCredentialsProvider(common.Config.S3AccesstKey, common.Config.S3SecretKey, ""),
+		BaseEndpoint: aws.String(s3BaseEndpoint(common.Config.S3Endpoint)),
+		Region:       common.Config.S3Region,
+		UsePathStyle: true,
+		// The endpoint is an S3-compatible store, not AWS: send checksums only
+		// where the API requires them, as v1 did, since not every store
+		// accepts the CRC32 headers v2 adds by default.
+		RequestChecksumCalculation: aws.RequestChecksumCalculationWhenRequired,
+		ResponseChecksumValidation: aws.ResponseChecksumValidationWhenRequired,
+	})
 
-	if newSessErr != nil {
-		fmt.Println("Error while creating session")
-		return "", newSessErr
-	}
-
-	s3Client := s3.New(newSession)
-
-	// Uploading the file to S3.
-	_, erre := s3Client.PutObject(&s3.PutObjectInput{
+	_, err := client.PutObject(context.Background(), &s3.PutObjectInput{
 		Bucket:             aws.String(common.Config.S3BucketName),
 		Key:                aws.String(fileName),
-		ACL:                aws.String("public-read"),
+		ACL:                types.ObjectCannedACLPublicRead,
 		Body:               bytes.NewReader(buffer),
 		ContentLength:      aws.Int64(int64(len(buffer))),
 		ContentType:        aws.String(http.DetectContentType(buffer)),
 		ContentDisposition: aws.String("attachment"),
 	})
-
-	if erre != nil {
-		fmt.Printf("Failed to upload data to %s\n", erre.Error())
-		return "", erre
+	if err != nil {
+		return "", fmt.Errorf("client.PutObject: %w", err)
 	}
 
-	// Creating a url for the uploaded file.
-	uploadedFileUrl := common.Config.S3Endpoint + "/" + common.Config.S3BucketName + "/" + fileName
+	return common.Config.S3Endpoint + "/" + common.Config.S3BucketName + "/" + fileName, nil
+}
 
-	return uploadedFileUrl, nil
+// s3BaseEndpoint gives a scheme-less S3_ENDPOINT the http:// that v1's
+// DisableSSL used to add; v2 requires a full URL.
+func s3BaseEndpoint(endpoint string) string {
+	if strings.Contains(endpoint, "://") {
+		return endpoint
+	}
+	return "http://" + endpoint
 }

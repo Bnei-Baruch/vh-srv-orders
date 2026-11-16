@@ -995,3 +995,31 @@ func Test_UpdatePayment_concurrent_confirms_write_once(t *testing.T) {
 		require.Equal(t, winner, s.authNo, "round %d", round)
 	}
 }
+
+// A confirm writes the gateway's facts and nothing else: an existing
+// payments_pelecard row keeps the amount and ord_key it has, even when they
+// differ from the payment's (a row corrected by hand).
+func Test_UpdatePayment_keeps_an_existing_pelecard_rows_amount_and_ord_key(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "regular")
+	pool := a.testPool(t)
+	ctx := eventstest.WithTestEventBuilder(t, context.Background())
+	_, err := pool.Exec(ctx, `UPDATE payments SET "Ordkey" = $1 WHERE id = $2`, p.orderKey, p.paymentID)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `UPDATE payments_pelecard SET amount = 90, ord_key = 'corrected' WHERE payment_id = $1`, p.paymentID)
+	require.NoError(t, err)
+	record := gatewayRecord(p)
+
+	_, err = a.repo.UpdatePayment(ctx, paidFromGateway(&record))
+	require.NoError(t, err)
+
+	var token, ordKey string
+	var amount null.Float64
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT COALESCE(pelecard_token, ''), amount, COALESCE(ord_key, '')
+		FROM payments_pelecard WHERE payment_id = $1`, p.paymentID).Scan(&token, &amount, &ordKey))
+	assert.Equal(t, "card-token", token)
+	assert.Equal(t, null.Float64From(90), amount)
+	assert.Equal(t, "corrected", ordKey)
+}

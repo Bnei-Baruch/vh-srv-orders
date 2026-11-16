@@ -373,7 +373,7 @@ func (o *OrdersDB) MergeAccountsOrders(ctx context.Context, req AccountMergeRequ
 
 	err = o.pool.QueryRow(ctx, `SELECT "Email" FROM accounts WHERE id = $1`, destinationAccountID).Scan(&destinationAccountEmail)
 	if err != nil {
-		return fmt.Errorf("Email from destaination account.id: %w", err)
+		return fmt.Errorf("Email from destination account.id: %w", err)
 	}
 
 	tx, err := o.pool.Begin(ctx)
@@ -413,9 +413,21 @@ func (o *OrdersDB) MergeAccountsOrders(ctx context.Context, req AccountMergeRequ
 		return fmt.Errorf("UPDATE account_merges : %w", err)
 	}
 
-	_, err = tx.Exec(ctx, `DELETE FROM specials where email = (SELECT "Email" FROM accounts WHERE id = $1)`, sourceAccountID)
-	if err != nil {
-		return fmt.Errorf("delete from specials: %w", err)
+	// Specials are keyed by email. When both accounts carry the same one, the
+	// source's specials are also the destination's, so they stay. Deleting by
+	// the email just compared keeps the guard and the delete on one value; a
+	// NULL email matches nothing.
+	if !strings.EqualFold(sourceAccountEmail.String, destinationAccountEmail.String) {
+		if _, err = tx.Exec(ctx, `DELETE FROM specials WHERE email = $1`, sourceAccountEmail); err != nil {
+			return fmt.Errorf("delete from specials: %w", err)
+		}
+	}
+
+	// The specials that stay move to the destination, as orders.userkey does:
+	// ending and listing specials, and the activator's create_special, all go
+	// by keycloak_id, and the source's id is about to stop existing.
+	if _, err = tx.Exec(ctx, `UPDATE specials SET keycloak_id = $1 WHERE keycloak_id = $2`, req.DestinationKeycloakID, req.SourceKeycloakID); err != nil {
+		return fmt.Errorf("UPDATE specials keycloak_id: %w", err)
 	}
 
 	_, err = tx.Exec(ctx, "DELETE FROM accounts WHERE id = $1", sourceAccountID)

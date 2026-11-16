@@ -24,9 +24,10 @@ type stubTokens struct {
 
 func (s stubTokens) Token() (string, error) { return s.token, s.err }
 func (s stubTokens) Invalidate()            {}
+func (s stubTokens) InvalidateToken(string) {}
 
-// rotatingTokens hands out the next token after each Invalidate, so a retry is
-// distinguishable from the attempt before it.
+// rotatingTokens hands out the next token after each invalidation, so a retry
+// is distinguishable from the attempt before it.
 type rotatingTokens struct {
 	tokens      []string
 	idx         int
@@ -40,6 +41,8 @@ func (r *rotatingTokens) Invalidate() {
 		r.idx++
 	}
 }
+
+func (r *rotatingTokens) InvalidateToken(string) { r.Invalidate() }
 
 // withExternalPayments starts a stub external_payments and returns a client
 // pointed at it.

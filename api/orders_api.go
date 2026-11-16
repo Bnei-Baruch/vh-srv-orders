@@ -21,8 +21,8 @@ type OrdersAPI struct {
 	priorityClient      *priority.Client
 	accountingService   accounting.AccountingService
 	quickbooksCompanyID string
-	// pages opens Pelecard pages for payers through external_payments, with a
-	// bearer.
+	// pages talks to external_payments with a bearer: it opens Pelecard pages
+	// for payers and reads back what checkout recorded about a payment.
 	pages *pelecard.Client
 }
 

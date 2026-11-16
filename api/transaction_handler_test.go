@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"log"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/go-resty/resty/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -72,29 +74,59 @@ func postAsRoot(a *App, path string, body string) *httptest.ResponseRecorder {
 	return w
 }
 
+// captureRequestLog records what is logged through slog.Default(), such as the
+// logging middleware's request record.
+func captureRequestLog(t *testing.T) *bytes.Buffer {
+	var buf bytes.Buffer
+	// slog.SetDefault also points the std log package at the new handler, and
+	// setting slog's default back does not undo that, so restore log as well.
+	real, w, f := slog.Default(), log.Writer(), log.Flags()
+	t.Cleanup(func() { slog.SetDefault(real); log.SetOutput(w); log.SetFlags(f) })
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	return &buf
+}
+
+// requestErrors returns the errs of the logged "request" record. They are what
+// the Sentry middleware captures on a 5xx.
+func requestErrors(t *testing.T, buf *bytes.Buffer) string {
+	t.Helper()
+	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+		var rec map[string]any
+		require.NoError(t, json.Unmarshal([]byte(line), &rec))
+		if rec["msg"] == "request" {
+			assert.Equal(t, "ERROR", rec["level"])
+			errs, _ := json.Marshal(rec["errs"])
+			return string(errs)
+		}
+	}
+	t.Fatal("no request record logged")
+	return ""
+}
+
 // When the checkout service answers with something that isn't JSON (a proxy
 // error, a maintenance page), the caller must get a 500, not a 200 with a null
-// body that looks like success.
+// body that looks like success, and the cause must be recorded on the request
+// so it reaches Sentry.
 func Test_new_token_non_json_upstream_is_500(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)
 	stubPages(t, a, http.StatusBadGateway, "text/html", "<html>502 Bad Gateway</html>")
+	buf := captureRequestLog(t)
 
-	w := postAsRoot(a, "/v2/transaction/new_token", `{}`)
+	POST_ROOT(t, a, "/v2/transaction/new_token", gin.H{}, http.StatusInternalServerError)
 
-	assert.Equal(t, http.StatusInternalServerError, w.Code, w.Body.String())
-	assert.NotEqual(t, "null", w.Body.String())
+	assert.Contains(t, requestErrors(t, buf), "handleTransactionNewToken json.Unmarshal:")
 }
 
 func Test_new_token_no_cvv_non_json_upstream_is_500(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)
 	stubPages(t, a, http.StatusBadGateway, "text/html", "<html>502 Bad Gateway</html>")
+	buf := captureRequestLog(t)
 
-	w := postAsRoot(a, "/v2/transaction/new_token_no_cvv", `{}`)
+	POST_ROOT(t, a, "/v2/transaction/new_token_no_cvv", gin.H{}, http.StatusInternalServerError)
 
-	assert.Equal(t, http.StatusInternalServerError, w.Code, w.Body.String())
-	assert.NotEqual(t, "null", w.Body.String())
+	assert.Contains(t, requestErrors(t, buf), "handleTransactionNewTokenNoCVV json.Unmarshal:")
 }
 
 // Every page call carries a bearer, to the /vh route: the shared routes read
@@ -204,16 +236,13 @@ func Test_page_failure_is_logged_at_error(t *testing.T) {
 	defer CloseTestApp(a)
 	stubPages(t, a, http.StatusUnauthorized, "application/json", `{"error":"unauthorized"}`)
 
-	var log bytes.Buffer
-	real := slog.Default()
-	t.Cleanup(func() { slog.SetDefault(real) })
-	slog.SetDefault(slog.New(slog.NewJSONHandler(&log, nil)))
+	buf := captureRequestLog(t)
 
 	w := postAsRoot(a, "/v2/transaction/new_token_no_cvv", `{"ErrorURL":"http://test/error"}`)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
 	var found map[string]any
-	for _, line := range bytes.Split(bytes.TrimSpace(log.Bytes()), []byte("\n")) {
+	for _, line := range bytes.Split(bytes.TrimSpace(buf.Bytes()), []byte("\n")) {
 		var rec map[string]any
 		require.NoError(t, json.Unmarshal(line, &rec))
 		if rec["msg"] == "payment page failed" {

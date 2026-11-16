@@ -3,6 +3,7 @@ package common
 import (
 	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/kelseyhightower/envconfig"
 )
@@ -54,6 +55,16 @@ type envConfig struct {
 	PriorityBaseURL  string `envconfig:"PRIORITY_BASE_URL"`
 	PriorityUsername string `envconfig:"PRIORITY_USERNAME"`
 	PriorityPassword string `envconfig:"PRIORITY_PASSWORD"`
+
+	// CheckoutNotifyHMACKeys verify the signature external_payments puts on
+	// POST /checkout/notify: the same value as its NOTIFY_HMAC_KEY_<CLIENT>.
+	// Comma-separated, so a new key can be added before the old is dropped.
+	// Spaces around each key are ignored (verifyNotifySignature trims them).
+	CheckoutNotifyHMACKeys []string `envconfig:"CHECKOUT_NOTIFY_HMAC_KEY"`
+	// CheckoutNotifyHMACEnforce refuses a notify whose signature is missing or
+	// wrong. Off, a bad signature is only logged: the switch-over step, since a
+	// refused notify is one checkout never retries.
+	CheckoutNotifyHMACEnforce bool `envconfig:"CHECKOUT_NOTIFY_HMAC_ENFORCE" default:"false"`
 }
 
 var Config = new(envConfig)
@@ -63,4 +74,18 @@ func LoadConfig() {
 		slog.Error("envconfig.Process", slog.Any("err", err))
 		os.Exit(1)
 	}
+	// Not fatal: one endpoint's setting must not take the service down. The
+	// notify answers 503 meanwhile, which checkout retries.
+	if Config.CheckoutNotifyHMACEnforce && !hasNonBlank(Config.CheckoutNotifyHMACKeys) {
+		slog.Error("CHECKOUT_NOTIFY_HMAC_ENFORCE is on but CHECKOUT_NOTIFY_HMAC_KEY is empty: every checkout notify will get 503")
+	}
+}
+
+func hasNonBlank(values []string) bool {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return true
+		}
+	}
+	return false
 }

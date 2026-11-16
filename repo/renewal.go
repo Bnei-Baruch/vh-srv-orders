@@ -127,7 +127,7 @@ func (o *OrdersDB) FinalizeRenewal(ctx context.Context, orderID uint, payment *P
 		}
 	}
 
-	if err := writePaymentFacts(ctx, tx, *payment, payment.ID); err != nil {
+	if err := writePaymentFacts(ctx, tx, *payment, payment.Amount, payment.Ordkey, payment.ID); err != nil {
 		return fmt.Errorf("%w: writePaymentFacts: %w", common.ErrPostPayment, err)
 	}
 

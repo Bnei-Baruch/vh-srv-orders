@@ -1,16 +1,22 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -485,6 +491,145 @@ func Test_paid_return_with_an_error_for_a_pending_payment_is_refused(t *testing.
 	assert.Equal(t, "pending", readPaymentState(t, a, p).paymentStatus)
 }
 
+// Known answer shared with external_payments' notify tests:
+// printf '1.{}' | openssl dgst -sha256 -hmac key
+const knownNotifySig = "v1=1ba6b8171186efc613e8bcc0cbdab2748f24984d7c5a84faa2637afa0e40d224"
+
+func Test_verifyNotifySignature(t *testing.T) {
+	at := time.Unix(1, 0)
+	body := []byte("{}")
+	for name, tc := range map[string]struct {
+		body    []byte
+		ts, sig string
+		keys    []string
+		now     time.Time
+		want    error
+	}{
+		"valid":                {body, "1", knownNotifySig, []string{"key"}, at, nil},
+		"second key, rotation": {body, "1", knownNotifySig, []string{"new", "key"}, at, nil},
+		"spaces after a comma": {body, "1", knownNotifySig, []string{"new", " key "}, at, nil},
+		"only blank keys":      {body, "1", knownNotifySig, []string{" ", ""}, at, errNotifyNoKey},
+		"edge of the window":   {body, "1", knownNotifySig, []string{"key"}, at.Add(notifyMaxSkew), nil},
+		"no key configured":    {body, "1", knownNotifySig, nil, at, errNotifyNoKey},
+		"no signature":         {body, "1", "", []string{"key"}, at, errNotifyUnsigned},
+		"no timestamp":         {body, "", knownNotifySig, []string{"key"}, at, errNotifyUnsigned},
+		"replayed later":       {body, "1", knownNotifySig, []string{"key"}, at.Add(notifyMaxSkew + time.Second), errNotifyStale},
+		"from the future":      {body, "1", knownNotifySig, []string{"key"}, at.Add(-notifyMaxSkew - time.Second), errNotifyStale},
+		"timestamp not a num":  {body, "x", knownNotifySig, []string{"key"}, at, errNotifyStale},
+		"no v1 prefix":         {body, "1", knownNotifySig[3:], []string{"key"}, at, errNotifyBadFormat},
+		"not hex":              {body, "1", "v1=zz", []string{"key"}, at, errNotifyBadFormat},
+		"wrong key":            {body, "1", knownNotifySig, []string{"other"}, at, errNotifyMismatch},
+		"body changed":         {[]byte(`{"a":1}`), "1", knownNotifySig, []string{"key"}, at, errNotifyMismatch},
+		"timestamp changed":    {body, "2", knownNotifySig, []string{"key"}, at, errNotifyMismatch},
+	} {
+		t.Run(name, func(t *testing.T) {
+			assert.ErrorIs(t, verifyNotifySignature(tc.body, tc.ts, tc.sig, tc.keys, tc.now), tc.want)
+			if tc.want == nil {
+				assert.NoError(t, verifyNotifySignature(tc.body, tc.ts, tc.sig, tc.keys, tc.now))
+			}
+		})
+	}
+}
+
+func signNotify(key string, ts int64, body []byte) (string, string) {
+	t := strconv.FormatInt(ts, 10)
+	mac := hmac.New(sha256.New, []byte(key))
+	mac.Write([]byte(t + "."))
+	mac.Write(body)
+	return t, "v1=" + hex.EncodeToString(mac.Sum(nil))
+}
+
+func enforceNotifyHMAC(t *testing.T, keys ...string) {
+	t.Helper()
+	oldKeys, oldEnforce := common.Config.CheckoutNotifyHMACKeys, common.Config.CheckoutNotifyHMACEnforce
+	common.Config.CheckoutNotifyHMACKeys, common.Config.CheckoutNotifyHMACEnforce = keys, true
+	t.Cleanup(func() {
+		common.Config.CheckoutNotifyHMACKeys, common.Config.CheckoutNotifyHMACEnforce = oldKeys, oldEnforce
+	})
+}
+
+func postNotify(a *App, p pendingPayment, headers map[string]string) *httptest.ResponseRecorder {
+	raw, _ := json.Marshal(gin.H{"user_key": p.orderKey, "reference": p.paramX})
+	r := httptest.NewRequest(http.MethodPost, "/checkout/notify", bytes.NewReader(raw))
+	r.Header.Set("Content-Type", "application/json")
+	for k, v := range headers {
+		r.Header.Set(k, v)
+	}
+	w := httptest.NewRecorder()
+	a.gEngine.ServeHTTP(w, r)
+	return w
+}
+
+// Enforced: an unsigned or wrongly signed notice is refused before any lookup,
+// with the same body as every other refusal.
+func Test_checkout_notify_enforced_refuses_a_bad_signature(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	enforceNotifyHMAC(t, "k3y")
+	p := seedPendingPayment(t, a, "regular")
+	calls := stubCheckout(t, a, http.StatusOK, gatewayRecord(p))
+	raw, _ := json.Marshal(gin.H{"user_key": p.orderKey, "reference": p.paramX})
+	ts, wrong := signNotify("not-the-key", time.Now().Unix(), raw)
+
+	for name, h := range map[string]map[string]string{
+		"unsigned":  nil,
+		"wrong key": {"X-Notify-Timestamp": ts, "X-Notify-Signature": wrong},
+	} {
+		w := postNotify(a, p, h)
+		assert.Equal(t, http.StatusUnauthorized, w.Code, name)
+		assert.JSONEq(t, `{"error":"cannot confirm this payment"}`, w.Body.String(), name)
+	}
+	assert.Empty(t, calls())
+	assert.Equal(t, "pending", readPaymentState(t, a, p).paymentStatus)
+}
+
+// Enforced with no key configured (e.g. the .env lost it on a redeploy): 503,
+// which checkout retries, not 401, which it drops. Nothing is looked up.
+func Test_checkout_notify_enforced_without_a_key_answers_503(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	enforceNotifyHMAC(t, " ")
+	p := seedPendingPayment(t, a, "regular")
+	calls := stubCheckout(t, a, http.StatusOK, gatewayRecord(p))
+	raw, _ := json.Marshal(gin.H{"user_key": p.orderKey, "reference": p.paramX})
+	ts, sig := signNotify("k3y", time.Now().Unix(), raw)
+
+	w := postNotify(a, p, map[string]string{"X-Notify-Timestamp": ts, "X-Notify-Signature": sig})
+
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	assert.JSONEq(t, `{"error":"cannot confirm this payment"}`, w.Body.String())
+	assert.Empty(t, calls())
+	assert.Equal(t, "pending", readPaymentState(t, a, p).paymentStatus)
+}
+
+func Test_checkout_notify_enforced_accepts_a_signed_notice(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	enforceNotifyHMAC(t, "k3y")
+	p := seedPendingPayment(t, a, "regular")
+	stubCheckout(t, a, http.StatusOK, gatewayRecord(p))
+	raw, _ := json.Marshal(gin.H{"user_key": p.orderKey, "reference": p.paramX})
+	ts, sig := signNotify("k3y", time.Now().Unix(), raw)
+
+	w := postNotify(a, p, map[string]string{"X-Notify-Timestamp": ts, "X-Notify-Signature": sig})
+
+	assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, "paid", readPaymentState(t, a, p).orderStatus)
+}
+
+// Not enforced (the switch-over step): an unsigned notice is still confirmed.
+func Test_checkout_notify_not_enforced_confirms_an_unsigned_notice(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	enforceNotifyHMAC(t, "k3y")
+	common.Config.CheckoutNotifyHMACEnforce = false
+	p := seedPendingPayment(t, a, "regular")
+	stubCheckout(t, a, http.StatusOK, gatewayRecord(p))
+
+	assert.Equal(t, http.StatusOK, postNotify(a, p, nil).Code)
+	assert.Equal(t, "paid", readPaymentState(t, a, p).orderStatus)
+}
+
 // If the payment cannot be read, the browser return stops with 500. Treating
 // the failed read as "not paid" would write the browser's facts over a payment
 // checkout's notify already confirmed.
@@ -596,11 +741,9 @@ func Test_paid_return_with_ids_in_another_form_is_refused(t *testing.T) {
 }
 
 // Every field of checkout's record that UpdatePayment stores is carried into
-// the update, each to its own field, and success is implied. The issuer and
-// Pelecard's transaction id are passed in and must come out empty:
-// UpdatePayment has never stored either (the browser return does not get
-// them stored either), so mapping them would look like data that is not
-// kept.
+// the update, each to its own field, and success is implied. Pelecard's
+// transaction id is passed in and must come out empty: UpdatePayment does not
+// store it, so mapping it would look like data that is kept.
 func Test_paidFromGateway_maps_every_field(t *testing.T) {
 	got := paidFromGateway(&pelecard.GatewayPayment{
 		UserKey: "ord-1", AdditionalDetailsParamX: "m-2", TransactionId: "tx",
@@ -615,7 +758,7 @@ func Test_paidFromGateway_maps_every_field(t *testing.T) {
 	assert.Equal(t, repo.RequestPaid{
 		UserKey: s("ord-1"), ParamX: s("m-2"), Success: s("1"), TransactionID: s("tx"),
 		Token: s("tok"), AuthNo: s("0123456"), CardHebrewName: s("heb"), CCAbroadCard: s("abroad"),
-		CCBrand: s("brand"), CCCompanyClearer: s("clearer"), CreditType: s("ctype"),
+		CCBrand: s("brand"), CCCompanyClearer: s("clearer"), CCCompanyIssuer: s("issuer"), CreditType: s("ctype"),
 		CCNumber: s("4580"), CCExpDate: s("1230"), DebitCode: s("dcode"), DebitCurrency: s("1"),
 		DebitTotal: s("18000"), DebitType: s("dtype"), FirstPaymentTotal: s("first"),
 		FixedPaymentTotal: s("fixed"), TotalPayments: s("3"), JParam: s("4"),
@@ -703,6 +846,55 @@ func Test_checkout_notify_leaves_an_inconsistent_payment_alone(t *testing.T) {
 	assert.Empty(t, calls())
 }
 
+func readIssuer(t *testing.T, a *App, p pendingPayment) (payments, pelecard string) {
+	t.Helper()
+	require.NoError(t, a.testPool(t).QueryRow(context.Background(), `
+		SELECT COALESCE(p."CCCompanyIssuer", ''), COALESCE(pp.cc_company_issuer, '')
+		FROM payments p JOIN payments_pelecard pp ON pp.payment_id = p.id WHERE p.id = $1`, p.paymentID).
+		Scan(&payments, &pelecard))
+	return
+}
+
+// The card's issuer is stored on a confirmed payment, from checkout's record,
+// in payments and payments_pelecard alike, as a payment created by a charge
+// already is.
+func Test_checkout_notify_stores_the_card_issuer(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "regular")
+	record := gatewayRecord(p)
+	record.CreditCardCompanyIssuer = "2"
+	stubCheckout(t, a, http.StatusOK, record)
+
+	notify(t, a, p, http.StatusOK)
+
+	payments, pelecard := readIssuer(t, a, p)
+	assert.Equal(t, "2", payments)
+	assert.Equal(t, "2", pelecard)
+}
+
+// The browser return stores it the same way.
+func Test_paid_return_stores_the_card_issuer(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "regular")
+
+	POST_ROOT(t, a, "/orders/paid", gin.H{
+		"user_key": p.orderKey, "additional_details_param_x": p.paramX,
+		"success": "1", "credit_card_company_issuer": "6", "credit_card_company_clearer": "1",
+	}, http.StatusOK)
+
+	payments, pelecard := readIssuer(t, a, p)
+	assert.Equal(t, "6", payments)
+	assert.Equal(t, "6", pelecard)
+	// The clearer was already copied; its payments_pelecard column had the
+	// same misnamed-column problem on a database built from migrations.
+	var clearer string
+	require.NoError(t, a.testPool(t).QueryRow(context.Background(),
+		`SELECT COALESCE(cc_company_clearer, '') FROM payments_pelecard WHERE payment_id = $1`, p.paymentID).Scan(&clearer))
+	assert.Equal(t, "1", clearer)
+}
+
 // Checkout hangs up while the notify is reading its record. The confirm is not
 // cancelled with it: the payment and the order are both written, rather than
 // left for a retry to repair.
@@ -744,19 +936,22 @@ func Test_UpdatePayment_creates_a_missing_pelecard_row(t *testing.T) {
 	_, err = pool.Exec(ctx, `UPDATE payments SET "Ordkey" = $1 WHERE id = $2`, p.orderKey, p.paymentID)
 	require.NoError(t, err)
 	record := gatewayRecord(p)
+	record.CreditCardCompanyIssuer = "2"
 
 	_, err = a.repo.UpdatePayment(ctx, paidFromGateway(&record))
 	require.NoError(t, err)
 
 	var rows int
-	var token, authNo, ordKey string
+	var token, authNo, issuer, ordKey string
 	var amount null.Float64
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT count(*) OVER (), COALESCE(pelecard_token, ''), COALESCE(auth_no, ''), amount, COALESCE(ord_key, '')
-		FROM payments_pelecard WHERE payment_id = $1`, p.paymentID).Scan(&rows, &token, &authNo, &amount, &ordKey))
+		SELECT count(*) OVER (), COALESCE(pelecard_token, ''), COALESCE(auth_no, ''), COALESCE(cc_company_issuer, ''),
+		       amount, COALESCE(ord_key, '')
+		FROM payments_pelecard WHERE payment_id = $1`, p.paymentID).Scan(&rows, &token, &authNo, &issuer, &amount, &ordKey))
 	assert.Equal(t, 1, rows)
 	assert.Equal(t, "card-token", token)
 	assert.Equal(t, "0123456", authNo)
+	assert.Equal(t, "2", issuer)
 	// Taken from the payment: the gateway's record carries neither.
 	assert.Equal(t, null.Float64From(180), amount)
 	assert.Equal(t, p.orderKey, ordKey)
@@ -849,4 +1044,61 @@ func Test_UpdatePayment_concurrent_confirms_write_once(t *testing.T) {
 		require.Equal(t, winner, s.token, "round %d", round)
 		require.Equal(t, winner, s.authNo, "round %d", round)
 	}
+}
+
+// A browser return that sends fields explicitly empty stores them as NULL, as
+// the notify does, not as ''. An empty token is not checked: the update
+// queries already skip it, so it stays NULL with or without blankAsNull.
+func Test_paid_return_stores_empty_fields_as_null(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "regular")
+
+	POST_ROOT(t, a, "/orders/paid", gin.H{
+		"user_key": p.orderKey, "additional_details_param_x": p.paramX, "success": "1",
+		"credit_card_company_issuer": "", "credit_card_company_clearer": "", "credit_card_brand": "",
+		"card_hebrew_name": "", "credit_card_number": "", "authNo": "", "voucher_id": "",
+	}, http.StatusOK)
+
+	var nulls [7]bool
+	require.NoError(t, a.testPool(t).QueryRow(context.Background(), `
+		SELECT p."CCCompanyIssuer" IS NULL, p."CCCompanyClearer" IS NULL, p."CCBrand" IS NULL,
+		       p."CardHebrewName" IS NULL, p."CCNumber" IS NULL, p."AuthNo" IS NULL, p."VoucherID" IS NULL
+		FROM payments p WHERE p.id = $1`, p.paymentID).
+		Scan(&nulls[0], &nulls[1], &nulls[2], &nulls[3], &nulls[4], &nulls[5], &nulls[6]))
+	assert.Equal(t, [7]bool{true, true, true, true, true, true, true}, nulls)
+	var pelecardNulls [4]bool
+	require.NoError(t, a.testPool(t).QueryRow(context.Background(), `
+		SELECT cc_company_issuer IS NULL, cc_company_clearer IS NULL, cc_brand IS NULL, voucher_id IS NULL
+		FROM payments_pelecard WHERE payment_id = $1`, p.paymentID).
+		Scan(&pelecardNulls[0], &pelecardNulls[1], &pelecardNulls[2], &pelecardNulls[3]))
+	assert.Equal(t, [4]bool{true, true, true, true}, pelecardNulls)
+}
+
+// A confirm writes the gateway's facts and nothing else: an existing
+// payments_pelecard row keeps the amount and ord_key it has, even when they
+// differ from the payment's (a row corrected by hand).
+func Test_UpdatePayment_keeps_an_existing_pelecard_rows_amount_and_ord_key(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	p := seedPendingPayment(t, a, "regular")
+	pool := a.testPool(t)
+	ctx := eventstest.WithTestEventBuilder(t, context.Background())
+	_, err := pool.Exec(ctx, `UPDATE payments SET "Ordkey" = $1 WHERE id = $2`, p.orderKey, p.paymentID)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `UPDATE payments_pelecard SET amount = 90, ord_key = 'corrected' WHERE payment_id = $1`, p.paymentID)
+	require.NoError(t, err)
+	record := gatewayRecord(p)
+
+	_, err = a.repo.UpdatePayment(ctx, paidFromGateway(&record))
+	require.NoError(t, err)
+
+	var token, ordKey string
+	var amount null.Float64
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT COALESCE(pelecard_token, ''), amount, COALESCE(ord_key, '')
+		FROM payments_pelecard WHERE payment_id = $1`, p.paymentID).Scan(&token, &amount, &ordKey))
+	assert.Equal(t, "card-token", token)
+	assert.Equal(t, null.Float64From(90), amount)
+	assert.Equal(t, "corrected", ordKey)
 }

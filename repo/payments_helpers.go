@@ -281,10 +281,6 @@ func (o *OrdersDB) CreatePayment(ctx context.Context, req RequestOrder, orderID 
 }
 
 func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment, error) {
-	if !req.Error.IsZero() {
-		return nil, fmt.Errorf("req.Error: %s", req.Error.String)
-	}
-
 	// Ids are int4: parsing within 32 bits makes the int conversion exact.
 	parsedOrder, err := strconv.ParseInt(strings.Split(req.UserKey.String, "-")[1], 10, 32)
 	if err != nil {
@@ -309,8 +305,12 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	var p Payment
-	// Amount and Ordkey are read for writePelecardFacts: a missing
-	// payments_pelecard row is created from this payment.
+	// Amount and Ordkey are read for writePelecardFacts, to create a missing
+	// payments_pelecard row. They stay out of p: the update builders write every
+	// set field, so carrying them would rewrite payments and copy them over a
+	// payments_pelecard row someone corrected by hand.
+	var amount null.Float64
+	var ordkey null.String
 	if err := tx.QueryRow(ctx, `SELECT
 	"OrderID",
 	"Amount",
@@ -341,7 +341,7 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 	"TransactionInitTime",
 	"TransactionUpdateTime",
 	"VoucherID" FROM payments WHERE "OrderID"=$1 AND id=$2 FOR UPDATE`, orderid, paymentid).Scan(
-		&p.OrderID, &p.Amount, &p.Ordkey, &p.PaymentStatus, &p.PaymentType, &p.ParamX, &p.AuthNo, &p.ConfirmationKey, &p.Success,
+		&p.OrderID, &amount, &ordkey, &p.PaymentStatus, &p.PaymentType, &p.ParamX, &p.AuthNo, &p.ConfirmationKey, &p.Success,
 		&p.PelecardToken, &p.TransactionID, &p.CCBrand, &p.CardHebrewName, &p.CCAbroadCard,
 		&p.CCCompanyClearer, &p.CreditType, &p.CCExpDate, &p.CCNumber, &p.DebitCode, &p.DebitCurrency,
 		&p.DebitTotal, &p.DebitType, &p.FirstPaymentTotal, &p.FixedPaymentTotal, &p.TotalPayments,
@@ -352,34 +352,44 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 	if p.PaymentStatus.String == common.PaymentStatusSuccess {
 		return nil, common.ErrAlreadyPaid
 	}
+	// Checked after the status, under the lock: a return carrying an error for
+	// a payment already confirmed is answered as already paid, and only one
+	// for a payment still pending is refused.
+	if !req.Error.IsZero() {
+		return nil, fmt.Errorf("req.Error: %s", req.Error.String)
+	}
 
 	if req.Success.String == "1" {
+		// A browser return can send a field explicitly empty, which would be
+		// stored as ''; checkout's notify sends NULL for it. Every field is
+		// taken through blankAsNull so both paths store the same.
 		p.PaymentStatus = null.NewString("success", true)
 		p.PaymentType = null.StringFrom(common.PaymentTypePelecard)
 		p.ParamX = req.ParamX
-		p.AuthNo = req.AuthNo
-		p.ConfirmationKey = req.ConfirmationKey
+		p.AuthNo = blankAsNull(req.AuthNo)
+		p.ConfirmationKey = blankAsNull(req.ConfirmationKey)
 		p.Success = req.Success
-		p.PelecardToken = req.Token
-		p.TransactionID = req.TransactionID
-		p.CCBrand = req.CCBrand
-		p.CardHebrewName = req.CardHebrewName
-		p.CCAbroadCard = req.CCAbroadCard
-		p.CCCompanyClearer = req.CCCompanyClearer
-		p.CreditType = req.CreditType
-		p.CCExpDate = req.CCExpDate
-		p.CCNumber = req.CCNumber
-		p.DebitCode = req.DebitCode
-		p.DebitCurrency = req.DebitCurrency
-		p.DebitTotal = req.DebitTotal
-		p.DebitType = req.DebitType
-		p.FirstPaymentTotal = req.FirstPaymentTotal
-		p.FixedPaymentTotal = req.FixedPaymentTotal
-		p.TotalPayments = req.TotalPayments
-		p.JParam = req.JParam
-		p.TransactionInitTime = req.TransactionInitTime
-		p.TransactionUpdateTime = req.TransactionUpdateTime
-		p.VoucherID = req.VoucherID
+		p.PelecardToken = blankAsNull(req.Token)
+		p.TransactionID = blankAsNull(req.TransactionID)
+		p.CCBrand = blankAsNull(req.CCBrand)
+		p.CardHebrewName = blankAsNull(req.CardHebrewName)
+		p.CCAbroadCard = blankAsNull(req.CCAbroadCard)
+		p.CCCompanyClearer = blankAsNull(req.CCCompanyClearer)
+		p.CCCompanyIssuer = blankAsNull(req.CCCompanyIssuer)
+		p.CreditType = blankAsNull(req.CreditType)
+		p.CCExpDate = blankAsNull(req.CCExpDate)
+		p.CCNumber = blankAsNull(req.CCNumber)
+		p.DebitCode = blankAsNull(req.DebitCode)
+		p.DebitCurrency = blankAsNull(req.DebitCurrency)
+		p.DebitTotal = blankAsNull(req.DebitTotal)
+		p.DebitType = blankAsNull(req.DebitType)
+		p.FirstPaymentTotal = blankAsNull(req.FirstPaymentTotal)
+		p.FixedPaymentTotal = blankAsNull(req.FixedPaymentTotal)
+		p.TotalPayments = blankAsNull(req.TotalPayments)
+		p.JParam = blankAsNull(req.JParam)
+		p.TransactionInitTime = blankAsNull(req.TransactionInitTime)
+		p.TransactionUpdateTime = blankAsNull(req.TransactionUpdateTime)
+		p.VoucherID = blankAsNull(req.VoucherID)
 	} else {
 		p.PaymentStatus = null.NewString("failed", true)
 		p.ErrorMsg = null.NewString("Failed", true) // TODO: improve
@@ -387,7 +397,7 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 	}
 
 	// The row is held FOR UPDATE above, so this write finds it.
-	if err := writePaymentFacts(ctx, tx, p, paymentid); err != nil {
+	if err := writePaymentFacts(ctx, tx, p, amount, ordkey, paymentid); err != nil {
 		return nil, err
 	}
 
@@ -408,14 +418,16 @@ type execer interface {
 // writePaymentFacts writes a Pelecard payment's row and its payments_pelecard
 // row from a gateway result: checkout's notify and the browser return
 // (UpdatePayment) and a renewal charge (FinalizeRenewal). Callers run it in a
-// transaction so both land or neither does. The admin PATCH is not one of
-// these: UpdatePelecardPayment writes the fields an admin chose, from a
-// PaymentUpdate, and the handler sets the payment status separately.
-func writePaymentFacts(ctx context.Context, tx execer, p Payment, paymentID int) error {
+// transaction so both land or neither does. amount and ordkey are used only
+// to create a missing payments_pelecard row (see writePelecardFacts). The
+// admin PATCH is not one of these: UpdatePelecardPayment writes the fields an
+// admin chose, from a PaymentUpdate, and the handler sets the payment status
+// separately.
+func writePaymentFacts(ctx context.Context, tx execer, p Payment, amount null.Float64, ordkey null.String, paymentID int) error {
 	if err := updatePaymentRow(ctx, tx, p, paymentID); err != nil {
 		return err
 	}
-	return writePelecardFacts(ctx, tx, p, paymentID)
+	return writePelecardFacts(ctx, tx, p, amount, ordkey, paymentID)
 }
 
 // updatePaymentRow writes p's set fields to the payments row paymentID names,
@@ -432,8 +444,9 @@ func updatePaymentRow(ctx context.Context, db execer, p Payment, paymentID int) 
 // writePelecardFacts stores the gateway's facts in the payment's
 // payments_pelecard row. Older payments (and a few recent ones) have no such
 // row; one is created rather than committing a confirmed payment without its
-// card facts.
-func writePelecardFacts(ctx context.Context, tx execer, p Payment, paymentID int) error {
+// card facts, taking amount and ordkey from the payment: they are kept out of
+// p so the updates never rewrite them.
+func writePelecardFacts(ctx context.Context, tx execer, p Payment, amount null.Float64, ordkey null.String, paymentID int) error {
 	toUpdate, args := preparePelecardPaymentUpdateViaPaymentStructQuery(p)
 	tag, err := tx.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=$%d`, toUpdate, len(args)+1),
 		append(args, int64(paymentID))...)
@@ -443,7 +456,9 @@ func writePelecardFacts(ctx context.Context, tx execer, p Payment, paymentID int
 	if tag.RowsAffected() > 0 {
 		return nil
 	}
-	columns, placeholders, createArgs := preparePelecardPaymentCreateQuery(p, paymentID)
+	ins := p
+	ins.Amount, ins.Ordkey = amount, ordkey
+	columns, placeholders, createArgs := preparePelecardPaymentCreateQuery(ins, paymentID)
 	if _, err := tx.Exec(ctx, fmt.Sprintf(`INSERT INTO payments_pelecard (%s) VALUES (%s)`, columns, placeholders),
 		createArgs...); err != nil {
 		return fmt.Errorf("insert pelecard %d: %w", paymentID, err)
@@ -1725,4 +1740,13 @@ func (o *OrdersDB) FetchPaymentByParamX(ctx context.Context, paramX string) (*Pa
 	}
 
 	return &p, nil
+}
+
+// blankAsNull treats an empty string as absent, so it is left unwritten
+// rather than stored as ''.
+func blankAsNull(s null.String) null.String {
+	if s.String == "" {
+		return null.String{}
+	}
+	return s
 }

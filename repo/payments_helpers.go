@@ -281,10 +281,6 @@ func (o *OrdersDB) CreatePayment(ctx context.Context, req RequestOrder, orderID 
 }
 
 func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment, error) {
-	if !req.Error.IsZero() {
-		return nil, fmt.Errorf("req.Error: %s", req.Error.String)
-	}
-
 	// Ids are int4: parsing within 32 bits makes the int conversion exact.
 	parsedOrder, err := strconv.ParseInt(strings.Split(req.UserKey.String, "-")[1], 10, 32)
 	if err != nil {
@@ -309,8 +305,12 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	var p Payment
-	// Amount and Ordkey are read for writePelecardFacts: a missing
-	// payments_pelecard row is created from this payment.
+	// Amount and Ordkey are read for writePelecardFacts, to create a missing
+	// payments_pelecard row. They stay out of p: the update builders write every
+	// set field, so carrying them would rewrite payments and copy them over a
+	// payments_pelecard row someone corrected by hand.
+	var amount null.Float64
+	var ordkey null.String
 	if err := tx.QueryRow(ctx, `SELECT
 	"OrderID",
 	"Amount",
@@ -341,7 +341,7 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 	"TransactionInitTime",
 	"TransactionUpdateTime",
 	"VoucherID" FROM payments WHERE "OrderID"=$1 AND id=$2 FOR UPDATE`, orderid, paymentid).Scan(
-		&p.OrderID, &p.Amount, &p.Ordkey, &p.PaymentStatus, &p.PaymentType, &p.ParamX, &p.AuthNo, &p.ConfirmationKey, &p.Success,
+		&p.OrderID, &amount, &ordkey, &p.PaymentStatus, &p.PaymentType, &p.ParamX, &p.AuthNo, &p.ConfirmationKey, &p.Success,
 		&p.PelecardToken, &p.TransactionID, &p.CCBrand, &p.CardHebrewName, &p.CCAbroadCard,
 		&p.CCCompanyClearer, &p.CreditType, &p.CCExpDate, &p.CCNumber, &p.DebitCode, &p.DebitCurrency,
 		&p.DebitTotal, &p.DebitType, &p.FirstPaymentTotal, &p.FixedPaymentTotal, &p.TotalPayments,
@@ -351,6 +351,12 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 	}
 	if p.PaymentStatus.String == common.PaymentStatusSuccess {
 		return nil, common.ErrAlreadyPaid
+	}
+	// Checked after the status, under the lock: a return carrying an error for
+	// a payment already confirmed is answered as already paid, and only one
+	// for a payment still pending is refused.
+	if !req.Error.IsZero() {
+		return nil, fmt.Errorf("req.Error: %s", req.Error.String)
 	}
 
 	if req.Success.String == "1" {
@@ -398,7 +404,7 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 		return nil, fmt.Errorf("tx.Exec [update payment]: %w", err)
 	}
 
-	if err := writePelecardFacts(ctx, tx, p, paymentid); err != nil {
+	if err := writePelecardFacts(ctx, tx, p, amount, ordkey, paymentid); err != nil {
 		return nil, err
 	}
 
@@ -415,7 +421,7 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 // payments_pelecard row, inside the payment's transaction. Older payments
 // (and a few recent ones) have no such row; one is created rather than
 // committing a confirmed payment without its card facts.
-func writePelecardFacts(ctx context.Context, tx pgx.Tx, p Payment, paymentID int) error {
+func writePelecardFacts(ctx context.Context, tx pgx.Tx, p Payment, amount null.Float64, ordkey null.String, paymentID int) error {
 	toUpdate, args := preparePelecardPaymentUpdateViaPaymentStructQuery(p)
 	tag, err := tx.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=$%d`, toUpdate, len(args)+1),
 		append(args, int64(paymentID))...)
@@ -425,7 +431,9 @@ func writePelecardFacts(ctx context.Context, tx pgx.Tx, p Payment, paymentID int
 	if tag.RowsAffected() > 0 {
 		return nil
 	}
-	columns, placeholders, createArgs := preparePelecardPaymentCreateQuery(p, paymentID)
+	ins := p
+	ins.Amount, ins.Ordkey = amount, ordkey
+	columns, placeholders, createArgs := preparePelecardPaymentCreateQuery(ins, paymentID)
 	if _, err := tx.Exec(ctx, fmt.Sprintf(`INSERT INTO payments_pelecard (%s) VALUES (%s)`, columns, placeholders),
 		createArgs...); err != nil {
 		return fmt.Errorf("tx.Exec [insert pelecard]: %w", err)

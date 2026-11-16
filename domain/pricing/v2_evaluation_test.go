@@ -178,6 +178,22 @@ func TestBuildDonationsDiscount_NoSpouse_BelowAnnual_NoDiscount(t *testing.T) {
 	assert.False(t, primaryGets)
 	props := unmarshalDonationsProps(t, d)
 	assert.False(t, props.SpouseGetsDiscount)
+	assert.True(t, props.Donated)
+}
+
+func TestBuildDonationsDiscount_NoDonations_DonatedFalse(t *testing.T) {
+	sums := donationSums{perCurrency: map[string]float64{}}
+	d, _ := buildDonationsDiscount(sums, nisBase(180), 180, 1, 0, "")
+	assert.False(t, d.Eligible)
+	assert.False(t, unmarshalDonationsProps(t, d).Donated)
+}
+
+func TestBuildDonationsDiscount_FloatResidue_DonatedFalse(t *testing.T) {
+	// Fully reversed gifts leave 4.4e-16. gift is a variable so the sum runs in float64 (constants are exact).
+	gift := 1.10
+	sums := donationSums{perCurrency: map[string]float64{}, totalNIS: gift + 2.20 - 3.30}
+	d, _ := buildDonationsDiscount(sums, nisBase(180), 180, 1, 0, "")
+	assert.False(t, unmarshalDonationsProps(t, d).Donated)
 }
 
 func TestBuildDonationsDiscount_NoSpouse_AboveAnnual_PrimaryGets(t *testing.T) {
@@ -703,7 +719,7 @@ func TestBuildFormula_NoSpouseNoDiscount(t *testing.T) {
 	assert.Contains(t, lines[1], "primary(2)")
 	assert.Contains(t, lines[1], "fetch donations from all sources (Priority, QuickBooks, Europe; last 12mo)")
 	assert.Contains(t, lines[1], "ok")
-	assert.Equal(t, "3. sum all donations per currency → convert each to NIS", lines[2])
+	assert.Equal(t, "3. sum all donations per currency → convert each to NIS → donated: no", lines[2])
 	assert.Contains(t, lines[3], "no discount")
 	assert.Contains(t, lines[3], "2160.00 NIS/yr") // single-person threshold = annual
 	assert.NotContains(t, lines[3], "→ NIS")
@@ -714,11 +730,13 @@ func TestBuildFormula_NoSpouseNoDiscount(t *testing.T) {
 func TestBuildFormula_NoSpousePrimaryDiscount(t *testing.T) {
 	base := nisBase(180)
 	props := baseProps(2)
+	props.Donated = true
 	discounted := base.Amount * (1 - DonationsDiscountAmtPct/100)
 	eval := makeEval(base, 101, Price{Amount: discounted, Currency: common.CurrencyNIS}, props, true)
 
 	lines := buildExplain(eval)
 	require.Len(t, lines, 5)
+	assert.Contains(t, lines[2], "donated: yes")
 	assert.Contains(t, lines[3], "primary gets 55% off")
 	assert.Contains(t, lines[3], "2160.00 NIS/yr") // single-person threshold = annual
 	assert.Contains(t, lines[4], "81.00 NIS")
@@ -773,7 +791,7 @@ func TestBuildFormula_ForeignCurrencyOriginalCurrency(t *testing.T) {
 	assert.NotContains(t, lines[0], "NIS")
 	assert.NotContains(t, lines[0], "@ 1")
 	// Step 3: acknowledges NIS conversion without showing amounts
-	assert.Equal(t, "3. sum all donations per currency → convert each to NIS", lines[2])
+	assert.Equal(t, "3. sum all donations per currency → convert each to NIS → donated: no", lines[2])
 	// Step 4: single-person threshold = annual (120 USD) with → NIS marker
 	assert.Contains(t, lines[3], "120.00 USD/yr (→ NIS)")
 	assert.NotContains(t, lines[3], "744") // 2×annual in NIS, must not appear

@@ -65,7 +65,7 @@ func TestListFilters_ValuesAreParameters(t *testing.T) {
 	t.Run("GetAllOrders", func(t *testing.T) {
 		get := func(productType, currency, status, org, email, key string) []Order {
 			t.Helper()
-			orders, err := db.GetAllOrders(ctx, 0, 10, "", &future, productType, currency, status, org, email, 0, key, "", "")
+			orders, err := db.GetAllOrders(ctx, 0, 10, nil, &future, productType, currency, status, org, email, 0, key, "", "")
 			require.NoError(t, err)
 			return *orders
 		}
@@ -86,7 +86,7 @@ func TestListFilters_ValuesAreParameters(t *testing.T) {
 	t.Run("GetAllPayments", func(t *testing.T) {
 		get := func(paymentType, paymentStatus, orderType, email string) []Payment {
 			t.Helper()
-			payments, err := db.GetAllPayments(ctx, 0, 10, "", &time.Time{}, paymentType, paymentStatus, orderType, email, 0, "", "", 0, "")
+			payments, err := db.GetAllPayments(ctx, 0, 10, nil, &time.Time{}, paymentType, paymentStatus, orderType, email, 0, "", nil, 0, "")
 			require.NoError(t, err)
 			return payments
 		}

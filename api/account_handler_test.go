@@ -1,9 +1,7 @@
 package api
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -35,9 +33,8 @@ func Test_create_and_get_account(t *testing.T) {
 
 // sendAsUser sends a request as the non-admin USER_KEY and returns the raw
 // recorder: a refusal has no body for do() to decode.
-func sendAsUser(a *App, method, path string, body interface{}) *httptest.ResponseRecorder {
-	b, _ := json.Marshal(body)
-	r := httptest.NewRequest(method, path, bytes.NewReader(b))
+func sendAsUser(t *testing.T, a *App, method, path string, body interface{}) *httptest.ResponseRecorder {
+	r := httptest.NewRequest(method, path, requestBody(t, body))
 	claims := &middleware.IDTokenClaims{Sub: USER_KEY, RealmAccess: middleware.Roles{Roles: []string{"some-role"}}}
 	w := httptest.NewRecorder()
 	a.gEngine.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), common.CtxAuthClaims, claims)))
@@ -59,7 +56,7 @@ func Test_create_account_with_someone_elses_userkey_is_forbidden(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)
 
-	w := sendAsUser(a, http.MethodPost, "/v2/account/", repo.Account{UserKey: null.StringFrom("kc-victim")})
+	w := sendAsUser(t, a, http.MethodPost, "/v2/account/", repo.Account{UserKey: null.StringFrom("kc-victim")})
 
 	assert.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
 	assert.Zero(t, countAccountsWithUserKey(t, a, "kc-victim"))
@@ -73,7 +70,7 @@ func Test_patch_own_account_to_someone_elses_userkey_is_forbidden(t *testing.T) 
 	got := POST(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom(USER_KEY)}, http.StatusCreated)
 	id := int(got["data"].(float64))
 
-	w := sendAsUser(a, http.MethodPatch, fmt.Sprintf("/v2/account/%d", id), repo.Account{UserKey: null.StringFrom("kc-victim")})
+	w := sendAsUser(t, a, http.MethodPatch, fmt.Sprintf("/v2/account/%d", id), repo.Account{UserKey: null.StringFrom("kc-victim")})
 
 	assert.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
 	assert.Zero(t, countAccountsWithUserKey(t, a, "kc-victim"))

@@ -30,7 +30,7 @@ func TestGetAllOrders_KeycloakFilterFindsNewOrders(t *testing.T) {
 	require.NoError(t, err)
 
 	future := time.Now().Add(time.Hour)
-	orders, err := db.GetAllOrders(ctx, 0, 10, "", &future, "", "", "", "", "", 0, "kc-1", "", "")
+	orders, err := db.GetAllOrders(ctx, 0, 10, nil, &future, "", "", "", "", "", 0, "kc-1", "", "")
 	require.NoError(t, err)
 	require.Len(t, *orders, 1)
 	assert.Equal(t, orderID, (*orders)[0].ID)

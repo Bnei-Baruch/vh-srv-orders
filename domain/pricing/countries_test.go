@@ -77,6 +77,11 @@ func TestGetCountryBasePrice_EuropeanCountries(t *testing.T) {
 			expected: CountryBasePrice{Price: Price{Amount: 27.0, Currency: common.CurrencyEUR}, Group: "Medium"},
 		},
 		{
+			name:     "Greece Medium group",
+			code:     "GR",
+			expected: CountryBasePrice{Price: Price{Amount: 27.0, Currency: common.CurrencyEUR}, Group: "Medium"},
+		},
+		{
 			name:     "Romania Medium group",
 			code:     "RO",
 			expected: CountryBasePrice{Price: Price{Amount: 27.0, Currency: common.CurrencyEUR}, Group: "Medium"},

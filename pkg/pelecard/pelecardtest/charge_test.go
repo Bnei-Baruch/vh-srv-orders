@@ -40,7 +40,7 @@ func TestTerminalByPMX_Token(t *testing.T) {
 	assert.Equal(t, pelecard.TokenTerminal, terminal)
 	assert.Equal(t, "token", terminal.Name)
 	assert.Equal(t, "t", terminal.PMX)
-	assert.NotEmpty(t, terminal.ChargeURL)
+	assert.Equal(t, "https://checkout.kbb1.com/vh/token/charge", terminal.ChargeURL)
 }
 
 func TestTerminalByPMX_EMV(t *testing.T) {
@@ -49,7 +49,7 @@ func TestTerminalByPMX_EMV(t *testing.T) {
 	assert.Equal(t, pelecard.EMVTerminal, terminal)
 	assert.Equal(t, "emv", terminal.Name)
 	assert.Equal(t, "e", terminal.PMX)
-	assert.NotEmpty(t, terminal.ChargeURL)
+	assert.Equal(t, "https://checkout.kbb1.com/vh/emv/charge", terminal.ChargeURL)
 }
 
 func TestTerminalByPMX_Unknown(t *testing.T) {
@@ -403,6 +403,29 @@ func TestClient_ChargeByToken_PersistentUnauthorizedFails(t *testing.T) {
 	assert.Nil(t, result)
 	assert.Contains(t, err.Error(), "401")
 	assert.Equal(t, 2, requests, "a persistent 401 fails rather than looping")
+}
+
+// A 403 from /vh is a key that is not allowed there: the run stops on it as on
+// a 401, and since a fresh token would not change that, it is not retried.
+func TestClient_ChargeByToken_ForbiddenIsUnauthorized(t *testing.T) {
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"error":"forbidden"}`))
+	}))
+	defer server.Close()
+
+	client := newChargeClient(t)
+
+	result, err := client.ChargeByToken(context.Background(), &pelecard.ChargeRequest{Reference: "m-3-f2t"},
+		pelecard.Terminal{Name: "token", ChargeURL: server.URL})
+
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.ErrorIs(t, err, pelecard.ErrUnauthorized)
+	assert.Contains(t, err.Error(), "403")
+	assert.Equal(t, 1, requests)
 }
 
 // A charge must not be attempted at all without a credential, now that the

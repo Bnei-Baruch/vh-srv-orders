@@ -5,7 +5,7 @@ import (
 
 	uuid "github.com/satori/go.uuid"
 
-	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/profiles"
 )
 
 func EventFixture(eventType string, payload map[string]interface{}) profiles.Event {

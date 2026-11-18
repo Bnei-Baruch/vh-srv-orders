@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	pkgmocks "gitlab.bbdev.team/vh/pay/orders/internal/mocks/pkg"
+	pkgmocks "github.com/Bnei-Baruch/vh-srv-orders/internal/mocks/pkg"
 )
 
 func TestGetMonthlyPrice_ResolvesV2(t *testing.T) {

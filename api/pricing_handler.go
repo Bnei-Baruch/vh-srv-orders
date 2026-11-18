@@ -8,9 +8,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"gitlab.bbdev.team/vh/pay/orders/common"
-	"gitlab.bbdev.team/vh/pay/orders/domain/pricing"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
+	"github.com/Bnei-Baruch/vh-srv-orders/domain/pricing"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/utils"
 )
 
 func (o *OrdersAPI) handleMonthlyPriceByKCID(c *gin.Context) {

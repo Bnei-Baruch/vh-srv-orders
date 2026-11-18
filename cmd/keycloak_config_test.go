@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitlab.bbdev.team/vh/pay/orders/common"
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
 )
 
 func withKeycloakConfig(t *testing.T, url, realm, id, secret string) {

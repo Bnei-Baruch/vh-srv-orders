@@ -1,4 +1,4 @@
-module gitlab.bbdev.team/vh/pay/orders
+module github.com/Bnei-Baruch/vh-srv-orders
 
 go 1.27
 

@@ -166,11 +166,51 @@ func TestRenewCardPages_ForgetDropsThePage(t *testing.T) {
 	assert.Equal(t, int32(4), calls.Load())
 }
 
-// Without a reference every request falls back to the same one, so the member
-// tells them apart.
-func TestRenewCardPageKey_FallbackReferenceIsPerMember(t *testing.T) {
-	assert.Equal(t, "new_token_7", renewCardPageKey("new_token_7", "kc-a"))
-	assert.NotEqual(t,
-		renewCardPageKey(defaultRenewCardReference, "kc-a"),
-		renewCardPageKey(defaultRenewCardReference, "kc-b"))
+// Two members renewing without a reference share the fallback one, and must
+// not get each other's page: their payloads differ.
+func TestRenewCardPages_FallbackReferenceIsNotSharedAcrossMembers(t *testing.T) {
+	pages := newRenewCardPages()
+	var calls atomic.Int32
+	memberA := []byte(`{"Reference":"new_token_by_admin_no_cvv","Name":"A","Email":"a@example.com"}`)
+	memberB := []byte(`{"Reference":"new_token_by_admin_no_cvv","Name":"B","Email":"b@example.com"}`)
+
+	_, _, err := pages.open(context.Background(), "new_token_by_admin_no_cvv", memberA, pageOpener(&calls, `{"url":"pa"}`, true, nil))
+	require.NoError(t, err)
+	body, reused, err := pages.open(context.Background(), "new_token_by_admin_no_cvv", memberB, pageOpener(&calls, `{"url":"pb"}`, true, nil))
+	require.NoError(t, err)
+
+	assert.False(t, reused)
+	assert.Equal(t, `{"url":"pb"}`, string(body))
+	assert.Equal(t, int32(2), calls.Load())
+}
+
+// Clicks waiting on a call that fails get the failure as reused, so the
+// handler reports it once rather than once per click.
+func TestRenewCardPages_WaitersOnAFailureAreReused(t *testing.T) {
+	pages := newRenewCardPages()
+	release := make(chan struct{})
+	failing := func(context.Context) ([]byte, bool, error) {
+		<-release
+		return nil, false, errors.New("checkout down")
+	}
+
+	const clicks = 5
+	var wg sync.WaitGroup
+	var reportable atomic.Int32
+	for range clicks {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, reused, err := pages.open(context.Background(), "new_token_1", clickPayload, failing)
+			assert.Error(t, err)
+			if !reused {
+				reportable.Add(1)
+			}
+		}()
+	}
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+	wg.Wait()
+
+	assert.Equal(t, int32(1), reportable.Load())
 }

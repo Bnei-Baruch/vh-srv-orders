@@ -52,15 +52,17 @@ func newRenewCardPages() *renewCardPages {
 func (r *renewCardPages) open(ctx context.Context, order string, payload []byte,
 	openPage func(context.Context) (body []byte, shareable bool, err error)) (body []byte, reused bool, err error) {
 
-	key := renewCardRequestKey(order, payload)
-	if body, ok := r.lookup(key); ok {
-		return body, true, nil
-	}
-
 	// Do reports shared for the caller that ran the call too, once anyone else
 	// waited on it, so whether this caller opened the page is tracked here.
+	key := renewCardRequestKey(order, payload)
 	opened := false
 	value, err, _ := r.inFlight.Do(key, func() (interface{}, error) {
+		// Looked up inside Do, not before it: a request that missed the cache
+		// just before another call stored its page, and reached Do just after
+		// that call left, would otherwise open a second page.
+		if body, ok := r.lookup(key); ok {
+			return body, nil
+		}
 		opened = true
 		// Not the first caller's context: if that browser goes away, the
 		// requests waiting on this call still want the page.

@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -220,16 +221,31 @@ func Test_new_token_no_cvv_saved_card_releases_the_page(t *testing.T) {
 	assert.Len(t, calls(), 2)
 }
 
-// A failed page is not handed to the next click.
+// A failed page is not handed to the next click: checkout answers 502 once,
+// then a page, and the second click gets the page.
 func Test_new_token_no_cvv_failed_page_is_retried(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)
-	calls := stubPages(t, a, http.StatusBadGateway, "text/html", "<html>502 Bad Gateway</html>")
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			w.Header().Set("Content-Type", "text/html")
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte("<html>502 Bad Gateway</html>"))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"url":"https://pelecard.example/page"}`))
+	}))
+	t.Cleanup(srv.Close)
+	a.ordersAPI.pages = &pelecard.Client{Client: resty.New(), BaseURL: srv.URL, Tokens: keycloak.StaticTokenSource("tok")}
 
 	POST_ROOT(t, a, "/v2/transaction/new_token_no_cvv", gin.H{"Reference": "new_token_9"}, http.StatusInternalServerError)
-	POST_ROOT(t, a, "/v2/transaction/new_token_no_cvv", gin.H{"Reference": "new_token_9"}, http.StatusInternalServerError)
+	w := postAsRoot(a, "/v2/transaction/new_token_no_cvv", `{"Reference":"new_token_9"}`)
 
-	assert.Len(t, calls(), 2)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.JSONEq(t, `{"url":"https://pelecard.example/page"}`, w.Body.String())
+	assert.Equal(t, int32(2), calls.Load())
 }
 
 func Test_recurring_checkout_opens_the_vh_token_page_with_a_bearer(t *testing.T) {

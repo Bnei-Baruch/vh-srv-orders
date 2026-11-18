@@ -9,9 +9,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"gitlab.bbdev.team/vh/pay/orders/common"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/pelecard"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/pelecard"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/utils"
 )
 
 // The charge path sees real traffic once a month, in one burst at 02:00 on the

@@ -1,6 +1,6 @@
 # Orders Service
 
-Go 1.27 service for managing orders, payments, and billing. Module: `gitlab.bbdev.team/vh/pay/orders`.
+Go 1.27 service for managing orders, payments, and billing. Module: `github.com/Bnei-Baruch/vh-srv-orders`.
 
 ## Project Structure
 
@@ -50,7 +50,7 @@ import (
 
     "github.com/gin-gonic/gin"
 
-    "gitlab.bbdev.team/vh/pay/orders/common"
+    "github.com/Bnei-Baruch/vh-srv-orders/common"
 )
 ```
 
@@ -342,7 +342,7 @@ Things `task --list` won't tell you:
   compiler is a different diff. Raise that pin whenever go.mod's `go` directive
   moves; it has to clear mockery v3.8.0's own floor of go 1.25.5 as well.
 - Production entrypoint is `./orders server` (port 8185).
-- Build injects the git SHA: `-ldflags "-X gitlab.bbdev.team/vh/pay/orders/common.GitSHA=${GIT_SHA}"`
+- Build injects the git SHA: `-ldflags "-X github.com/Bnei-Baruch/vh-srv-orders/common.GitSHA=${GIT_SHA}"`
 
 ## Tech Stack
 

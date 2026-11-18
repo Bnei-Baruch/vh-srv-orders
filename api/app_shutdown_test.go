@@ -20,10 +20,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"gitlab.bbdev.team/vh/pay/orders/common"
-	"gitlab.bbdev.team/vh/pay/orders/events"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
+	"github.com/Bnei-Baruch/vh-srv-orders/events"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/profiles"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/utils"
 )
 
 // Shutdown is reached from the fatal paths as well as from server.go's defer, so

@@ -23,11 +23,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/volatiletech/null/v9"
 
-	"gitlab.bbdev.team/vh/pay/orders/common"
-	"gitlab.bbdev.team/vh/pay/orders/events/eventstest"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/keycloak"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/pelecard"
-	"gitlab.bbdev.team/vh/pay/orders/repo"
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
+	"github.com/Bnei-Baruch/vh-srv-orders/events/eventstest"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/keycloak"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/pelecard"
+	"github.com/Bnei-Baruch/vh-srv-orders/repo"
 )
 
 type checkoutCall struct{ path, reference, auth string }

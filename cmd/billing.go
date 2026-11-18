@@ -12,17 +12,17 @@ import (
 	"github.com/getsentry/sentry-go"
 	"github.com/spf13/cobra"
 
-	"gitlab.bbdev.team/vh/pay/orders/common"
-	"gitlab.bbdev.team/vh/pay/orders/domain/billing"
-	"gitlab.bbdev.team/vh/pay/orders/domain/pricing"
-	"gitlab.bbdev.team/vh/pay/orders/events"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/accounting"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/keycloak"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/pelecard"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/priority"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
-	"gitlab.bbdev.team/vh/pay/orders/repo"
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
+	"github.com/Bnei-Baruch/vh-srv-orders/domain/billing"
+	"github.com/Bnei-Baruch/vh-srv-orders/domain/pricing"
+	"github.com/Bnei-Baruch/vh-srv-orders/events"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/accounting"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/keycloak"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/pelecard"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/priority"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/profiles"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/utils"
+	"github.com/Bnei-Baruch/vh-srv-orders/repo"
 )
 
 var billingCmd = &cobra.Command{

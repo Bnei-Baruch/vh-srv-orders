@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"gitlab.bbdev.team/vh/pay/orders/common"
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
 )
 
 // Same as importers.TestBaseImporterCloseAfterFailedInit: Do calls Close on the

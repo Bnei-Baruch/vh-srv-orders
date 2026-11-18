@@ -12,8 +12,8 @@ import (
 
 	"github.com/go-resty/resty/v2"
 
-	"gitlab.bbdev.team/vh/pay/orders/common"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/utils"
 )
 
 // currencyCodeMap maps Priority ERP CODE values to ISO currency codes.

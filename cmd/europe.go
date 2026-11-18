@@ -9,9 +9,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"gitlab.bbdev.team/vh/pay/orders/common"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/accounting"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/keycloak"
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/accounting"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/keycloak"
 )
 
 var europeCmd = &cobra.Command{

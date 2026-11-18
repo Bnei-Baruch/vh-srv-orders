@@ -2,7 +2,8 @@ package cmd
 
 import (
 	"github.com/spf13/cobra"
-	"gitlab.bbdev.team/vh/pay/orders/importers"
+
+	"github.com/Bnei-Baruch/vh-srv-orders/importers"
 )
 
 var importerCmd = &cobra.Command{

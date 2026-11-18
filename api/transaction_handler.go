@@ -17,10 +17,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/volatiletech/null/v9"
 
-	"gitlab.bbdev.team/vh/pay/orders/common"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/pelecard"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
-	"gitlab.bbdev.team/vh/pay/orders/repo"
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/pelecard"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/utils"
+	"github.com/Bnei-Baruch/vh-srv-orders/repo"
 )
 
 // paymentCallContext carries the request's values without its cancellation.
@@ -428,29 +428,39 @@ func (o *OrdersAPI) handleTransactionNewTokenNoCVV(c *gin.Context) {
 		return
 	}
 
-	resp, err := o.pages.OpenPage(paymentCallContext(c), pelecard.PageRenewCard, payload)
+	body, reused, err := o.renewCardPages.open(paymentCallContext(c), reference, payload,
+		func(ctx context.Context) ([]byte, bool, error) {
+			resp, err := o.pages.OpenPage(ctx, pelecard.PageRenewCard, payload)
+			if err != nil {
+				return nil, false, err
+			}
+			utils.LogFor(ctx).Info("getToken response", slog.Group("response",
+				slog.String("status", resp.Status()),
+				slog.Any("headers", resp.Header()),
+				slog.String("body", string(resp.Body()))))
+			return resp.Body(), resp.IsSuccess() && json.Valid(resp.Body()), nil
+		})
 	if err != nil {
-		reportPageFailure(c, pelecard.PageRenewCard, err)
+		// Once per failure, not once per click waiting on it.
+		if !reused {
+			reportPageFailure(c, pelecard.PageRenewCard, err)
+		}
 		c.JSON(http.StatusOK, gin.H{"url": req.ErrorURL})
 		return
 	}
-
-	body := resp.Body()
-
-	utils.LogFor(c.Request.Context()).Info("getToken response", slog.Group("response",
-		slog.String("status", resp.Status()),
-		slog.Any("headers", resp.Header()),
-		slog.String("body", string(body))))
-	{
-		var i interface{}
-		if err := json.Unmarshal(body, &i); err != nil {
-			c.Status(http.StatusInternalServerError)
-			_ = c.Error(fmt.Errorf("handleTransactionNewTokenNoCVV json.Unmarshal: %w", err))
-			return
-		}
-
-		c.JSON(http.StatusOK, i)
+	if reused {
+		utils.LogFor(c.Request.Context()).Info("card renewal page reused",
+			slog.String("reference", reference))
 	}
+
+	var i interface{}
+	if err := json.Unmarshal(body, &i); err != nil {
+		c.Status(http.StatusInternalServerError)
+		_ = c.Error(fmt.Errorf("handleTransactionNewTokenNoCVV json.Unmarshal: %w", err))
+		return
+	}
+
+	c.JSON(http.StatusOK, i)
 }
 
 func (o *OrdersAPI) handleTransactionPaid(c *gin.Context) {

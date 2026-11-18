@@ -18,13 +18,13 @@ import (
 	healthnats "github.com/hellofresh/health-go/v5/checks/nats"
 	healthpgx "github.com/hellofresh/health-go/v5/checks/pgx5"
 
-	"gitlab.bbdev.team/vh/pay/orders/api/middleware"
-	"gitlab.bbdev.team/vh/pay/orders/common"
-	"gitlab.bbdev.team/vh/pay/orders/domain"
-	"gitlab.bbdev.team/vh/pay/orders/events"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
-	"gitlab.bbdev.team/vh/pay/orders/repo"
+	"github.com/Bnei-Baruch/vh-srv-orders/api/middleware"
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
+	"github.com/Bnei-Baruch/vh-srv-orders/domain"
+	"github.com/Bnei-Baruch/vh-srv-orders/events"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/profiles"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/utils"
+	"github.com/Bnei-Baruch/vh-srv-orders/repo"
 )
 
 type App struct {

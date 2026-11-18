@@ -2,7 +2,7 @@ package api
 
 import (
 	"fmt"
-	"gitlab.bbdev.team/vh/pay/orders/common"
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
 	"net/http"
 
 	"github.com/gin-gonic/gin"

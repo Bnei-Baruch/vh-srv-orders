@@ -7,8 +7,8 @@ package mocks
 import (
 	"context"
 
+	"github.com/Bnei-Baruch/vh-srv-orders/repo"
 	mock "github.com/stretchr/testify/mock"
-	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
 // NewMockAccountsRepo creates a new instance of MockAccountsRepo. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.

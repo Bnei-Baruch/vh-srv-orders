@@ -12,8 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/volatiletech/null/v9"
 
-	mocks "gitlab.bbdev.team/vh/pay/orders/internal/mocks"
-	"gitlab.bbdev.team/vh/pay/orders/repo"
+	mocks "github.com/Bnei-Baruch/vh-srv-orders/internal/mocks"
+	"github.com/Bnei-Baruch/vh-srv-orders/repo"
 )
 
 func specialRecord() *SpecialRecord {

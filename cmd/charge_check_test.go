@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"gitlab.bbdev.team/vh/pay/orders/pkg/pelecard"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/pelecard"
 )
 
 func TestChargeCheckVerdict(t *testing.T) {

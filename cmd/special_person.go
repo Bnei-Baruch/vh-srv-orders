@@ -3,7 +3,7 @@ package cmd
 import (
 	"strings"
 
-	"gitlab.bbdev.team/vh/pay/orders/repo"
+	"github.com/Bnei-Baruch/vh-srv-orders/repo"
 )
 
 // identifiersOf returns the identifiers a special names a person by. Either

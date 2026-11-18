@@ -8,7 +8,7 @@ import (
 
 	"github.com/volatiletech/null/v9"
 
-	"gitlab.bbdev.team/vh/pay/orders/repo"
+	"github.com/Bnei-Baruch/vh-srv-orders/repo"
 )
 
 // specialKeys indexes the specials already in the table by what a sheet row

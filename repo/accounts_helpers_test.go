@@ -10,12 +10,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/volatiletech/null/v9"
 
-	"gitlab.bbdev.team/vh/pay/orders/common"
-	"gitlab.bbdev.team/vh/pay/orders/events"
-	"gitlab.bbdev.team/vh/pay/orders/events/eventstest"
-	mocks "gitlab.bbdev.team/vh/pay/orders/internal/mocks/pkg"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles/profilestest"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/testutil"
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
+	"github.com/Bnei-Baruch/vh-srv-orders/events"
+	"github.com/Bnei-Baruch/vh-srv-orders/events/eventstest"
+	mocks "github.com/Bnei-Baruch/vh-srv-orders/internal/mocks/pkg"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/profiles/profilestest"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/testutil"
 )
 
 func TestGetAccountIDByKeycloakID(t *testing.T) {

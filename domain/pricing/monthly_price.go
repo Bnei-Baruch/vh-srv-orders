@@ -5,9 +5,9 @@ import (
 
 	"github.com/volatiletech/null/v9"
 
-	"gitlab.bbdev.team/vh/pay/orders/pkg/accounting"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/priority"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/accounting"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/priority"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/profiles"
 )
 
 // MonthlyPriceRes is the response for a monthly price query.

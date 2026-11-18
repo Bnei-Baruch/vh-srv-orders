@@ -3,7 +3,7 @@ package pricing
 import (
 	"strings"
 
-	"gitlab.bbdev.team/vh/pay/orders/common"
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
 )
 
 // Price is a bare amount and currency with no pricing-tier metadata.

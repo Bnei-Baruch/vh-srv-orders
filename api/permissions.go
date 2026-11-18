@@ -7,8 +7,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/volatiletech/null/v9"
 
-	"gitlab.bbdev.team/vh/pay/orders/api/middleware"
-	"gitlab.bbdev.team/vh/pay/orders/common"
+	"github.com/Bnei-Baruch/vh-srv-orders/api/middleware"
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
 )
 
 // hasAnyRole and userKeyFromRequest read the request only, so a handler group

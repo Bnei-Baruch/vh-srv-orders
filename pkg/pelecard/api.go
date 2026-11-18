@@ -11,8 +11,8 @@ import (
 
 	"github.com/go-resty/resty/v2"
 
-	"gitlab.bbdev.team/vh/pay/orders/pkg/keycloak"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/keycloak"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/utils"
 )
 
 // ErrUnauthorized means external_payments rejected the credential, after one

@@ -1,4 +1,4 @@
-module gitlab.bbdev.team/vh/pay/orders
+module github.com/Bnei-Baruch/vh-srv-orders
 
 go 1.27
 
@@ -27,6 +27,7 @@ require (
 	github.com/spf13/cobra v1.8.0
 	github.com/stretchr/testify v1.11.1
 	github.com/volatiletech/null/v9 v9.0.0
+	golang.org/x/sync v0.23.0
 	google.golang.org/api v0.264.0
 )
 
@@ -87,7 +88,6 @@ require (
 	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect

@@ -3,7 +3,7 @@ package domain
 import (
 	"context"
 
-	"gitlab.bbdev.team/vh/pay/orders/repo"
+	"github.com/Bnei-Baruch/vh-srv-orders/repo"
 )
 
 // AccountsRepo is the storage this package uses. Declared here rather than in

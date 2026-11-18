@@ -8,9 +8,9 @@ import (
 	"math"
 	"time"
 
-	"gitlab.bbdev.team/vh/pay/orders/domain/coupon"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
-	"gitlab.bbdev.team/vh/pay/orders/repo"
+	"github.com/Bnei-Baruch/vh-srv-orders/domain/coupon"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/utils"
+	"github.com/Bnei-Baruch/vh-srv-orders/repo"
 )
 
 // DiscountTypeCoupon identifies a redeemed-coupon discount.

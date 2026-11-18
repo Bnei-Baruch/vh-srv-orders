@@ -11,7 +11,7 @@ import (
 	"github.com/Nerzal/gocloak/v13"
 	"github.com/golang-jwt/jwt/v4"
 
-	"gitlab.bbdev.team/vh/pay/orders/common"
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
 )
 
 // Token() is the reader that dereferences what Invalidate nils, so it is the

@@ -7,8 +7,8 @@ package mocks
 import (
 	"context"
 
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/accounting"
 	mock "github.com/stretchr/testify/mock"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/accounting"
 )
 
 // NewMockAccountingService creates a new instance of MockAccountingService. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.

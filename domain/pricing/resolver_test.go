@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/volatiletech/null/v9"
 
-	pkgmocks "gitlab.bbdev.team/vh/pay/orders/internal/mocks/pkg"
-	"gitlab.bbdev.team/vh/pay/orders/repo"
+	pkgmocks "github.com/Bnei-Baruch/vh-srv-orders/internal/mocks/pkg"
+	"github.com/Bnei-Baruch/vh-srv-orders/repo"
 )
 
 // manualDiscountProviderFunc is a function adapter that implements manualDiscountProvider.

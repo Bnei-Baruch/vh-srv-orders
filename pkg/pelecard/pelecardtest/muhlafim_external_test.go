@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"gitlab.bbdev.team/vh/pay/orders/pkg/pelecard"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/pelecard"
 )
 
 // stubTokens stands in for Keycloak.

@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/volatiletech/null/v9"
 
-	"gitlab.bbdev.team/vh/pay/orders/events"
-	"gitlab.bbdev.team/vh/pay/orders/internal/mocks"
-	"gitlab.bbdev.team/vh/pay/orders/repo"
+	"github.com/Bnei-Baruch/vh-srv-orders/events"
+	"github.com/Bnei-Baruch/vh-srv-orders/internal/mocks"
+	"github.com/Bnei-Baruch/vh-srv-orders/repo"
 )
 
 func specialStarting(t time.Time) *repo.Special {

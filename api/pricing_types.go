@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"gitlab.bbdev.team/vh/pay/orders/domain/pricing"
+	"github.com/Bnei-Baruch/vh-srv-orders/domain/pricing"
 )
 
 // monthlyPriceResponse is the API DTO for the monthly price endpoint.

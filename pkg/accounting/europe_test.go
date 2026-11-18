@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	keycloakmocks "gitlab.bbdev.team/vh/pay/orders/internal/mocks/pkg/keycloak"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
+	keycloakmocks "github.com/Bnei-Baruch/vh-srv-orders/internal/mocks/pkg/keycloak"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/utils"
 )
 
 func TestAccountingServiceAPI_GetEuropeContributions_Success(t *testing.T) {

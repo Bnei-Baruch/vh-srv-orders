@@ -3,13 +3,13 @@ package api
 import (
 	"errors"
 	"fmt"
-	"gitlab.bbdev.team/vh/pay/orders/common"
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 
-	"gitlab.bbdev.team/vh/pay/orders/repo"
+	"github.com/Bnei-Baruch/vh-srv-orders/repo"
 )
 
 func (o *OrdersAPI) handleOperationCreate(c *gin.Context) {

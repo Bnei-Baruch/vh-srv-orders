@@ -10,7 +10,7 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	_ "github.com/lib/pq"
 
-	"gitlab.bbdev.team/vh/pay/orders/common"
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
 )
 
 func GetDBURL() string {

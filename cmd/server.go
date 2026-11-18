@@ -5,9 +5,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"gitlab.bbdev.team/vh/pay/orders/api"
-	"gitlab.bbdev.team/vh/pay/orders/domain/pricing"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
+	"github.com/Bnei-Baruch/vh-srv-orders/api"
+	"github.com/Bnei-Baruch/vh-srv-orders/domain/pricing"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/utils"
 )
 
 func init() {

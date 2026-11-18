@@ -7,8 +7,8 @@ package mocks
 import (
 	"context"
 
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/profiles"
 	mock "github.com/stretchr/testify/mock"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
 )
 
 // NewMockProfileService creates a new instance of MockProfileService. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.

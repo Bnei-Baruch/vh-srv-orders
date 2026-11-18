@@ -10,8 +10,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"gitlab.bbdev.team/vh/pay/orders/common"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/priority"
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/priority"
 )
 
 var priorityCmd = &cobra.Command{

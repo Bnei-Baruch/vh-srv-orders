@@ -8,9 +8,9 @@ import (
 	"context"
 	"time"
 
+	"github.com/Bnei-Baruch/vh-srv-orders/repo"
 	mock "github.com/stretchr/testify/mock"
 	"github.com/volatiletech/null/v9"
-	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
 // NewMockOrdersRepository creates a new instance of MockOrdersRepository. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.

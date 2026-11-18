@@ -10,9 +10,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/volatiletech/null/v9"
 
-	"gitlab.bbdev.team/vh/pay/orders/common"
-	"gitlab.bbdev.team/vh/pay/orders/domain/pricing"
-	"gitlab.bbdev.team/vh/pay/orders/repo"
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
+	"github.com/Bnei-Baruch/vh-srv-orders/domain/pricing"
+	"github.com/Bnei-Baruch/vh-srv-orders/repo"
 )
 
 // sameAmount compares currency amounts at cent precision, so floating-point

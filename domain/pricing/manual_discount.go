@@ -7,8 +7,8 @@ import (
 	"log/slog"
 	"math"
 
-	"gitlab.bbdev.team/vh/pay/orders/pkg/utils"
-	"gitlab.bbdev.team/vh/pay/orders/repo"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/utils"
+	"github.com/Bnei-Baruch/vh-srv-orders/repo"
 )
 
 // DiscountTypeManual identifies a manually-applied admin discount.

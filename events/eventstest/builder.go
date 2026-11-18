@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"gitlab.bbdev.team/vh/pay/orders/common"
-	"gitlab.bbdev.team/vh/pay/orders/events"
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
+	"github.com/Bnei-Baruch/vh-srv-orders/events"
 )
 
 func WithTestEventBuilder(t *testing.T, ctx context.Context) context.Context {

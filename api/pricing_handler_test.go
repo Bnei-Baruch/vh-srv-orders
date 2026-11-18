@@ -12,13 +12,13 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/volatiletech/null/v9"
 
-	"gitlab.bbdev.team/vh/pay/orders/api/middleware"
-	"gitlab.bbdev.team/vh/pay/orders/common"
-	accountingmocks "gitlab.bbdev.team/vh/pay/orders/internal/mocks/pkg"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/accounting"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/priority"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
-	"gitlab.bbdev.team/vh/pay/orders/repo"
+	"github.com/Bnei-Baruch/vh-srv-orders/api/middleware"
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
+	accountingmocks "github.com/Bnei-Baruch/vh-srv-orders/internal/mocks/pkg"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/accounting"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/priority"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/profiles"
+	"github.com/Bnei-Baruch/vh-srv-orders/repo"
 )
 
 func TestHandleMonthlyPriceByKCID_UnknownKeycloakID(t *testing.T) {

@@ -9,8 +9,8 @@ import (
 
 	"github.com/volatiletech/null/v9"
 
-	"gitlab.bbdev.team/vh/pay/orders/common"
-	"gitlab.bbdev.team/vh/pay/orders/events"
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
+	"github.com/Bnei-Baruch/vh-srv-orders/events"
 )
 
 func (o *OrdersDB) DeleteSpecialById(ctx context.Context, id int) error {

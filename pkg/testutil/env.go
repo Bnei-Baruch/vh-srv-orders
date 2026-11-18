@@ -5,7 +5,8 @@ import (
 	"runtime"
 
 	"github.com/joho/godotenv"
-	"gitlab.bbdev.team/vh/pay/orders/common"
+
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
 )
 
 func init() {

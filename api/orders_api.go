@@ -1,13 +1,13 @@
 package api
 
 import (
-	"gitlab.bbdev.team/vh/pay/orders/common"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/accounting"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/keycloak"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/pelecard"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/priority"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
-	"gitlab.bbdev.team/vh/pay/orders/repo"
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/accounting"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/keycloak"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/pelecard"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/priority"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/profiles"
+	"github.com/Bnei-Baruch/vh-srv-orders/repo"
 )
 
 type OrdersAPI struct {
@@ -24,6 +24,9 @@ type OrdersAPI struct {
 	// pages talks to external_payments with a bearer: it opens Pelecard pages
 	// for payers and reads back what checkout recorded about a payment.
 	pages *pelecard.Client
+	// renewCardPages hands one card-renewal page to repeated requests for an
+	// order rather than opening one per click.
+	renewCardPages *renewCardPages
 }
 
 func NewOrdersAPI(db *repo.OrdersDB) *OrdersAPI {
@@ -34,6 +37,7 @@ func NewOrdersAPI(db *repo.OrdersDB) *OrdersAPI {
 		accountingService:   accounting.NewAccountingServiceAPI(keycloak.NewClient()),
 		quickbooksCompanyID: common.Config.QuickbooksCompanyID,
 		pages:               pelecard.NewClient(),
+		renewCardPages:      newRenewCardPages(),
 	}
 }
 

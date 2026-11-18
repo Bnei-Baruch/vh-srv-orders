@@ -3,7 +3,7 @@ package api
 import (
 	"context"
 
-	"gitlab.bbdev.team/vh/pay/orders/repo"
+	"github.com/Bnei-Baruch/vh-srv-orders/repo"
 )
 
 // couponRepo is what the /v2/coupon handlers call: nine coupon methods plus

@@ -10,10 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/volatiletech/null/v9"
 
-	"gitlab.bbdev.team/vh/pay/orders/common"
-	"gitlab.bbdev.team/vh/pay/orders/domain/coupon"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/profiles"
-	"gitlab.bbdev.team/vh/pay/orders/repo"
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
+	"github.com/Bnei-Baruch/vh-srv-orders/domain/coupon"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/profiles"
+	"github.com/Bnei-Baruch/vh-srv-orders/repo"
 )
 
 type couponProviderFunc func(ctx context.Context, keycloakID string) ([]repo.ActiveCouponRedemption, error)

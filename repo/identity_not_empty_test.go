@@ -12,10 +12,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/volatiletech/null/v9"
 
-	"gitlab.bbdev.team/vh/pay/orders/common"
-	"gitlab.bbdev.team/vh/pay/orders/events"
-	"gitlab.bbdev.team/vh/pay/orders/events/eventstest"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/testutil"
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
+	"github.com/Bnei-Baruch/vh-srv-orders/events"
+	"github.com/Bnei-Baruch/vh-srv-orders/events/eventstest"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/testutil"
 )
 
 // Migration 28 makes NULL the only spelling of "absent" for the identity

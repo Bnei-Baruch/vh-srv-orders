@@ -9,11 +9,11 @@ import (
 
 	"github.com/stretchr/testify/mock"
 
-	"gitlab.bbdev.team/vh/pay/orders/common"
-	"gitlab.bbdev.team/vh/pay/orders/domain/pricing"
-	pkgmocks "gitlab.bbdev.team/vh/pay/orders/internal/mocks/pkg"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/accounting"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/priority"
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
+	"github.com/Bnei-Baruch/vh-srv-orders/domain/pricing"
+	pkgmocks "github.com/Bnei-Baruch/vh-srv-orders/internal/mocks/pkg"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/accounting"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/priority"
 )
 
 // offlineV2Resolver builds a PriceResolver whose external dependencies all report

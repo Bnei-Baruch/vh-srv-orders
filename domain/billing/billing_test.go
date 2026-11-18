@@ -9,10 +9,10 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"gitlab.bbdev.team/vh/pay/orders/common"
-	"gitlab.bbdev.team/vh/pay/orders/internal/mocks"
-	pelecardmock "gitlab.bbdev.team/vh/pay/orders/internal/mocks/pkg"
-	"gitlab.bbdev.team/vh/pay/orders/repo"
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
+	"github.com/Bnei-Baruch/vh-srv-orders/internal/mocks"
+	pelecardmock "github.com/Bnei-Baruch/vh-srv-orders/internal/mocks/pkg"
+	"github.com/Bnei-Baruch/vh-srv-orders/repo"
 )
 
 // ---------------------------------------------------------------------------

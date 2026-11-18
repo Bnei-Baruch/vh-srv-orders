@@ -3,7 +3,7 @@ package pricing
 import (
 	"context"
 
-	"gitlab.bbdev.team/vh/pay/orders/repo"
+	"github.com/Bnei-Baruch/vh-srv-orders/repo"
 )
 
 // The discount lookups pricing needs from storage. They were already one

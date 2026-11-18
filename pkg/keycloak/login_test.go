@@ -15,7 +15,7 @@ import (
 	"github.com/Nerzal/gocloak/v13"
 	"github.com/golang-jwt/jwt/v4"
 
-	"gitlab.bbdev.team/vh/pay/orders/common"
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
 )
 
 // A Keycloak stub, because the property it pins is not reachable otherwise: a

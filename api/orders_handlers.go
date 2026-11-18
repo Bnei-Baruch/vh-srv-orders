@@ -12,8 +12,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/volatiletech/null/v9"
 
-	"gitlab.bbdev.team/vh/pay/orders/common"
-	"gitlab.bbdev.team/vh/pay/orders/repo"
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
+	"github.com/Bnei-Baruch/vh-srv-orders/repo"
 )
 
 func (o *OrdersAPI) handleV2OrderCreate(c *gin.Context) {
@@ -212,6 +212,7 @@ func (o *OrdersAPI) handleOrdersUpdateToken(c *gin.Context) {
 		_ = c.Error(fmt.Errorf("repo.UpdateOrdersToken: %w", err))
 		return
 	}
+	o.renewCardPages.forget(req.ParamX)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Updated!", "success": true})
 }

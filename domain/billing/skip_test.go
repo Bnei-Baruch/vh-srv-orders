@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"gitlab.bbdev.team/vh/pay/orders/internal/mocks"
+	"github.com/Bnei-Baruch/vh-srv-orders/internal/mocks"
 )
 
 func TestSkipDoubleOrders(t *testing.T) {

@@ -10,7 +10,7 @@ COPY go.mod go.sum ./
 RUN go mod download && go mod verify
 
 COPY . .
-RUN CGO_ENABLED=0 go build -ldflags "-X gitlab.bbdev.team/vh/pay/orders/common.GitSHA=${GIT_SHA}" -o orders .
+RUN CGO_ENABLED=0 go build -ldflags "-X github.com/Bnei-Baruch/vh-srv-orders/common.GitSHA=${GIT_SHA}" -o orders .
 
 FROM alpine:latest
 

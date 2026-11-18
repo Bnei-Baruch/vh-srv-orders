@@ -9,7 +9,7 @@ import (
 
 	"github.com/volatiletech/null/v9"
 
-	"gitlab.bbdev.team/vh/pay/orders/common"
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
 )
 
 // RenewalData holds all DB data needed to process an order renewal.

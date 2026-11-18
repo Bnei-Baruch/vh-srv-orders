@@ -17,7 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
-	"gitlab.bbdev.team/vh/pay/orders/events"
+	"github.com/Bnei-Baruch/vh-srv-orders/events"
 )
 
 // Guards the one behavioural difference in the pgx v4 → v5 migration.

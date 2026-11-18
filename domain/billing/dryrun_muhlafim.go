@@ -1,8 +1,8 @@
 package billing
 
 import (
-	"gitlab.bbdev.team/vh/pay/orders/common"
-	"gitlab.bbdev.team/vh/pay/orders/pkg/pelecard"
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
+	"github.com/Bnei-Baruch/vh-srv-orders/pkg/pelecard"
 )
 
 // Dry-run muhlafim simulation (deterministic from orderID):

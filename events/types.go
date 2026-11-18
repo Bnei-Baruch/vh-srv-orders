@@ -6,7 +6,8 @@ import (
 	"time"
 
 	"github.com/oklog/ulid/v2"
-	"gitlab.bbdev.team/vh/pay/orders/common"
+
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
 )
 
 const (

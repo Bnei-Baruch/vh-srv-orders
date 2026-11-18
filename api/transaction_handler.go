@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -342,6 +343,8 @@ func (o *OrdersAPI) handleTransactionNewToken(c *gin.Context) {
 	}
 }
 
+const defaultRenewCardReference = "new_token_by_admin_no_cvv"
+
 func (o *OrdersAPI) handleTransactionNewTokenNoCVV(c *gin.Context) {
 
 	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
@@ -379,7 +382,7 @@ func (o *OrdersAPI) handleTransactionNewTokenNoCVV(c *gin.Context) {
 	if req.Reference.Valid && len(req.Reference.String) > 0 {
 		reference = req.Reference.String
 	} else {
-		reference = "new_token_by_admin_no_cvv"
+		reference = defaultRenewCardReference
 	}
 	if req.OrderLanguage.Valid {
 		language = req.OrderLanguage.String
@@ -412,29 +415,46 @@ func (o *OrdersAPI) handleTransactionNewTokenNoCVV(c *gin.Context) {
 		return
 	}
 
-	resp, err := o.pages.OpenPage(c.Request.Context(), pelecard.PageRenewCard, payload)
+	body, reused, err := o.renewCardPages.open(c.Request.Context(), renewCardPageKey(reference, extPay.UserKey),
+		func(ctx context.Context) ([]byte, bool, error) {
+			resp, err := o.pages.OpenPage(ctx, pelecard.PageRenewCard, payload)
+			if err != nil {
+				return nil, false, err
+			}
+			utils.LogFor(ctx).Info("getToken response", slog.Group("response",
+				slog.String("status", resp.Status()),
+				slog.Any("headers", resp.Header()),
+				slog.String("body", string(resp.Body()))))
+			return resp.Body(), resp.IsSuccess() && json.Valid(resp.Body()), nil
+		})
 	if err != nil {
 		reportPageFailure(c, pelecard.PageRenewCard, err)
 		c.JSON(http.StatusOK, gin.H{"url": req.ErrorURL})
 		return
 	}
-
-	body := resp.Body()
-
-	utils.LogFor(c.Request.Context()).Info("getToken response", slog.Group("response",
-		slog.String("status", resp.Status()),
-		slog.Any("headers", resp.Header()),
-		slog.String("body", string(body))))
-	{
-		var i interface{}
-		if err := json.Unmarshal(body, &i); err != nil {
-			c.Status(http.StatusInternalServerError)
-			_ = c.Error(fmt.Errorf("handleTransactionNewTokenNoCVV json.Unmarshal: %w", err))
-			return
-		}
-
-		c.JSON(http.StatusOK, i)
+	if reused {
+		utils.LogFor(c.Request.Context()).Info("card renewal page reused",
+			slog.String("reference", reference))
 	}
+
+	var i interface{}
+	if err := json.Unmarshal(body, &i); err != nil {
+		c.Status(http.StatusInternalServerError)
+		_ = c.Error(fmt.Errorf("handleTransactionNewTokenNoCVV json.Unmarshal: %w", err))
+		return
+	}
+
+	c.JSON(http.StatusOK, i)
+}
+
+// renewCardPageKey names the order a card-renewal page is for. The reference
+// is new_token_<order id>, except the fallback for a request without one, which
+// every such request shares, so it is told apart by the member.
+func renewCardPageKey(reference, userKey string) string {
+	if reference == defaultRenewCardReference {
+		return reference + "/" + userKey
+	}
+	return reference
 }
 
 func (o *OrdersAPI) handleTransactionPaid(c *gin.Context) {

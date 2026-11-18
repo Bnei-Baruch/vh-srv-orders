@@ -24,6 +24,9 @@ type OrdersAPI struct {
 	// pages talks to external_payments with a bearer: it opens Pelecard pages
 	// for payers and reads back what checkout recorded about a payment.
 	pages *pelecard.Client
+	// renewCardPages hands one card-renewal page to repeated requests for an
+	// order rather than opening one per click.
+	renewCardPages *renewCardPages
 }
 
 func NewOrdersAPI(db *repo.OrdersDB) *OrdersAPI {
@@ -34,6 +37,7 @@ func NewOrdersAPI(db *repo.OrdersDB) *OrdersAPI {
 		accountingService:   accounting.NewAccountingServiceAPI(keycloak.NewClient()),
 		quickbooksCompanyID: common.Config.QuickbooksCompanyID,
 		pages:               pelecard.NewClient(),
+		renewCardPages:      newRenewCardPages(),
 	}
 }
 

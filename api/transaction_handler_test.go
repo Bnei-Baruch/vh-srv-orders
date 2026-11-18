@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -22,6 +24,7 @@ import (
 	"gitlab.bbdev.team/vh/pay/orders/common"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/keycloak"
 	"gitlab.bbdev.team/vh/pay/orders/pkg/pelecard"
+	"gitlab.bbdev.team/vh/pay/orders/repo"
 )
 
 // pageCall is one request the stub external_payments received.
@@ -151,6 +154,98 @@ func Test_new_token_no_cvv_opens_the_vh_page_with_a_bearer(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.Equal(t, []pageCall{{path: "/vh/renew-card", auth: "Bearer tok"}}, calls())
+}
+
+// The back office once sent 23 renewals for one order in 9 seconds, and each
+// opened its own Pelecard page. Repeated clicks now get the first page.
+func Test_new_token_no_cvv_repeated_clicks_open_one_page(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	calls := stubPages(t, a, http.StatusOK, "application/json", `{"url":"https://pelecard.example/page"}`)
+
+	for range 5 {
+		w := postAsRoot(a, "/v2/transaction/new_token_no_cvv", `{"Reference":"new_token_112447"}`)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		assert.JSONEq(t, `{"url":"https://pelecard.example/page"}`, w.Body.String())
+	}
+
+	assert.Len(t, calls(), 1)
+}
+
+// Back from Pelecard after Cancel or a decline, the back office is on its
+// status=failed URL and builds the next request's return URLs from it. That
+// request must open a new page: the first one is closed at Pelecard.
+func Test_new_token_no_cvv_after_cancel_opens_a_new_page(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	calls := stubPages(t, a, http.StatusOK, "application/json", `{"url":"https://pelecard.example/page"}`)
+
+	postAsRoot(a, "/v2/transaction/new_token_no_cvv",
+		`{"Reference":"new_token_112447","CancelURL":"https://bo.example/customers/7?status=failed"}`)
+	postAsRoot(a, "/v2/transaction/new_token_no_cvv",
+		`{"Reference":"new_token_112447","CancelURL":"https://bo.example/customers/7?status=failed?status=failed"}`)
+
+	assert.Len(t, calls(), 2)
+}
+
+func Test_new_token_no_cvv_other_orders_get_their_own_page(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	calls := stubPages(t, a, http.StatusOK, "application/json", `{"url":"https://pelecard.example/page"}`)
+
+	postAsRoot(a, "/v2/transaction/new_token_no_cvv", `{"Reference":"new_token_1"}`)
+	postAsRoot(a, "/v2/transaction/new_token_no_cvv", `{"Reference":"new_token_2"}`)
+
+	assert.Len(t, calls(), 2)
+}
+
+// Once the card is saved, the page that saved it is used up: the next click
+// for the order must open a new one.
+func Test_new_token_no_cvv_saved_card_releases_the_page(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	calls := stubPages(t, a, http.StatusOK, "application/json", `{"url":"https://pelecard.example/page"}`)
+	got := POST_ROOT(t, a, "/v2/account/", repo.Account{UserKey: null.StringFrom("kc-renew")}, http.StatusCreated)
+	accountID := int(got["data"].(float64))
+	got = POST_ROOT(t, a, "/v2/order/", repo.Order{Amount: null.Float64From(15), AccountID: null.IntFrom(accountID)}, http.StatusCreated)
+	orderID := int(got["data"].(float64))
+	renew := fmt.Sprintf(`{"Reference":"new_token_%d"}`, orderID)
+
+	postAsRoot(a, "/v2/transaction/new_token_no_cvv", renew)
+	POST_ROOT(t, a, "/v2/order/update_token", repo.RequestUpdateToken{
+		CardExp: "0627", CardNumber: "1234123412341234", OrderId: orderID, Token: "renewed-token",
+		ParamX: fmt.Sprintf("new_token_%d", orderID),
+	}, http.StatusOK)
+	postAsRoot(a, "/v2/transaction/new_token_no_cvv", renew)
+
+	assert.Len(t, calls(), 2)
+}
+
+// A failed page is not handed to the next click: checkout answers 502 once,
+// then a page, and the second click gets the page.
+func Test_new_token_no_cvv_failed_page_is_retried(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			w.Header().Set("Content-Type", "text/html")
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte("<html>502 Bad Gateway</html>"))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"url":"https://pelecard.example/page"}`))
+	}))
+	t.Cleanup(srv.Close)
+	a.ordersAPI.pages = &pelecard.Client{Client: resty.New(), BaseURL: srv.URL, Tokens: keycloak.StaticTokenSource("tok")}
+
+	POST_ROOT(t, a, "/v2/transaction/new_token_no_cvv", gin.H{"Reference": "new_token_9"}, http.StatusInternalServerError)
+	w := postAsRoot(a, "/v2/transaction/new_token_no_cvv", `{"Reference":"new_token_9"}`)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.JSONEq(t, `{"url":"https://pelecard.example/page"}`, w.Body.String())
+	assert.Equal(t, int32(2), calls.Load())
 }
 
 func Test_recurring_checkout_opens_the_vh_token_page_with_a_bearer(t *testing.T) {

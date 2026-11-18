@@ -212,6 +212,7 @@ func (o *OrdersAPI) handleOrdersUpdateToken(c *gin.Context) {
 		_ = c.Error(fmt.Errorf("repo.UpdateOrdersToken: %w", err))
 		return
 	}
+	o.renewCardPages.forget(req.ParamX)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Updated!", "success": true})
 }

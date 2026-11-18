@@ -171,6 +171,22 @@ func Test_new_token_no_cvv_repeated_clicks_open_one_page(t *testing.T) {
 	assert.Len(t, calls(), 1)
 }
 
+// Back from Pelecard after Cancel or a decline, the back office is on its
+// status=failed URL and builds the next request's return URLs from it. That
+// request must open a new page: the first one is closed at Pelecard.
+func Test_new_token_no_cvv_after_cancel_opens_a_new_page(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+	calls := stubPages(t, a, http.StatusOK, "application/json", `{"url":"https://pelecard.example/page"}`)
+
+	postAsRoot(a, "/v2/transaction/new_token_no_cvv",
+		`{"Reference":"new_token_112447","CancelURL":"https://bo.example/customers/7?status=failed"}`)
+	postAsRoot(a, "/v2/transaction/new_token_no_cvv",
+		`{"Reference":"new_token_112447","CancelURL":"https://bo.example/customers/7?status=failed?status=failed"}`)
+
+	assert.Len(t, calls(), 2)
+}
+
 func Test_new_token_no_cvv_other_orders_get_their_own_page(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)

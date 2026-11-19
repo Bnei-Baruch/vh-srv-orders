@@ -64,3 +64,26 @@ func Test_operation_rename_without_matching_account_is_409(t *testing.T) {
 	require.NoError(t, a.testPool(t).QueryRow(context.Background(), `SELECT count(*) FROM operation_trace`).Scan(&traces))
 	assert.Zero(t, traces)
 }
+
+// A revert blocked because the old key has an account again is a 409.
+func Test_operation_revert_old_key_taken_is_409(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	pool := a.testPool(t)
+	_, err := pool.Exec(context.Background(),
+		`INSERT INTO accounts ("UserKey", "Email", created_at) VALUES ('kc-old', 'a@test.test', now())`)
+	require.NoError(t, err)
+	_, err = pool.Exec(context.Background(), `CREATE TABLE IF NOT EXISTS specials_sep2021 (email text)`)
+	require.NoError(t, err)
+
+	rename := url.Values{"type": {"email_update"}, "old_keycloak_id": {"kc-old"}, "new_keycloak_id": {"kc-new"},
+		"new_email": {"b@test.test"}, "old_email": {"a@test.test"}}
+	do(t, a, "POST", operationPath("/v2/operation/", rename), nil, http.StatusOK, DoOptions{isRoot: true})
+	_, err = pool.Exec(context.Background(),
+		`INSERT INTO accounts ("UserKey", "Email", created_at) VALUES ('kc-old', 'again@test.test', now())`)
+	require.NoError(t, err)
+
+	pair := url.Values{"new_email": {"b@test.test"}, "old_email": {"a@test.test"}}
+	do(t, a, "POST", operationPath("/v2/operation/revert", pair), nil, http.StatusConflict, DoOptions{isRoot: true})
+}

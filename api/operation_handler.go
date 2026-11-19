@@ -75,7 +75,8 @@ func (o *OrdersAPI) handleOperationRevert(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": revertErr.Error()})
 		return
 	}
-	if errors.Is(revertErr, common.ErrOperationReverted) || errors.Is(revertErr, common.ErrOperationNoAccount) {
+	if errors.Is(revertErr, common.ErrOperationReverted) || errors.Is(revertErr, common.ErrOperationNoAccount) ||
+		errors.Is(revertErr, common.ErrAccountKeyTaken) {
 		c.JSON(http.StatusConflict, gin.H{"error": revertErr.Error()})
 		return
 	}

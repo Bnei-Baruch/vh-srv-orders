@@ -162,6 +162,10 @@ func (o *OrdersDB) RevertOperation(ctx context.Context, newEmail string, oldEmai
 	// The statements come from the code, built from the stored input.
 	revert := QueryLog{Queries: revertStatements(input)}
 	if revert.Logs, err = execStatements(ctx, tx, revert.Queries); err != nil {
+		// The old key has an account again (e.g. a login since the rename).
+		if isKeyTaken(err) {
+			return fmt.Errorf("old keycloak id: %w; merge the accounts instead", common.ErrAccountKeyTaken)
+		}
 		if errors.Is(err, common.ErrOperationNoAccount) {
 			return err
 		}

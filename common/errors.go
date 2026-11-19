@@ -15,6 +15,9 @@ var (
 	// accounts_userkey_uniq allows one per key.
 	ErrAccountKeyTaken = fmt.Errorf("an account already exists for this keycloak id")
 
+	// ErrOperationNotFound: no operation_trace row for this email pair.
+	ErrOperationNotFound = fmt.Errorf("operation not found")
+
 	// ErrPrePayment wraps errors that occur before any payment is attempted
 	// (DB lookups, missing card details). No money moved. No point retrying
 	// on another terminal since the same issue will occur.

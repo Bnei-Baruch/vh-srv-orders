@@ -228,15 +228,13 @@ func TestPatchAccount_KeyThatHasAnAccountIsTaken(t *testing.T) {
 // and the stored revert puts the account back.
 func TestPerformOperation_QuoteInEmail_RenamesAndReverts(t *testing.T) {
 	db, ctx := newTestDB(t)
-	// Production has this table; the migrations never created it.
-	_, err := db.pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS specials_sep2021 (email text)`)
-	require.NoError(t, err)
+	createSpecialsSep2021(t, db, ctx)
 
 	oldEmail, newEmail := "o'old@test.test", "o'new@test.test"
 	accountID, orderID, _, _ := seedAccountWithRows(t, db, ctx, "kc-old", oldEmail)
 
 	str := func(s string) *string { return &s }
-	_, err = db.PerformOperation(ctx, OperationReq{
+	_, err := db.PerformOperation(ctx, OperationReq{
 		Type:          str("email_update"),
 		OldKeycloakID: str("kc-old"), NewKeycloakID: str("kc-new"),
 		OldEmail: str(oldEmail), NewEmail: str(newEmail),
@@ -267,4 +265,73 @@ func TestPerformOperation_QuoteInEmail_RenamesAndReverts(t *testing.T) {
 	assert.Equal(t, []string{oldEmail, "kc-old", "kc-old"}, []string{email, key, orderKey})
 
 	require.ErrorIs(t, db.RevertOperation(ctx, "nobody@test.test", oldEmail), common.ErrOperationNotFound)
+}
+
+// createSpecialsSep2021 adds the table production has and no migration creates.
+func createSpecialsSep2021(t *testing.T, db *OrdersDB, ctx context.Context) {
+	t.Helper()
+	_, err := db.pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS specials_sep2021 (email text)`)
+	require.NoError(t, err)
+}
+
+// Without an old keycloak id only the email of the new key's account moves,
+// in accounts and both specials tables, and the revert moves it back.
+func TestPerformOperation_NoOldKey_RenamesEmailAndReverts(t *testing.T) {
+	db, ctx := newTestDB(t)
+	createSpecialsSep2021(t, db, ctx)
+
+	oldEmail, newEmail := "o'old@test.test", "o'new@test.test"
+	accountID, _, _, _ := seedAccountWithRows(t, db, ctx, "kc-1", oldEmail)
+	_, err := db.pool.Exec(ctx, `INSERT INTO specials (email, start_date, end_date, category) VALUES ($1, now(), now(), 'c')`, oldEmail)
+	require.NoError(t, err)
+	_, err = db.pool.Exec(ctx, `INSERT INTO specials_sep2021 (email) VALUES ($1)`, oldEmail)
+	require.NoError(t, err)
+
+	str := func(s string) *string { return &s }
+	_, err = db.PerformOperation(ctx, OperationReq{
+		Type:          str("email_update"),
+		NewKeycloakID: str("kc-1"),
+		OldEmail:      str(oldEmail), NewEmail: str(newEmail),
+	})
+	require.NoError(t, err)
+
+	state := func() []string {
+		var email, key, special, sep string
+		require.NoError(t, db.pool.QueryRow(ctx, `SELECT "Email", "UserKey" FROM accounts WHERE id = $1`, accountID).Scan(&email, &key))
+		require.NoError(t, db.pool.QueryRow(ctx, `SELECT email FROM specials`).Scan(&special))
+		require.NoError(t, db.pool.QueryRow(ctx, `SELECT email FROM specials_sep2021`).Scan(&sep))
+		return []string{email, key, special, sep}
+	}
+	assert.Equal(t, []string{newEmail, "kc-1", newEmail, newEmail}, state())
+
+	require.NoError(t, db.RevertOperation(ctx, newEmail, oldEmail))
+	assert.Equal(t, []string{oldEmail, "kc-1", oldEmail, oldEmail}, state())
+}
+
+// The revert builds its statements from the stored input; SQL in the
+// revert column is a record only and never runs.
+func TestRevertOperation_DoesNotRunStoredSQL(t *testing.T) {
+	db, ctx := newTestDB(t)
+	createSpecialsSep2021(t, db, ctx)
+
+	accountID, _, _, _ := seedAccountWithRows(t, db, ctx, "kc-old", "old@test.test")
+	str := func(s string) *string { return &s }
+	_, err := db.PerformOperation(ctx, OperationReq{
+		Type:          str("email_update"),
+		OldKeycloakID: str("kc-old"), NewKeycloakID: str("kc-new"),
+		OldEmail: str("old@test.test"), NewEmail: str("new@test.test"),
+	})
+	require.NoError(t, err)
+
+	_, err = db.pool.Exec(ctx, `UPDATE operation_trace SET revert = '{"queries":[{"sql":"DELETE FROM card_details","args":[]}],"logs":[]}'`)
+	require.NoError(t, err)
+
+	require.NoError(t, db.RevertOperation(ctx, "new@test.test", "old@test.test"))
+
+	var email, key string
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT "Email", "UserKey" FROM accounts WHERE id = $1`, accountID).Scan(&email, &key))
+	assert.Equal(t, []string{"old@test.test", "kc-old"}, []string{email, key})
+	var cards int
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT count(*) FROM card_details`).Scan(&cards))
+	assert.Equal(t, 1, cards)
 }

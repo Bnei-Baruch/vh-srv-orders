@@ -382,3 +382,27 @@ func TestRevertOperation_AccountChangedSince_ChangesNothing(t *testing.T) {
 	require.NoError(t, db.pool.QueryRow(ctx, `SELECT status FROM operation_trace`).Scan(&status))
 	assert.Equal(t, []string{"kc-new", "kc-new", "success"}, []string{accountKey, orderKey, status})
 }
+
+// If the old key has an account again (a login since the rename), the
+// revert is a key conflict, not a database failure, and changes nothing.
+func TestRevertOperation_OldKeyTakenAgain_IsKeyTaken(t *testing.T) {
+	db, ctx := newTestDB(t)
+	createSpecialsSep2021(t, db, ctx)
+
+	accountID, _, _, _ := seedAccountWithRows(t, db, ctx, "kc-old", "a@test.test")
+	str := func(s string) *string { return &s }
+	_, err := db.PerformOperation(ctx, OperationReq{
+		Type:          str("email_update"),
+		OldKeycloakID: str("kc-old"), NewKeycloakID: str("kc-new"),
+		OldEmail: str("a@test.test"), NewEmail: str("b@test.test"),
+	})
+	require.NoError(t, err)
+	seedAccountWithRows(t, db, ctx, "kc-old", "again@test.test")
+
+	require.ErrorIs(t, db.RevertOperation(ctx, "b@test.test", "a@test.test"), common.ErrAccountKeyTaken)
+
+	var key, status string
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT "UserKey" FROM accounts WHERE id = $1`, accountID).Scan(&key))
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT status FROM operation_trace`).Scan(&status))
+	assert.Equal(t, []string{"kc-new", "success"}, []string{key, status})
+}

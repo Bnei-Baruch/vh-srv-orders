@@ -3,7 +3,6 @@ package repo
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/Bnei-Baruch/vh-srv-orders/common"
@@ -55,53 +54,33 @@ func (o *OrdersDB) CreateTransactionAndGetId(ctx context.Context, p Transaction)
 	return ID, nil
 }
 
-func prepareTransactionCreateQuery(req Transaction) (string, string, []interface{}) {
-	var createStrings []string
-	var numString []string
-	var args []interface{}
+func prepareTransactionCreateQuery(req Transaction) (string, string, queryArgs) {
+	var c colVals
 
 	if req.AccountID.Valid {
-		createStrings = append(createStrings, "account_id")
-		numString = append(numString, fmt.Sprintf(`$%d`, len(numString)+1))
-		args = append(args, req.AccountID.Int)
+		c.add("account_id", req.AccountID.Int)
 	}
 
 	if req.OrderID.Valid {
-		createStrings = append(createStrings, "order_id")
-		numString = append(numString, fmt.Sprintf(`$%d`, len(numString)+1))
-		args = append(args, req.OrderID.Int)
+		c.add("order_id", req.OrderID.Int)
 	}
 
 	if req.PaymentID.Valid {
-		createStrings = append(createStrings, "payment_id")
-		numString = append(numString, fmt.Sprintf(`$%d`, len(numString)+1))
-		args = append(args, req.PaymentID.Int)
+		c.add("payment_id", req.PaymentID.Int)
 	}
 
 	if req.TerminalID.Valid {
-		createStrings = append(createStrings, "terminal_id")
-		numString = append(numString, fmt.Sprintf(`$%d`, len(numString)+1))
-		args = append(args, req.TerminalID.String)
+		c.add("terminal_id", req.TerminalID.String)
 	}
 
 	if req.Status.Valid {
-		createStrings = append(createStrings, "status")
-		numString = append(numString, fmt.Sprintf(`$%d`, len(numString)+1))
-		args = append(args, req.Status.Int)
+		c.add("status", req.Status.Int)
 	}
 
-	if len(args) != 0 {
-		createStrings = append(createStrings, "created_at")
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, time.Now())
-
-		createStrings = append(createStrings, "updated_at")
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, time.Now())
+	if !c.empty() {
+		c.add("created_at", time.Now())
+		c.add("updated_at", time.Now())
 	}
 
-	concatedCreateString := strings.Join(createStrings, ",")
-	concatedNumString := strings.Join(numString, ",")
-
-	return concatedCreateString, concatedNumString, args
+	return c.insertLists()
 }

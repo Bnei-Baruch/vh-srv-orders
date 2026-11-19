@@ -175,7 +175,7 @@ func (o *OrdersDB) CreateSpecial(ctx context.Context, s Special) (int, error) {
 	createString, numString, createQueryArgs := prepareSpecialCreateQuery(s)
 
 	var ID int
-	if err := o.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO specials (%s) VALUES (%s) RETURNING id`, createString, numString),
+	if err := o.pool.QueryRow(ctx, `INSERT INTO specials (`+createString+`) VALUES (`+numString+`) RETURNING id`,
 		createQueryArgs...).Scan(&ID); err != nil {
 		return 0, err
 	}
@@ -186,53 +186,34 @@ func (o *OrdersDB) CreateSpecial(ctx context.Context, s Special) (int, error) {
 	return ID, nil
 }
 
-func prepareSpecialCreateQuery(req Special) (string, string, []interface{}) {
-	var createStrings []string
-	var numString []string
-	var args []interface{}
+func prepareSpecialCreateQuery(req Special) (string, string, queryArgs) {
+	var c colVals
 
 	if req.KeycloakId.Valid && req.KeycloakId.String != "" {
-		createStrings = append(createStrings, `"keycloak_id"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.KeycloakId.String)
+		c.add(`"keycloak_id"`, req.KeycloakId.String)
 	}
 	if req.Email.Valid && req.Email.String != "" {
-		createStrings = append(createStrings, `"email"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.Email.String)
+		c.add(`"email"`, req.Email.String)
 	}
 	if req.StartDate.Valid {
-		createStrings = append(createStrings, `"start_date"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.StartDate.Time)
+		c.add(`"start_date"`, req.StartDate.Time)
 	}
 	if req.EndDate.Valid {
-		createStrings = append(createStrings, `"end_date"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.EndDate.Time)
+		c.add(`"end_date"`, req.EndDate.Time)
 	}
 	if req.Category.Valid {
-		createStrings = append(createStrings, `"category"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.Category.String)
+		c.add(`"category"`, req.Category.String)
 	}
 
 	if req.SubCategory.Valid {
-		createStrings = append(createStrings, `"subcategory"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.SubCategory.String)
+		c.add(`"subcategory"`, req.SubCategory.String)
 	}
 
-	if len(args) != 0 {
-		createStrings = append(createStrings, "created_at")
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, time.Now())
+	if !c.empty() {
+		c.add("created_at", time.Now())
 	}
 
-	concatedCreateString := strings.Join(createStrings, ",")
-	concatedNumString := strings.Join(numString, ",")
-
-	return concatedCreateString, concatedNumString, args
+	return c.insertLists()
 }
 
 func (o *OrdersDB) GetAllSpecialsByEmail(ctx context.Context, email string) ([]*Special, error) {

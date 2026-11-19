@@ -58,7 +58,7 @@ func (o *OrdersDB) CreateAccount(ctx context.Context, a Account) (int, error) {
 	}
 
 	var ID int
-	if err := o.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO accounts (%s) VALUES (%s) RETURNING id`, createString, numString),
+	if err := o.pool.QueryRow(ctx, `INSERT INTO accounts (`+createString+`) VALUES (`+numString+`) RETURNING id`,
 		createQueryArgs...).Scan(&ID); err != nil {
 		if isKeyTaken(err) {
 			return 0, fmt.Errorf("%w: %w", common.ErrAccountKeyTaken, err)
@@ -456,186 +456,124 @@ func isKeyTaken(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "accounts_userkey_uniq"
 }
 
-func prepareAccountCreateQuery(req Account) (string, string, []interface{}) {
-	var createStrings []string
-	var numString []string
-	var args []interface{}
+func prepareAccountCreateQuery(req Account) (string, string, queryArgs) {
+	var c colVals
 
 	if req.FirstName.Valid {
-		createStrings = append(createStrings, `"FirstName"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.FirstName.String)
+		c.add(`"FirstName"`, req.FirstName.String)
 	}
 	if req.LastName.Valid {
-		createStrings = append(createStrings, `"LastName"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.LastName.String)
+		c.add(`"LastName"`, req.LastName.String)
 	}
 	if req.Email.Valid && req.Email.String != "" {
-		createStrings = append(createStrings, `"Email"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.Email.String)
+		c.add(`"Email"`, req.Email.String)
 	}
 	if req.Phone.Valid {
-		createStrings = append(createStrings, `"Phone"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.Phone.String)
+		c.add(`"Phone"`, req.Phone.String)
 	}
 	if req.Street.Valid {
-		createStrings = append(createStrings, `"Street"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.Street.String)
+		c.add(`"Street"`, req.Street.String)
 	}
 	if req.City.Valid {
-		createStrings = append(createStrings, `"City"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.City.String)
+		c.add(`"City"`, req.City.String)
 	}
 	if req.State.Valid {
-		createStrings = append(createStrings, `"State"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.State.String)
+		c.add(`"State"`, req.State.String)
 	}
 	if req.Postcode.Valid {
-		createStrings = append(createStrings, `"Postcode"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.Postcode.String)
+		c.add(`"Postcode"`, req.Postcode.String)
 	}
 	if req.Country.Valid {
-		createStrings = append(createStrings, `"Country"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.Country.String)
+		c.add(`"Country"`, req.Country.String)
 	}
 	if req.AccountType.Valid {
-		createStrings = append(createStrings, `"AccountType"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.AccountType.String)
+		c.add(`"AccountType"`, req.AccountType.String)
 	}
 	if req.PaymentToken.Valid {
-		createStrings = append(createStrings, `"PaymentToken"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.PaymentToken.String)
+		c.add(`"PaymentToken"`, req.PaymentToken.String)
 	}
 	if req.PaymentCardID.Valid {
-		createStrings = append(createStrings, `"PaymentCardID"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.PaymentCardID.String)
+		c.add(`"PaymentCardID"`, req.PaymentCardID.String)
 	}
 	if req.PaymentCardExpMonth.Valid {
-		createStrings = append(createStrings, `"PaymentCardExpMonth"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.PaymentCardExpMonth.Int)
+		c.add(`"PaymentCardExpMonth"`, req.PaymentCardExpMonth.Int)
 	}
 	if req.PaymentCardExpYear.Valid {
-		createStrings = append(createStrings, `"PaymentCardExpYear"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.PaymentCardExpYear.Int)
+		c.add(`"PaymentCardExpYear"`, req.PaymentCardExpYear.Int)
 	}
 	if req.AuthNo.Valid {
-		createStrings = append(createStrings, `"AuthNo"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.AuthNo.String)
+		c.add(`"AuthNo"`, req.AuthNo.String)
 	}
 	if req.UserKey.Valid && req.UserKey.String != "" {
-		createStrings = append(createStrings, `"UserKey"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.UserKey.String)
+		c.add(`"UserKey"`, req.UserKey.String)
 	}
 
-	if len(args) != 0 {
-		createStrings = append(createStrings, "created_at")
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, time.Now())
-
-		createStrings = append(createStrings, "updated_at")
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, time.Now())
+	if !c.empty() {
+		c.add("created_at", time.Now())
+		c.add("updated_at", time.Now())
 	}
 
-	concatedCreateString := strings.Join(createStrings, ",")
-	concatedNumString := strings.Join(numString, ",")
-
-	return concatedCreateString, concatedNumString, args
+	return c.insertLists()
 }
 
-func prepareAccountUpdateQuery(req Account) (string, []interface{}) {
-	var updateStrings []string
-	var args []interface{}
+func prepareAccountUpdateQuery(req Account) (string, queryArgs) {
+	var c colVals
 
 	if req.FirstName.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"FirstName"=$%d`, len(updateStrings)+1))
-		args = append(args, req.FirstName.String)
+		c.add(`"FirstName"`, req.FirstName.String)
 	}
 	if req.LastName.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"LastName"=$%d`, len(updateStrings)+1))
-		args = append(args, req.LastName.String)
+		c.add(`"LastName"`, req.LastName.String)
 	}
 	// An empty email or key clears it, as storing '' did before: absent is NULL.
 	if req.Email.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"Email"=$%d`, len(updateStrings)+1))
-		args = append(args, nullIfEmpty(req.Email))
+		c.add(`"Email"`, nullIfEmpty(req.Email))
 	}
 	if req.Phone.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"Phone"=$%d`, len(updateStrings)+1))
-		args = append(args, req.Phone.String)
+		c.add(`"Phone"`, req.Phone.String)
 	}
 	if req.Street.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"Street"=$%d`, len(updateStrings)+1))
-		args = append(args, req.Street.String)
+		c.add(`"Street"`, req.Street.String)
 	}
 	if req.City.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"City"=$%d`, len(updateStrings)+1))
-		args = append(args, req.City.String)
+		c.add(`"City"`, req.City.String)
 	}
 	if req.State.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"State"=$%d`, len(updateStrings)+1))
-		args = append(args, req.State.String)
+		c.add(`"State"`, req.State.String)
 	}
 	if req.Postcode.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"Postcode"=$%d`, len(updateStrings)+1))
-		args = append(args, req.Postcode.String)
+		c.add(`"Postcode"`, req.Postcode.String)
 	}
 	if req.Country.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"Country"=$%d`, len(updateStrings)+1))
-		args = append(args, req.Country.String)
+		c.add(`"Country"`, req.Country.String)
 	}
 	if req.AccountType.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"AccountType"=$%d`, len(updateStrings)+1))
-		args = append(args, req.AccountType.String)
+		c.add(`"AccountType"`, req.AccountType.String)
 	}
 	if req.PaymentToken.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"PaymentToken"=$%d`, len(updateStrings)+1))
-		args = append(args, req.PaymentToken.String)
+		c.add(`"PaymentToken"`, req.PaymentToken.String)
 	}
 	if req.PaymentCardID.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"PaymentCardID"=$%d`, len(updateStrings)+1))
-		args = append(args, req.PaymentCardID.String)
+		c.add(`"PaymentCardID"`, req.PaymentCardID.String)
 	}
 	if req.PaymentCardExpMonth.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"PaymentCardExpMonth"=$%d`, len(updateStrings)+1))
-		args = append(args, req.PaymentCardExpMonth.Int)
+		c.add(`"PaymentCardExpMonth"`, req.PaymentCardExpMonth.Int)
 	}
 	if req.PaymentCardExpYear.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"PaymentCardExpYear"=$%d`, len(updateStrings)+1))
-		args = append(args, req.PaymentCardExpYear.Int)
+		c.add(`"PaymentCardExpYear"`, req.PaymentCardExpYear.Int)
 	}
 	if req.AuthNo.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"AuthNo"=$%d`, len(updateStrings)+1))
-		args = append(args, req.AuthNo.String)
+		c.add(`"AuthNo"`, req.AuthNo.String)
 	}
 	if req.UserKey.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"UserKey"=$%d`, len(updateStrings)+1))
-		args = append(args, nullIfEmpty(req.UserKey))
+		c.add(`"UserKey"`, nullIfEmpty(req.UserKey))
 	}
 
-	if len(args) != 0 {
-		updateStrings = append(updateStrings, fmt.Sprintf("updated_at=$%d", len(updateStrings)+1))
-		args = append(args, time.Now())
+	if !c.empty() {
+		c.add("updated_at", time.Now())
 	}
 
-	updateArgument := strings.Join(updateStrings, ",")
-
-	return updateArgument, args
+	return c.setList()
 }
 
 func buildAndGetAccountsWhereQuery(email string) (string, string, []any) {

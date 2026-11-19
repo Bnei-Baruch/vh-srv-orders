@@ -243,7 +243,7 @@ return tx.Commit(ctx)
 
 ### Dynamic query building
 
-Conditional fields based on `null.*.Valid`. Uses `prepare*Query` helpers that build column lists, placeholders, and args slices. Not an ORM — just string building with `fmt.Sprintf` and positional `$N` params.
+Conditional fields based on `null.*.Valid`. `prepare*Query` helpers collect each set field with `colVals.add(col, value)` (`repo/query_args.go`) and render INSERT column/placeholder lists with `insertLists()` or an UPDATE SET list with `setList()`. Not an ORM — column names are code constants, values are positional `$N` params.
 
 ### Events from repo
 

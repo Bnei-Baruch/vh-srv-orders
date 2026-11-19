@@ -67,6 +67,10 @@ func (o *OrdersAPI) handleOperationRevert(c *gin.Context) {
 
 	revertErr := o.repo.RevertOperation(c.Request.Context(), *opr.NewEmail, *opr.OldEmail)
 
+	if errors.Is(revertErr, common.ErrOperationNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": revertErr.Error()})
+		return
+	}
 	if revertErr != nil {
 		_ = c.Error(fmt.Errorf("error while reverting operation: %w", revertErr))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": revertErr.Error()})

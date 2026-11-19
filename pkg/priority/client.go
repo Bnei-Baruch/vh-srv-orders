@@ -81,7 +81,7 @@ func NewClient() *Client {
 // "no such customer" -- unlike GetCustomerByID, which looks up a single entity by key, where
 // 404 genuinely does mean "no such entity".
 func (c *Client) GetCustomersByEmail(ctx context.Context, email string) ([]Customer, error) {
-	filter := fmt.Sprintf("EMAIL eq '%s'", email)
+	filter := "EMAIL eq " + odataString(email)
 
 	req := c.client.NewRequest()
 	req.SetContext(ctx)
@@ -241,9 +241,14 @@ func normalizeEmail(email string) string {
 func buildOrFilter(field string, values []string) string {
 	parts := make([]string, len(values))
 	for i, v := range values {
-		parts[i] = fmt.Sprintf("%s eq '%s'", field, strings.ReplaceAll(v, "'", "''"))
+		parts[i] = field + " eq " + odataString(v)
 	}
 	return strings.Join(parts, " or ")
+}
+
+// odataString quotes v as an OData string literal; a quote inside is doubled.
+func odataString(v string) string {
+	return "'" + strings.ReplaceAll(v, "'", "''") + "'"
 }
 
 // chunkStrings splits values into slices of at most size elements.

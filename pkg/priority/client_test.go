@@ -56,6 +56,19 @@ func TestGetCustomersByEmail_Success(t *testing.T) {
 	assert.Equal(t, "test@example.com", result[0].Email)
 }
 
+// A quote in the email is doubled, so it stays inside the OData literal.
+func TestGetCustomersByEmail_QuoteInEmailIsEscaped(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "EMAIL eq 'o''brien@example.com'", r.URL.Query().Get("$filter"))
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(CustomerODataResponse{Value: []Customer{}})
+	}))
+	defer server.Close()
+
+	_, err := newTestClient(server.URL).GetCustomersByEmail(context.Background(), "o'brien@example.com")
+	require.NoError(t, err)
+}
+
 func TestGetCustomersByEmail_MultipleCustomers(t *testing.T) {
 	response := CustomerODataResponse{
 		Value: []Customer{

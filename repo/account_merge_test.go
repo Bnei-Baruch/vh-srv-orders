@@ -223,3 +223,48 @@ func TestPatchAccount_KeyThatHasAnAccountIsTaken(t *testing.T) {
 	err := db.PatchAccount(ctx, Account{UserKey: null.StringFrom("kc-taken")}, mine)
 	require.ErrorIs(t, err, common.ErrAccountKeyTaken)
 }
+
+// Emails and keys go to Postgres as arguments, so a quote in an email is data,
+// and the stored revert puts the account back.
+func TestPerformOperation_QuoteInEmail_RenamesAndReverts(t *testing.T) {
+	db, ctx := newTestDB(t)
+	// Production has this table; the migrations never created it.
+	_, err := db.pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS specials_sep2021 (email text)`)
+	require.NoError(t, err)
+
+	oldEmail, newEmail := "o'old@test.test", "o'new@test.test"
+	accountID, orderID, _, _ := seedAccountWithRows(t, db, ctx, "kc-old", oldEmail)
+
+	str := func(s string) *string { return &s }
+	_, err = db.PerformOperation(ctx, OperationReq{
+		Type:          str("email_update"),
+		OldKeycloakID: str("kc-old"), NewKeycloakID: str("kc-new"),
+		OldEmail: str(oldEmail), NewEmail: str(newEmail),
+	})
+	require.NoError(t, err)
+
+	account := func() (email, key, orderKey string) {
+		require.NoError(t, db.pool.QueryRow(ctx, `SELECT "Email", "UserKey" FROM accounts WHERE id = $1`, accountID).Scan(&email, &key))
+		require.NoError(t, db.pool.QueryRow(ctx, `SELECT userkey FROM orders WHERE id = $1`, orderID).Scan(&orderKey))
+		return
+	}
+	email, key, orderKey := account()
+	assert.Equal(t, []string{newEmail, "kc-new", "kc-new"}, []string{email, key, orderKey})
+
+	// Two reverts at once: the row lock lets exactly one run.
+	errs := make(chan error, 2)
+	for range 2 {
+		go func() { errs <- db.RevertOperation(ctx, newEmail, oldEmail) }()
+	}
+	err1, err2 := <-errs, <-errs
+	if err1 != nil {
+		err1, err2 = err2, err1
+	}
+	require.NoError(t, err1)
+	require.ErrorContains(t, err2, "already reverted")
+
+	email, key, orderKey = account()
+	assert.Equal(t, []string{oldEmail, "kc-old", "kc-old"}, []string{email, key, orderKey})
+
+	require.ErrorIs(t, db.RevertOperation(ctx, "nobody@test.test", oldEmail), common.ErrOperationNotFound)
+}

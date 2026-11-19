@@ -1305,3 +1305,19 @@ func TestSortedKeys_ReturnsDeterministicOrder(t *testing.T) {
 	set := map[string]struct{}{"c": {}, "a": {}, "b": {}}
 	assert.Equal(t, []string{"a", "b", "c"}, sortedKeys(set))
 }
+
+// A quote in a customer id is doubled inside the OData key literal.
+func TestCustomerIDQuoteIsEscapedInKeyPaths(t *testing.T) {
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	_, _ = client.GetCustomerByID(context.Background(), "O'K")
+	_, _ = client.GetAccountReceivables(context.Background(), "O'K")
+	assert.Equal(t, []string{"/CUSTOMERS('O''K')", "/ACCOUNTS_RECEIVABLE('O''K')/ACCFNCITEMS2_SUBFORM"}, paths)
+}

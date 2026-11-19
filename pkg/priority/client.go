@@ -110,7 +110,7 @@ func (c *Client) GetCustomersByEmail(ctx context.Context, email string) ([]Custo
 // GetCustomerByID fetches a single customer from Priority ERP by CUSTNAME (customer code).
 // Returns (nil, nil) on 404.
 func (c *Client) GetCustomerByID(ctx context.Context, customerID string) (*Customer, error) {
-	path := fmt.Sprintf("CUSTOMERS('%s')", customerID)
+	path := "CUSTOMERS(" + odataString(customerID) + ")"
 
 	req := c.client.NewRequest()
 	req.SetContext(ctx)
@@ -158,7 +158,7 @@ func (c *Client) GetActiveCustomersByEmail(ctx context.Context, email string) ([
 // The API path is: /ACCOUNTS_RECEIVABLE('{customerID}')/ACCFNCITEMS2_SUBFORM
 func (c *Client) GetAccountReceivables(ctx context.Context, customerID string) ([]AccountReceivableItem, error) {
 	// Build the API path with the customer ID
-	path := fmt.Sprintf("ACCOUNTS_RECEIVABLE('%s')/ACCFNCITEMS2_SUBFORM", customerID)
+	path := "ACCOUNTS_RECEIVABLE(" + odataString(customerID) + ")/ACCFNCITEMS2_SUBFORM"
 
 	req := c.client.NewRequest()
 	req.SetContext(ctx)

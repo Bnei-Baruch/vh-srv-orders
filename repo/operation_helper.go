@@ -15,6 +15,10 @@ import (
 type sqlQuery struct {
 	SQL  string   `json:"sql"`
 	Args []string `json:"args"`
+
+	// oneRow: the statement must update exactly one row, or the whole
+	// operation is refused.
+	oneRow bool
 }
 
 func (q sqlQuery) args() []any {
@@ -32,20 +36,20 @@ func (q sqlQuery) args() []any {
 func renameStatements(fromEmail, toEmail string, fromKc *string, toKc string) []sqlQuery {
 	var q []sqlQuery
 	if fromKc == nil {
-		q = append(q, sqlQuery{`UPDATE accounts SET "Email" = $1 WHERE "Email" = $2 AND "UserKey" = $3`,
-			[]string{toEmail, fromEmail, toKc}})
+		q = append(q, sqlQuery{SQL: `UPDATE accounts SET "Email" = $1 WHERE "Email" = $2 AND "UserKey" = $3`,
+			Args: []string{toEmail, fromEmail, toKc}, oneRow: true})
 	} else {
 		q = append(q,
-			sqlQuery{`UPDATE accounts SET "Email" = $1, "UserKey" = $2 WHERE "Email" = $3 AND "UserKey" = $4`,
-				[]string{toEmail, toKc, fromEmail, *fromKc}},
-			sqlQuery{`UPDATE orders SET userkey = $1 WHERE userkey = $2`, []string{toKc, *fromKc}},
-			sqlQuery{`UPDATE payments_pelecard SET ord_key = $1 WHERE ord_key = $2`, []string{toKc, *fromKc}},
-			sqlQuery{`UPDATE payments SET "Ordkey" = $1 WHERE "Ordkey" = $2`, []string{toKc, *fromKc}},
+			sqlQuery{SQL: `UPDATE accounts SET "Email" = $1, "UserKey" = $2 WHERE "Email" = $3 AND "UserKey" = $4`,
+				Args: []string{toEmail, toKc, fromEmail, *fromKc}, oneRow: true},
+			sqlQuery{SQL: `UPDATE orders SET userkey = $1 WHERE userkey = $2`, Args: []string{toKc, *fromKc}},
+			sqlQuery{SQL: `UPDATE payments_pelecard SET ord_key = $1 WHERE ord_key = $2`, Args: []string{toKc, *fromKc}},
+			sqlQuery{SQL: `UPDATE payments SET "Ordkey" = $1 WHERE "Ordkey" = $2`, Args: []string{toKc, *fromKc}},
 		)
 	}
 	return append(q,
-		sqlQuery{`UPDATE specials SET email = $1 WHERE email = $2`, []string{toEmail, fromEmail}},
-		sqlQuery{`UPDATE specials_sep2021 SET email = $1 WHERE email = $2`, []string{toEmail, fromEmail}},
+		sqlQuery{SQL: `UPDATE specials SET email = $1 WHERE email = $2`, Args: []string{toEmail, fromEmail}},
+		sqlQuery{SQL: `UPDATE specials_sep2021 SET email = $1 WHERE email = $2`, Args: []string{toEmail, fromEmail}},
 	)
 }
 
@@ -55,6 +59,24 @@ func revertStatements(in emailInput) []sqlQuery {
 		return renameStatements(*in.NewEmail, *in.OldEmail, nil, *in.NewKeycloakID)
 	}
 	return renameStatements(*in.NewEmail, *in.OldEmail, in.NewKeycloakID, *in.OldKeycloakID)
+}
+
+// execStatements runs the statements in order and returns each result. The
+// account statement must hit exactly one row: if the account no longer has
+// the email and key the statements start from, nothing is changed.
+func execStatements(ctx context.Context, tx pgx.Tx, qs []sqlQuery) ([]string, error) {
+	logs := []string{}
+	for _, q := range qs {
+		res, err := tx.Exec(ctx, q.SQL, q.args()...)
+		if err != nil {
+			return nil, err
+		}
+		if q.oneRow && res.RowsAffected() != 1 {
+			return nil, common.ErrOperationNoAccount
+		}
+		logs = append(logs, res.String())
+	}
+	return logs, nil
 }
 
 type QueryLog struct {
@@ -77,7 +99,6 @@ func (o *OrdersDB) PerformOperation(ctx context.Context, req OperationReq) (int,
 		OldKeycloakID: req.OldKeycloakID,
 		OldEmail:      req.OldEmail,
 	}
-	var output QueryLog
 	revert := QueryLog{Queries: revertStatements(input), Logs: []string{}}
 
 	tx, err := o.pool.Begin(ctx)
@@ -86,21 +107,19 @@ func (o *OrdersDB) PerformOperation(ctx context.Context, req OperationReq) (int,
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// run loop for all queries
-	for _, query := range renameStatements(*input.OldEmail, *input.NewEmail, input.OldKeycloakID, *input.NewKeycloakID) {
-		updatedRes, err := tx.Exec(ctx, query.SQL, query.args()...)
-
-		if err != nil {
-			// The new key already has an account: that is a merge, not a rename.
-			if isKeyTaken(err) {
-				return 0, fmt.Errorf("new keycloak id: %w; merge the accounts instead", common.ErrAccountKeyTaken)
-			}
-			return 0, fmt.Errorf("problem updating users: %w", err)
+	rename := renameStatements(*input.OldEmail, *input.NewEmail, input.OldKeycloakID, *input.NewKeycloakID)
+	logs, err := execStatements(ctx, tx, rename)
+	if err != nil {
+		// The new key already has an account: that is a merge, not a rename.
+		if isKeyTaken(err) {
+			return 0, fmt.Errorf("new keycloak id: %w; merge the accounts instead", common.ErrAccountKeyTaken)
 		}
-
-		output.Queries = append(output.Queries, query)
-		output.Logs = append(output.Logs, updatedRes.String())
+		if errors.Is(err, common.ErrOperationNoAccount) {
+			return 0, err
+		}
+		return 0, fmt.Errorf("problem updating users: %w", err)
 	}
+	output := QueryLog{Queries: rename, Logs: logs}
 
 	// pgx encodes the structs as JSON for the json columns.
 	var ID int
@@ -137,17 +156,16 @@ func (o *OrdersDB) RevertOperation(ctx context.Context, newEmail string, oldEmai
 	}
 
 	if status == "reverted" {
-		return fmt.Errorf("operation already reverted")
+		return common.ErrOperationReverted
 	}
 
 	// The statements come from the code, built from the stored input.
-	revert := QueryLog{Queries: revertStatements(input), Logs: []string{}}
-	for _, query := range revert.Queries {
-		revertRes, err := tx.Exec(ctx, query.SQL, query.args()...)
-		if err != nil {
-			return fmt.Errorf("problem reverting operation: %w", err)
+	revert := QueryLog{Queries: revertStatements(input)}
+	if revert.Logs, err = execStatements(ctx, tx, revert.Queries); err != nil {
+		if errors.Is(err, common.ErrOperationNoAccount) {
+			return err
 		}
-		revert.Logs = append(revert.Logs, revertRes.String())
+		return fmt.Errorf("problem reverting operation: %w", err)
 	}
 
 	if _, err := tx.Exec(ctx, `UPDATE operation_trace SET revert = $1, status = 'reverted' WHERE id = $2`,

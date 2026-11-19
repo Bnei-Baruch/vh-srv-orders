@@ -259,7 +259,7 @@ func TestPerformOperation_QuoteInEmail_RenamesAndReverts(t *testing.T) {
 		err1, err2 = err2, err1
 	}
 	require.NoError(t, err1)
-	require.ErrorContains(t, err2, "already reverted")
+	require.ErrorIs(t, err2, common.ErrOperationReverted)
 
 	email, key, orderKey = account()
 	assert.Equal(t, []string{oldEmail, "kc-old", "kc-old"}, []string{email, key, orderKey})
@@ -334,4 +334,51 @@ func TestRevertOperation_DoesNotRunStoredSQL(t *testing.T) {
 	var cards int
 	require.NoError(t, db.pool.QueryRow(ctx, `SELECT count(*) FROM card_details`).Scan(&cards))
 	assert.Equal(t, 1, cards)
+}
+
+// A rename whose old email and key match no account changes nothing and
+// writes no trace, instead of reporting success for UPDATE 0.
+func TestPerformOperation_NoMatchingAccount_ChangesNothing(t *testing.T) {
+	db, ctx := newTestDB(t)
+	createSpecialsSep2021(t, db, ctx)
+	seedAccountWithRows(t, db, ctx, "kc-1", "old@test.test")
+
+	str := func(s string) *string { return &s }
+	_, err := db.PerformOperation(ctx, OperationReq{
+		Type:          str("email_update"),
+		NewKeycloakID: str("kc-1"),
+		OldEmail:      str("typo@test.test"), NewEmail: str("new@test.test"),
+	})
+	require.ErrorIs(t, err, common.ErrOperationNoAccount)
+
+	var traces int
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT count(*) FROM operation_trace`).Scan(&traces))
+	assert.Zero(t, traces)
+}
+
+// If the account's email changed after the rename, the revert would move the
+// orders back to the old key but not the account. It is refused instead and
+// changes nothing.
+func TestRevertOperation_AccountChangedSince_ChangesNothing(t *testing.T) {
+	db, ctx := newTestDB(t)
+	createSpecialsSep2021(t, db, ctx)
+
+	accountID, orderID, _, _ := seedAccountWithRows(t, db, ctx, "kc-old", "a@test.test")
+	str := func(s string) *string { return &s }
+	_, err := db.PerformOperation(ctx, OperationReq{
+		Type:          str("email_update"),
+		OldKeycloakID: str("kc-old"), NewKeycloakID: str("kc-new"),
+		OldEmail: str("a@test.test"), NewEmail: str("b@test.test"),
+	})
+	require.NoError(t, err)
+	_, err = db.pool.Exec(ctx, `UPDATE accounts SET "Email" = 'c@test.test' WHERE id = $1`, accountID)
+	require.NoError(t, err)
+
+	require.ErrorIs(t, db.RevertOperation(ctx, "b@test.test", "a@test.test"), common.ErrOperationNoAccount)
+
+	var accountKey, orderKey, status string
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT "UserKey" FROM accounts WHERE id = $1`, accountID).Scan(&accountKey))
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT userkey FROM orders WHERE id = $1`, orderID).Scan(&orderKey))
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT status FROM operation_trace`).Scan(&status))
+	assert.Equal(t, []string{"kc-new", "kc-new", "success"}, []string{accountKey, orderKey, status})
 }

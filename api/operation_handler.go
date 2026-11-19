@@ -39,6 +39,10 @@ func (o *OrdersAPI) handleOperationCreate(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"error": common.ErrAccountKeyTaken.Error()})
 			return
 		}
+		if errors.Is(dbErr, common.ErrOperationNoAccount) {
+			c.JSON(http.StatusConflict, gin.H{"error": dbErr.Error()})
+			return
+		}
 		c.Status(http.StatusInternalServerError)
 		_ = c.Error(fmt.Errorf("error while creating grant: %w", dbErr))
 		return
@@ -69,6 +73,10 @@ func (o *OrdersAPI) handleOperationRevert(c *gin.Context) {
 
 	if errors.Is(revertErr, common.ErrOperationNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": revertErr.Error()})
+		return
+	}
+	if errors.Is(revertErr, common.ErrOperationReverted) || errors.Is(revertErr, common.ErrOperationNoAccount) {
+		c.JSON(http.StatusConflict, gin.H{"error": revertErr.Error()})
 		return
 	}
 	if revertErr != nil {

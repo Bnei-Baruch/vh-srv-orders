@@ -225,7 +225,7 @@ func TestPatchAccount_KeyThatHasAnAccountIsTaken(t *testing.T) {
 }
 
 // Emails and keys go to Postgres as arguments, so a quote in an email is data,
-// and the stored revert puts the account back.
+// and the revert (built from the stored input) puts the account back.
 func TestPerformOperation_QuoteInEmail_RenamesAndReverts(t *testing.T) {
 	db, ctx := newTestDB(t)
 	createSpecialsSep2021(t, db, ctx)

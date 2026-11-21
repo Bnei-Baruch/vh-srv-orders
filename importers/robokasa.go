@@ -36,14 +36,12 @@ func (im *RobokasaImporter) String() string {
 // Import fetches all robokasa orders and import the ones we don't have.
 // Idempotency is guaranteed by robokasa order_id being stored in our DB as well.
 func (im *RobokasaImporter) Import() error {
-	var err error
-
-	var sheetValues []*RobokasaOrder
-	sheetValues, err = im.getSheetValues()
+	sheetValues, dropped, err := im.getSheetValues()
 	if err != nil {
 		return fmt.Errorf("importer.getSheetValues: %w", err)
 	}
-	slog.Info("importer.getSheetValues", slog.Int("count", len(sheetValues)))
+	slog.Info("importer.getSheetValues", slog.Int("count", len(sheetValues)), slog.Int("dropped", dropped))
+	reportDroppedRows(im, dropped, len(sheetValues))
 
 	var existingPayments map[string]*repo.OfflinePayment
 	existingPayments, err = im.getExistingPayments()
@@ -55,20 +53,24 @@ func (im *RobokasaImporter) Import() error {
 	newOrders := 0
 	skippedOrders := 0
 	errOrders := 0
-	for i, row := range sheetValues {
+	for _, row := range sheetValues {
 		if _, ok := existingPayments[row.OrderID]; ok {
 			skippedOrders++
 			continue
 		}
 
 		if err := im.createOrderAndPayments(row); err != nil {
-			slog.Error("importer.createOrderAndPayments", slog.Int("line", i+1), slog.String("robokasa_id", row.OrderID), slog.Any("err", err))
+			slog.Error("importer.createOrderAndPayments", slog.Int("row", row.SheetRow), slog.String("robokasa_id", row.OrderID), slog.Any("err", err))
 			errOrders++
 			continue
 		}
 		newOrders++
 	}
-	slog.Info("import summary", slog.Int("new_orders", newOrders), slog.Int("skipped_orders", skippedOrders), slog.Int("with_errors", errOrders))
+	// dropped_by_parser for the same reason the other two importers carry it:
+	// a row the parser threw away reaches no counter below, so without it the
+	// summary adds up to fewer rows than the sheet holds.
+	slog.Info("import summary", slog.Int("new_orders", newOrders), slog.Int("skipped_orders", skippedOrders),
+		slog.Int("with_errors", errOrders), slog.Int("dropped_by_parser", dropped))
 
 	return nil
 }
@@ -78,47 +80,91 @@ type RobokasaOrder struct {
 	Email     string
 	Amount    float64
 	Timestamp time.Time
+	// The 1-based sheet row, so a failure names a line an operator can open.
+	// Import's loop index counts survivors, not sheet rows.
+	SheetRow int
 }
 
-func (im *RobokasaImporter) getSheetValues() ([]*RobokasaOrder, error) {
+func (im *RobokasaImporter) getSheetValues() ([]*RobokasaOrder, int, error) {
 	sheetsService, err := sheets.NewService(context.TODO(),
 		option.WithCredentialsFile(common.Config.GoogleAppCredentials),
 		option.WithScopes(sheets.SpreadsheetsReadonlyScope))
 	if err != nil {
-		return nil, fmt.Errorf("sheets.NewService: %w", err)
+		return nil, 0, fmt.Errorf("sheets.NewService: %w", err)
 	}
 
 	call := sheetsService.Spreadsheets.Values.Get("1w2kn2rHKMp63lcmYZcWZwEiEW5AgcwS6eGdyNEghNZU", "ArvutRus")
 	call.Context(context.TODO())
 	resp, err := call.Do()
 	if err != nil {
-		return nil, fmt.Errorf("sheetsService.Spreadsheets.Values.Get: %w", err)
+		return nil, 0, fmt.Errorf("sheetsService.Spreadsheets.Values.Get: %w", err)
 	}
 
-	orders := make([]*RobokasaOrder, 0)
-	for i, row := range resp.Values {
-		order := &RobokasaOrder{
-			OrderID: row[0].(string),
-			Email:   row[1].(string),
-		}
+	orders, dropped := parseRobokasaRows(resp.Values)
+	return orders, dropped, nil
+}
 
-		var err error
-		order.Amount, err = strconv.ParseFloat(row[2].(string), 10)
-		if err != nil {
-			slog.Warn("malformed row", slog.Int("row", i+1), slog.String("column", "amount"), slog.Any("err", err))
+// parseRobokasaRows turns sheet rows into orders. Split out of getSheetValues,
+// which builds its Sheets client inline and so cannot be reached from a test.
+//
+// This export has no header row, so sheet row 1 is the first order.
+func parseRobokasaRows(values [][]any) ([]*RobokasaOrder, int) {
+	orders := make([]*RobokasaOrder, 0)
+
+	dropped := 0
+	for i, row := range values {
+		sheetRow := i + 1
+
+		if blankRow(row) {
 			continue
 		}
 
-		order.Timestamp, err = time.Parse(time.DateTime, row[3].(string))
+		// cell(), not row[n].(string): both hazards sheet_row.go describes hit
+		// here — a trailing blank shortens the row, and a numeric cell arrives
+		// as float64. Either panic killed the whole run.
+		order := &RobokasaOrder{
+			OrderID:  cell(row, 0),
+			Email:    cell(row, 1),
+			SheetRow: sheetRow,
+		}
+
+		// Idempotency is keyed on OrderID, so one imported blank id occupies
+		// the key "" and every later blank-id row is skipped forever as
+		// already imported.
+		if order.OrderID == "" {
+			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "order_id"), slog.String("reason", "empty"))
+			dropped++
+			continue
+		}
+
+		// getOrCreateAccount with an empty email resolves to whichever account
+		// was created last without one, so the order would attach to an
+		// unrelated person with no error anywhere.
+		if order.Email == "" {
+			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "email"), slog.String("reason", "empty"))
+			dropped++
+			continue
+		}
+
+		var err error
+		order.Amount, err = strconv.ParseFloat(cell(row, 2), 64)
 		if err != nil {
-			slog.Warn("malformed row", slog.Int("row", i+1), slog.String("column", "timestamp"), slog.Any("err", err))
+			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "amount"), slog.Any("err", err))
+			dropped++
+			continue
+		}
+
+		order.Timestamp, err = time.Parse(time.DateTime, cell(row, 3))
+		if err != nil {
+			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "timestamp"), slog.Any("err", err))
+			dropped++
 			continue
 		}
 
 		orders = append(orders, order)
 	}
 
-	return orders, nil
+	return orders, dropped
 }
 
 func (im *RobokasaImporter) getExistingPayments() (map[string]*repo.OfflinePayment, error) {

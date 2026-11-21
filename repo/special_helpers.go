@@ -14,16 +14,21 @@ import (
 )
 
 func (o *OrdersDB) DeleteSpecialById(ctx context.Context, id int) error {
+	// null.String, not string: specials.email is nullable and rows from before
+	// #53 may hold NULL. pgx refuses NULL into *string, and a scan error here
+	// would hide the real reason the revoke is refused below.
 	var (
-		email null.String
-		err   error
+		email      null.String
+		keycloakID null.String
+		err        error
 	)
-	if err = o.pool.QueryRow(ctx, `SELECT email FROM specials where id=$1`, id).Scan(&email); err != nil {
+	if err = o.pool.QueryRow(ctx, `SELECT email, keycloak_id FROM specials where id=$1`, id).Scan(&email, &keycloakID); err != nil {
 		return err
 	}
 	// vh-srv-profile revokes by email only, so ending a special that has none
 	// would leave the membership active there. Refuse, and leave the row as is.
-	if !email.Valid {
+	// '' as well as NULL: older rows stored the empty string for "absent".
+	if email.String == "" {
 		return fmt.Errorf("special %d has no email to revoke by: %w", id, common.ErrInvalidValues)
 	}
 	res, errUpdate := o.pool.Exec(ctx, `UPDATE  specials SET end_date = now(), updated_at = now() WHERE  id = $1`, id)
@@ -34,7 +39,9 @@ func (o *OrdersDB) DeleteSpecialById(ctx context.Context, id int) error {
 	if res.RowsAffected() == 0 {
 		return common.ErrNoRowsAffected
 	} else {
-		o.emitEvent(ctx, events.TypeDeleteSpecial, map[string]interface{}{"email": email.String})
+		// keycloak_id alongside the email, so a consumer is not left with only
+		// an address the account may have changed since.
+		o.emitEvent(ctx, events.TypeDeleteSpecial, map[string]interface{}{"email": email.String, "keycloak_id": keycloakID.String})
 	}
 	return nil
 }
@@ -131,9 +138,17 @@ func (o *OrdersDB) GetSpecialsByKeycloakId(ctx context.Context, keycloakID strin
 	return specials, nil
 }
 
-func (o *OrdersDB) GetAllSpecials(ctx context.Context) ([]*Special, error) {
+// GetAllSpecials returns a page of specials, newest first.
+//
+// Bounded because the table only grows: revoking is a soft update that rewrites
+// end_date, so nothing is ever removed, and the admin listing was reading every
+// row ever granted on each request. The ORDER BY is what makes skip/limit mean
+// anything — without it Postgres returns whatever the plan produces and two
+// pages can overlap or miss rows.
+func (o *OrdersDB) GetAllSpecials(ctx context.Context, skip, limit int) ([]*Special, error) {
 	var specials []*Special
-	rows, err := o.pool.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory from specials`)
+	rows, err := o.pool.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory from specials
+		 ORDER BY created_at DESC, id DESC LIMIT $1 OFFSET $2`, limit, skip)
 	if err != nil {
 		return specials, err
 	}
@@ -150,6 +165,47 @@ func (o *OrdersDB) GetAllSpecials(ctx context.Context) ([]*Special, error) {
 		return nil, err
 	}
 	return specials, nil
+}
+
+// GetSpecialsStartingBetween returns the specials whose window starts inside
+// the given range, in no particular order.
+//
+// Both callers want a narrow band of start dates: the activator wants today,
+// the importer's dedup index wants the span the sheet mentions. Reading the
+// whole table for either grows without bound, since revoking is a soft update
+// that rewrites end_date rather than removing the row.
+func (o *OrdersDB) GetSpecialsStartingBetween(ctx context.Context, from, to time.Time) ([]*Special, error) {
+	var specials []*Special
+	rows, err := o.pool.Query(ctx,
+		`SELECT id, keycloak_id, email, start_date, end_date, category, subcategory FROM specials
+		 WHERE start_date >= $1 AND start_date <= $2`, from, to)
+	if err != nil {
+		return nil, fmt.Errorf("o.Query: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var spe Special
+		if err := rows.Scan(&spe.Id, &spe.KeycloakId, &spe.Email, &spe.StartDate, &spe.EndDate, &spe.Category, &spe.SubCategory); err != nil {
+			return nil, fmt.Errorf("rows.Scan: %w", err)
+		}
+		specials = append(specials, &spe)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows.Err: %w", err)
+	}
+	return specials, nil
+}
+
+// CountSpecials is how a caller tells a full page from the whole table. The
+// listing response carries no other marker, so without it a truncated answer
+// and a complete one are the same JSON.
+func (o *OrdersDB) CountSpecials(ctx context.Context) (int, error) {
+	total, err := o.count(ctx, `SELECT count(*) FROM specials`)
+	if err != nil {
+		return 0, fmt.Errorf("o.count: %w", err)
+	}
+	return int(total), nil
 }
 
 func (o *OrdersDB) HasSpecialMembership(ctx context.Context, email string) (bool, error) {
@@ -235,6 +291,14 @@ func prepareSpecialCreateQuery(req Special) (string, string, []interface{}) {
 	return concatedCreateString, concatedNumString, args
 }
 
+// GetAllSpecialsByEmail finds specials by the address they were granted to.
+//
+// A special the sheet supplied no email for stores NULL there, and `ilike` is
+// UNKNOWN against NULL, so those rows are not returned — not even for a
+// wildcard. That is the intended answer to "which specials belong to this
+// address": a keycloak-only grant belongs to no address, and it is reachable
+// through GetSpecialsByKeycloakId. It is worth stating because the rows used to
+// carry an empty string, which a wildcard did match.
 func (o *OrdersDB) GetAllSpecialsByEmail(ctx context.Context, email string) ([]*Special, error) {
 	var specials []*Special
 	rows, err := o.pool.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory,created_at from specials where email ilike $1`, email)
@@ -258,28 +322,4 @@ func (o *OrdersDB) GetAllSpecialsByEmail(ctx context.Context, email string) ([]*
 
 	return specials, nil
 
-}
-
-func (o *OrdersDB) GetUniqueEmailsFromSpecial(ctx context.Context) ([]string, error) {
-	var emails []string
-	rows, err := o.pool.Query(ctx, `SELECT DISTINCT specials.email from specials WHERE specials.email IS NOT NULL`)
-
-	if err != nil {
-		return emails, err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var email string
-		if err := rows.Scan(&email); err != nil {
-			return nil, err
-		}
-		emails = append(emails, email)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	return emails, nil
 }

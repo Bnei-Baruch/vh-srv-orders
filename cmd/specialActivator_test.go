@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/volatiletech/null/v9"
 
@@ -59,8 +60,7 @@ func (e *capturingEmitter) Close(context.Context) {}
 func TestDoTask_SpecialWithoutKeycloakIdActivatesWithEmptyString(t *testing.T) {
 	ctx := context.Background()
 	mockRepo := mocks.NewMockOrdersRepository(t)
-	mockRepo.EXPECT().GetUniqueEmailsFromSpecial(ctx).Return([]string{"a@example.com"}, nil)
-	mockRepo.EXPECT().GetAllSpecialsByEmail(ctx, "a@example.com").Return([]*repo.Special{{
+	mockRepo.EXPECT().GetSpecialsStartingBetween(ctx, mock.Anything, mock.Anything).Return([]*repo.Special{{
 		Email:     null.StringFrom("a@example.com"),
 		StartDate: null.TimeFrom(time.Now()),
 		EndDate:   null.TimeFrom(time.Now().AddDate(0, 1, 0)),

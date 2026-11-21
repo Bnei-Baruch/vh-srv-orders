@@ -74,8 +74,8 @@ func TestSchema_RefusesPaymentsPelecardEmptyToken(t *testing.T) {
 	requireCheckViolation(t, err, "payments_pelecard_pelecard_token_not_empty")
 }
 
-// One specials row without an email used to make GetUniqueEmailsFromSpecial fail,
-// which specialActivator hands to LogFatal: no specials activated for anyone.
+// One specials row without an email used to make specialActivator's read fail,
+// and it hands that to LogFatal: no specials activated for anyone.
 func TestSpecials_NullEmailIsAbsentNotFatal(t *testing.T) {
 	db, ctx := newTestDB(t)
 
@@ -85,9 +85,16 @@ func TestSpecials_NullEmailIsAbsentNotFatal(t *testing.T) {
 	require.NoError(t, err)
 	insertSpecial(t, db, ctx, "kc-with-email", "with@test.test", -time.Hour, 24*time.Hour)
 
-	emails, err := db.GetUniqueEmailsFromSpecial(ctx)
+	specials, err := db.GetSpecialsStartingBetween(ctx, time.Now().AddDate(0, 0, -2), time.Now().AddDate(0, 0, 2))
 	require.NoError(t, err)
-	assert.Equal(t, []string{"with@test.test"}, emails)
+	byKc := map[string]null.String{}
+	for _, sp := range specials {
+		byKc[sp.KeycloakId.String] = sp.Email
+	}
+	assert.Equal(t, map[string]null.String{
+		"kc-no-email":   {},
+		"kc-with-email": null.StringFrom("with@test.test"),
+	}, byKc)
 
 }
 

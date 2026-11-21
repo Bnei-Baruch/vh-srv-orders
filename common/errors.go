@@ -15,6 +15,17 @@ var (
 	// accounts_userkey_uniq allows one per key.
 	ErrAccountKeyTaken = fmt.Errorf("an account already exists for this keycloak id")
 
+	// ErrOperationNotFound: no operation_trace row for this email pair.
+	ErrOperationNotFound = fmt.Errorf("operation not found")
+
+	// ErrOperationReverted: the latest operation for this email pair was
+	// already reverted.
+	ErrOperationReverted = fmt.Errorf("operation already reverted")
+
+	// ErrOperationNoAccount: no account has the email and keycloak id the
+	// rename (or its revert) starts from, so nothing was changed.
+	ErrOperationNoAccount = fmt.Errorf("no account matches this email and keycloak id")
+
 	// ErrPrePayment wraps errors that occur before any payment is attempted
 	// (DB lookups, missing card details). No money moved. No point retrying
 	// on another terminal since the same issue will occur.

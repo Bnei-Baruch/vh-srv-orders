@@ -223,3 +223,186 @@ func TestPatchAccount_KeyThatHasAnAccountIsTaken(t *testing.T) {
 	err := db.PatchAccount(ctx, Account{UserKey: null.StringFrom("kc-taken")}, mine)
 	require.ErrorIs(t, err, common.ErrAccountKeyTaken)
 }
+
+// Emails and keys go to Postgres as arguments, so a quote in an email is data,
+// and the revert (built from the stored input) puts the account back.
+func TestPerformOperation_QuoteInEmail_RenamesAndReverts(t *testing.T) {
+	db, ctx := newTestDB(t)
+	createSpecialsSep2021(t, db, ctx)
+
+	oldEmail, newEmail := "o'old@test.test", "o'new@test.test"
+	accountID, orderID, _, _ := seedAccountWithRows(t, db, ctx, "kc-old", oldEmail)
+
+	str := func(s string) *string { return &s }
+	_, err := db.PerformOperation(ctx, OperationReq{
+		Type:          str("email_update"),
+		OldKeycloakID: str("kc-old"), NewKeycloakID: str("kc-new"),
+		OldEmail: str(oldEmail), NewEmail: str(newEmail),
+	})
+	require.NoError(t, err)
+
+	account := func() (email, key, orderKey string) {
+		require.NoError(t, db.pool.QueryRow(ctx, `SELECT "Email", "UserKey" FROM accounts WHERE id = $1`, accountID).Scan(&email, &key))
+		require.NoError(t, db.pool.QueryRow(ctx, `SELECT userkey FROM orders WHERE id = $1`, orderID).Scan(&orderKey))
+		return
+	}
+	email, key, orderKey := account()
+	assert.Equal(t, []string{newEmail, "kc-new", "kc-new"}, []string{email, key, orderKey})
+
+	// Two reverts at once: the row lock lets exactly one run.
+	errs := make(chan error, 2)
+	for range 2 {
+		go func() { errs <- db.RevertOperation(ctx, newEmail, oldEmail) }()
+	}
+	err1, err2 := <-errs, <-errs
+	if err1 != nil {
+		err1, err2 = err2, err1
+	}
+	require.NoError(t, err1)
+	require.ErrorIs(t, err2, common.ErrOperationReverted)
+
+	email, key, orderKey = account()
+	assert.Equal(t, []string{oldEmail, "kc-old", "kc-old"}, []string{email, key, orderKey})
+
+	require.ErrorIs(t, db.RevertOperation(ctx, "nobody@test.test", oldEmail), common.ErrOperationNotFound)
+}
+
+// createSpecialsSep2021 adds the table production has and no migration creates.
+func createSpecialsSep2021(t *testing.T, db *OrdersDB, ctx context.Context) {
+	t.Helper()
+	_, err := db.pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS specials_sep2021 (email text)`)
+	require.NoError(t, err)
+}
+
+// Without an old keycloak id only the email of the new key's account moves,
+// in accounts and both specials tables, and the revert moves it back.
+func TestPerformOperation_NoOldKey_RenamesEmailAndReverts(t *testing.T) {
+	db, ctx := newTestDB(t)
+	createSpecialsSep2021(t, db, ctx)
+
+	oldEmail, newEmail := "o'old@test.test", "o'new@test.test"
+	accountID, _, _, _ := seedAccountWithRows(t, db, ctx, "kc-1", oldEmail)
+	_, err := db.pool.Exec(ctx, `INSERT INTO specials (email, start_date, end_date, category) VALUES ($1, now(), now(), 'c')`, oldEmail)
+	require.NoError(t, err)
+	_, err = db.pool.Exec(ctx, `INSERT INTO specials_sep2021 (email) VALUES ($1)`, oldEmail)
+	require.NoError(t, err)
+
+	str := func(s string) *string { return &s }
+	_, err = db.PerformOperation(ctx, OperationReq{
+		Type:          str("email_update"),
+		NewKeycloakID: str("kc-1"),
+		OldEmail:      str(oldEmail), NewEmail: str(newEmail),
+	})
+	require.NoError(t, err)
+
+	state := func() []string {
+		var email, key, special, sep string
+		require.NoError(t, db.pool.QueryRow(ctx, `SELECT "Email", "UserKey" FROM accounts WHERE id = $1`, accountID).Scan(&email, &key))
+		require.NoError(t, db.pool.QueryRow(ctx, `SELECT email FROM specials`).Scan(&special))
+		require.NoError(t, db.pool.QueryRow(ctx, `SELECT email FROM specials_sep2021`).Scan(&sep))
+		return []string{email, key, special, sep}
+	}
+	assert.Equal(t, []string{newEmail, "kc-1", newEmail, newEmail}, state())
+
+	require.NoError(t, db.RevertOperation(ctx, newEmail, oldEmail))
+	assert.Equal(t, []string{oldEmail, "kc-1", oldEmail, oldEmail}, state())
+}
+
+// The revert builds its statements from the stored input; SQL in the
+// revert column is a record only and never runs.
+func TestRevertOperation_DoesNotRunStoredSQL(t *testing.T) {
+	db, ctx := newTestDB(t)
+	createSpecialsSep2021(t, db, ctx)
+
+	accountID, _, _, _ := seedAccountWithRows(t, db, ctx, "kc-old", "old@test.test")
+	str := func(s string) *string { return &s }
+	_, err := db.PerformOperation(ctx, OperationReq{
+		Type:          str("email_update"),
+		OldKeycloakID: str("kc-old"), NewKeycloakID: str("kc-new"),
+		OldEmail: str("old@test.test"), NewEmail: str("new@test.test"),
+	})
+	require.NoError(t, err)
+
+	_, err = db.pool.Exec(ctx, `UPDATE operation_trace SET revert = '{"queries":[{"sql":"DELETE FROM card_details","args":[]}],"logs":[]}'`)
+	require.NoError(t, err)
+
+	require.NoError(t, db.RevertOperation(ctx, "new@test.test", "old@test.test"))
+
+	var email, key string
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT "Email", "UserKey" FROM accounts WHERE id = $1`, accountID).Scan(&email, &key))
+	assert.Equal(t, []string{"old@test.test", "kc-old"}, []string{email, key})
+	var cards int
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT count(*) FROM card_details`).Scan(&cards))
+	assert.Equal(t, 1, cards)
+}
+
+// A rename whose old email and key match no account changes nothing and
+// writes no trace, instead of reporting success for UPDATE 0.
+func TestPerformOperation_NoMatchingAccount_ChangesNothing(t *testing.T) {
+	db, ctx := newTestDB(t)
+	createSpecialsSep2021(t, db, ctx)
+	seedAccountWithRows(t, db, ctx, "kc-1", "old@test.test")
+
+	str := func(s string) *string { return &s }
+	_, err := db.PerformOperation(ctx, OperationReq{
+		Type:          str("email_update"),
+		NewKeycloakID: str("kc-1"),
+		OldEmail:      str("typo@test.test"), NewEmail: str("new@test.test"),
+	})
+	require.ErrorIs(t, err, common.ErrOperationNoAccount)
+
+	var traces int
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT count(*) FROM operation_trace`).Scan(&traces))
+	assert.Zero(t, traces)
+}
+
+// If the account's email changed after the rename, the revert would move the
+// orders back to the old key but not the account. It is refused instead and
+// changes nothing.
+func TestRevertOperation_AccountChangedSince_ChangesNothing(t *testing.T) {
+	db, ctx := newTestDB(t)
+	createSpecialsSep2021(t, db, ctx)
+
+	accountID, orderID, _, _ := seedAccountWithRows(t, db, ctx, "kc-old", "a@test.test")
+	str := func(s string) *string { return &s }
+	_, err := db.PerformOperation(ctx, OperationReq{
+		Type:          str("email_update"),
+		OldKeycloakID: str("kc-old"), NewKeycloakID: str("kc-new"),
+		OldEmail: str("a@test.test"), NewEmail: str("b@test.test"),
+	})
+	require.NoError(t, err)
+	_, err = db.pool.Exec(ctx, `UPDATE accounts SET "Email" = 'c@test.test' WHERE id = $1`, accountID)
+	require.NoError(t, err)
+
+	require.ErrorIs(t, db.RevertOperation(ctx, "b@test.test", "a@test.test"), common.ErrOperationNoAccount)
+
+	var accountKey, orderKey, status string
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT "UserKey" FROM accounts WHERE id = $1`, accountID).Scan(&accountKey))
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT userkey FROM orders WHERE id = $1`, orderID).Scan(&orderKey))
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT status FROM operation_trace`).Scan(&status))
+	assert.Equal(t, []string{"kc-new", "kc-new", "success"}, []string{accountKey, orderKey, status})
+}
+
+// If the old key has an account again (a login since the rename), the
+// revert is a key conflict, not a database failure, and changes nothing.
+func TestRevertOperation_OldKeyTakenAgain_IsKeyTaken(t *testing.T) {
+	db, ctx := newTestDB(t)
+	createSpecialsSep2021(t, db, ctx)
+
+	accountID, _, _, _ := seedAccountWithRows(t, db, ctx, "kc-old", "a@test.test")
+	str := func(s string) *string { return &s }
+	_, err := db.PerformOperation(ctx, OperationReq{
+		Type:          str("email_update"),
+		OldKeycloakID: str("kc-old"), NewKeycloakID: str("kc-new"),
+		OldEmail: str("a@test.test"), NewEmail: str("b@test.test"),
+	})
+	require.NoError(t, err)
+	seedAccountWithRows(t, db, ctx, "kc-old", "again@test.test")
+
+	require.ErrorIs(t, db.RevertOperation(ctx, "b@test.test", "a@test.test"), common.ErrAccountKeyTaken)
+
+	var key, status string
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT "UserKey" FROM accounts WHERE id = $1`, accountID).Scan(&key))
+	require.NoError(t, db.pool.QueryRow(ctx, `SELECT status FROM operation_trace`).Scan(&status))
+	assert.Equal(t, []string{"kc-new", "success"}, []string{key, status})
+}

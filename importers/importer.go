@@ -45,15 +45,17 @@ func doImport(im importer) {
 	}
 	defer sentry.Flush(2 * time.Second)
 
-	// do the thing
+	// do the thing. The failure paths drain too, through FatalAfter: os.Exit runs
+	// no deferred function — not even the sentry.Flush above — and the reason has
+	// to be logged before the drain, which can block.
 	if err := im.Init(); err != nil {
 		sentry.CaptureException(err)
-		utils.LogFatal("importer.Init", slog.Any("err", err))
+		utils.FatalAfter(im.Close, "importer.Init", slog.Any("err", err))
 	}
 
 	if err := im.Import(); err != nil {
 		sentry.CaptureException(err)
-		utils.LogFatal("im.Import", slog.Any("err", err))
+		utils.FatalAfter(im.Close, "im.Import", slog.Any("err", err))
 	}
 
 	im.Close()
@@ -79,21 +81,32 @@ func (im *BaseImporter) Init() error {
 		return fmt.Errorf("events.CreateEmitter: %w", err)
 	}
 
-	im.repo, err = repo.NewOrdersDB(context.Background(), im.eventEmitter)
+	// Through a local: NewOrdersDB returns a concrete *repo.OrdersDB, and on
+	// failure that nil pointer boxes into a non-nil interface, defeating
+	// Close's guard.
+	ordersDB, err := repo.NewOrdersDB(context.Background(), im.eventEmitter)
 	if err != nil {
 		return fmt.Errorf("repo.NewOrdersDB: %w", err)
 	}
+	im.repo = ordersDB
 
 	im.profileService = profiles.NewProfileServiceAPI(keycloak.NewClient())
 
 	return nil
 }
 
+// Close is safe after a failed Init, which is where it matters: Init creates the
+// emitter before the repo, so a database failure leaves events undelivered and
+// no repo to close.
 func (im *BaseImporter) Close() {
-	im.repo.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	im.eventEmitter.Close(ctx)
+	if im.repo != nil {
+		im.repo.Close()
+	}
+	if im.eventEmitter != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		im.eventEmitter.Close(ctx)
+	}
 }
 
 func (im *BaseImporter) getOrCreateAccount(ctx context.Context, email string) (int, error) {

@@ -23,6 +23,21 @@ import (
 	"github.com/Bnei-Baruch/vh-srv-orders/repo"
 )
 
+// paymentCallContext carries the request's values without its cancellation.
+//
+// These handlers write payment rows before they post to checkout, so a caller
+// that goes away mid-call must not cancel it: the rows are already written and
+// checkout may already have charged, and an abandoned call means nothing
+// records that. Threading the request context straight through — which an
+// earlier version of this branch did — bought shutdown cancellation and this
+// with it. OpenPage's own timeout is what bounds the call instead.
+//
+// The convention is CLAUDE.md's, and domain/billing/renewal.go uses
+// WithoutCancel on the renewal path for the same reason.
+func paymentCallContext(c *gin.Context) context.Context {
+	return context.WithoutCancel(c.Request.Context())
+}
+
 func (o *OrdersAPI) handleTransactionGetByID(c *gin.Context) {
 
 	id, err := strconv.Atoi(c.Param("id"))
@@ -209,7 +224,7 @@ func (o *OrdersAPI) handleTransactionOrderAndPay(c *gin.Context) {
 		return
 	}
 
-	resp, err := o.pages.OpenPage(c.Request.Context(), page, payload)
+	resp, err := o.pages.OpenPage(paymentCallContext(c), page, payload)
 	if err != nil {
 		reportPageFailure(c, page, err)
 		c.JSON(http.StatusOK, gin.H{"url": errorurl})
@@ -318,7 +333,7 @@ func (o *OrdersAPI) handleTransactionNewToken(c *gin.Context) {
 		return
 	}
 
-	resp, err := o.pages.OpenPage(c.Request.Context(), pelecard.PageEmvNewToken, payload)
+	resp, err := o.pages.OpenPage(paymentCallContext(c), pelecard.PageEmvNewToken, payload)
 	if err != nil {
 		reportPageFailure(c, pelecard.PageEmvNewToken, err)
 		c.JSON(http.StatusOK, gin.H{"url": req.ErrorURL})
@@ -413,7 +428,7 @@ func (o *OrdersAPI) handleTransactionNewTokenNoCVV(c *gin.Context) {
 		return
 	}
 
-	body, reused, err := o.renewCardPages.open(c.Request.Context(), reference, payload,
+	body, reused, err := o.renewCardPages.open(paymentCallContext(c), reference, payload,
 		func(ctx context.Context) ([]byte, bool, error) {
 			resp, err := o.pages.OpenPage(ctx, pelecard.PageRenewCard, payload)
 			if err != nil {

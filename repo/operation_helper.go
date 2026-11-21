@@ -227,8 +227,8 @@ func (o *OrdersDB) RevertOperation(ctx context.Context, newEmail string, oldEmai
 	updateString, updateQueryArgs := prepareOperationTraceUpdateQuery(operation)
 
 	if len(updateQueryArgs) != 0 {
-		if err := tx.QueryRow(ctx, fmt.Sprintf(`UPDATE operation_trace SET %s WHERE id='%d' RETURNING id`, updateString, *operation.ID),
-			updateQueryArgs...).Scan(&operation.ID); err != nil {
+		if err := tx.QueryRow(ctx, fmt.Sprintf(`UPDATE operation_trace SET %s WHERE id=$%d RETURNING id`, updateString, len(updateQueryArgs)+1),
+			append(updateQueryArgs, *operation.ID)...).Scan(&operation.ID); err != nil {
 			return fmt.Errorf("problem updating operation_trace: %w", err)
 		}
 

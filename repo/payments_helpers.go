@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aarondl/null/v9"
 	"github.com/jackc/pgx/v5"
-	"github.com/volatiletech/null/v9"
 
 	"github.com/Bnei-Baruch/vh-srv-orders/common"
 	"github.com/Bnei-Baruch/vh-srv-orders/events"
@@ -1718,7 +1718,7 @@ func (o *OrdersDB) FetchPaymentByParamX(ctx context.Context, paramX string) (*Pa
 }
 
 // blankAsNull treats an empty string as absent, so it is left unwritten
-// rather than stored as ''.
+// rather than stored as ”.
 func blankAsNull(s null.String) null.String {
 	if s.String == "" {
 		return null.String{}

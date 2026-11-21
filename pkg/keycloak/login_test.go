@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/Nerzal/gocloak/v13"
-	"github.com/golang-jwt/jwt/v4"
+	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/Bnei-Baruch/vh-srv-orders/common"
 )

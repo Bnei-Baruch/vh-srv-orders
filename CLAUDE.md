@@ -68,7 +68,7 @@ import (
 - Constants in `common/consts.go` — `CamelCase` for exported names
 - Context keys are `SCREAMING_SNAKE` strings defined in `common/consts.go`
 - Minimal comments. Don't add godoc to everything. Only comment non-obvious business logic
-- Nullable fields use `github.com/volatiletech/null/v9`
+- Nullable fields use `github.com/aarondl/null/v9`
 
 ## Error Handling
 

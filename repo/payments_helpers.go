@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/volatiletech/null/v9"
 
 	"github.com/Bnei-Baruch/vh-srv-orders/common"
@@ -396,15 +396,8 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 		p.PaymentType = null.StringFrom(common.PaymentTypePelecard)
 	}
 
-	toUpdate, toUpdateArgs := preparePaymentUpdateQuery(p)
-	// The id is bound like every other value, not formatted into the SQL.
 	// The row is held FOR UPDATE above, so this write finds it.
-	if _, err := tx.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=$%d`, toUpdate, len(toUpdateArgs)+1),
-		append(toUpdateArgs, paymentid)...); err != nil {
-		return nil, fmt.Errorf("tx.Exec [update payment]: %w", err)
-	}
-
-	if err := writePelecardFacts(ctx, tx, p, amount, ordkey, paymentid); err != nil {
+	if err := writePaymentFacts(ctx, tx, p, amount, ordkey, paymentid); err != nil {
 		return nil, err
 	}
 
@@ -417,16 +410,48 @@ func (o *OrdersDB) UpdatePayment(ctx context.Context, req RequestPaid) (*Payment
 	return &p, nil
 }
 
+// execer is a pool or a transaction: the payment writers below run in either.
+type execer interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+}
+
+// writePaymentFacts writes a Pelecard payment's row and its payments_pelecard
+// row from a gateway result: checkout's notify and the browser return
+// (UpdatePayment) and a renewal charge (FinalizeRenewal). Callers run it in a
+// transaction so both land or neither does. amount and ordkey are used only
+// to create a missing payments_pelecard row (see writePelecardFacts). The
+// admin PATCH is not one of these: UpdatePelecardPayment writes the fields an
+// admin chose, from a PaymentUpdate, and the handler sets the payment status
+// separately.
+func writePaymentFacts(ctx context.Context, tx execer, p Payment, amount null.Float64, ordkey null.String, paymentID int) error {
+	if err := updatePaymentRow(ctx, tx, p, paymentID); err != nil {
+		return err
+	}
+	return writePelecardFacts(ctx, tx, p, amount, ordkey, paymentID)
+}
+
+// updatePaymentRow writes p's set fields to the payments row paymentID names,
+// the id bound like every other value.
+func updatePaymentRow(ctx context.Context, db execer, p Payment, paymentID int) error {
+	toUpdate, args := preparePaymentUpdateQuery(p)
+	if _, err := db.Exec(ctx, fmt.Sprintf(`UPDATE payments SET %s WHERE id=$%d`, toUpdate, len(args)+1),
+		append(args, int64(paymentID))...); err != nil {
+		return fmt.Errorf("update payment %d: %w", paymentID, err)
+	}
+	return nil
+}
+
 // writePelecardFacts stores the gateway's facts in the payment's
-// payments_pelecard row, inside the payment's transaction. Older payments
-// (and a few recent ones) have no such row; one is created rather than
-// committing a confirmed payment without its card facts.
-func writePelecardFacts(ctx context.Context, tx pgx.Tx, p Payment, amount null.Float64, ordkey null.String, paymentID int) error {
+// payments_pelecard row. Older payments (and a few recent ones) have no such
+// row; one is created rather than committing a confirmed payment without its
+// card facts, taking amount and ordkey from the payment: they are kept out of
+// p so the updates never rewrite them.
+func writePelecardFacts(ctx context.Context, tx execer, p Payment, amount null.Float64, ordkey null.String, paymentID int) error {
 	toUpdate, args := preparePelecardPaymentUpdateViaPaymentStructQuery(p)
 	tag, err := tx.Exec(ctx, fmt.Sprintf(`UPDATE payments_pelecard SET %s WHERE payment_id=$%d`, toUpdate, len(args)+1),
 		append(args, int64(paymentID))...)
 	if err != nil {
-		return fmt.Errorf("tx.Exec [update pelecard]: %w", err)
+		return fmt.Errorf("update pelecard %d: %w", paymentID, err)
 	}
 	if tag.RowsAffected() > 0 {
 		return nil
@@ -436,7 +461,7 @@ func writePelecardFacts(ctx context.Context, tx pgx.Tx, p Payment, amount null.F
 	columns, placeholders, createArgs := preparePelecardPaymentCreateQuery(ins, paymentID)
 	if _, err := tx.Exec(ctx, fmt.Sprintf(`INSERT INTO payments_pelecard (%s) VALUES (%s)`, columns, placeholders),
 		createArgs...); err != nil {
-		return fmt.Errorf("tx.Exec [insert pelecard]: %w", err)
+		return fmt.Errorf("insert pelecard %d: %w", paymentID, err)
 	}
 	return nil
 }

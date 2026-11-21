@@ -77,13 +77,13 @@ func (o *OrdersDB) CreateRenewalPayment(ctx context.Context, data *RenewalData, 
 	}
 
 	createString, numString, createQueryArgs := preparePaymentCreateQuery(p)
-	if err := o.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO payments (%s) VALUES (%s) RETURNING id`, createString, numString),
+	if err := o.pool.QueryRow(ctx, `INSERT INTO payments (`+createString+`) VALUES (`+numString+`) RETURNING id`,
 		createQueryArgs...).Scan(&p.ID); err != nil {
 		return nil, fmt.Errorf("o.pool.QueryRow.Scan [insert payment]: %w", err)
 	}
 
 	createPelecardString, numPelecardString, createPelecardQueryArgs := preparePelecardPaymentCreateQuery(p, p.ID)
-	_, err := o.pool.Exec(ctx, fmt.Sprintf(`INSERT INTO payments_pelecard (%s) VALUES (%s)`, createPelecardString, numPelecardString),
+	_, err := o.pool.Exec(ctx, `INSERT INTO payments_pelecard (`+createPelecardString+`) VALUES (`+numPelecardString+`)`,
 		createPelecardQueryArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("o.pool.Exec [insert pelecard]: %w", err)

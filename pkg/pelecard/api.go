@@ -214,8 +214,9 @@ func (c *Client) ChargeByToken(ctx context.Context, request *ChargeRequest, term
 
 		// Told apart from a declined card because handleNonRetryableError
 		// branches on it: one is a deployment fault that fails every charge, the
-		// other is this member's card.
-		if resp.StatusCode() == http.StatusUnauthorized {
+		// other is this member's card. A 403 is the same fault as on the page
+		// routes: a valid key that is not allowed on /vh.
+		if code := resp.StatusCode(); code == http.StatusUnauthorized || code == http.StatusForbidden {
 			return nil, fmt.Errorf("%w: charge gateway HTTP error [%d]",
 				ErrUnauthorized, resp.StatusCode())
 		}

@@ -80,9 +80,9 @@ func NewClient() *Client {
 //
 // Retrying a charge cannot charge twice: external_payments suppresses a
 // reference that already charged within the hour and replays the original
-// response, on every charge route including the /emv/charge leg the fallback
-// uses. Needs external_payments >= 46d5102 for that. A 401 can come from a hop
-// in front of the handler, after the card was charged.
+// response, on every charge route including the /vh/emv/charge leg the
+// fallback uses. Needs external_payments >= 46d5102 for that. A 401 can come
+// from a hop in front of the handler, after the card was charged.
 func (c *Client) sendAuthorized(ctx context.Context, what string,
 	do func(*resty.Request) (*resty.Response, error)) (*resty.Response, error) {
 
@@ -214,10 +214,11 @@ func (c *Client) ChargeByToken(ctx context.Context, request *ChargeRequest, term
 
 		// Told apart from a declined card because handleNonRetryableError
 		// branches on it: one is a deployment fault that fails every charge, the
-		// other is this member's card.
-		if resp.StatusCode() == http.StatusUnauthorized {
+		// other is this member's card. A 403 is the same fault as on the page
+		// routes: a valid key that is not allowed on /vh.
+		if code := resp.StatusCode(); code == http.StatusUnauthorized || code == http.StatusForbidden {
 			return nil, fmt.Errorf("%w: charge gateway HTTP error [%d]",
-				ErrUnauthorized, resp.StatusCode())
+				ErrUnauthorized, code)
 		}
 
 		return nil, fmt.Errorf("charge gateway HTTP error [%d]", resp.StatusCode())

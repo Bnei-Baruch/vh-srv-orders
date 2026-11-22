@@ -46,8 +46,9 @@ func TestGetPayment_MapsTheStatuses(t *testing.T) {
 		body   string
 		want   error
 	}{
-		"401 after the retry": {http.StatusUnauthorized, `{}`, pelecard.ErrUnauthorized},
-		"404":                 {http.StatusNotFound, `{}`, pelecard.ErrPaymentNotFound},
+		"401 after the retry":        {http.StatusUnauthorized, `{}`, pelecard.ErrUnauthorized},
+		"403 key not allowed on /vh": {http.StatusForbidden, `{}`, pelecard.ErrUnauthorized},
+		"404":                        {http.StatusNotFound, `{}`, pelecard.ErrPaymentNotFound},
 	} {
 		t.Run(name, func(t *testing.T) {
 			c := paymentClient(t, func(w http.ResponseWriter, r *http.Request) {

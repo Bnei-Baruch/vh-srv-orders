@@ -27,8 +27,11 @@ type Terminal struct {
 	ChargeURL string `json:"-"`
 }
 
-var TokenTerminal = Terminal{Name: "token", PMX: "t", ChargeURL: EXTERNAL_PAYMENTS_BASE_URL + "/token/charge"}
-var EMVTerminal = Terminal{Name: "emv", PMX: "e", ChargeURL: EXTERNAL_PAYMENTS_BASE_URL + "/emv/charge"}
+// The /vh charge routes, like the page routes in api.go: they require a key
+// and run the same handlers as the shared /token/charge and /emv/charge, which
+// still accept anonymous callers and are to be closed once nothing uses them.
+var TokenTerminal = Terminal{Name: "token", PMX: "t", ChargeURL: EXTERNAL_PAYMENTS_BASE_URL + "/vh/token/charge"}
+var EMVTerminal = Terminal{Name: "emv", PMX: "e", ChargeURL: EXTERNAL_PAYMENTS_BASE_URL + "/vh/emv/charge"}
 
 // TerminalByPMX returns the Terminal for a given PMX value.
 // PMX is the canonical identifier used across internal code, Priority, and Pelecard.

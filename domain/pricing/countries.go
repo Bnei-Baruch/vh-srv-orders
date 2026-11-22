@@ -93,7 +93,7 @@ var countryToGroup = map[string]string{
 	"GN": "Low",    // Guinea
 	"GP": "High",   // Guadeloupe (French overseas department)
 	"GQ": "Medium", // Equatorial Guinea
-	"GR": "High",   // Greece
+	"GR": "Medium", // Greece
 	"GT": "Low",    // Guatemala
 	"GU": "High",   // Guam (US territory)
 	"GW": "Low",    // Guinea-Bissau

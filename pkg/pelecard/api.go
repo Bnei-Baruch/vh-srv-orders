@@ -218,7 +218,7 @@ func (c *Client) ChargeByToken(ctx context.Context, request *ChargeRequest, term
 		// routes: a valid key that is not allowed on /vh.
 		if code := resp.StatusCode(); code == http.StatusUnauthorized || code == http.StatusForbidden {
 			return nil, fmt.Errorf("%w: charge gateway HTTP error [%d]",
-				ErrUnauthorized, resp.StatusCode())
+				ErrUnauthorized, code)
 		}
 
 		return nil, fmt.Errorf("charge gateway HTTP error [%d]", resp.StatusCode())

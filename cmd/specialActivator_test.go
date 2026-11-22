@@ -21,9 +21,15 @@ func specialStarting(t time.Time) *repo.Special {
 
 func TestIsBeginsToday_StartsToday(t *testing.T) {
 	assert.True(t, isBeginsToday(specialStarting(time.Now())))
-	// Any time-of-day today counts — only the calendar date matters.
-	midnight := time.Now().Truncate(24 * time.Hour)
+
+	// Local midnight: Truncate(24h) gives UTC midnight (03:00 IDT), which is still yesterday locally before 03:00.
+	now := time.Now()
+	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	assert.True(t, isBeginsToday(specialStarting(midnight.Add(time.Minute))))
+	assert.True(t, isBeginsToday(specialStarting(midnight)))
+
+	// The other end of the same day.
+	assert.True(t, isBeginsToday(specialStarting(midnight.AddDate(0, 0, 1).Add(-time.Second))))
 }
 
 // Regression: the old check compared today's day-of-month with itself, so any

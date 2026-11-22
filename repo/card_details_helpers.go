@@ -22,7 +22,7 @@ func (o *OrdersDB) GetCardDetailById(ctx context.Context, id int) (*CardDetails,
 			token,
 			created_at,
 			updated_at,
-			deleted_at from card_details `+fmt.Sprintf("where id = %d", id)).Scan(
+			deleted_at from card_details where id = $1`, id).Scan(
 		&card.ID,
 		&card.AccountID,
 		&card.GatewayProvider,
@@ -66,7 +66,7 @@ func (o *OrdersDB) PatchCardDetailsById(ctx context.Context, req CardDetails, id
 		return common.ErrInvalidValues
 	}
 
-	updateRes, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE card_details SET %s WHERE id=%d`, toUpdate, id), toUpdateArgs...)
+	updateRes, err := o.pool.Exec(ctx, fmt.Sprintf(`UPDATE card_details SET %s WHERE id=$%d`, toUpdate, len(toUpdateArgs)+1), append(toUpdateArgs, id)...)
 	if err != nil {
 		return fmt.Errorf("o.pool.Exec: %w", err)
 	}

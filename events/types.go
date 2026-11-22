@@ -1,8 +1,6 @@
 package events
 
 import (
-	"io"
-	"math/rand"
 	"time"
 
 	"github.com/oklog/ulid/v2"
@@ -39,12 +37,6 @@ const (
 	TypeHHRequestConcluded = "hh_request_concluded"
 )
 
-var entropy io.Reader
-
-func init() {
-	entropy = rand.New(rand.NewSource(time.Now().UTC().UnixNano()))
-}
-
 type Event struct {
 	ID        string                 `json:"id"`
 	Type      string                 `json:"type"`
@@ -61,7 +53,8 @@ type EventBuilder interface {
 
 func MakeEvent(eventType string, payload map[string]interface{}) Event {
 	return Event{
-		ID:        ulid.MustNew(ulid.Now(), entropy).String(),
+		// ulid.Make is safe for concurrent use (locked monotonic entropy).
+		ID:        ulid.Make().String(),
 		Type:      eventType,
 		Payload:   payload,
 		Timestamp: time.Now().UTC(),

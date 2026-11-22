@@ -23,10 +23,11 @@ import (
 // the command: a rejected or missing credential, a malformed request, a wrong
 // URL, a 5xx, a timeout, and above all an accepted card.
 //
-// The default target /token/charge is in observe mode, so a pass there only
-// proves the credential was not rejected — checkout's log settles the rest,
-// showing `requested_by=keycloak:vh`. Point --url at /vh/token/charge, which
-// requires a caller, for an answer that stands on its own.
+// The default target is the /vh charge route, which requires a caller, so a
+// pass is an answer on its own. --url can point it at another route, such as
+// the shared /token/charge, which still accepts anonymous callers: a pass there
+// only proves the credential was not rejected, and checkout's log has to show
+// `requested_by=keycloak:vh` to settle the rest.
 var chargeCheckCmd = &cobra.Command{
 	Use:   "charge-check",
 	Short: "Verify that charge calls authenticate to external_payments",
@@ -42,9 +43,8 @@ func init() {
 	chargeCheckCmd.Flags().String("terminal", "token", "which terminal to check: token or emv")
 	chargeCheckCmd.Flags().String("reference", "", "reference to send (default: m-authcheck-<pid>)")
 	chargeCheckCmd.Flags().String("url", "",
-		"override the charge URL, e.g. https://checkout.kbb1.com/vh/token/charge — that route "+
-			"requires a caller, so a 401 there is a definitive answer where the shared route's "+
-			"observe mode accepts anonymous callers too")
+		"override the charge URL, e.g. https://checkout.kbb1.com/token/charge — the shared route, "+
+			"which also accepts anonymous callers, so a pass there does not prove the credential landed")
 }
 
 func chargeCheckFn(cmd *cobra.Command, args []string) {

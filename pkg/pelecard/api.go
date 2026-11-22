@@ -80,9 +80,9 @@ func NewClient() *Client {
 //
 // Retrying a charge cannot charge twice: external_payments suppresses a
 // reference that already charged within the hour and replays the original
-// response, on every charge route including the /emv/charge leg the fallback
-// uses. Needs external_payments >= 46d5102 for that. A 401 can come from a hop
-// in front of the handler, after the card was charged.
+// response, on every charge route including the /vh/emv/charge leg the
+// fallback uses. Needs external_payments >= 46d5102 for that. A 401 can come
+// from a hop in front of the handler, after the card was charged.
 func (c *Client) sendAuthorized(ctx context.Context, what string,
 	do func(*resty.Request) (*resty.Response, error)) (*resty.Response, error) {
 

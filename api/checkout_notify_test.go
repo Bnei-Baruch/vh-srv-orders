@@ -1017,14 +1017,12 @@ func Test_UpdatePayment_concurrent_confirms_write_once(t *testing.T) {
 		start := make(chan struct{})
 		var wg sync.WaitGroup
 		for i, token := range tokens {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				<-start
 				_, errs[i] = a.repo.UpdatePayment(ctx, paidFromGateway(&pelecard.GatewayPayment{
 					UserKey: p.orderKey, AdditionalDetailsParamX: p.paramX, Token: token, ApprovalNo: token,
 				}))
-			}()
+			})
 		}
 		close(start)
 		wg.Wait()

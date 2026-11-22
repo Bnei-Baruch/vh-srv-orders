@@ -169,22 +169,12 @@ func (o *OrdersDB) ConcludeHHRequest(ctx context.Context, id int, c HHRequestCon
 			request.KeycloakID); err != nil {
 			return nil, fmt.Errorf("tx.Exec: %w", err)
 		}
-		// NULL start means "now", and that NOW() is the database's, not this
-		// process's. The row is written with the app host's clock and then read
-		// back by `start_date <= NOW()` on the database host, so a host running
-		// even milliseconds ahead of the database stamps a grant that is not
-		// yet active — GetActiveHHGrant skips it, and so does the deactivation
-		// above. Measured 13ms of skew against the test database, which is
-		// enough: the grant is meant to apply the moment it is approved.
-		var start any
-		if c.StartDate.Valid {
-			start = c.StartDate.Time
-		}
+		// No start = the database's NOW(), so `start_date <= NOW()` sees it at once despite app/DB clock skew.
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO hh_grants (request_id, keycloak_id, type, discount_pct, start_date, end_date, note)
 			 VALUES ($1, $2, $3, $4, COALESCE($5::timestamptz, NOW()),
 			         COALESCE($5::timestamptz, NOW()) + make_interval(months => $6), $7)`,
-			request.ID, request.KeycloakID, c.Type, c.DiscountPct, start, c.Months, c.Note); err != nil {
+			request.ID, request.KeycloakID, c.Type, c.DiscountPct, c.StartDate, c.Months, c.Note); err != nil {
 			return nil, fmt.Errorf("tx.Exec (grant): %w", err)
 		}
 	}

@@ -82,8 +82,10 @@ func (c *Client) GetPayment(ctx context.Context, userKey, reference string) (*Ga
 	}
 
 	switch {
-	case resp.StatusCode() == http.StatusUnauthorized:
-		return nil, fmt.Errorf("%w: payment", ErrUnauthorized)
+	// A 403 is a valid key that is not allowed on /vh: the same credential
+	// fault as a 401, as on the charge and page routes.
+	case resp.StatusCode() == http.StatusUnauthorized, resp.StatusCode() == http.StatusForbidden:
+		return nil, fmt.Errorf("%w: payment (%d)", ErrUnauthorized, resp.StatusCode())
 	case resp.StatusCode() == http.StatusNotFound:
 		return nil, ErrPaymentNotFound
 	case resp.IsError():

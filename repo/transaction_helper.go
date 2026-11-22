@@ -12,9 +12,12 @@ import (
 func (o *OrdersDB) GetTransactionById(ctx context.Context, id int, accountId *int) (*Transaction, error) {
 	var transaction Transaction
 
-	whereCondition := fmt.Sprintf("where id = %d", id)
+	// accountId was formatted with %d as a *int, which prints the pointer, so
+	// a member's lookup could never match. Bound, it is the id.
+	var args queryArgs
+	whereCondition := "where id = " + args.arg(id)
 	if accountId != nil {
-		whereCondition += fmt.Sprintf(" and account_id = %d", accountId)
+		whereCondition += " and account_id = " + args.arg(*accountId)
 	}
 	if err := o.pool.QueryRow(ctx, `SELECT 
 		id,
@@ -24,7 +27,7 @@ func (o *OrdersDB) GetTransactionById(ctx context.Context, id int, accountId *in
 		terminal_id,
 		status,
 		created_at,
-		updated_at from transaction `+whereCondition).Scan(
+		updated_at from transaction `+whereCondition, args...).Scan(
 		&transaction.ID,
 		&transaction.OrderID,
 		&transaction.PaymentID,

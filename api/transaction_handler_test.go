@@ -29,13 +29,15 @@ import (
 
 // pageCall is one request the stub external_payments received.
 type pageCall struct {
-	path string
-	auth string
+	path    string
+	auth    string
+	userKey string
 }
 
 // stubPages points the page client at a stub external_payments that answers
 // every request with status, contentType and body, and records what it was
-// sent. The token is fixed, so no Keycloak is needed.
+// sent, including the UserKey in the body. The token is fixed, so no Keycloak
+// is needed.
 func stubPages(t *testing.T, a *App, status int, contentType, body string) func() []pageCall {
 	t.Helper()
 	var (
@@ -43,8 +45,10 @@ func stubPages(t *testing.T, a *App, status int, contentType, body string) func(
 		calls []pageCall
 	)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var sent struct{ UserKey string }
+		_ = json.NewDecoder(r.Body).Decode(&sent)
 		mu.Lock()
-		calls = append(calls, pageCall{path: r.URL.Path, auth: r.Header.Get("Authorization")})
+		calls = append(calls, pageCall{path: r.URL.Path, auth: r.Header.Get("Authorization"), userKey: sent.UserKey})
 		mu.Unlock()
 		w.Header().Set("Content-Type", contentType)
 		w.WriteHeader(status)
@@ -64,17 +68,18 @@ func stubPages(t *testing.T, a *App, status int, contentType, body string) func(
 	}
 }
 
-// postAsRoot sends a raw request, without do()'s JSON decoding: some responses
-// under test have no body.
-func postAsRoot(a *App, path string, body string) *httptest.ResponseRecorder {
+// postAs sends a raw request as USER_KEY with the given realm roles, without
+// do()'s JSON decoding: some responses under test have no body.
+func postAs(a *App, path, body string, roles ...string) *httptest.ResponseRecorder {
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
-	claims := &middleware.IDTokenClaims{
-		Sub:         USER_KEY,
-		RealmAccess: middleware.Roles{Roles: []string{common.RoleRoot}},
-	}
+	claims := &middleware.IDTokenClaims{Sub: USER_KEY, RealmAccess: middleware.Roles{Roles: roles}}
 	a.gEngine.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), common.CtxAuthClaims, claims)))
 	return w
+}
+
+func postAsRoot(a *App, path, body string) *httptest.ResponseRecorder {
+	return postAs(a, path, body, common.RoleRoot)
 }
 
 // captureRequestLog records what is logged through slog.Default(), such as the
@@ -258,7 +263,7 @@ func Test_recurring_checkout_opens_the_vh_token_page_with_a_bearer(t *testing.T)
 	got := POST_ROOT(t, a, "/v2/transaction/", req, http.StatusOK)
 
 	assert.Equal(t, "https://pelecard.example/page", got["url"])
-	assert.Equal(t, []pageCall{{path: "/vh/token/new", auth: "Bearer tok"}}, calls())
+	assert.Equal(t, []pageCall{{path: "/vh/token/new", auth: "Bearer tok", userKey: "ord-1"}}, calls())
 }
 
 func Test_regular_checkout_opens_the_vh_emv_page_with_a_bearer(t *testing.T) {
@@ -274,7 +279,7 @@ func Test_regular_checkout_opens_the_vh_emv_page_with_a_bearer(t *testing.T) {
 	got := POST_ROOT(t, a, "/v2/transaction/", req, http.StatusOK)
 
 	assert.Equal(t, "https://pelecard.example/page", got["url"])
-	assert.Equal(t, []pageCall{{path: "/vh/emv/new", auth: "Bearer tok"}}, calls())
+	assert.Equal(t, []pageCall{{path: "/vh/emv/new", auth: "Bearer tok", userKey: "ord-1"}}, calls())
 }
 
 // A rejected credential is retried once with a fresh token; if it is rejected
@@ -350,70 +355,30 @@ func Test_page_failure_is_logged_at_error(t *testing.T) {
 	assert.Contains(t, found["err"], pelecard.ErrUnauthorized.Error())
 }
 
-// stubPageBodies is stubPages for tests that need what was posted: it records
-// each request body.
-func stubPageBodies(t *testing.T, a *App) func() []map[string]any {
-	t.Helper()
-	var (
-		mu     sync.Mutex
-		bodies []map[string]any
-	)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		mu.Lock()
-		bodies = append(bodies, body)
-		mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"url":"https://pelecard.example/page"}`))
-	}))
-	t.Cleanup(srv.Close)
-
-	a.ordersAPI.pages = &pelecard.Client{
-		Client:  resty.New(),
-		BaseURL: srv.URL,
-		Tokens:  keycloak.StaticTokenSource("tok"),
-	}
-	return func() []map[string]any {
-		mu.Lock()
-		defer mu.Unlock()
-		return append([]map[string]any(nil), bodies...)
-	}
-}
-
-// postAs sends a raw request as USER_KEY with the given realm roles.
-func postAs(a *App, path, body string, roles ...string) *httptest.ResponseRecorder {
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
-	claims := &middleware.IDTokenClaims{Sub: USER_KEY, RealmAccess: middleware.Roles{Roles: roles}}
-	a.gEngine.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), common.CtxAuthClaims, claims)))
-	return w
-}
-
 // A member can open a card-update page only under their own key, whatever the
 // body names: external_payments files the attempt and its result by UserKey.
 func Test_new_token_member_cannot_name_another_user_key(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)
-	bodies := stubPageBodies(t, a)
+	calls := stubPages(t, a, http.StatusOK, "application/json", `{"url":"https://pelecard.example/page"}`)
 
 	w := postAs(a, "/v2/transaction/new_token", `{"UserKey":"someone-else","Reference":"new_token_1"}`)
 
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	require.Len(t, bodies(), 1)
-	assert.Equal(t, USER_KEY, bodies()[0]["UserKey"])
+	require.Len(t, calls(), 1)
+	assert.Equal(t, USER_KEY, calls()[0].userKey)
 }
 
 func Test_new_token_admin_keeps_the_user_key_from_the_body(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)
-	bodies := stubPageBodies(t, a)
+	calls := stubPages(t, a, http.StatusOK, "application/json", `{"url":"https://pelecard.example/page"}`)
 
 	w := postAs(a, "/v2/transaction/new_token", `{"UserKey":"someone-else","Reference":"new_token_1"}`, common.RoleAdmin)
 
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	require.Len(t, bodies(), 1)
-	assert.Equal(t, "someone-else", bodies()[0]["UserKey"])
+	require.Len(t, calls(), 1)
+	assert.Equal(t, "someone-else", calls()[0].userKey)
 }
 
 // seedTransaction stores an account keyed userKey with one order, payment and

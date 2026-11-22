@@ -5,20 +5,18 @@ import (
 	"testing"
 )
 
-// Billing workers emit events concurrently. Under -race this fails on a shared
-// unsynchronized entropy source; without -race it still catches duplicate IDs.
+// Billing workers emit events concurrently. Run with -race (as CI does): it
+// fails on a shared unsynchronized entropy source.
 func TestMakeEvent_ConcurrentCallsGetDistinctIDs(t *testing.T) {
 	const workers, each = 8, 500
 	ids := make(chan string, workers*each)
 	var wg sync.WaitGroup
 	for range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range each {
 				ids <- MakeEvent(TypeUpdateOrder, nil).ID
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	close(ids)

@@ -53,9 +53,7 @@ type EventBuilder interface {
 
 func MakeEvent(eventType string, payload map[string]interface{}) Event {
 	return Event{
-		// ulid.Make draws from a locked, monotonic source. The shared
-		// math/rand reader this used was not safe for concurrent use, and the
-		// billing workers emit events concurrently.
+		// ulid.Make is safe for concurrent use (locked monotonic entropy).
 		ID:        ulid.Make().String(),
 		Type:      eventType,
 		Payload:   payload,

@@ -161,22 +161,28 @@ func TestUpdatePayment_WritesOnlyThatPayment(t *testing.T) {
 }
 
 func TestRevertOperation_MarksOnlyThatOperation(t *testing.T) {
-	db, pool, ctx := newBindTestDB(t)
+	db, ctx := newTestDB(t)
+	str := func(s string) *string { return &s }
 	ids := make([]int, 2)
 	for i := range ids {
-		require.NoError(t, pool.QueryRow(ctx, `
-			INSERT INTO operation_trace (input, type, output, status, revert)
-			VALUES ($1, 'change_email', '{}', 'done', '{"Queries": [], "Logs": []}') RETURNING id`,
-			fmt.Sprintf(`{"new_email": "new%d@test.test", "old_email": "old%d@test.test"}`, i, i)).Scan(&ids[i]))
+		key, oldEmail := fmt.Sprintf("kc-%d", i), fmt.Sprintf("old%d@test.test", i)
+		seedAccountWithRows(t, db, ctx, key, oldEmail)
+		id, err := db.PerformOperation(ctx, OperationReq{
+			Type:          str("email_update"),
+			NewKeycloakID: str(key),
+			OldEmail:      str(oldEmail), NewEmail: str(fmt.Sprintf("new%d@test.test", i)),
+		})
+		require.NoError(t, err)
+		ids[i] = id
 	}
 
 	require.NoError(t, db.RevertOperation(ctx, "new0@test.test", "old0@test.test"))
 
 	statuses := make([]string, 2)
 	for i, id := range ids {
-		require.NoError(t, pool.QueryRow(ctx, `SELECT status FROM operation_trace WHERE id = $1`, id).Scan(&statuses[i]))
+		require.NoError(t, db.pool.QueryRow(ctx, `SELECT status FROM operation_trace WHERE id = $1`, id).Scan(&statuses[i]))
 	}
-	assert.Equal(t, []string{"reverted", "done"}, statuses)
+	assert.Equal(t, []string{"reverted", "success"}, statuses)
 	assert.ErrorIs(t, db.RevertOperation(ctx, "nobody@test.test", "old1@test.test"), pgx.ErrNoRows)
 }
 

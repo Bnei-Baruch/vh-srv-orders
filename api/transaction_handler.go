@@ -25,7 +25,8 @@ import (
 
 func (o *OrdersAPI) handleTransactionGetByID(c *gin.Context) {
 
-	id, err := strconv.Atoi(c.Param("id"))
+	// transaction.id is int4: a larger id is a bad request, not a 500 from pgx.
+	id, err := strconv.ParseInt(c.Param("id"), 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id! Accepted value is INTEGER", "success": false})
 		return
@@ -34,8 +35,7 @@ func (o *OrdersAPI) handleTransactionGetByID(c *gin.Context) {
 	if !isActiveUser {
 		return
 	}
-	// An admin reads any transaction: no account filter, rather than
-	// account_id = 0, which matches nothing.
+	// nil: no account filter, an admin reads any transaction.
 	var accountFilter *int
 	if !isAdmin {
 		accountId, err := o.repo.GetAccountIDByKeycloakID(c.Request.Context(), keycloakId)
@@ -46,7 +46,7 @@ func (o *OrdersAPI) handleTransactionGetByID(c *gin.Context) {
 		accountFilter = &accountId
 	}
 
-	transaction, err := o.repo.GetTransactionById(c.Request.Context(), id, accountFilter)
+	transaction, err := o.repo.GetTransactionById(c.Request.Context(), int(id), accountFilter)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			c.Status(http.StatusNotFound)

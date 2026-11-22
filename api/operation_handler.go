@@ -76,7 +76,7 @@ func (o *OrdersAPI) handleOperationRevert(c *gin.Context) {
 		return
 	}
 	if errors.Is(revertErr, common.ErrOperationReverted) || errors.Is(revertErr, common.ErrOperationNoAccount) ||
-		errors.Is(revertErr, common.ErrAccountKeyTaken) {
+		errors.Is(revertErr, common.ErrAccountKeyTaken) || errors.Is(revertErr, common.ErrOperationIncomplete) {
 		c.JSON(http.StatusConflict, gin.H{"error": revertErr.Error()})
 		return
 	}

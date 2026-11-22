@@ -25,6 +25,9 @@ var (
 	// ErrOperationNoAccount: no account has the email and keycloak id the
 	// rename (or its revert) starts from, so nothing was changed.
 	ErrOperationNoAccount = fmt.Errorf("no account matches this email and keycloak id")
+	// ErrOperationIncomplete: the stored operation lacks what a revert is
+	// built from, so it cannot be reverted automatically.
+	ErrOperationIncomplete = fmt.Errorf("operation cannot be reverted: incomplete input")
 
 	// ErrPrePayment wraps errors that occur before any payment is attempted
 	// (DB lookups, missing card details). No money moved. No point retrying

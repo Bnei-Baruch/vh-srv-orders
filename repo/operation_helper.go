@@ -158,6 +158,11 @@ func (o *OrdersDB) RevertOperation(ctx context.Context, newEmail string, oldEmai
 	if status == "reverted" {
 		return common.ErrOperationReverted
 	}
+	// A row without these cannot be rebuilt into statements, e.g. one written
+	// before the input carried the keys.
+	if input.NewEmail == nil || input.OldEmail == nil || input.NewKeycloakID == nil {
+		return fmt.Errorf("%w: stored input lacks new_email, old_email or new_keycloak_id", common.ErrOperationIncomplete)
+	}
 
 	// The statements come from the code, built from the stored input.
 	revert := QueryLog{Queries: revertStatements(input)}

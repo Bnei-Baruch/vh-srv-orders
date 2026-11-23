@@ -43,8 +43,6 @@ func (o *OrdersDB) PerformOperation(ctx context.Context, req OperationReq) (int,
 	var (
 		updateAccountsQuery         string
 		revertAcccountsQuery        string
-		updateOrdersQuery           string
-		revertOrdersQuery           string
 		updatePaymentsPelecardQuery string
 		revertPaymentsPelecardQuery string
 		updatePaymentsQuery         string
@@ -80,10 +78,6 @@ func (o *OrdersDB) PerformOperation(ctx context.Context, req OperationReq) (int,
 		updateAccountsQuery = `UPDATE accounts SET "Email" = '` + *newEmail + `', "UserKey" = '` + *newKcId + `' WHERE "Email" = '` + *oldEmail + `' AND "UserKey" = '` + *oldKcId + `';`
 		revertAcccountsQuery = `UPDATE accounts SET "Email" = '` + *oldEmail + `', "UserKey" = '` + *oldKcId + `' WHERE "Email" = '` + *newEmail + `' AND "UserKey" = '` + *newKcId + `';`
 		queryArr = append(queryArr, updateAccountsQuery)
-
-		updateOrdersQuery = `UPDATE orders SET userkey = '` + *newKcId + `' WHERE userkey = '` + *oldKcId + `';`
-		revertOrdersQuery = `UPDATE orders SET userkey = '` + *oldKcId + `' WHERE userkey = '` + *newKcId + `';`
-		queryArr = append(queryArr, updateOrdersQuery)
 
 		updatePaymentsPelecardQuery = `UPDATE payments_pelecard SET ord_key = '` + *newKcId + `' WHERE ord_key = '` + *oldKcId + `';`
 		revertPaymentsPelecardQuery = `UPDATE payments_pelecard SET ord_key = '` + *oldKcId + `' WHERE ord_key = '` + *newKcId + `';`
@@ -125,8 +119,6 @@ func (o *OrdersDB) PerformOperation(ctx context.Context, req OperationReq) (int,
 		switch query {
 		case updateAccountsQuery:
 			revert.Queries = append(revert.Queries, revertAcccountsQuery)
-		case updateOrdersQuery:
-			revert.Queries = append(revert.Queries, revertOrdersQuery)
 		case updatePaymentsPelecardQuery:
 			revert.Queries = append(revert.Queries, revertPaymentsPelecardQuery)
 		case updatePaymentsQuery:

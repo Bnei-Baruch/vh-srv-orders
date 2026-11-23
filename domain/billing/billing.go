@@ -145,12 +145,6 @@ func (s *BillingService) flagAndSkipOperations(ctx context.Context, period *Bill
 		return fmt.Errorf("clear flags: %w", err)
 	}
 
-	// Update user keys
-	utils.LogFor(ctx).Info("Synchronizing user keys from accounts table to orders")
-	if err := s.repo.UpdateOrdersUserKeyFromAccounts(ctx); err != nil {
-		return fmt.Errorf("update user keys: %w", err)
-	}
-
 	// Flag orders for renewal
 	utils.LogFor(ctx).Info("Identifying and flagging orders eligible for renewal")
 	count, err := s.repo.FlagOrdersToRenew(ctx, int64(period.Month), int64(period.Year))

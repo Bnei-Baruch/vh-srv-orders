@@ -99,3 +99,40 @@ func (c *Client) GetPayment(ctx context.Context, userKey, reference string) (*Ga
 
 	return &payment, nil
 }
+
+// GetChargeStatus asks external_payments how a charge it answered "pending"
+// ended: the status of the request with this user key and reference — "valid"
+// charged, "invalid" or "cancel" not charged, "new" or "in-process" not settled
+// yet. ErrPaymentNotFound when external_payments has no such request.
+func (c *Client) GetChargeStatus(ctx context.Context, userKey, reference string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, paymentReadTimeout)
+	defer cancel()
+
+	resp, err := c.sendAuthorized(ctx, "charge status", func(r *resty.Request) (*resty.Response, error) {
+		return r.SetQueryParam("reference", reference).
+			Get(c.BaseURL + "/vh/charge/" + url.PathEscape(userKey))
+	})
+	if err != nil {
+		return "", err
+	}
+
+	switch {
+	case resp.StatusCode() == http.StatusUnauthorized, resp.StatusCode() == http.StatusForbidden:
+		return "", fmt.Errorf("%w: charge status (%d)", ErrUnauthorized, resp.StatusCode())
+	case resp.StatusCode() == http.StatusNotFound:
+		return "", ErrPaymentNotFound
+	case resp.IsError():
+		return "", utils.RespStatusError(resp, "external charge status error")
+	}
+
+	var body struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(resp.Body(), &body); err != nil {
+		return "", fmt.Errorf("failed to unmarshal external charge status: %w", err)
+	}
+	if body.Status == "" {
+		return "", fmt.Errorf("external charge status: empty status")
+	}
+	return body.Status, nil
+}

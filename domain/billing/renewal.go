@@ -3,6 +3,7 @@ package billing
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -85,6 +86,10 @@ func processOrder(
 	paymentCtx := context.WithoutCancel(ctx)
 	resp, payErr := chargeExecutor.Execute(paymentCtx, chargeReq, terminal, uint(data.Order.ID))
 
+	if errors.Is(payErr, pelecard.ErrOutcomeUnknown) {
+		return payment, holdChargePending(ctx, ordersRepo, data, payment, price, terminal, payErr)
+	}
+
 	if payErr != nil {
 		payment.PaymentStatus = null.StringFrom(common.PaymentStatusFailed)
 		payment.Success = null.StringFrom("0")
@@ -129,6 +134,30 @@ func processOrder(
 	}
 
 	return payment, nil
+}
+
+// holdChargePending leaves a charge with no known outcome as it is: the payment
+// stays pending and the order leaves torenew, so neither the EMV fallback nor a
+// re-run of billing charges it again. billing reconcile-pending settles it once
+// external_payments knows. Returns an error wrapping pelecard.ErrOutcomeUnknown.
+func holdChargePending(ctx context.Context, ordersRepo repo.OrdersRepository, data *repo.RenewalData,
+	payment *repo.Payment, price *pricing.ChargePrice, terminal pelecard.Terminal, payErr error) error {
+	attrs := []any{
+		slog.Int("order_id", data.Order.ID),
+		slog.Int("payment_id", payment.ID),
+		slog.String("reference", payment.ParamX.String),
+		slog.Float64("amount", price.Amount),
+		slog.String("currency", price.Currency),
+		slog.String("terminal", terminal.Name),
+		slog.Any("err", payErr),
+	}
+	if err := ordersRepo.MarkRenewalChargePending(ctx, uint(data.Order.ID)); err != nil {
+		// Still torenew: a re-run of billing would charge this order again.
+		utils.LogFor(ctx).Error("CHARGE_OUTCOME_UNKNOWN_NOT_HELD", append(attrs, slog.Any("flag_err", err))...)
+		return fmt.Errorf("MarkRenewalChargePending: %w (after %w)", err, payErr)
+	}
+	utils.LogFor(ctx).Warn("CHARGE_OUTCOME_UNKNOWN", attrs...)
+	return payErr
 }
 
 func emitOrderEvent(ctx context.Context, emitter events.EventEmitter, orderID int) {

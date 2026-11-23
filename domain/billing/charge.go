@@ -253,6 +253,10 @@ dispatchLoop:
 		slog.Int64("post_payment_errors", stats.errorCount.Get("post_payment")),
 		slog.Int64("charge_success_db_fail", stats.errorCount.Get("charge_success_db_fail")),
 		slog.Int64("gateway_errors", stats.errorCount.Get("gateway")),
+		slog.Int64("outcome_unknown", stats.errorCount.Get("outcome_unknown")),
+		slog.Float64("outcome_unknown_nis", stats.reasonFailedSum.Get("outcome_unknown:"+common.CurrencyNIS)),
+		slog.Float64("outcome_unknown_usd", stats.reasonFailedSum.Get("outcome_unknown:"+common.CurrencyUSD)),
+		slog.Float64("outcome_unknown_eur", stats.reasonFailedSum.Get("outcome_unknown:"+common.CurrencyEUR)),
 		slog.Int64("unauthorized_errors", stats.errorCount.Get("unauthorized")),
 		slog.Int64("no_credential_errors", stats.errorCount.Get("no_credential")),
 		slog.Float64("no_credential_failed_nis", stats.reasonFailedSum.Get("no_credential:"+common.CurrencyNIS)),
@@ -346,6 +350,10 @@ func (s *BillingService) processWithRecovery(ctx context.Context, workerID int, 
 			return
 		}
 		// Token declined — fall through to EMV
+	} else if errors.Is(tokenErr, pelecard.ErrOutcomeUnknown) {
+		// It may have been charged: the EMV leg could take the money twice.
+		recordOutcomeUnknown(ctx, hub, stats, pelecard.TokenTerminal.Name, ro.Price, tokenErr)
+		return false
 	} else if handleNonRetryableError(ctx, hub, stats, pelecard.TokenTerminal.Name, ro.Price, tokenPayment, tokenErr) {
 		return credentialFailureReason(tokenErr) != ""
 	} else {
@@ -365,6 +373,11 @@ func (s *BillingService) processWithRecovery(ctx context.Context, workerID int, 
 		}
 		recordDeclinedOrder(ctx, stats, ro.Price)
 		return
+	}
+
+	if errors.Is(emvErr, pelecard.ErrOutcomeUnknown) {
+		recordOutcomeUnknown(ctx, hub, stats, pelecard.EMVTerminal.Name, ro.Price, emvErr)
+		return false
 	}
 
 	if handleNonRetryableError(ctx, hub, stats, pelecard.EMVTerminal.Name, ro.Price, emvPayment, emvErr) {
@@ -502,6 +515,17 @@ func recordPostPaymentError(ctx context.Context, hub *sentry.Hub, stats *chargeS
 		hub.CaptureException(err)
 	})
 	stats.errorCount.Inc("post_payment", 1)
+}
+
+// recordOutcomeUnknown counts an order held charge_pending. Its amount is
+// neither collected nor failed until billing reconcile-pending settles it.
+func recordOutcomeUnknown(ctx context.Context, hub *sentry.Hub, stats *chargeStats, terminal string,
+	price *pricing.ChargePrice, err error) {
+	stats.errorCount.Inc("outcome_unknown", 1)
+	stats.reasonFailedSum.Inc("outcome_unknown:"+price.Currency, price.Amount)
+	captureError(hub, terminal, "outcome_unknown", err)
+	utils.LogFor(ctx).Warn("charge outcome unknown; order held for billing reconcile-pending",
+		slog.String("terminal", terminal))
 }
 
 func recordDeclinedOrder(ctx context.Context, stats *chargeStats, price *pricing.ChargePrice) {

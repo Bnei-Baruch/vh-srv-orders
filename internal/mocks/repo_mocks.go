@@ -777,6 +777,74 @@ func (_c *MockOrdersRepository_GetAllSpecialsByEmail_Call) RunAndReturn(run func
 	return _c
 }
 
+// GetChargePendingRenewals provides a mock function for the type MockOrdersRepository
+func (_mock *MockOrdersRepository) GetChargePendingRenewals(ctx context.Context, createdBefore time.Time) ([]repo.PendingCharge, error) {
+	ret := _mock.Called(ctx, createdBefore)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetChargePendingRenewals")
+	}
+
+	var r0 []repo.PendingCharge
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, time.Time) ([]repo.PendingCharge, error)); ok {
+		return returnFunc(ctx, createdBefore)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, time.Time) []repo.PendingCharge); ok {
+		r0 = returnFunc(ctx, createdBefore)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]repo.PendingCharge)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, time.Time) error); ok {
+		r1 = returnFunc(ctx, createdBefore)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockOrdersRepository_GetChargePendingRenewals_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetChargePendingRenewals'
+type MockOrdersRepository_GetChargePendingRenewals_Call struct {
+	*mock.Call
+}
+
+// GetChargePendingRenewals is a helper method to define mock.On call
+//   - ctx context.Context
+//   - createdBefore time.Time
+func (_e *MockOrdersRepository_Expecter) GetChargePendingRenewals(ctx any, createdBefore any) *MockOrdersRepository_GetChargePendingRenewals_Call {
+	return &MockOrdersRepository_GetChargePendingRenewals_Call{Call: _e.mock.On("GetChargePendingRenewals", ctx, createdBefore)}
+}
+
+func (_c *MockOrdersRepository_GetChargePendingRenewals_Call) Run(run func(ctx context.Context, createdBefore time.Time)) *MockOrdersRepository_GetChargePendingRenewals_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 time.Time
+		if args[1] != nil {
+			arg1 = args[1].(time.Time)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockOrdersRepository_GetChargePendingRenewals_Call) Return(pendingCharges []repo.PendingCharge, err error) *MockOrdersRepository_GetChargePendingRenewals_Call {
+	_c.Call.Return(pendingCharges, err)
+	return _c
+}
+
+func (_c *MockOrdersRepository_GetChargePendingRenewals_Call) RunAndReturn(run func(ctx context.Context, createdBefore time.Time) ([]repo.PendingCharge, error)) *MockOrdersRepository_GetChargePendingRenewals_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetFlaggedOrders provides a mock function for the type MockOrdersRepository
 func (_mock *MockOrdersRepository) GetFlaggedOrders(ctx context.Context) ([]repo.Order, error) {
 	ret := _mock.Called(ctx)
@@ -1537,6 +1605,63 @@ func (_c *MockOrdersRepository_LoadRenewalData_Call) Return(renewalData *repo.Re
 }
 
 func (_c *MockOrdersRepository_LoadRenewalData_Call) RunAndReturn(run func(ctx context.Context, orderID uint) (*repo.RenewalData, error)) *MockOrdersRepository_LoadRenewalData_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// MarkRenewalChargePending provides a mock function for the type MockOrdersRepository
+func (_mock *MockOrdersRepository) MarkRenewalChargePending(ctx context.Context, orderID uint) error {
+	ret := _mock.Called(ctx, orderID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for MarkRenewalChargePending")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint) error); ok {
+		r0 = returnFunc(ctx, orderID)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockOrdersRepository_MarkRenewalChargePending_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MarkRenewalChargePending'
+type MockOrdersRepository_MarkRenewalChargePending_Call struct {
+	*mock.Call
+}
+
+// MarkRenewalChargePending is a helper method to define mock.On call
+//   - ctx context.Context
+//   - orderID uint
+func (_e *MockOrdersRepository_Expecter) MarkRenewalChargePending(ctx any, orderID any) *MockOrdersRepository_MarkRenewalChargePending_Call {
+	return &MockOrdersRepository_MarkRenewalChargePending_Call{Call: _e.mock.On("MarkRenewalChargePending", ctx, orderID)}
+}
+
+func (_c *MockOrdersRepository_MarkRenewalChargePending_Call) Run(run func(ctx context.Context, orderID uint)) *MockOrdersRepository_MarkRenewalChargePending_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 uint
+		if args[1] != nil {
+			arg1 = args[1].(uint)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockOrdersRepository_MarkRenewalChargePending_Call) Return(err error) *MockOrdersRepository_MarkRenewalChargePending_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockOrdersRepository_MarkRenewalChargePending_Call) RunAndReturn(run func(ctx context.Context, orderID uint) error) *MockOrdersRepository_MarkRenewalChargePending_Call {
 	_c.Call.Return(run)
 	return _c
 }

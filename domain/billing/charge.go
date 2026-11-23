@@ -113,10 +113,8 @@ func (s *BillingService) preResolve(ctx context.Context, orderIDs []uint, maxWor
 	resultChan := make(chan preResolveResult, len(orderIDs))
 
 	var wg sync.WaitGroup
-	for i := 0; i < maxWorkers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range maxWorkers {
+		wg.Go(func() {
 			for orderID := range orderChan {
 				data, err := s.repo.LoadRenewalData(ctx, orderID)
 				if err != nil {
@@ -145,7 +143,7 @@ func (s *BillingService) preResolve(ctx context.Context, orderIDs []uint, maxWor
 					Price:   price,
 				}}
 			}
-		}()
+		})
 	}
 
 	go func() {
@@ -200,10 +198,8 @@ func (s *BillingService) chargeResolved(ctx context.Context, orders []resolvedOr
 	orderChan := make(chan resolvedOrder, maxWorkers)
 	var wg sync.WaitGroup
 
-	for i := 0; i < maxWorkers; i++ {
-		wg.Add(1)
-		go func(workerID int) {
-			defer wg.Done()
+	for workerID := range maxWorkers {
+		wg.Go(func() {
 			for ro := range orderChan {
 				select {
 				case <-ctx.Done():
@@ -219,7 +215,7 @@ func (s *BillingService) chargeResolved(ctx context.Context, orders []resolvedOr
 					breaker.record(s.processWithRecovery(ctx, workerID, ro, &stats))
 				}
 			}
-		}(i)
+		})
 	}
 
 dispatchLoop:

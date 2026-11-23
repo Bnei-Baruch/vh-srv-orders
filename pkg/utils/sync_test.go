@@ -89,13 +89,11 @@ func TestTTLCache_ConcurrentAccess(t *testing.T) {
 	cache := NewTTLCache[int, int](time.Minute)
 	var wg sync.WaitGroup
 
-	for i := 0; i < 100; i++ {
-		wg.Add(1)
-		go func(n int) {
-			defer wg.Done()
+	for n := range 100 {
+		wg.Go(func() {
 			cache.Put(n, n*10)
 			cache.Get(n)
-		}(i)
+		})
 	}
 	wg.Wait()
 

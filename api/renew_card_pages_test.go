@@ -38,16 +38,14 @@ func TestRenewCardPages_ConcurrentRequestsShareOnePage(t *testing.T) {
 	bodies := make([]string, clicks)
 	var reusedCount atomic.Int32
 	for i := range clicks {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			body, reused, err := pages.open(context.Background(), "new_token_1", clickPayload, slowOpen)
 			assert.NoError(t, err)
 			bodies[i] = string(body)
 			if reused {
 				reusedCount.Add(1)
 			}
-		}()
+		})
 	}
 	time.Sleep(50 * time.Millisecond)
 	close(release)
@@ -198,15 +196,13 @@ func TestRenewCardPages_WaitersOnAFailureAreReused(t *testing.T) {
 	var wg sync.WaitGroup
 	var reportable atomic.Int32
 	for range clicks {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_, reused, err := pages.open(context.Background(), "new_token_1", clickPayload, failing)
 			assert.Error(t, err)
 			if !reused {
 				reportable.Add(1)
 			}
-		}()
+		})
 	}
 	time.Sleep(50 * time.Millisecond)
 	close(release)

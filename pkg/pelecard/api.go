@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/go-resty/resty/v2"
@@ -26,9 +28,21 @@ var ErrUnauthorized = errors.New("external_payments rejected the credential")
 // the run summary.
 var ErrNoCredential = errors.New("no credential available for external_payments")
 
+// ErrOutcomeUnknown means a charge may have gone through: external_payments
+// answered "pending", answered 5xx or something unreadable, or the connection
+// was lost after the request was sent. Not a decline: charging the other
+// terminal could take the money twice. The payment stays pending until
+// `billing reconcile-pending` learns the outcome from external_payments.
+var ErrOutcomeUnknown = errors.New("charge outcome unknown")
+
+// chargeStatusPending is external_payments' answer for a charge it left
+// in-process for its own reconciliation.
+const chargeStatusPending = "pending"
+
 type PelecardAPI interface {
 	FetchMuhlafim(ctx context.Context, startDate, endDate string) (map[string]MuhlafimEntry, error)
 	ChargeByToken(ctx context.Context, request *ChargeRequest, terminal Terminal) (map[string]interface{}, error)
+	GetChargeStatus(ctx context.Context, userKey, reference string) (string, error)
 }
 
 // Client calls external_payments, which holds the Pelecard credentials and
@@ -198,6 +212,9 @@ func (c *Client) ChargeByToken(ctx context.Context, request *ChargeRequest, term
 		return r.SetBody(request).Post(terminal.ChargeURL)
 	})
 	if err != nil {
+		if requestMayHaveArrived(err) {
+			return nil, fmt.Errorf("%w: %w", ErrOutcomeUnknown, err)
+		}
 		return nil, err
 	}
 
@@ -220,6 +237,12 @@ func (c *Client) ChargeByToken(ctx context.Context, request *ChargeRequest, term
 			return nil, fmt.Errorf("%w: charge gateway HTTP error [%d]",
 				ErrUnauthorized, code)
 		}
+		// A 4xx is refused before any charge. A 5xx can come after one (a proxy
+		// timing out while external_payments still waits on Pelecard), so it
+		// is not a decline.
+		if resp.StatusCode() >= http.StatusInternalServerError {
+			return nil, fmt.Errorf("%w: charge gateway HTTP error [%d]", ErrOutcomeUnknown, resp.StatusCode())
+		}
 
 		return nil, fmt.Errorf("charge gateway HTTP error [%d]", resp.StatusCode())
 	}
@@ -230,10 +253,30 @@ func (c *Client) ChargeByToken(ctx context.Context, request *ChargeRequest, term
 			slog.String("terminal", terminal.Name),
 			slog.String("body", string(resp.Body())),
 			slog.Any("err", err))
-		return nil, fmt.Errorf("failed to unmarshal charge response: %w", err)
+		return nil, fmt.Errorf("%w: failed to unmarshal charge response: %w", ErrOutcomeUnknown, err)
+	}
+
+	if status, _ := result["status"].(string); status == chargeStatusPending {
+		log.Warn("charge gateway answered pending",
+			slog.String("terminal", terminal.Name),
+			slog.Any("detail", result["error"]))
+		return result, fmt.Errorf("%w: external_payments answered pending: %v", ErrOutcomeUnknown, result["error"])
 	}
 
 	return result, nil
+}
+
+// requestMayHaveArrived reports whether a failed send got as far as opening a
+// connection, so that external_payments may have received the charge. A
+// failure to connect (DNS, refused, connect timeout) sent nothing, nor did
+// failing to get a credential.
+func requestMayHaveArrived(err error) bool {
+	var urlErr *url.Error
+	if !errors.As(err, &urlErr) {
+		return false
+	}
+	var opErr *net.OpError
+	return !(errors.As(err, &opErr) && opErr.Op == "dial")
 }
 
 // Execute implements ChargeExecutor by delegating to ChargeByToken.

@@ -29,6 +29,8 @@ type OrdersRepository interface {
 	LoadRenewalData(ctx context.Context, orderID uint) (*RenewalData, error)
 	CreateRenewalPayment(ctx context.Context, data *RenewalData, amount float64, currency, pricingVersion string, pricingEvaluation null.JSON, pmx string) (*Payment, error)
 	FinalizeRenewal(ctx context.Context, orderID uint, payment *Payment) error
+	MarkRenewalChargePending(ctx context.Context, orderID uint) error
+	GetChargePendingRenewals(ctx context.Context, createdBefore time.Time) ([]PendingCharge, error)
 	FlagOrdersToRenew(ctx context.Context, month int64, year int64) (int64, error)
 	FlagOrder(ctx context.Context, id int, flag string) error
 	GetFlaggedOrders(ctx context.Context) ([]Order, error)

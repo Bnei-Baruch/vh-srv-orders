@@ -195,6 +195,78 @@ func (_c *MockPelecardAPI_FetchMuhlafim_Call) RunAndReturn(run func(ctx context.
 	return _c
 }
 
+// GetChargeStatus provides a mock function for the type MockPelecardAPI
+func (_mock *MockPelecardAPI) GetChargeStatus(ctx context.Context, userKey string, reference string) (string, error) {
+	ret := _mock.Called(ctx, userKey, reference)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetChargeStatus")
+	}
+
+	var r0 string
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) (string, error)); ok {
+		return returnFunc(ctx, userKey, reference)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) string); ok {
+		r0 = returnFunc(ctx, userKey, reference)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+		r1 = returnFunc(ctx, userKey, reference)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockPelecardAPI_GetChargeStatus_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetChargeStatus'
+type MockPelecardAPI_GetChargeStatus_Call struct {
+	*mock.Call
+}
+
+// GetChargeStatus is a helper method to define mock.On call
+//   - ctx context.Context
+//   - userKey string
+//   - reference string
+func (_e *MockPelecardAPI_Expecter) GetChargeStatus(ctx any, userKey any, reference any) *MockPelecardAPI_GetChargeStatus_Call {
+	return &MockPelecardAPI_GetChargeStatus_Call{Call: _e.mock.On("GetChargeStatus", ctx, userKey, reference)}
+}
+
+func (_c *MockPelecardAPI_GetChargeStatus_Call) Run(run func(ctx context.Context, userKey string, reference string)) *MockPelecardAPI_GetChargeStatus_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockPelecardAPI_GetChargeStatus_Call) Return(s string, err error) *MockPelecardAPI_GetChargeStatus_Call {
+	_c.Call.Return(s, err)
+	return _c
+}
+
+func (_c *MockPelecardAPI_GetChargeStatus_Call) RunAndReturn(run func(ctx context.Context, userKey string, reference string) (string, error)) *MockPelecardAPI_GetChargeStatus_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockChargeExecutor creates a new instance of MockChargeExecutor. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockChargeExecutor(t interface {

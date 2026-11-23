@@ -70,6 +70,10 @@ const (
 	OrderFlagPaused         = "paused"
 	OrderFlagSkip           = "skip"
 	OrderFlagPricingError   = "pricing_error"
+	// OrderFlagChargePending: the renewal charge's outcome is unknown (see
+	// pelecard.ErrOutcomeUnknown). Out of torenew so a re-run of billing does
+	// not charge it again; billing reconcile-pending settles it.
+	OrderFlagChargePending = "charge_pending"
 
 	HHGrantTypeHayal  = "hh-hayal"
 	HHGrantTypeGimlaj = "hh-gimlaj"

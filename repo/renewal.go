@@ -136,12 +136,72 @@ func (o *OrdersDB) FinalizeRenewal(ctx context.Context, orderID uint, payment *P
 		_, err = tx.Exec(ctx, `UPDATE orders SET "Status"=$1, "PaymentDate"=$2, updated_at=$3 WHERE id = $4`,
 			common.OrderStatusPaid, now, now, payment.OrderID.Int)
 	} else {
-		_, err = tx.Exec(ctx, `UPDATE orders SET "Status"=$1, updated_at=$2 WHERE id = $3`,
-			common.OrderStatusNoSuccess, now, payment.OrderID.Int)
+		// A charge_pending order settled as not charged goes back to torenew, so
+		// a re-run of billing tries it again like any other declined order.
+		_, err = tx.Exec(ctx, `UPDATE orders SET "Status"=$1,
+				"Flag" = CASE WHEN "Flag" = $2 THEN $3 ELSE "Flag" END,
+				updated_at=$4 WHERE id = $5`,
+			common.OrderStatusNoSuccess, common.OrderFlagChargePending, common.OrderFlagToRenew, now, payment.OrderID.Int)
 	}
 	if err != nil {
 		return fmt.Errorf("%w: tx.Exec [update order status]: %w", common.ErrPostPayment, err)
 	}
 
 	return tx.Commit(ctx)
+}
+
+// MarkRenewalChargePending takes an order out of torenew after a charge whose
+// outcome is unknown. Its payment stays pending, untouched, for
+// GetChargePendingRenewals.
+func (o *OrdersDB) MarkRenewalChargePending(ctx context.Context, orderID uint) error {
+	tag, err := o.pool.Exec(ctx, `UPDATE orders SET "Flag"=$1, updated_at=$2 WHERE id = $3`,
+		common.OrderFlagChargePending, time.Now(), orderID)
+	if err != nil {
+		return fmt.Errorf("o.pool.Exec: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return common.ErrNoRowsAffected
+	}
+	return nil
+}
+
+// PendingCharge is a charge_pending order and the payment whose charge has no
+// known outcome: the newest pending payment of the order.
+type PendingCharge struct {
+	OrderID   uint
+	PaymentID int
+}
+
+// GetChargePendingRenewals lists the charge_pending orders whose pending payment
+// was created before createdBefore, oldest first. The cutoff gives
+// external_payments' own reconciliation time to settle the charge first.
+func (o *OrdersDB) GetChargePendingRenewals(ctx context.Context, createdBefore time.Time) ([]PendingCharge, error) {
+	rows, err := o.pool.Query(ctx, `
+		SELECT order_id, payment_id FROM (
+			SELECT DISTINCT ON (o.id) o.id AS order_id, p.id AS payment_id, p.created_at
+			FROM orders o
+			JOIN payments p ON p."OrderID" = o.id
+			WHERE o."Flag" = $1 AND p."PaymentStatus" = $2 AND p.deleted_at IS NULL
+			ORDER BY o.id, p.id DESC
+		) newest
+		WHERE created_at < $3
+		ORDER BY payment_id`,
+		common.OrderFlagChargePending, common.PaymentStatusPending, createdBefore)
+	if err != nil {
+		return nil, fmt.Errorf("o.pool.Query: %w", err)
+	}
+	defer rows.Close()
+
+	pending := []PendingCharge{}
+	for rows.Next() {
+		var pc PendingCharge
+		if err := rows.Scan(&pc.OrderID, &pc.PaymentID); err != nil {
+			return nil, fmt.Errorf("rows.Scan: %w", err)
+		}
+		pending = append(pending, pc)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows.Err: %w", err)
+	}
+	return pending, nil
 }

@@ -378,6 +378,7 @@ Monthly billing uses a two-phase architecture:
 billing start                        # Full workflow: flag → skip → muhlafim → charge
 billing retry-pricing-errors         # Retry only orders flagged pricing_error
 billing reconcile --log-file <path>  # Parse CHARGE_SUCCESS_DB_FAIL log markers, retry FinalizeRenewal
+billing reconcile-pending            # Settle charge_pending orders by asking external_payments
 ```
 
 Shared flags on `billing` parent: `--dry-run`, `--max-workers`.
@@ -387,6 +388,7 @@ Shared flags on `billing` parent: `--dry-run`, `--max-workers`.
 - `CHARGE_SUCCESS_DB_FAIL` — structured slog marker when gateway succeeds but `FinalizeRenewal` fails. Contains order_id, payment_id, amount, currency, terminal. Reconciled via `billing reconcile`.
 - `pricing_error` flag — set on orders where `LoadRenewalData` or `Resolve` fails. Retried via `billing retry-pricing-errors`.
 - `ErrPrePayment` / `ErrPostPayment` — sentinel errors controlling terminal fallback behavior.
+- `pelecard.ErrOutcomeUnknown` — the charge may have gone through: external_payments answered `pending`, answered 5xx or something unreadable, or the connection dropped after sending. Never a decline and never a reason to try EMV: the payment stays `pending`, the order is flagged `charge_pending` (out of `torenew`, so a re-run does not charge it again) and a `CHARGE_OUTCOME_UNKNOWN` marker is logged. `billing reconcile-pending` asks `GET /vh/charge/:user_key?reference=` and finalizes: `valid` → success; `invalid`/`cancel`/`error`/no such request → failed, back to `torenew`; `new`/`in-process` → left held. A failure to connect (dial) or a 4xx is pre-charge and still falls back.
 
 ### Priority contribution fetching
 

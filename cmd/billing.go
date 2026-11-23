@@ -57,11 +57,27 @@ Examples:
 	Run: runBillingReconcile,
 }
 
+var billingReconcilePendingCmd = &cobra.Command{
+	Use:   "reconcile-pending",
+	Short: "Settle renewal charges whose outcome was unknown",
+	Long: `Asks external_payments how each charge_pending renewal ended and finalizes it:
+charged → paid and renewed; not charged → failed and back to torenew for the
+next billing run; not settled yet → left held. Run it after billing start once
+external_payments' own reconciliation has had time (--older-than).
+With --dry-run it only reports; nothing is written.
+
+Examples:
+  orders billing reconcile-pending
+  orders billing reconcile-pending --older-than 2h --dry-run`,
+	Run: runBillingReconcilePending,
+}
+
 func init() {
 	rootCmd.AddCommand(billingCmd)
 	billingCmd.AddCommand(billingStartCmd)
 	billingCmd.AddCommand(billingRetryPricingErrorsCmd)
 	billingCmd.AddCommand(billingReconcileCmd)
+	billingCmd.AddCommand(billingReconcilePendingCmd)
 
 	// Shared flags inherited by all billing subcommands
 	billingCmd.PersistentFlags().Bool("dry-run", false, "Simulate payment gateway calls (no live charges); all DB operations are real")
@@ -70,6 +86,9 @@ func init() {
 	// reconcile-specific flags
 	billingReconcileCmd.Flags().String("log-file", "", "Path to log file with CHARGE_SUCCESS_DB_FAIL markers, or - for stdin")
 	_ = billingReconcileCmd.MarkFlagRequired("log-file")
+
+	billingReconcilePendingCmd.Flags().Duration("older-than", 30*time.Minute,
+		"Only settle charges at least this old, so external_payments has reconciled them")
 
 	// start-specific flags
 	billingStartCmd.Flags().Int("month", 0, "Month (1-12), defaults to current month")
@@ -140,6 +159,44 @@ func runBillingRetryPricingErrors(cmd *cobra.Command, args []string) {
 	}
 
 	slog.Info("Retry pricing errors completed successfully", slog.Int("orders_charged", count))
+}
+
+func runBillingReconcilePending(cmd *cobra.Command, args []string) {
+	slog.Info("Settling charge_pending renewals", slog.String("command", "billing reconcile-pending"))
+	initBillingSentry("billing reconcile-pending")
+	defer sentry.Flush(2 * time.Second)
+
+	dryRun, _, err := parseSharedBillingFlags(cmd)
+	if err != nil {
+		sentry.CaptureException(err)
+		utils.LogFatal("Failed to parse flags", slog.Any("error", err))
+	}
+	olderThan, err := cmd.Flags().GetDuration("older-than")
+	if err != nil || olderThan < 0 {
+		utils.LogFatal("Malformed --older-than", slog.Any("error", err))
+	}
+	if err := keycloakConfigError(); err != nil {
+		utils.LogFatal("Missing configuration", slog.Any("error", err))
+	}
+
+	eventEmitter, ordersDB, cleanup, err := initBillingInfra()
+	if err != nil {
+		sentry.CaptureException(err)
+		utils.LogFatal("Failed to initialize billing infrastructure", slog.Any("error", err))
+	}
+	defer cleanup()
+
+	// Asks and finalizes only: no pricing and no charge, so neither is wired.
+	billingService := billing.NewBillingService(ordersDB, pelecard.NewClient(), eventEmitter, nil, nil)
+	ctx := context.WithValue(context.Background(), common.CtxEventBuilder, new(BillingWorkflowEventBuilder))
+	result, err := billingService.ReconcilePendingCharges(ctx, olderThan, dryRun)
+	if err != nil {
+		sentry.CaptureException(err)
+		utils.LogFatal("reconcile-pending failed", slog.Any("error", err))
+	}
+	if result.Errors > 0 {
+		sentry.CaptureMessage(fmt.Sprintf("billing reconcile-pending: %d of %d could not be settled", result.Errors, result.Checked))
+	}
 }
 
 func runBillingReconcile(cmd *cobra.Command, args []string) {

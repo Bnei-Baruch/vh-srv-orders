@@ -12,7 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:12
+        # Same as cicd.yml: matches the on-prem vh-db (PG 18).
+        image: postgres:18
         env:
           POSTGRES_DB: orders_test
           POSTGRES_USER: postgres

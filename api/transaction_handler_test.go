@@ -432,3 +432,12 @@ func Test_get_transaction_as_admin_reads_any(t *testing.T) {
 	a.gEngine.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), common.CtxAuthClaims, claims)))
 	assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
 }
+
+// transaction.id is int4, so an id past its range is refused up front rather
+// than reaching pgx, which cannot encode it and answers 500.
+func Test_get_transaction_id_beyond_int4_is_400(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	GET(t, a, "/v2/transaction/2147483648", http.StatusBadRequest)
+}

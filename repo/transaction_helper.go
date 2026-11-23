@@ -12,8 +12,6 @@ import (
 func (o *OrdersDB) GetTransactionById(ctx context.Context, id int, accountId *int) (*Transaction, error) {
 	var transaction Transaction
 
-	// accountId was formatted with %d as a *int, which prints the pointer, so
-	// a member's lookup could never match. Bound, it is the id.
 	var args queryArgs
 	whereCondition := "where id = " + args.arg(id)
 	if accountId != nil {

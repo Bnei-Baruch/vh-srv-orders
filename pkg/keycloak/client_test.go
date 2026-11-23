@@ -29,20 +29,16 @@ func TestClientTokenReadRacesInvalidation(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	for i := 0; i < 4; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 4 {
+		wg.Go(func() {
 			for j := 0; j < 150; j++ {
 				_, _ = client.Token()
 			}
-		}()
+		})
 	}
 
-	for i := 0; i < 4; i++ {
-		wg.Add(1)
-		go func(worker int) {
-			defer wg.Done()
+	for worker := range 4 {
+		wg.Go(func() {
 			for j := 0; j < 150; j++ {
 				if worker%2 == 0 {
 					client.InvalidateToken("cached")
@@ -51,7 +47,7 @@ func TestClientTokenReadRacesInvalidation(t *testing.T) {
 				}
 				seedToken(client, "cached")
 			}
-		}(i)
+		})
 	}
 
 	wg.Wait()
@@ -81,10 +77,8 @@ func TestClientConcurrentTokenAccess(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 8 {
+		wg.Go(func() {
 			for j := 0; j < 200; j++ {
 				client.InvalidateToken("cached")
 				client.Invalidate()
@@ -94,7 +88,7 @@ func TestClientConcurrentTokenAccess(t *testing.T) {
 				client.claims = &claims
 				client.mu.Unlock()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }

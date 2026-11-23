@@ -55,7 +55,7 @@ func (o *OrdersDB) CreateOrderViaTransaction(ctx context.Context, req RequestOrd
 	}
 
 	createString, numString, createQueryArgs := prepareOrderCreateQuery(order)
-	err = o.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	err = o.pool.QueryRow(ctx, `INSERT INTO orders (`+createString+`) VALUES (`+numString+`) RETURNING id`,
 		createQueryArgs...).
 		Scan(&order.ID)
 	if err != nil {
@@ -270,7 +270,7 @@ func (o *OrdersDB) CreateV2Order(ctx context.Context, order Order) (int, error) 
 	}
 
 	var ID int
-	if err := o.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO orders (%s) VALUES (%s) RETURNING id`, createString, numString),
+	if err := o.pool.QueryRow(ctx, `INSERT INTO orders (`+createString+`) VALUES (`+numString+`) RETURNING id`,
 		createQueryArgs...).Scan(&ID); err != nil {
 		return 0, err
 	}
@@ -353,194 +353,129 @@ func (o *OrdersDB) GetAllOrders(ctx context.Context, skip int, limit int, fromDa
 
 }
 
-func prepareOrderCreateQuery(req Order) (string, string, []interface{}) {
-	var createStrings []string
-	var numString []string
-	var args []interface{}
+func prepareOrderCreateQuery(req Order) (string, string, queryArgs) {
+	var c colVals
 
 	if req.Type.Valid {
-		createStrings = append(createStrings, `"Type"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.Type.String)
+		c.add(`"Type"`, req.Type.String)
 	}
 	if req.ProductType.Valid {
-		createStrings = append(createStrings, `"ProductType"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.ProductType.String)
+		c.add(`"ProductType"`, req.ProductType.String)
 	}
 	if req.RecuringFreq.Valid {
-		createStrings = append(createStrings, `"RecuringFreq"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.RecuringFreq.Int)
+		c.add(`"RecuringFreq"`, req.RecuringFreq.Int)
 	}
 	if req.AccountID.Valid {
-		createStrings = append(createStrings, `"AccountID"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.AccountID.Int)
+		c.add(`"AccountID"`, req.AccountID.Int)
 	}
 	if req.Organization.Valid {
-		createStrings = append(createStrings, `"Organization"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.Organization.String)
+		c.add(`"Organization"`, req.Organization.String)
 	}
 	if req.Amount.Valid {
-		createStrings = append(createStrings, `"Amount"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, fmt.Sprintf("%g", req.Amount.Float64))
+		c.add(`"Amount"`, fmt.Sprintf("%g", req.Amount.Float64))
 	}
 	if req.Currency.Valid {
-		createStrings = append(createStrings, `"Currency"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.Currency.String)
+		c.add(`"Currency"`, req.Currency.String)
 	}
 	if req.SKU.Valid {
-		createStrings = append(createStrings, `"SKU"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.SKU.String)
+		c.add(`"SKU"`, req.SKU.String)
 	}
 	if req.Status.Valid {
-		createStrings = append(createStrings, `"Status"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.Status.String)
+		c.add(`"Status"`, req.Status.String)
 	}
 	if req.OrderLanguage.Valid {
-		createStrings = append(createStrings, `"OrderLanguage"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.OrderLanguage.String)
+		c.add(`"OrderLanguage"`, req.OrderLanguage.String)
 	}
 	if req.PaymentDate.Valid {
-		createStrings = append(createStrings, `"PaymentDate"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.PaymentDate.Time)
+		c.add(`"PaymentDate"`, req.PaymentDate.Time)
 	}
 	if req.Note.Valid {
-		createStrings = append(createStrings, `"Note"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.Note.String)
+		c.add(`"Note"`, req.Note.String)
 	}
 	if req.Flag.Valid {
-		createStrings = append(createStrings, `"Flag"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.Flag.String)
+		c.add(`"Flag"`, req.Flag.String)
 	}
 	if req.Quantity.Valid {
-		createStrings = append(createStrings, "quantity")
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.Quantity.Int)
+		c.add("quantity", req.Quantity.Int)
 	}
 	if req.AmountItem.Valid {
-		createStrings = append(createStrings, "amount_item")
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.AmountItem.Float64)
+		c.add("amount_item", req.AmountItem.Float64)
 	}
 	if req.StartingDate.Valid {
-		createStrings = append(createStrings, "starting_date")
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.StartingDate.Time)
+		c.add("starting_date", req.StartingDate.Time)
 	}
 	if req.CardDetailsId.Valid {
-		createStrings = append(createStrings, `"card_details_id"`)
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, req.CardDetailsId.Int)
+		c.add(`"card_details_id"`, req.CardDetailsId.Int)
 	}
 
-	if len(args) != 0 {
-		createStrings = append(createStrings, "created_at")
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, time.Now())
-
-		createStrings = append(createStrings, "updated_at")
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, time.Now())
+	if !c.empty() {
+		c.add("created_at", time.Now())
+		c.add("updated_at", time.Now())
 	}
 
-	concatedCreateString := strings.Join(createStrings, ",")
-	concatedNumString := strings.Join(numString, ",")
-
-	return concatedCreateString, concatedNumString, args
+	return c.insertLists()
 }
 
-func prepareOrderUpdateQuery(req Order) (string, []interface{}) {
-	var updateStrings []string
-	var args []interface{}
+func prepareOrderUpdateQuery(req Order) (string, queryArgs) {
+	var c colVals
 
 	if req.Type.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"Type"=$%d`, len(updateStrings)+1))
-		args = append(args, req.Type.String)
+		c.add(`"Type"`, req.Type.String)
 	}
 	if req.ProductType.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"ProductType"=$%d`, len(updateStrings)+1))
-		args = append(args, req.ProductType.String)
+		c.add(`"ProductType"`, req.ProductType.String)
 	}
 	if req.RecuringFreq.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"RecuringFreq"=$%d`, len(updateStrings)+1))
-		args = append(args, req.RecuringFreq.Int)
+		c.add(`"RecuringFreq"`, req.RecuringFreq.Int)
 	}
 	if req.AccountID.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"AccountID"=$%d`, len(updateStrings)+1))
-		args = append(args, req.AccountID.Int)
+		c.add(`"AccountID"`, req.AccountID.Int)
 	}
 	if req.Organization.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"Organization"=$%d`, len(updateStrings)+1))
-		args = append(args, req.Organization.String)
+		c.add(`"Organization"`, req.Organization.String)
 	}
 	if req.Amount.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"Amount"=$%d`, len(updateStrings)+1))
-		args = append(args, fmt.Sprintf("%g", req.Amount.Float64))
+		c.add(`"Amount"`, fmt.Sprintf("%g", req.Amount.Float64))
 	}
 	if req.Currency.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"Currency"=$%d`, len(updateStrings)+1))
-		args = append(args, req.Currency.String)
+		c.add(`"Currency"`, req.Currency.String)
 	}
 	if req.SKU.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"SKU"=$%d`, len(updateStrings)+1))
-		args = append(args, req.SKU.String)
+		c.add(`"SKU"`, req.SKU.String)
 	}
 	if req.Status.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"Status"=$%d`, len(updateStrings)+1))
-		args = append(args, req.Status.String)
+		c.add(`"Status"`, req.Status.String)
 	}
 	if req.OrderLanguage.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"OrderLanguage"=$%d`, len(updateStrings)+1))
-		args = append(args, req.OrderLanguage.String)
+		c.add(`"OrderLanguage"`, req.OrderLanguage.String)
 	}
 	if req.PaymentDate.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"PaymentDate"=$%d`, len(updateStrings)+1))
-		args = append(args, req.PaymentDate.Time)
+		c.add(`"PaymentDate"`, req.PaymentDate.Time)
 	}
 	if req.StartingDate.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`starting_date=$%d`, len(updateStrings)+1))
-		args = append(args, req.StartingDate.Time)
+		c.add(`starting_date`, req.StartingDate.Time)
 	}
 	if req.Note.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"Note"=$%d`, len(updateStrings)+1))
-		args = append(args, req.Note.String)
+		c.add(`"Note"`, req.Note.String)
 	}
 	if req.Flag.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"Flag"=$%d`, len(updateStrings)+1))
-		args = append(args, req.Flag.String)
+		c.add(`"Flag"`, req.Flag.String)
 	}
 	if req.CardDetailsId.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`"card_details_id"=$%d`, len(updateStrings)+1))
-		args = append(args, req.CardDetailsId.Int)
+		c.add(`"card_details_id"`, req.CardDetailsId.Int)
 	}
 	if req.Quantity.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`quantity=$%d`, len(updateStrings)+1))
-		args = append(args, req.Quantity.Int)
+		c.add(`quantity`, req.Quantity.Int)
 	}
 	if req.AmountItem.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf(`amount_item=$%d`, len(updateStrings)+1))
-		args = append(args, req.AmountItem.Float64)
+		c.add(`amount_item`, req.AmountItem.Float64)
 	}
 
-	if len(args) != 0 {
-		updateStrings = append(updateStrings, fmt.Sprintf("updated_at=$%d", len(updateStrings)+1))
-		args = append(args, time.Now())
+	if !c.empty() {
+		c.add("updated_at", time.Now())
 	}
 
-	updateArgument := strings.Join(updateStrings, ",")
-
-	return updateArgument, args
+	return c.setList()
 }
 
 func buildAndGetOrdersWhereQuery(fromDate *time.Time, dateTo *time.Time, productType string, currency string, status string,

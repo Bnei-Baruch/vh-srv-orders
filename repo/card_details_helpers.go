@@ -47,7 +47,7 @@ func (o *OrdersDB) CreateCardDetailsAndGetId(ctx context.Context, p CardDetails)
 	}
 
 	var ID int
-	if err := o.pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO card_details (%s) VALUES (%s) RETURNING id`, createString, numString),
+	if err := o.pool.QueryRow(ctx, `INSERT INTO card_details (`+createString+`) VALUES (`+numString+`) RETURNING id`,
 		createQueryArgs...).Scan(&ID); err != nil {
 		return 0, err
 	}
@@ -125,104 +125,71 @@ func (o *OrdersDB) GetAllCardDetails(ctx context.Context, skip int, limit int) (
 	return cardDetails, rows.Err()
 }
 
-func prepareCardDetailsUpdateQuery(req CardDetails) (string, []interface{}) {
-	var updateStrings []string
-	var args []interface{}
+func prepareCardDetailsUpdateQuery(req CardDetails) (string, queryArgs) {
+	var c colVals
 
 	if req.AccountID.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf("account_id=$%d", len(updateStrings)+1))
-		args = append(args, req.AccountID.Int)
+		c.add("account_id", req.AccountID.Int)
 	}
 	if req.GatewayProvider.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf("gateway_provider=$%d", len(updateStrings)+1))
-		args = append(args, req.GatewayProvider.String)
+		c.add("gateway_provider", req.GatewayProvider.String)
 	}
 	if req.CCNumber.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf("cc_number=$%d", len(updateStrings)+1))
-		args = append(args, req.CCNumber.String)
+		c.add("cc_number", req.CCNumber.String)
 	}
 	if req.CCExpDate.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf("cc_expdate=$%d", len(updateStrings)+1))
-		args = append(args, req.CCExpDate.String)
+		c.add("cc_expdate", req.CCExpDate.String)
 	}
 	if req.Active.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf("active=$%d", len(updateStrings)+1))
-		args = append(args, req.Active.Bool)
+		c.add("active", req.Active.Bool)
 	}
 	if req.Token.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf("token=$%d", len(updateStrings)+1))
-		args = append(args, req.Token.String)
+		c.add("token", req.Token.String)
 	}
 	if req.CreatedAt.Valid {
-		updateStrings = append(updateStrings, fmt.Sprintf("created_at=$%d", len(updateStrings)+1))
-		args = append(args, req.CreatedAt.Time)
+		c.add("created_at", req.CreatedAt.Time)
 	}
 
-	if len(args) != 0 {
-		updateStrings = append(updateStrings, fmt.Sprintf("updated_at=$%d", len(updateStrings)+1))
-		args = append(args, time.Now())
+	if !c.empty() {
+		c.add("updated_at", time.Now())
 	}
 
-	updateArgument := strings.Join(updateStrings, ",")
-
-	return updateArgument, args
+	return c.setList()
 }
 
-func prepareCardDetailsCreateQuery(req CardDetails) (string, string, []interface{}) {
-	var createStrings []string
-	var numString []string
-	var args []interface{}
+func prepareCardDetailsCreateQuery(req CardDetails) (string, string, queryArgs) {
+	var c colVals
 
 	if req.AccountID.Valid {
-		createStrings = append(createStrings, "account_id")
-		numString = append(numString, fmt.Sprintf(`$%d`, len(numString)+1))
-		args = append(args, req.AccountID.Int)
+		c.add("account_id", req.AccountID.Int)
 	}
 
 	if req.GatewayProvider.Valid {
-		createStrings = append(createStrings, "gateway_provider")
-		numString = append(numString, fmt.Sprintf(`$%d`, len(numString)+1))
-		args = append(args, req.GatewayProvider.String)
+		c.add("gateway_provider", req.GatewayProvider.String)
 	}
 
 	if req.CCNumber.Valid {
-		createStrings = append(createStrings, "cc_number")
-		numString = append(numString, fmt.Sprintf(`$%d`, len(numString)+1))
-		args = append(args, req.CCNumber.String)
+		c.add("cc_number", req.CCNumber.String)
 	}
 
 	if req.CCExpDate.Valid {
-		createStrings = append(createStrings, "cc_expdate")
-		numString = append(numString, fmt.Sprintf(`$%d`, len(numString)+1))
-		args = append(args, req.CCExpDate.String)
+		c.add("cc_expdate", req.CCExpDate.String)
 	}
 
 	if req.Active.Valid {
-		createStrings = append(createStrings, "active")
-		numString = append(numString, fmt.Sprintf(`$%d`, len(numString)+1))
-		args = append(args, req.Active.Bool)
+		c.add("active", req.Active.Bool)
 	}
 
 	if req.Token.Valid {
-		createStrings = append(createStrings, "token")
-		numString = append(numString, fmt.Sprintf(`$%d`, len(numString)+1))
-		args = append(args, req.Token.String)
+		c.add("token", req.Token.String)
 	}
 
-	if len(args) != 0 {
-		createStrings = append(createStrings, "created_at")
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, time.Now())
-
-		createStrings = append(createStrings, "updated_at")
-		numString = append(numString, fmt.Sprintf("$%d", len(numString)+1))
-		args = append(args, time.Now())
+	if !c.empty() {
+		c.add("created_at", time.Now())
+		c.add("updated_at", time.Now())
 	}
 
-	concatedCreateString := strings.Join(createStrings, ",")
-	concatedNumString := strings.Join(numString, ",")
-
-	return concatedCreateString, concatedNumString, args
+	return c.insertLists()
 }
 
 func buildAndGetCardDetailsWhereQuery() (string, string) {

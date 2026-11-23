@@ -56,6 +56,19 @@ func TestGetCustomersByEmail_Success(t *testing.T) {
 	assert.Equal(t, "test@example.com", result[0].Email)
 }
 
+// A quote in the email is doubled, so it stays inside the OData literal.
+func TestGetCustomersByEmail_QuoteInEmailIsEscaped(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "EMAIL eq 'o''brien@example.com'", r.URL.Query().Get("$filter"))
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(CustomerODataResponse{Value: []Customer{}})
+	}))
+	defer server.Close()
+
+	_, err := newTestClient(server.URL).GetCustomersByEmail(context.Background(), "o'brien@example.com")
+	require.NoError(t, err)
+}
+
 func TestGetCustomersByEmail_MultipleCustomers(t *testing.T) {
 	response := CustomerODataResponse{
 		Value: []Customer{
@@ -1291,4 +1304,20 @@ func TestChunkStrings_ZeroSize_ReturnsSingleChunk(t *testing.T) {
 func TestSortedKeys_ReturnsDeterministicOrder(t *testing.T) {
 	set := map[string]struct{}{"c": {}, "a": {}, "b": {}}
 	assert.Equal(t, []string{"a", "b", "c"}, sortedKeys(set))
+}
+
+// A quote in a customer id is doubled inside the OData key literal.
+func TestCustomerIDQuoteIsEscapedInKeyPaths(t *testing.T) {
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	_, _ = client.GetCustomerByID(context.Background(), "O'K")
+	_, _ = client.GetAccountReceivables(context.Background(), "O'K")
+	assert.Equal(t, []string{"/CUSTOMERS('O''K')", "/ACCOUNTS_RECEIVABLE('O''K')/ACCFNCITEMS2_SUBFORM"}, paths)
 }

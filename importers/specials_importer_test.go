@@ -3,8 +3,8 @@ package importers
 import (
 	"testing"
 
+	"github.com/aarondl/null/v9"
 	"github.com/stretchr/testify/assert"
-	"github.com/volatiletech/null/v9"
 )
 
 func TestCreateSpecial_BlankEmailNamesTheCause(t *testing.T) {

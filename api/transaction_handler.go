@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aarondl/null/v9"
 	"github.com/getsentry/sentry-go"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
-	"github.com/volatiletech/null/v9"
 
 	"github.com/Bnei-Baruch/vh-srv-orders/common"
 	"github.com/Bnei-Baruch/vh-srv-orders/pkg/pelecard"
@@ -479,7 +479,7 @@ func (o *OrdersAPI) handleTransactionPaid(c *gin.Context) {
 		utils.LogFor(c.Request.Context()).Warn("user_key is empty", slog.String("additional_details_param_x", rp.ParamX.String))
 		hub := utils.SentryFor(c.Request.Context())
 		hub.WithScope(func(scope *sentry.Scope) {
-			scope.SetExtra("additional_details_param_x", rp.ParamX.String)
+			scope.SetContext("transaction", sentry.Context{"additional_details_param_x": rp.ParamX.String})
 			hub.CaptureMessage("OrdersAPI.handleTransactionPaid user_key is empty")
 		})
 		c.JSON(http.StatusBadRequest, gin.H{"error": "No order id provided in UserKey"})

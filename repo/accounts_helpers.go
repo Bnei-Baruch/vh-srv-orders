@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/volatiletech/null/v9"
+	"github.com/aarondl/null/v9"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"

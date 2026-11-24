@@ -158,7 +158,7 @@ func (o *OrdersDB) GetAllSpecials(ctx context.Context) ([]*Special, error) {
 func (o *OrdersDB) GetSpecialsStartingBetween(ctx context.Context, from, to time.Time) ([]*Special, error) {
 	var specials []*Special
 	rows, err := o.pool.Query(ctx,
-		`SELECT id, keycloak_id, email, start_date, end_date, category, subcategory FROM specials
+		`SELECT id, keycloak_id, email, start_date, end_date, category, subcategory, updated_at FROM specials
 		 WHERE start_date >= $1 AND start_date <= $2`, from, to)
 	if err != nil {
 		return nil, fmt.Errorf("o.pool.Query: %w", err)
@@ -167,7 +167,7 @@ func (o *OrdersDB) GetSpecialsStartingBetween(ctx context.Context, from, to time
 
 	for rows.Next() {
 		var spe Special
-		if err := rows.Scan(&spe.Id, &spe.KeycloakId, &spe.Email, &spe.StartDate, &spe.EndDate, &spe.Category, &spe.SubCategory); err != nil {
+		if err := rows.Scan(&spe.Id, &spe.KeycloakId, &spe.Email, &spe.StartDate, &spe.EndDate, &spe.Category, &spe.SubCategory, &spe.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("rows.Scan: %w", err)
 		}
 		specials = append(specials, &spe)

@@ -515,6 +515,9 @@ type Special struct {
 	Category    null.String `json:"category"`
 	SubCategory null.String `json:"subcategory"`
 	CreatedAt   null.Time   `json:"created_at"`
+	// UpdatedAt is read only by GetSpecialsStartingBetween, where the importer
+	// uses it to recognise a revoke; it is not part of the API.
+	UpdatedAt null.Time `json:"-"`
 }
 
 type SpecialKeycloakIdUpdate struct {

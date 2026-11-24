@@ -131,13 +131,45 @@ func TestSpecialKeys_SecondCopyWithinTheSameSheet(t *testing.T) {
 func TestSpecialKeys_ARevokedSpecialIsStillRecognised(t *testing.T) {
 	keys := make(specialKeys)
 
+	revokedAt := time.Date(2026, 3, 15, 14, 23, 7, 512000, time.UTC)
 	revoked := storedSpecial("a@example.com", "kc-1")
-	// what the revoke's now() wrote: never a midnight
-	revoked.EndDate = null.TimeFrom(time.Date(2026, 3, 15, 14, 23, 7, 512000, time.UTC))
+	// what DeleteSpecialById writes: one now() into both columns
+	revoked.EndDate = null.TimeFrom(revokedAt)
+	revoked.UpdatedAt = null.TimeFrom(revokedAt)
 	keys.addExisting(revoked)
 
 	assert.True(t, keys.has(sheetRecord("a@example.com", "kc-1")),
 		"the sheet row must not be re-imported over a revoke")
+}
+
+// SetKeycloakIdByEmail moves updated_at after a revoke; the revoke still holds.
+func TestSpecialKeys_ARevokeStillHoldsAfterALaterUpdate(t *testing.T) {
+	keys := make(specialKeys)
+
+	revokedAt := time.Date(2026, 3, 15, 14, 23, 7, 512000, time.UTC)
+	revoked := storedSpecial("a@example.com", "kc-1")
+	revoked.EndDate = null.TimeFrom(revokedAt)
+	revoked.UpdatedAt = null.TimeFrom(revokedAt.AddDate(0, 1, 0))
+	keys.addExisting(revoked)
+
+	assert.True(t, keys.has(sheetRecord("a@example.com", "kc-1")))
+}
+
+// Prod has never-revoked specials ending at 07:00 Jerusalem, so an end time
+// that is not a midnight is not a revoke: extending such a row imports it.
+func TestSpecialKeys_AnOddEndTimeIsNotARevoke(t *testing.T) {
+	keys := make(specialKeys)
+
+	stored := storedSpecial("a@example.com", "kc-1")
+	stored.EndDate = null.TimeFrom(time.Date(2026, 12, 31, 5, 0, 0, 0, time.UTC))
+	keys.addExisting(stored)
+
+	extended := sheetRecord("a@example.com", "kc-1")
+	extended.EndDate = time.Date(2027, 6, 30, 0, 0, 0, 0, time.UTC)
+	assert.False(t, keys.has(extended), "a later end on the sheet is a new special")
+
+	sameEnd := sheetRecord("a@example.com", "kc-1")
+	assert.True(t, keys.has(sameEnd), "07:00 Jerusalem is still 2026-12-31")
 }
 
 func TestSpecialKeys_AStoredRowWithNoEndIsStillRecognised(t *testing.T) {

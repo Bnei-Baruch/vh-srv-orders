@@ -58,19 +58,22 @@ func specialDay(t time.Time) string {
 	return t.In(specialZone).Format(time.DateOnly)
 }
 
-// storedEnd is a stored special's end for the key. Revoking writes now(), and
-// the sheet and the API only ever write a midnight, so an end that is not a
-// midnight in either zone is a revoke: it matches whatever end the sheet says,
-// or the next run would re-grant it.
-func storedEnd(end null.Time) string {
-	if !end.Valid || !(isMidnight(end.Time.UTC()) || isMidnight(end.Time.In(specialZone))) {
+// storedEnd is a stored special's end for the key. A revoked special, or one
+// with no end, matches whatever end the sheet says, or the next run would
+// re-grant it.
+func storedEnd(s *repo.Special) string {
+	if !s.EndDate.Valid || revoked(s) {
 		return anyEnd
 	}
-	return specialDay(end.Time)
+	return specialDay(s.EndDate.Time)
 }
 
-func isMidnight(t time.Time) bool {
-	return t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0 && t.Nanosecond() == 0
+// revoked: DeleteSpecialById sets end_date and updated_at to the same now().
+// The only other writer of updated_at, SetKeycloakIdByEmail, moves it later,
+// which keeps end_date <= updated_at. End times alone prove nothing: rows
+// ending at 07:00 Jerusalem exist that were never revoked.
+func revoked(s *repo.Special) bool {
+	return s.UpdatedAt.Valid && !s.EndDate.Time.After(s.UpdatedAt.Time)
 }
 
 func (k specialKeys) addExisting(s *repo.Special) {
@@ -78,7 +81,7 @@ func (k specialKeys) addExisting(s *repo.Special) {
 		if strings.TrimSpace(identifier) == "" {
 			continue
 		}
-		k[specialKey(identifier, s.StartDate.Time, storedEnd(s.EndDate), s.Category.String, s.SubCategory)] = true
+		k[specialKey(identifier, s.StartDate.Time, storedEnd(s), s.Category.String, s.SubCategory)] = true
 	}
 }
 

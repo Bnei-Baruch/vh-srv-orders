@@ -26,6 +26,55 @@ type importer interface {
 	Import() error
 }
 
+// reportDroppedRows sends dropped sheet rows to Sentry: a Warning at any
+// ratio, an Error when nothing survived. A dropped row is not fatal, so
+// without this a changed date format would import nothing and exit 0.
+//
+// The fingerprint buckets the drop count: sheets are never cleared, so the
+// same unfixable row is re-dropped on every run, and exact counts would open a
+// new issue each time the sheet grows.
+func reportDroppedRows(im importer, dropped, kept int) {
+	if dropped == 0 {
+		return
+	}
+	slog.Warn("importer dropped rows", slog.String("importer", im.String()), slog.Int("dropped", dropped), slog.Int("kept", kept))
+
+	level := sentry.LevelWarning
+	message := fmt.Sprintf("%s: dropped %d of %d sheet rows as malformed", im.String(), dropped, dropped+kept)
+	if kept == 0 {
+		level = sentry.LevelError
+		message = fmt.Sprintf("%s: dropped every one of %d sheet rows as malformed; the sheet format may have changed", im.String(), dropped)
+	}
+	sentry.WithScope(func(scope *sentry.Scope) {
+		scope.SetLevel(level)
+		scope.SetFingerprint([]string{"importer-dropped-rows", im.String(), dropBucket(dropped, kept)})
+		sentry.CaptureMessage(message)
+	})
+}
+
+// dropBucket buckets the absolute drop count, not the ratio: a nuisance row
+// stays one row as the sheet grows, so its bucket stays put.
+func dropBucket(dropped, kept int) string {
+	switch {
+	case kept == 0:
+		return "all"
+	case dropped <= 2:
+		return fmt.Sprintf("%d", dropped)
+	case dropped <= 5:
+		return "3-5"
+	case dropped <= 10:
+		return "6-10"
+	case dropped <= 20:
+		return "11-20"
+	case dropped <= 50:
+		return "21-50"
+	case dropped <= 100:
+		return "51-100"
+	default:
+		return "100+"
+	}
+}
+
 func doImport(im importer) {
 	slog.Info("running importer", slog.String("importer", im.String()))
 

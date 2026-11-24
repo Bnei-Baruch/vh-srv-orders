@@ -2,6 +2,7 @@ package importers
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -28,9 +29,9 @@ func storedSpecial(email, keycloakID string) *repo.Special {
 	return &repo.Special{
 		Email:      null.NewString(email, email != ""),
 		KeycloakId: null.NewString(keycloakID, keycloakID != ""),
-		// Read back from timestamptz in the session's zone, which is not UTC.
-		StartDate: null.TimeFrom(time.Date(2026, 1, 1, 2, 0, 0, 0, time.FixedZone("IDT", 2*60*60))),
-		EndDate:   null.TimeFrom(time.Date(2026, 12, 31, 2, 0, 0, 0, time.FixedZone("IST", 2*60*60))),
+		// As the API writes it: a Jerusalem midnight, the previous UTC day.
+		StartDate: null.TimeFrom(time.Date(2026, 1, 1, 0, 0, 0, 0, specialZone)),
+		EndDate:   null.TimeFrom(time.Date(2026, 12, 31, 0, 0, 0, 0, specialZone)),
 		Category:  null.StringFrom("membership"),
 	}
 }
@@ -41,7 +42,45 @@ func TestSpecialKeys_RecognisesAnAlreadyImportedRow(t *testing.T) {
 	keys.addExisting(storedSpecial("a@example.com", "kc-1"))
 
 	assert.True(t, keys.has(sheetRecord("a@example.com", "kc-1")), "the same row is not imported twice")
-	assert.True(t, keys.has(sheetRecord("A@Example.com", "kc-1")), "the identifier is matched case-insensitively")
+}
+
+// The sheet row carries only the email, so the match cannot come through the keycloak id.
+func TestSpecialKeys_MatchesTheEmailCaseAndSpaceInsensitively(t *testing.T) {
+	keys := make(specialKeys)
+	keys.addExisting(storedSpecial("a@example.com", "kc-1"))
+
+	assert.True(t, keys.has(sheetRecord(" A@Example.COM ", "")))
+}
+
+// The process runs in UTC in prod; the key must still read the API's
+// Jerusalem midnight as the day the sheet names.
+func TestSpecialKeys_MatchesARowTheAPIWroteAtJerusalemMidnight(t *testing.T) {
+	stored := storedSpecial("a@example.com", "kc-1")
+	require.Equal(t, time.December, stored.StartDate.Time.UTC().Month(), "the fixture falls on the previous UTC day")
+
+	keys := make(specialKeys)
+	keys.addExisting(stored)
+	assert.True(t, keys.has(sheetRecord("a@example.com", "kc-1")))
+}
+
+func TestSpecialKeys_MatchesARowTheImporterWrote(t *testing.T) {
+	stored := storedSpecial("a@example.com", "kc-1")
+	stored.StartDate = null.TimeFrom(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	stored.EndDate = null.TimeFrom(time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC))
+
+	keys := make(specialKeys)
+	keys.addExisting(stored)
+	assert.True(t, keys.has(sheetRecord("a@example.com", "kc-1")))
+}
+
+// Before dedup, a sheet row that moved the end date was imported; it still is.
+func TestSpecialKeys_AMovedEndDateIsANewSpecial(t *testing.T) {
+	keys := make(specialKeys)
+	keys.addExisting(storedSpecial("a@example.com", "kc-1"))
+
+	moved := sheetRecord("a@example.com", "kc-1")
+	moved.EndDate = time.Date(2027, 3, 31, 0, 0, 0, 0, time.UTC)
+	assert.False(t, keys.has(moved))
 }
 
 // createSpecial may add a keycloak id the sheet never had, so a stored row
@@ -93,11 +132,72 @@ func TestSpecialKeys_ARevokedSpecialIsStillRecognised(t *testing.T) {
 	keys := make(specialKeys)
 
 	revoked := storedSpecial("a@example.com", "kc-1")
-	revoked.EndDate = null.TimeFrom(time.Now()) // what the revoke wrote
+	// what the revoke's now() wrote: never a midnight
+	revoked.EndDate = null.TimeFrom(time.Date(2026, 3, 15, 14, 23, 7, 512000, time.UTC))
 	keys.addExisting(revoked)
 
 	assert.True(t, keys.has(sheetRecord("a@example.com", "kc-1")),
 		"the sheet row must not be re-imported over a revoke")
+}
+
+func TestSpecialKeys_AStoredRowWithNoEndIsStillRecognised(t *testing.T) {
+	keys := make(specialKeys)
+
+	stored := storedSpecial("a@example.com", "kc-1")
+	stored.EndDate = null.Time{}
+	keys.addExisting(stored)
+
+	assert.True(t, keys.has(sheetRecord("a@example.com", "kc-1")))
+}
+
+func TestImportSpecialRecords_SkipsWhatTheTableHolds(t *testing.T) {
+	keys := make(specialKeys)
+	keys.addExisting(storedSpecial("a@example.com", "kc-1"))
+
+	var createdRows []string
+	create := func(r *SpecialRecord) error {
+		createdRows = append(createdRows, r.Email.String)
+		return nil
+	}
+
+	created, skipped, failed := importSpecialRecords(
+		[]*SpecialRecord{sheetRecord("a@example.com", "kc-1"), sheetRecord("b@example.com", "kc-2")}, keys, create)
+
+	assert.Equal(t, []string{"b@example.com"}, createdRows)
+	assert.Equal(t, 1, created)
+	assert.Equal(t, 1, skipped)
+	assert.Zero(t, failed)
+}
+
+func TestImportSpecialRecords_ASheetListingAGrantTwiceCreatesItOnce(t *testing.T) {
+	calls := 0
+	create := func(*SpecialRecord) error {
+		calls++
+		return nil
+	}
+
+	created, skipped, _ := importSpecialRecords(
+		[]*SpecialRecord{sheetRecord("a@example.com", "kc-1"), sheetRecord("a@example.com", "kc-1")}, make(specialKeys), create)
+
+	assert.Equal(t, 1, calls)
+	assert.Equal(t, 1, created)
+	assert.Equal(t, 1, skipped)
+}
+
+func TestImportSpecialRecords_AFailedCreateIsCountedAndNotRemembered(t *testing.T) {
+	calls := 0
+	create := func(*SpecialRecord) error {
+		calls++
+		return errors.New("insert failed")
+	}
+
+	created, skipped, failed := importSpecialRecords(
+		[]*SpecialRecord{sheetRecord("a@example.com", "kc-1"), sheetRecord("a@example.com", "kc-1")}, make(specialKeys), create)
+
+	assert.Equal(t, 2, calls, "a row that failed is not treated as imported")
+	assert.Zero(t, created)
+	assert.Zero(t, skipped)
+	assert.Equal(t, 2, failed)
 }
 
 // NULL and empty sub-categories are different stored values for the cleanup

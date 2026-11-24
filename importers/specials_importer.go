@@ -50,27 +50,30 @@ func (im *SpecialsImporter) Import() error {
 		return fmt.Errorf("importer.existingSpecials: %w", err)
 	}
 
-	newRecords := 0
-	errRecords := 0
-	skippedRecords := 0
-	for _, row := range sheetValues {
-		if existing.has(row) {
-			skippedRecords++
-			continue
-		}
-		if err := im.createSpecial(row); err != nil {
-			slog.Error("importer.createSpecial", slog.Int("row", row.SheetRow), slog.Any("err", err))
-			errRecords++
-			continue
-		}
-		// so a sheet that lists the same grant twice imports it once
-		existing.addImported(row)
-		newRecords++
-	}
+	newRecords, skippedRecords, errRecords := importSpecialRecords(sheetValues, existing, im.createSpecial)
 	slog.Info("import summary", slog.Int("new_specials", newRecords), slog.Int("already_present", skippedRecords),
 		slog.Int("with_errors", errRecords), slog.Int("dropped_by_parser", dropped))
 
 	return nil
+}
+
+// importSpecialRecords creates each record the table does not already hold.
+func importSpecialRecords(records []*SpecialRecord, existing specialKeys, create func(*SpecialRecord) error) (created, skipped, failed int) {
+	for _, row := range records {
+		if existing.has(row) {
+			skipped++
+			continue
+		}
+		if err := create(row); err != nil {
+			slog.Error("importer.createSpecial", slog.Int("row", row.SheetRow), slog.Any("err", err))
+			failed++
+			continue
+		}
+		// so a sheet that lists the same grant twice imports it once
+		existing.addImported(row)
+		created++
+	}
+	return created, skipped, failed
 }
 
 type SpecialRecord struct {

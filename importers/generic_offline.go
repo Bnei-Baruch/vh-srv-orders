@@ -35,26 +35,24 @@ func (im *GenericOfflineImporter) String() string {
 // Import fetches all orders and import them.
 // No idempotency is guaranteed, use carefully.
 func (im *GenericOfflineImporter) Import() error {
-	var err error
-
-	var sheetValues []*GenericOrder
-	sheetValues, err = im.getSheetValues()
+	sheetValues, dropped, err := im.getSheetValues()
 	if err != nil {
 		return fmt.Errorf("importer.getSheetValues: %w", err)
 	}
-	slog.Info("importer.getSheetValues", slog.Int("count", len(sheetValues)))
+	slog.Info("importer.getSheetValues", slog.Int("count", len(sheetValues)), slog.Int("dropped", dropped))
+	reportDroppedRows(im, dropped, len(sheetValues))
 
 	newOrders := 0
 	errOrders := 0
-	for i, row := range sheetValues {
+	for _, row := range sheetValues {
 		if err := im.createOrderAndPayments(row); err != nil {
-			slog.Error("importer.createOrderAndPayments", slog.Int("line", i+1), slog.Any("err", err))
+			slog.Error("importer.createOrderAndPayments", slog.Int("row", row.SheetRow), slog.Any("err", err))
 			errOrders++
 			continue
 		}
 		newOrders++
 	}
-	slog.Info("import summary", slog.Int("new_orders", newOrders), slog.Int("with_errors", errOrders))
+	slog.Info("import summary", slog.Int("new_orders", newOrders), slog.Int("with_errors", errOrders), slog.Int("dropped_by_parser", dropped))
 
 	return nil
 }
@@ -63,18 +61,20 @@ type GenericOrder struct {
 	Email         string
 	Amount        float64
 	Currency      string
-	Quantity      int64
+	Quantity      int
 	Timestamp     time.Time
 	PaymentMethod string
 	Comment       string
+	// SheetRow is the 1-based sheet row, for log lines an operator can act on.
+	SheetRow int
 }
 
-func (im *GenericOfflineImporter) getSheetValues() ([]*GenericOrder, error) {
+func (im *GenericOfflineImporter) getSheetValues() ([]*GenericOrder, int, error) {
 	sheetsService, err := sheets.NewService(context.TODO(),
 		option.WithCredentialsFile(common.Config.GoogleAppCredentials),
 		option.WithScopes(sheets.SpreadsheetsReadonlyScope))
 	if err != nil {
-		return nil, fmt.Errorf("sheets.NewService: %w", err)
+		return nil, 0, fmt.Errorf("sheets.NewService: %w", err)
 	}
 
 	const spreadsheetId = "1jRygsoYqD_tUpEKXxVHY2_nAS52F3cdGp5spxFw8Uak"
@@ -83,49 +83,89 @@ func (im *GenericOfflineImporter) getSheetValues() ([]*GenericOrder, error) {
 	call.Context(context.TODO())
 	resp, err := call.Do()
 	if err != nil {
-		return nil, fmt.Errorf("sheetsService.Spreadsheets.Values.Get: %w", err)
+		return nil, 0, fmt.Errorf("sheetsService.Spreadsheets.Values.Get: %w", err)
 	}
 
+	orders, dropped := parseGenericRows(resp.Values)
+	return orders, dropped, nil
+}
+
+// parseGenericRows turns sheet rows into orders, skipping the header. It
+// returns the orders it could read and how many data rows it dropped; a bad
+// row is logged and skipped, never fatal.
+func parseGenericRows(values [][]any) ([]*GenericOrder, int) {
 	orders := make([]*GenericOrder, 0)
-	for i, row := range resp.Values[1:] {
+	if len(values) == 0 {
+		return orders, 0
+	}
+
+	dropped := 0
+	for i, row := range values[1:] {
+		sheetRow := i + 2 // the header is row 1
+		if blankRow(row) {
+			continue
+		}
+
+		// GetAccount with an empty email returns the newest account without
+		// one, which would bill this order to an unrelated person.
+		email := cell(row, 0)
+		if email == "" {
+			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "email"), slog.String("reason", "empty"))
+			dropped++
+			continue
+		}
+
 		order := &GenericOrder{
-			Email:         row[0].(string),
-			Currency:      row[2].(string),
-			PaymentMethod: row[5].(string),
-			Comment:       row[6].(string),
+			SheetRow:      sheetRow,
+			Email:         email,
+			Currency:      cell(row, 2),
+			PaymentMethod: cell(row, 5),
+			Comment:       cell(row, 6),
+		}
+
+		if order.PaymentMethod == "" {
+			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "payment_method"), slog.String("reason", "empty"))
+			dropped++
+			continue
 		}
 
 		if order.Currency != common.CurrencyUSD &&
 			order.Currency != common.CurrencyEUR &&
 			order.Currency != common.CurrencyNIS &&
 			order.Currency != common.CurrencyRUR {
-			slog.Warn("malformed row", slog.Int("row", i+1), slog.String("column", "currency"), slog.Any("err", err))
+			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "currency"), slog.String("value", order.Currency))
+			dropped++
 			continue
 		}
 
 		var err error
-		order.Amount, err = strconv.ParseFloat(row[1].(string), 10)
+		order.Amount, err = strconv.ParseFloat(cell(row, 1), 64)
 		if err != nil {
-			slog.Warn("malformed row", slog.Int("row", i+1), slog.String("column", "amount"), slog.Any("err", err))
+			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "amount"), slog.Any("err", err))
+			dropped++
 			continue
 		}
 
-		order.Quantity, err = strconv.ParseInt(row[3].(string), 10, 64)
+		// 32 bits: orders.quantity is int4, so a larger value would fail at
+		// insert time instead of here.
+		quantity, err := strconv.ParseInt(cell(row, 3), 10, 32)
 		if err != nil {
-			slog.Warn("malformed row", slog.Int("row", i+1), slog.String("column", "quantity"), slog.Any("err", err))
+			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "quantity"), slog.Any("err", err))
+			dropped++
 			continue
 		}
+		order.Quantity = int(quantity)
 
-		order.Timestamp, err = time.Parse(time.DateTime, row[4].(string))
+		order.Timestamp, err = time.Parse(time.DateTime, cell(row, 4))
 		if err != nil {
-			slog.Warn("malformed row", slog.Int("row", i+1), slog.String("column", "timestamp"), slog.Any("err", err))
+			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "timestamp"), slog.Any("err", err))
+			dropped++
 			continue
 		}
 
 		orders = append(orders, order)
 	}
-
-	return orders, nil
+	return orders, dropped
 }
 
 // createOrderAndPayments will create a fresh Order, Payment and OfflinePayment for the given order
@@ -162,7 +202,7 @@ func (im *GenericOfflineImporter) createOrder(ctx context.Context, rOrder *Gener
 		Status:        null.StringFrom(common.OrderStatusPaid),
 		OrderLanguage: null.StringFrom(common.OrderLanguageEnglish),
 		PaymentDate:   null.TimeFrom(rOrder.Timestamp),
-		Quantity:      null.IntFrom(int(rOrder.Quantity)),
+		Quantity:      null.IntFrom(rOrder.Quantity),
 	}
 
 	var err error

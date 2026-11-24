@@ -103,7 +103,7 @@ func runBillingStart(cmd *cobra.Command, args []string) {
 	ctx := context.WithValue(context.Background(), common.CtxEventBuilder, new(BillingWorkflowEventBuilder))
 	if err := billingService.RunBillingWorkflow(ctx, month, year, opts); err != nil {
 		sentry.CaptureException(err)
-		utils.LogFatal("Billing workflow failed", slog.Any("error", err))
+		utils.FatalAfter(cleanup, "Billing workflow failed", slog.Any("error", err))
 	}
 
 	slog.Info("Billing workflow completed successfully")
@@ -136,7 +136,7 @@ func runBillingRetryPricingErrors(cmd *cobra.Command, args []string) {
 	count, err := billingService.RetryPricingErrors(ctx, maxWorkers)
 	if err != nil {
 		sentry.CaptureException(err)
-		utils.LogFatal("Retry pricing errors failed", slog.Any("error", err))
+		utils.FatalAfter(cleanup, "Retry pricing errors failed", slog.Any("error", err))
 	}
 
 	slog.Info("Retry pricing errors completed successfully", slog.Int("orders_charged", count))
@@ -233,7 +233,7 @@ func initBillingInfra() (events.EventEmitter, *repo.OrdersDB, func(), error) {
 	defer cancel()
 	ordersDB, err := repo.NewOrdersDB(ctx, eventEmitter)
 	if err != nil {
-		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), events.CloseBudget)
 		defer shutdownCancel()
 		eventEmitter.Close(shutdownCtx)
 		return nil, nil, nil, fmt.Errorf("repo.NewOrdersDB: %w", err)
@@ -241,7 +241,7 @@ func initBillingInfra() (events.EventEmitter, *repo.OrdersDB, func(), error) {
 
 	cleanup := func() {
 		ordersDB.Close()
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), events.CloseBudget)
 		defer cancel()
 		eventEmitter.Close(ctx)
 	}

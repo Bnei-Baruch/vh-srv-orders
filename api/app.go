@@ -2,8 +2,11 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"sync"
 	"time"
 
 	"github.com/getsentry/sentry-go"
@@ -27,52 +30,94 @@ import (
 type App struct {
 	// Concrete, with the same promoted-pgx caveat as OrdersAPI.repo. Close() in
 	// Shutdown is the one pool method this type should call.
-	repo                *repo.OrdersDB
+	repo *repo.OrdersDB
+	// repoClose is what Shutdown calls to close the repo: set with repo by
+	// initDB, and replaced in tests by a Close that blocks or counts.
+	repoClose           func()
 	eventEmitter        events.EventEmitter
 	eventListener       *profiles.EventListener
 	domainEventsHandler *domain.EventsHandler
 	ordersAPI           *OrdersAPI
 	couponAPI           *CouponAPI
 	gEngine             *gin.Engine
+
+	shutdownOnce sync.Once
+
+	// stop undoes the signal registration, so a fatal can hand signals back to
+	// their default disposition before it drains. Set by Initialize; nil in
+	// tests that build an App directly, which fatal tolerates.
+	stop func()
 }
 
 func NewApp() *App {
 	return new(App)
 }
 
-func (a *App) Initialize() {
-	a.initSentry()
-	a.initEventEmitter()
-	a.initDB()
-	a.initEventListener()
-	a.initGinEngine()
-	a.initHealth()
-}
+// Initialize builds the app, stopping early if the process is already being
+// asked to shut down.
+func (a *App) Initialize(ctx context.Context, stop func()) error {
+	a.stop = stop
 
-func (a *App) initEventEmitter() {
-	if common.Config.NatsUrl != "" {
-		slog.Info("initializing events emitter")
-		var err error
-		a.eventEmitter, err = events.CreateEmitter()
-		if err != nil {
-			utils.LogFatal("events.CreateEmitter", slog.Any("err", err))
-		}
+	steps := []struct {
+		name string
+		run  func()
+	}{
+		{"sentry", a.initSentry},
+		{"events emitter", a.initEventEmitter},
+		{"database", func() { a.initDB(ctx) }},
+		{"events listener", a.initEventListener},
+		{"gin engine", func() { a.initGinEngine(ctx) }},
+		{"health", a.initHealth},
 	}
+
+	for _, step := range steps {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("aborted before %s: %w", step.name, err)
+		}
+		step.run()
+	}
+
+	return nil
 }
 
-func (a *App) initDB() {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+// initEventEmitter always builds one: with no NATS_URL (the documented default)
+// the field used to stay a nil interface, and the first Emit or Shutdown panicked.
+func (a *App) initEventEmitter() {
+	slog.Info("initializing events emitter")
 
 	var err error
-	a.repo, err = repo.NewOrdersDB(ctx, a.eventEmitter)
+	a.eventEmitter, err = events.CreateEmitter()
 	if err != nil {
-		utils.LogFatal("connect to db", slog.Any("err", err))
+		a.fatal("events.CreateEmitter", slog.Any("err", err))
 	}
+}
+
+// initDB takes the startup context so a signal reaches the connect, rather than
+// only the gap before it.
+var dbConnectTimeout = 30 * time.Second
+
+func (a *App) initDB(ctx context.Context) {
+	connectCtx, cancel := context.WithTimeout(ctx, dbConnectTimeout)
+	defer cancel()
+
+	// Through a local: NewOrdersDB returns a concrete *repo.OrdersDB, and on
+	// failure that nil pointer boxes into a non-nil interface — Shutdown's guard
+	// would pass and its Close would panic on the nil receiver.
+	ordersDB, err := repo.NewOrdersDB(connectCtx, a.eventEmitter)
+	if err != nil {
+		// The parent, not connectCtx: a connect that times out is a failure,
+		// not a shutdown, and must not leave the server running with no repo.
+		if ctx.Err() != nil {
+			slog.Info("db connect abandoned, shutting down", slog.Any("err", err))
+			return
+		}
+		a.fatal("connect to db", slog.Any("err", err))
+	}
+	a.repo = ordersDB
 
 	err = repo.SyncDBStructInsertionAndMigrations()
 	if err != nil {
-		utils.LogFatal("db migrations", slog.Any("err", err))
+		a.fatal("db migrations", slog.Any("err", err))
 	}
 
 	slog.Info("db connected and migrated")
@@ -85,14 +130,14 @@ func (a *App) initEventListener() {
 		var err error
 		a.eventListener, err = profiles.NewEventListener()
 		if err != nil {
-			utils.LogFatal("profiles.NewEventListener", slog.Any("err", err))
+			a.fatal("profiles.NewEventListener", slog.Any("err", err))
 		}
 
 		a.domainEventsHandler = domain.NewEventsHandler(a.repo)
 		a.eventListener.RegisterHandler(a.domainEventsHandler.HandleProfilesEvent)
 
 		if err = a.eventListener.Run(); err != nil {
-			utils.LogFatal("eventListener.Run", slog.Any("err", err))
+			a.fatal("eventListener.Run", slog.Any("err", err))
 		}
 	}
 }
@@ -108,13 +153,19 @@ func (a *App) initSentry() {
 	}
 }
 
-func (a *App) initGinEngine() {
+func (a *App) initGinEngine(ctx context.Context) {
 	gin.SetMode(common.Config.Mode)
 	a.gEngine = gin.New()
 	issuerUrl := fmt.Sprintf("%s/auth/realms/%s", common.Config.KeycloakServerUrl, common.Config.KeycloakRealm)
-	tokenVerifier, err := middleware.NewFailoverOIDCTokenVerifier(issuerUrl)
+	tokenVerifier, err := middleware.NewFailoverOIDCTokenVerifier(ctx, issuerUrl)
 	if err != nil {
-		utils.LogFatal("middleware.NewFailoverOIDCTokenVerifier", slog.Any("err", err))
+		// Same as initDB: a signal during the fetch is a shutdown, not a
+		// misconfiguration, and serverFn already reports it as one.
+		if ctx.Err() != nil {
+			slog.Info("jwks fetch abandoned, shutting down", slog.Any("err", err))
+			return
+		}
+		a.fatal("middleware.NewFailoverOIDCTokenVerifier", slog.Any("err", err))
 	}
 
 	// middleware
@@ -303,19 +354,164 @@ func (a *App) initHealth() {
 	})
 }
 
-func (a *App) Run() {
-	if err := a.gEngine.Run(":" + common.Config.Port); err != nil {
-		utils.LogFatal("gin.Run", slog.Any("err", err))
+// Run serves until ctx is done, then returns so its caller's deferred Shutdown
+// can drain.
+func (a *App) Run(ctx context.Context) {
+	server := &http.Server{
+		Addr:    ":" + common.Config.Port,
+		Handler: a.gEngine,
+	}
+
+	listenErr := make(chan error, 1)
+	go func() {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			listenErr <- err
+		}
+	}()
+	slog.Info("listening", slog.String("addr", server.Addr))
+
+	// The listen failure is handled here rather than in the goroutine, so the
+	// exit belongs to one goroutine. Calling FatalAfter from there raced this
+	// one: the drain takes seconds, and a signal arriving inside that window let
+	// Run return, serverFn's deferred Shutdown find the Once already taken, and
+	// main exit 0 — reporting success for a server that never bound its port.
+	select {
+	case err := <-listenErr:
+		a.fatal("http.ListenAndServe", slog.Any("err", err))
+	case <-ctx.Done():
+		// Before the 15s request grace, which is the longest wait in the exit.
+		// The fatal paths get this from a.fatal; this one returns, so it does it
+		// here.
+		if a.stop != nil {
+			a.stop()
+		}
+		slog.Info("signal received, shutting down")
+		a.stopServer(server, shutdownGrace)
+
+		a.reportLateListenError(listenErr)
 	}
 }
 
-func (a *App) Shutdown() {
-	a.repo.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	a.eventEmitter.Close(ctx)
-	sentry.Flush(2 * time.Second)
+// fatal reports why the process is dying, drains, and exits.
+func (a *App) fatal(msg string, args ...any) {
+	if a.stop != nil {
+		a.stop()
+	}
+
+	utils.FatalAfter(a.Shutdown, msg, args...)
 }
+
+// reportLateListenError exits non-zero if the server had in fact failed to
+// listen, after a signal has already sent Run down the graceful path.
+func (a *App) reportLateListenError(listenErr <-chan error) {
+	select {
+	case err := <-listenErr:
+		a.fatal("http.ListenAndServe", slog.Any("err", err))
+	case <-time.After(listenErrorWindow):
+	}
+}
+
+// stopServer stops serving, waits grace for in-flight requests, and then takes
+// the connections out from under whatever is left.
+func (a *App) stopServer(server *http.Server, grace time.Duration) {
+	ctx, cancel := context.WithTimeout(context.Background(), grace)
+	defer cancel()
+
+	err := server.Shutdown(ctx)
+	if err == nil {
+		return
+	}
+
+	slog.Error("http.Server.Shutdown: requests still in flight after the grace, closing their connections",
+		slog.Any("err", err), slog.Duration("grace", grace))
+	sentry.CaptureException(err)
+
+	if err := server.Close(); err != nil {
+		slog.Error("http.Server.Close", slog.Any("err", err))
+	}
+}
+
+// shutdownGrace bounds how long in-flight requests have once a signal arrives.
+const shutdownGrace = 15 * time.Second
+
+// listenErrorWindow is how long Run looks for a listen failure after a signal
+// has already sent it down the graceful path.
+const listenErrorWindow = 250 * time.Millisecond
+
+// Shutdown drains what the app owns: the event listener, the connection pool,
+// the event emitter, then Sentry. It runs once, and survives a partial
+// Initialize, since the fatal paths call it too.
+func (a *App) Shutdown() {
+	a.shutdownOnce.Do(a.shutdown)
+}
+
+func (a *App) shutdown() {
+	// Each step has its own bound, so a stuck pgxpool.Close (it waits for every
+	// acquired connection) cannot eat the emitter's grace.
+	if a.eventListener != nil {
+		runBounded("event listener", profiles.CloseGrace+stepSlack, a.eventListener.Close)
+	}
+	closeRepo := a.repoClose
+	if closeRepo == nil && a.repo != nil {
+		closeRepo = a.repo.Close
+	}
+	if closeRepo != nil {
+		runBounded("repo", poolCloseGrace, closeRepo)
+	}
+	if a.eventEmitter != nil {
+		runBounded("event emitter", emitterDrainGrace+stepSlack, func() {
+			ctx, cancel := context.WithTimeout(context.Background(), emitterDrainGrace)
+			defer cancel()
+			a.eventEmitter.Close(ctx)
+		})
+	}
+
+	sentry.Flush(sentryFlushGrace)
+}
+
+// runBounded gives step its own grace and reports an overshoot. Returning
+// matters more than finishing: what follows is another step that also has data
+// to flush, or the exit.
+func runBounded(what string, grace time.Duration, step func()) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		step()
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(grace):
+		slog.Error("App.Shutdown step did not finish, continuing",
+			slog.String("step", what), slog.Duration("grace", grace))
+		sentry.CaptureMessage("App.Shutdown step timed out: " + what)
+	}
+}
+
+// The grants each shutdown step gets, and the budget they add up to.
+const (
+	// The emitter's whole close, not just its drain timeout: the library adds a
+	// hardcoded 5s flush after the subscription phase, and losing that race
+	// costs a spurious Sentry failure as well as the publishes.
+	emitterDrainGrace = events.CloseBudget
+	poolCloseGrace    = 3 * time.Second
+	sentryFlushGrace  = 2 * time.Second
+
+	// Outer grace = inner deadline + stepSlack, so a step that uses its whole
+	// deadline is not reported as hung.
+	stepSlack = time.Second
+
+	shutdownBudget = (profiles.CloseGrace + stepSlack) + poolCloseGrace + (emitterDrainGrace + stepSlack)
+)
+
+// stopGracePeriod is how long the orchestrator waits before SIGKILL, and the
+// whole exit has to fit inside it: this much for in-flight requests, then the
+// budget above, then the Sentry flush.
+const stopGracePeriod = 45 * time.Second
+
+// Guarded at compile time as well: subtracting on unsigned constants makes an
+// edit that overruns a build failure.
+const _ = uint64(stopGracePeriod - shutdownGrace - shutdownBudget - sentryFlushGrace)
 
 func (a *App) SetEmitter(emitter events.EventEmitter) {
 	a.eventEmitter = emitter

@@ -154,10 +154,11 @@ func TestParseGenericRows_BlankSpacerRowsAreNotDrops(t *testing.T) {
 	assert.Zero(t, dropped)
 }
 
+// The empty-email row is otherwise valid, so only the email guard drops it.
 func TestParseGenericRows_SkipsRowWithNoEmail(t *testing.T) {
 	orders, dropped := parseGenericRows([][]any{
 		genericHeader,
-		{"", "5.00", "USD", "1", "2026-01-01 10:00:00"},
+		{"", "5.00", "USD", "1", "2026-01-01 10:00:00", "cash"},
 		{"ok@example.com", "1.00", "USD", "1", "2026-01-01 10:00:00", "cash"},
 	})
 	require.Len(t, orders, 1)

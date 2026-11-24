@@ -6,10 +6,12 @@ import (
 )
 
 // cell reads one cell of a sheet row. The Sheets API omits trailing empty
-// cells, so a row can be shorter than the sheet's columns, and a numeric cell
-// arrives as float64: row[i].(string) panics on both. A missing cell reads as
-// "". Floats use 'f' formatting because fmt.Sprint's %g turns 1e6 into
-// "1e+06", which strconv then rejects.
+// cells, so a row can be shorter than the sheet's columns, and row[i].(string)
+// panics on it; a missing cell reads as "". Our Values.Get calls use the
+// default FORMATTED_VALUE render, so cells arrive as strings; the float64 case
+// covers UNFORMATTED_VALUE, which returns numbers as float64. It uses 'f'
+// formatting because fmt.Sprint's %g turns 1e6 into "1e+06", which strconv
+// then rejects.
 func cell(row []any, i int) string {
 	if i >= len(row) || row[i] == nil {
 		return ""

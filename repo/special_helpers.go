@@ -152,6 +152,32 @@ func (o *OrdersDB) GetAllSpecials(ctx context.Context) ([]*Special, error) {
 	return specials, nil
 }
 
+// GetSpecialsStartingBetween returns the specials whose window starts in
+// [from, to], so callers that need a few days of start dates do not read the
+// whole, ever-growing table.
+func (o *OrdersDB) GetSpecialsStartingBetween(ctx context.Context, from, to time.Time) ([]*Special, error) {
+	var specials []*Special
+	rows, err := o.pool.Query(ctx,
+		`SELECT id, keycloak_id, email, start_date, end_date, category, subcategory FROM specials
+		 WHERE start_date >= $1 AND start_date <= $2`, from, to)
+	if err != nil {
+		return nil, fmt.Errorf("o.pool.Query: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var spe Special
+		if err := rows.Scan(&spe.Id, &spe.KeycloakId, &spe.Email, &spe.StartDate, &spe.EndDate, &spe.Category, &spe.SubCategory); err != nil {
+			return nil, fmt.Errorf("rows.Scan: %w", err)
+		}
+		specials = append(specials, &spe)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows.Err: %w", err)
+	}
+	return specials, nil
+}
+
 func (o *OrdersDB) HasSpecialMembership(ctx context.Context, email string) (bool, error) {
 	count, err := o.count(ctx, `select count(*) as total from specials where email = $1`, email)
 	if err != nil {

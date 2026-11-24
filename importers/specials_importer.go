@@ -2,11 +2,13 @@ package importers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/volatiletech/null/v9"
 	"google.golang.org/api/option"
 	"google.golang.org/api/sheets/v4"
@@ -32,26 +34,41 @@ func (im *SpecialsImporter) String() string {
 	return "importer specials"
 }
 
+// Import creates a special per sheet row, skipping rows already in the table
+// (see special_dedup.go): the sheet is never cleared and CreateSpecial always
+// INSERTs.
 func (im *SpecialsImporter) Import() error {
-	var err error
-	var sheetValues []*SpecialRecord
-	sheetValues, err = im.getSheetValues()
+	sheetValues, dropped, err := im.getSheetValues()
 	if err != nil {
 		return fmt.Errorf("importer.getSheetValues: %w", err)
 	}
-	slog.Info("importer.getSheetValues", slog.Int("count", len(sheetValues)))
+	slog.Info("importer.getSheetValues", slog.Int("count", len(sheetValues)), slog.Int("dropped", dropped))
+	reportDroppedRows(im, dropped, len(sheetValues))
+
+	existing, err := im.existingSpecials(context.WithValue(context.Background(), common.CtxEventBuilder, im), sheetValues)
+	if err != nil {
+		return fmt.Errorf("importer.existingSpecials: %w", err)
+	}
 
 	newRecords := 0
 	errRecords := 0
-	for i, row := range sheetValues {
+	skippedRecords := 0
+	for _, row := range sheetValues {
+		if existing.has(row) {
+			skippedRecords++
+			continue
+		}
 		if err := im.createSpecial(row); err != nil {
-			slog.Error("importer.createSpecial", slog.Int("line", i+1), slog.Any("err", err))
+			slog.Error("importer.createSpecial", slog.Int("row", row.SheetRow), slog.Any("err", err))
 			errRecords++
 			continue
 		}
+		// so a sheet that lists the same grant twice imports it once
+		existing.addImported(row)
 		newRecords++
 	}
-	slog.Info("import summary", slog.Int("new_specials", newRecords), slog.Int("with_errors", errRecords))
+	slog.Info("import summary", slog.Int("new_specials", newRecords), slog.Int("already_present", skippedRecords),
+		slog.Int("with_errors", errRecords), slog.Int("dropped_by_parser", dropped))
 
 	return nil
 }
@@ -63,49 +80,95 @@ type SpecialRecord struct {
 	EndDate     time.Time
 	Category    string
 	SubCategory null.String
+	// SheetRow is the 1-based sheet row, for log lines an operator can act on.
+	SheetRow int
 }
 
-func (im *SpecialsImporter) getSheetValues() ([]*SpecialRecord, error) {
+func (im *SpecialsImporter) getSheetValues() ([]*SpecialRecord, int, error) {
 	sheetsService, err := sheets.NewService(context.TODO(),
 		option.WithCredentialsFile(common.Config.GoogleAppCredentials),
 		option.WithScopes(sheets.SpreadsheetsReadonlyScope))
 	if err != nil {
-		return nil, fmt.Errorf("sheets.NewService: %w", err)
+		return nil, 0, fmt.Errorf("sheets.NewService: %w", err)
 	}
 
 	call := sheetsService.Spreadsheets.Values.Get(common.Config.ImportSpecialsSpreadsheetId, "import specials")
 	call.Context(context.TODO())
 	resp, err := call.Do()
 	if err != nil {
-		return nil, fmt.Errorf("sheetsService.Spreadsheets.Values.Get: %w", err)
+		return nil, 0, fmt.Errorf("sheetsService.Spreadsheets.Values.Get: %w", err)
 	}
 
-	records := make([]*SpecialRecord, 0)
-	layout := "2006-01-02"
+	records, dropped := parseSpecialRows(resp.Values)
+	return records, dropped, nil
+}
 
-	for _, row := range resp.Values[1:] {
-		startDate, err := time.Parse(layout, row[2].(string))
-		if err != nil {
-			return nil, fmt.Errorf("time.Parse: %w", err)
+// parseSpecialRows turns sheet rows into records, skipping the header. It
+// returns the records it could read and how many data rows it dropped; a bad
+// row is logged and skipped, never fatal.
+func parseSpecialRows(values [][]any) ([]*SpecialRecord, int) {
+	records := make([]*SpecialRecord, 0)
+	const layout = "2006-01-02"
+	if len(values) == 0 {
+		return records, 0
+	}
+
+	dropped := 0
+	for i, row := range values[1:] {
+		sheetRow := i + 2 // the header is row 1
+		if blankRow(row) {
+			continue
 		}
-		endDate, err := time.Parse(layout, row[3].(string))
+
+		startDate, err := time.Parse(layout, cell(row, 2))
 		if err != nil {
-			return nil, fmt.Errorf("time.Parse: %w", err)
+			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "start_date"), slog.Any("err", err))
+			dropped++
+			continue
+		}
+		endDate, err := time.Parse(layout, cell(row, 3))
+		if err != nil {
+			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "end_date"), slog.Any("err", err))
+			dropped++
+			continue
+		}
+
+		// An empty category inserts '' and silently grants nothing.
+		category := cell(row, 4)
+		if category == "" {
+			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "category"), slog.String("reason", "empty"))
+			dropped++
+			continue
 		}
 
 		record := &SpecialRecord{
-			Email:      null.StringFrom(row[0].(string)),
-			KeycloakID: null.StringFrom(row[1].(string)),
-			StartDate:  startDate,
-			EndDate:    endDate,
-			Category:   row[4].(string),
+			StartDate: startDate,
+			EndDate:   endDate,
+			Category:  category,
+			SheetRow:  sheetRow,
 		}
-		if len(row) > 5 {
-			record.SubCategory = null.StringFrom(row[5].(string))
+
+		// Set only when non-empty: null.StringFrom("") is Valid, which would
+		// defeat createSpecial's identifier checks.
+		if email := cell(row, 0); email != "" {
+			record.Email = null.StringFrom(email)
 		}
+		if keycloakID := cell(row, 1); keycloakID != "" {
+			record.KeycloakID = null.StringFrom(keycloakID)
+		}
+		if !record.Email.Valid && !record.KeycloakID.Valid {
+			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "email/keycloak_id"), slog.String("reason", "both empty"))
+			dropped++
+			continue
+		}
+
+		// Always '', never NULL and never decided by len(row): trailing cells
+		// are omitted, so the row length depends on unrelated later columns,
+		// and the cleanup queries (`subcategory <> 'rav'`) treat NULL differently.
+		record.SubCategory = null.StringFrom(cell(row, 5))
 		records = append(records, record)
 	}
-	return records, nil
+	return records, dropped
 }
 
 func (im *SpecialsImporter) createSpecial(rSpecial *SpecialRecord) error {
@@ -116,6 +179,8 @@ func (im *SpecialsImporter) createSpecial(rSpecial *SpecialRecord) error {
 		return fmt.Errorf("email is required (keycloak id %q)", rSpecial.KeycloakID.String)
 	}
 	var special repo.Special
+	// An identifier the sheet does not carry stays unset, so the column is
+	// omitted from the INSERT and stores NULL, never ''.
 	special.Email = rSpecial.Email
 	special.KeycloakId = rSpecial.KeycloakID
 	special.StartDate = null.TimeFrom(rSpecial.StartDate)
@@ -124,13 +189,22 @@ func (im *SpecialsImporter) createSpecial(rSpecial *SpecialRecord) error {
 	special.SubCategory = rSpecial.SubCategory
 
 	ctx := context.WithValue(context.Background(), common.CtxEventBuilder, im)
-	account, err := im.repo.GetAccount(ctx, 0, rSpecial.Email.String)
-	if err == nil {
-		special.KeycloakId = account.UserKey
+	// The account may add a keycloak id, never replace a good one with an empty
+	// one. Only pgx.ErrNoRows is expected: a swallowed error would leave a
+	// half-written row that the dedup then skips forever.
+	if rSpecial.Email.Valid {
+		account, err := im.repo.GetAccount(ctx, 0, rSpecial.Email.String)
+		switch {
+		case err == nil:
+			if account.UserKey.String != "" {
+				special.KeycloakId = account.UserKey
+			}
+		case !errors.Is(err, pgx.ErrNoRows):
+			return fmt.Errorf("repo.GetAccount: %w", err)
+		}
 	}
 
-	_, err = im.repo.CreateSpecial(ctx, special)
-	if err != nil {
+	if _, err := im.repo.CreateSpecial(ctx, special); err != nil {
 		return fmt.Errorf("importer.createSpecial: %w", err)
 	}
 	return nil

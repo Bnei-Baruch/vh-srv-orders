@@ -15,15 +15,17 @@ import (
 
 func (o *OrdersDB) DeleteSpecialById(ctx context.Context, id int) error {
 	var (
-		email null.String
-		err   error
+		email      null.String
+		keycloakID null.String
+		err        error
 	)
-	if err = o.pool.QueryRow(ctx, `SELECT email FROM specials where id=$1`, id).Scan(&email); err != nil {
+	if err = o.pool.QueryRow(ctx, `SELECT email, keycloak_id FROM specials where id=$1`, id).Scan(&email, &keycloakID); err != nil {
 		return err
 	}
 	// vh-srv-profile revokes by email only, so ending a special that has none
 	// would leave the membership active there. Refuse, and leave the row as is.
-	if !email.Valid {
+	// '' as well as NULL: older rows stored the empty string for "absent".
+	if email.String == "" {
 		return fmt.Errorf("special %d has no email to revoke by: %w", id, common.ErrInvalidValues)
 	}
 	res, errUpdate := o.pool.Exec(ctx, `UPDATE  specials SET end_date = now(), updated_at = now() WHERE  id = $1`, id)
@@ -34,9 +36,18 @@ func (o *OrdersDB) DeleteSpecialById(ctx context.Context, id int) error {
 	if res.RowsAffected() == 0 {
 		return common.ErrNoRowsAffected
 	} else {
-		o.emitEvent(ctx, events.TypeDeleteSpecial, map[string]interface{}{"email": email.String})
+		o.emitEvent(ctx, events.TypeDeleteSpecial, map[string]interface{}{"email": email.String, "keycloak_id": keycloakID.String})
 	}
 	return nil
+}
+
+// CountSpecials is the total a paged listing needs to tell a full page from the whole table.
+func (o *OrdersDB) CountSpecials(ctx context.Context) (int, error) {
+	total, err := o.count(ctx, `SELECT count(*) FROM specials`)
+	if err != nil {
+		return 0, fmt.Errorf("o.count: %w", err)
+	}
+	return int(total), nil
 }
 
 func (o *OrdersDB) SetKeycloakIdByEmail(ctx context.Context, email string, keycloakID string) error {
@@ -131,9 +142,12 @@ func (o *OrdersDB) GetSpecialsByKeycloakId(ctx context.Context, keycloakID strin
 	return specials, nil
 }
 
-func (o *OrdersDB) GetAllSpecials(ctx context.Context) ([]*Special, error) {
+// GetAllSpecials returns a page of specials, newest first. The table only
+// grows (revoking rewrites end_date), so the listing has to be bounded.
+func (o *OrdersDB) GetAllSpecials(ctx context.Context, skip, limit int) ([]*Special, error) {
 	var specials []*Special
-	rows, err := o.pool.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory from specials`)
+	rows, err := o.pool.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory from specials
+		 ORDER BY created_at DESC, id DESC LIMIT $1 OFFSET $2`, limit, skip)
 	if err != nil {
 		return specials, err
 	}

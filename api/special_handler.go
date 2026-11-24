@@ -169,16 +169,62 @@ func (o *OrdersAPI) handleSpecialGetByKeycloakId(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": special, "success": true})
 }
 
+// The default is not the house 10, so an admin table that asks for no page
+// still gets the whole list; the maximum is what actually bounds the read.
+const (
+	defaultSpecialsPageSize = 1000
+	maxSpecialsPageSize     = 5000
+)
+
 func (o *OrdersAPI) handleSpecialGetAll(c *gin.Context) {
 	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
 		return
 	}
 
-	special, err := o.repo.GetAllSpecials(c.Request.Context())
+	skip := c.Query("skip")
+	if skip == "" {
+		skip = "0"
+	}
+	limit := c.Query("limit")
+	if limit == "" {
+		limit = strconv.Itoa(defaultSpecialsPageSize)
+	}
+
+	intSkip, err := strconv.Atoi(skip)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid skip value! Accepted value is INTEGER", "success": false})
+		return
+	}
+
+	intLimit, err := strconv.Atoi(limit)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit value! Accepted value is INTEGER", "success": false})
+		return
+	}
+	if intSkip < 0 || intLimit < 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "skip and limit must not be negative", "success": false})
+		return
+	}
+	if intLimit == 0 || intLimit > maxSpecialsPageSize {
+		intLimit = maxSpecialsPageSize
+	}
+
+	special, err := o.repo.GetAllSpecials(c.Request.Context(), intSkip, intLimit)
 	if err != nil {
 		c.Status(http.StatusInternalServerError)
 		_ = c.Error(fmt.Errorf("repo.GetAllSpecials: %w", err))
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": special, "success": true})
+
+	// total tells a full page from the whole table; data is unchanged for
+	// existing consumers.
+	total, err := o.repo.CountSpecials(c.Request.Context())
+	if err != nil {
+		c.Status(http.StatusInternalServerError)
+		_ = c.Error(fmt.Errorf("repo.CountSpecials: %w", err))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": special, "total": total,
+		"skip": intSkip, "limit": intLimit, "success": true})
 }

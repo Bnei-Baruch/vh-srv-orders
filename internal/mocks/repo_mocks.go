@@ -1486,68 +1486,6 @@ func (_c *MockOrdersRepository_GetTokensForOrders_Call) RunAndReturn(run func(ct
 	return _c
 }
 
-// GetUniqueEmailsFromSpecial provides a mock function for the type MockOrdersRepository
-func (_mock *MockOrdersRepository) GetUniqueEmailsFromSpecial(ctx context.Context) ([]string, error) {
-	ret := _mock.Called(ctx)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetUniqueEmailsFromSpecial")
-	}
-
-	var r0 []string
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context) ([]string, error)); ok {
-		return returnFunc(ctx)
-	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context) []string); ok {
-		r0 = returnFunc(ctx)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]string)
-		}
-	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = returnFunc(ctx)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// MockOrdersRepository_GetUniqueEmailsFromSpecial_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetUniqueEmailsFromSpecial'
-type MockOrdersRepository_GetUniqueEmailsFromSpecial_Call struct {
-	*mock.Call
-}
-
-// GetUniqueEmailsFromSpecial is a helper method to define mock.On call
-//   - ctx context.Context
-func (_e *MockOrdersRepository_Expecter) GetUniqueEmailsFromSpecial(ctx any) *MockOrdersRepository_GetUniqueEmailsFromSpecial_Call {
-	return &MockOrdersRepository_GetUniqueEmailsFromSpecial_Call{Call: _e.mock.On("GetUniqueEmailsFromSpecial", ctx)}
-}
-
-func (_c *MockOrdersRepository_GetUniqueEmailsFromSpecial_Call) Run(run func(ctx context.Context)) *MockOrdersRepository_GetUniqueEmailsFromSpecial_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 context.Context
-		if args[0] != nil {
-			arg0 = args[0].(context.Context)
-		}
-		run(
-			arg0,
-		)
-	})
-	return _c
-}
-
-func (_c *MockOrdersRepository_GetUniqueEmailsFromSpecial_Call) Return(strings []string, err error) *MockOrdersRepository_GetUniqueEmailsFromSpecial_Call {
-	_c.Call.Return(strings, err)
-	return _c
-}
-
-func (_c *MockOrdersRepository_GetUniqueEmailsFromSpecial_Call) RunAndReturn(run func(ctx context.Context) ([]string, error)) *MockOrdersRepository_GetUniqueEmailsFromSpecial_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // LoadRenewalData provides a mock function for the type MockOrdersRepository
 func (_mock *MockOrdersRepository) LoadRenewalData(ctx context.Context, orderID uint) (*repo.RenewalData, error) {
 	ret := _mock.Called(ctx, orderID)

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"log/slog"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-resty/resty/v2"
@@ -440,4 +442,45 @@ func Test_get_transaction_id_beyond_int4_is_400(t *testing.T) {
 	defer CloseTestApp(a)
 
 	GET(t, a, "/v2/transaction/2147483648", http.StatusBadRequest)
+}
+
+// The caller hanging up mid-call must not cancel the page request: the payment
+// rows are written and checkout may already be opening the page.
+func Test_new_token_page_call_survives_the_caller_going_away(t *testing.T) {
+	a := NewTestApp(t)
+	defer CloseTestApp(a)
+
+	received := make(chan struct{})
+	outboundCancelled := make(chan bool, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The server notices a dropped client only once the body is consumed.
+		_, _ = io.Copy(io.Discard, r.Body)
+		close(received)
+		select {
+		case <-r.Context().Done():
+			outboundCancelled <- true
+			return
+		case <-time.After(300 * time.Millisecond):
+			outboundCancelled <- false
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"url":"https://pelecard.example/page"}`))
+	}))
+	t.Cleanup(srv.Close)
+	a.ordersAPI.pages = &pelecard.Client{Client: resty.New(), BaseURL: srv.URL, Tokens: keycloak.StaticTokenSource("tok")}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	claims := &middleware.IDTokenClaims{Sub: USER_KEY, RealmAccess: middleware.Roles{Roles: []string{common.RoleRoot}}}
+	r := httptest.NewRequest(http.MethodPost, "/v2/transaction/new_token", strings.NewReader(`{}`)).
+		WithContext(context.WithValue(ctx, common.CtxAuthClaims, claims))
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		a.gEngine.ServeHTTP(httptest.NewRecorder(), r)
+	}()
+
+	<-received
+	cancel()
+	assert.False(t, <-outboundCancelled, "the page request was cancelled with the caller")
+	<-done
 }

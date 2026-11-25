@@ -103,13 +103,21 @@ func TestDrainGivesUpOnACleanupThatNeverReturns(t *testing.T) {
 	CleanupBackstop = 100 * time.Millisecond
 	defer func() { CleanupBackstop = restore }()
 
+	// drain runs in a goroutine: called inline, a broken backstop would hang
+	// here until the package's 10-minute timeout, which never names it.
 	start := time.Now()
-	drain(func() { <-release })
+	returned := make(chan struct{})
+	go func() {
+		defer close(returned)
+		drain(func() { <-release })
+	}()
+	select {
+	case <-returned:
+	case <-time.After(3 * time.Second):
+		t.Fatal("drain is still waiting on a cleanup that never returns, 3s past a 100ms backstop")
+	}
 	waited := time.Since(start)
 
-	if waited > 3*time.Second {
-		t.Fatalf("drain waited %v on a cleanup that never returns", waited)
-	}
 	if waited < 100*time.Millisecond {
 		t.Fatalf("drain returned after %v, before its own budget — nothing is being waited on",
 			waited)

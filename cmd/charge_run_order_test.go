@@ -59,25 +59,54 @@ func calls(node ast.Node) []*ast.CallExpr {
 // must run before initBillingInfra, while there is nothing to drain. An exit
 // after it would skip the callers' `defer cleanup()`: the pool stays open and
 // NATS is dropped without draining.
+//
+// Order of execution, not of writing: only the body's own top-level
+// assignments and expression statements count, without descending into a
+// func literal. A call wrapped in a closure, an if, a defer or a go statement
+// does not run where it is written, so it does not count as having run first.
 func TestInitChargeRun_BuildsEverythingBeforeOpeningInfra(t *testing.T) {
 	fn, _ := funcDecl(t, "initChargeRun")
 
-	first := map[string]token.Pos{}
-	for _, call := range calls(fn.Body) {
-		if name := callName(call.Fun); first[name] == 0 {
-			first[name] = call.Pos()
+	first := map[string]int{}
+	for index, stmt := range fn.Body.List {
+		switch stmt.(type) {
+		case *ast.AssignStmt, *ast.ExprStmt:
+		default:
+			continue
+		}
+		for _, call := range directCalls(stmt) {
+			if name := callName(call.Fun); first[name] == 0 {
+				first[name] = index + 1
+			}
 		}
 	}
 
 	infra := first["initBillingInfra"]
 	if infra == 0 {
-		t.Fatal("initChargeRun no longer calls initBillingInfra")
+		t.Fatal("initChargeRun no longer calls initBillingInfra as a statement of its own body")
 	}
 	for _, before := range []string{"validateChargeConfig", "newChargeParts"} {
-		if at := first[before]; at == 0 || at > infra {
-			t.Errorf("initChargeRun must call %s before initBillingInfra", before)
+		if at := first[before]; at == 0 || at >= infra {
+			t.Errorf("initChargeRun must call %s in a statement of its own body before "+
+				"initBillingInfra, not later and not inside a closure or a branch", before)
 		}
 	}
+}
+
+// directCalls is calls without descending into func literals, whose bodies
+// run whenever they are invoked rather than where they are written.
+func directCalls(node ast.Node) []*ast.CallExpr {
+	var found []*ast.CallExpr
+	ast.Inspect(node, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.FuncLit:
+			return false
+		case *ast.CallExpr:
+			found = append(found, n)
+		}
+		return true
+	})
+	return found
 }
 
 // service is all that runs inside the cleanup, and it only assigns fields.

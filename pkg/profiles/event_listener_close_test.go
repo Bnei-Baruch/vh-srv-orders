@@ -17,10 +17,11 @@ import (
 // stubMsg is a delivered message that records its own acknowledgement. Only the
 // three methods this package touches do anything.
 type stubMsg struct {
-	data      string
-	acks      atomic.Int64
-	naks      atomic.Int64
-	ackPanics bool
+	data       string
+	acks       atomic.Int64
+	naks       atomic.Int64
+	inProgress atomic.Int64
+	ackPanics  bool
 }
 
 func (m *stubMsg) Data() []byte { return []byte(m.data) }
@@ -34,7 +35,7 @@ func (m *stubMsg) Ack() error {
 func (m *stubMsg) Nak() error                                { m.naks.Add(1); return nil }
 func (m *stubMsg) NakWithDelay(time.Duration) error          { return nil }
 func (m *stubMsg) DoubleAck(context.Context) error           { return nil }
-func (m *stubMsg) InProgress() error                         { return nil }
+func (m *stubMsg) InProgress() error                         { m.inProgress.Add(1); return nil }
 func (m *stubMsg) Term() error                               { return nil }
 func (m *stubMsg) TermWithReason(string) error               { return nil }
 func (m *stubMsg) Metadata() (*jetstream.MsgMetadata, error) { return nil, nil }
@@ -55,14 +56,15 @@ func newListener() *EventListener {
 	}
 }
 
-// Close is called from api.App.Shutdown, which the fatal paths reach — including
-// the one where Run itself failed. None of the fields it touches exist then.
+// Close is meant for the server's shutdown (not wired at this commit), which
+// fatal paths reach too — including the one where Run itself failed. None of
+// the fields it touches exist then.
 func TestCloseBeforeRun(t *testing.T) {
 	new(EventListener).Close()
 }
 
-// Close must not return until the runner has stopped, because App.Shutdown
-// closes the repo next and these handlers write through it.
+// Close must not return until the runner has stopped, because the shutdown
+// that calls it closes the repo next and these handlers write through it.
 func TestCloseWaitsForTheRunnerAndDrainsWhatIsBuffered(t *testing.T) {
 	listener := newListener()
 
@@ -133,26 +135,68 @@ func TestCloseGivesUpOnAStuckRunner(t *testing.T) {
 }
 
 // Nothing is acknowledged until a handler has run: an event acked without being
-// handled is neither redelivered nor processed.
+// handled is neither redelivered nor processed. It goes in through
+// handleMessage, where the old code acked on enqueue.
 func TestTheAckFollowsTheHandlers(t *testing.T) {
 	listener := newListener()
 
-	var ackedDuringHandler atomic.Bool
+	release := make(chan struct{})
 	msg := &stubMsg{data: `{"type":"update_profile"}`}
-	listener.RegisterHandler(func(Event) {
-		ackedDuringHandler.Store(msg.acks.Load() > 0)
-	})
+	listener.RegisterHandler(func(Event) { <-release })
 
 	go listener.runQueue()
-	listener.queue <- queued{event: Event{}, msg: msg}
+	listener.handleMessage(msg)
+
+	if msg.acks.Load() != 0 {
+		t.Error("the message was acked when it was queued, before any handler finished")
+	}
+	close(release)
 	listener.Close()
 
-	if ackedDuringHandler.Load() {
-		t.Error("the message was acked before the handler ran")
-	}
 	if msg.acks.Load() != 1 {
 		t.Errorf("acked %d times, want once", msg.acks.Load())
 	}
+}
+
+// A dead instance's held messages stay blocked for AckWait, so AckWait is
+// short, and a held message is kept alive with InProgress instead. Each one,
+// queued or being handled, is touched until it is acked, and not after.
+func TestKeepAliveTouchesEveryHeldMessageUntilItsAck(t *testing.T) {
+	restore := progressInterval
+	progressInterval = 10 * time.Millisecond
+	defer func() { progressInterval = restore }()
+
+	listener := newListener()
+	release := make(chan struct{})
+	listener.RegisterHandler(func(Event) { <-release })
+
+	go listener.runQueue()
+	go listener.keepAlive()
+
+	handling := &stubMsg{data: `{"type":"update_profile"}`}
+	queuedMsg := &stubMsg{data: `{"type":"update_profile"}`}
+	listener.handleMessage(handling)
+	listener.handleMessage(queuedMsg)
+	time.Sleep(80 * time.Millisecond)
+
+	for name, msg := range map[string]*stubMsg{"handling": handling, "queued": queuedMsg} {
+		if msg.inProgress.Load() < 2 {
+			t.Errorf("the %s message got %d InProgress in 8 intervals: its AckWait runs out "+
+				"under a slow handler", name, msg.inProgress.Load())
+		}
+	}
+
+	release <- struct{}{} // the first is acked, the second is now being handled
+	time.Sleep(20 * time.Millisecond)
+	afterAck := handling.inProgress.Load()
+	time.Sleep(50 * time.Millisecond)
+	if handling.acks.Load() != 1 || handling.inProgress.Load() != afterAck {
+		t.Errorf("acked %d times, and InProgress went %d -> %d after the ack",
+			handling.acks.Load(), afterAck, handling.inProgress.Load())
+	}
+
+	close(release)
+	listener.Close()
 }
 
 // A handler panic costs one event, not the listener.
@@ -220,16 +264,18 @@ func TestAPanicInOneHandlerDoesNotSkipTheNext(t *testing.T) {
 	}
 }
 
-// The consumer sets an ack window long enough for the queue: the ack
-// waits for the handlers.
+// AckWait is how long a crashed instance's events stay blocked, so it is
+// short; keepAlive's interval has to fit inside it with room to miss a beat.
 func TestConsumerBoundsItsRedelivery(t *testing.T) {
 	config := consumerConfig()
 
-	if config.AckWait <= 0 {
-		t.Error("AckWait unset: the server's 30s applies, and a queued event can outlast it")
+	if config.AckWait <= 0 || config.AckWait > 30*time.Second {
+		t.Errorf("AckWait is %v: after a crash or kill, the events that instance held "+
+			"wait that long before anyone gets them", config.AckWait)
 	}
-	if config.AckWait < time.Minute {
-		t.Errorf("AckWait is %v, which a handler with no deadline of its own can exceed", config.AckWait)
+	if progressInterval > config.AckWait/2 {
+		t.Errorf("progressInterval %v leaves no missed heartbeat inside AckWait %v",
+			progressInterval, config.AckWait)
 	}
 	// MaxDeliver is deliberately unset: capping deliveries without something
 	// consuming the MAX_DELIVERIES advisory discards the message instead of
@@ -303,23 +349,15 @@ func TestTheProfileClientIsBounded(t *testing.T) {
 	}
 }
 
-// AckWait covers the queue, and what makes that possible is the cap on
-// delivered-unacknowledged messages.
+// The cap on delivered-unacknowledged messages matches the queue, so the
+// Consume callback never blocks with messages left in the client's buffer,
+// where keepAlive cannot reach them.
 func TestTheConsumerCapsWhatCanBeWaitingForAnAck(t *testing.T) {
 	config := consumerConfig()
 
 	if config.MaxAckPending != queueCapacity {
-		t.Errorf("MaxAckPending is %d, want %d: ackWait is derived against that number, and "+
-			"unset means the server's 1000", config.MaxAckPending, queueCapacity)
-	}
-
-	// And the derivation itself, stated against the cap rather than against
-	// ackWait's own definition.
-	perEvent := 2 * requestTimeout
-	if ackWait < time.Duration(config.MaxAckPending)*perEvent {
-		t.Errorf("ackWait %v does not cover %d events at %v each: events still queued get "+
-			"redelivered, and each redelivery publishes its own derived account event",
-			ackWait, config.MaxAckPending, perEvent)
+		t.Errorf("MaxAckPending is %d, want %d (unset means the server's 1000)",
+			config.MaxAckPending, queueCapacity)
 	}
 }
 
@@ -441,25 +479,31 @@ func TestCloseNaksWhatIsStillQueued(t *testing.T) {
 	}
 }
 
-// Close must Drain the consumer, not Stop it.
+// stubConsumeCtx records which way Close shuts the consumer.
+type stubConsumeCtx struct {
+	drains, stops atomic.Int64
+}
+
+func (c *stubConsumeCtx) Drain() { c.drains.Add(1) }
+func (c *stubConsumeCtx) Stop()  { c.stops.Add(1) }
+
+var _ jetstream.ConsumeContext = (*stubConsumeCtx)(nil)
+
+// Close must Drain the consumer, not Stop it: Stop discards the prefetched
+// buffer, so those events wait out ackWait instead of being naked back.
 func TestCloseDrainsTheConsumerRatherThanStoppingIt(t *testing.T) {
-	source, err := os.ReadFile("event_listener.go")
-	if err != nil {
-		t.Fatal(err)
-	}
+	listener := newListener()
+	consumer := &stubConsumeCtx{}
+	listener.consumerCtx = consumer
+	go listener.runQueue()
 
-	closeBody := regexp.MustCompile(`(?s)func \(el \*EventListener\) Close\(\) \{(.*?)\n\}`).
-		FindSubmatch(source)
-	if closeBody == nil {
-		t.Fatal("Close was not found in event_listener.go")
-	}
+	listener.Close()
 
-	if !bytes.Contains(closeBody[1], []byte("el.consumerCtx.Drain()")) {
-		t.Error("Close must call consumerCtx.Drain(): Stop discards the prefetched buffer, so " +
-			"those events wait out ackWait instead of being naked back immediately")
+	if consumer.drains.Load() != 1 {
+		t.Errorf("Close drained the consumer %d times, want once", consumer.drains.Load())
 	}
-	if bytes.Contains(closeBody[1], []byte("el.consumerCtx.Stop()")) {
-		t.Error("Close calls consumerCtx.Stop(), which discards the prefetched buffer")
+	if consumer.stops.Load() != 0 {
+		t.Errorf("Close stopped the consumer %d times, discarding its buffer", consumer.stops.Load())
 	}
 }
 

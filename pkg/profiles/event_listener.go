@@ -68,13 +68,24 @@ type EventListener struct {
 	ncClosedOnce sync.Once
 	// runnerStarted: whether anything will ever close done.
 	runnerStarted bool
+
+	// held is every delivered message not yet acked or naked: queued, being
+	// handled, or blocked on a full queue. keepAlive extends their AckWait.
+	heldMu sync.Mutex
+	held   map[jetstream.Msg]struct{}
 }
 
-// ackWait is how long the server waits for an ack before redelivering. The ack
-// comes after the handlers, so it must cover the whole queue ahead of a message
-// (MaxAckPending = queueCapacity), each spending up to two profile-service calls
-// (one retry after a 401), plus a minute.
-const ackWait = queueCapacity*2*requestTimeout + time.Minute
+// ackWait is how long the server waits for an ack before redelivering, and so
+// how long the events a dead instance held stay blocked: nothing Naks them when
+// it crashes or is killed. It is short on purpose. The ack comes after the
+// handlers, which can take longer (a queue of them, each up to two 30s
+// profile calls), so keepAlive sends InProgress for every held message each
+// progressInterval, and the server restarts their AckWait.
+const ackWait = 30 * time.Second
+
+// progressInterval leaves two missed heartbeats before AckWait runs out. A var
+// so tests can shorten it.
+var progressInterval = ackWait / 3
 
 // queued carries the message with its event so the ack happens after the handlers.
 type queued struct {
@@ -139,12 +150,12 @@ func consumerConfig() jetstream.ConsumerConfig {
 		Name:        common.ServiceName,
 		Durable:     common.ServiceName,
 		Description: "Events listener of vh-srv-orders for profile changes",
-		// The ack comes after the handlers, so the 30s default would expire on
-		// queued messages. MaxDeliver is left unset on purpose: without a dead
+		// Set explicitly, as the stall bound after a crash; keepAlive covers
+		// slow handlers. MaxDeliver is left unset on purpose: without a dead
 		// letter, a cap silently discards the event on its last delivery.
 		AckWait: ackWait,
-		// What ackWait is derived against. PullMaxMessages does not bound
-		// delivered-but-unacked messages; MaxAckPending does (default 1000).
+		// Bounds delivered-but-unacked messages to what the queue holds;
+		// PullMaxMessages does not (default 1000).
 		MaxAckPending: queueCapacity,
 	}
 }
@@ -160,8 +171,55 @@ func (el *EventListener) Run() error {
 
 	el.runnerStarted = true
 	go el.runQueue()
+	go el.keepAlive()
 
 	return nil
+}
+
+// keepAlive sends InProgress for every held message each progressInterval,
+// until the runner stops. After that Close Naks what is left.
+func (el *EventListener) keepAlive() {
+	ticker := time.NewTicker(progressInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			el.recovered("keepAlive", el.touchHeld)
+		case <-el.done:
+			return
+		}
+	}
+}
+
+func (el *EventListener) touchHeld() {
+	el.heldMu.Lock()
+	msgs := make([]jetstream.Msg, 0, len(el.held))
+	for msg := range el.held {
+		msgs = append(msgs, msg)
+	}
+	el.heldMu.Unlock()
+
+	for _, msg := range msgs {
+		if err := msg.InProgress(); err != nil {
+			slog.Error("EventListener in-progress", slog.Any("err", err))
+		}
+	}
+}
+
+func (el *EventListener) hold(msg jetstream.Msg) {
+	el.heldMu.Lock()
+	defer el.heldMu.Unlock()
+	if el.held == nil {
+		el.held = make(map[jetstream.Msg]struct{})
+	}
+	el.held[msg] = struct{}{}
+}
+
+func (el *EventListener) release(msg jetstream.Msg) {
+	el.heldMu.Lock()
+	defer el.heldMu.Unlock()
+	delete(el.held, msg)
 }
 
 // runQueue delivers queued events until quit, then drains the queue and closes
@@ -191,6 +249,7 @@ func (el *EventListener) deliver(item queued) {
 		if item.msg == nil {
 			return
 		}
+		el.release(item.msg)
 		// Past Close's grace this can fail, and the event is redelivered.
 		if err := item.msg.Ack(); err != nil {
 			slog.Error("EventListener ack", slog.Any("err", err),
@@ -248,7 +307,8 @@ func (el *EventListener) drainQueue() {
 //
 // Called from fatal paths too, so nothing is guaranteed to exist. Known gap: a
 // callback preempted between its quit check and its send can enqueue after
-// step 4; that event returns after ackWait instead of at once.
+// step 4; that event returns after ackWait instead of at once. A crash or kill
+// skips Close entirely, and everything held returns after ackWait.
 func (el *EventListener) Close() {
 	if el.quit != nil {
 		el.quitOnce.Do(func() { close(el.quit) })
@@ -287,7 +347,8 @@ func (el *EventListener) waitFor(what string, ch <-chan struct{}, grace time.Dur
 
 // Close's budget. natsFlushTimeout is nats.go's fixed FlushTimeout(5s), run
 // after the DrainTimeout-bounded subscription phase and before the close that
-// fires ncClosed. CloseGrace is exported for api.App.Shutdown.
+// fires ncClosed. CloseGrace is exported for the server's shutdown, which does
+// not call Close yet at this commit (fix/server-graceful-shutdown wires it).
 //
 // runnerShare is less than one slow handler can take (two 30s profile calls),
 // so with a slow profile service a handler can outlive the wait and meet a
@@ -307,6 +368,7 @@ func (el *EventListener) nakRemaining() {
 		select {
 		case item := <-el.queue:
 			if item.msg != nil {
+				el.release(item.msg)
 				el.nak(item.msg)
 			}
 		default:
@@ -348,9 +410,13 @@ func (el *EventListener) handleMessage(msg jetstream.Msg) {
 	default:
 	}
 
+	// Held from here: a full queue blocks this send, and the AckWait runs
+	// while it does.
+	el.hold(msg)
 	select {
 	case el.queue <- queued{event: event, msg: msg}:
 	case <-el.quit:
+		el.release(msg)
 		el.drop(msg)
 	}
 }

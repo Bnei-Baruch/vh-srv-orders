@@ -16,12 +16,17 @@ import (
 // fatal inside it skips the drain — the pool stays open and NATS is dropped
 // without draining. Its configuration checks were hoisted into the commands for
 // that reason, and these tests stop them coming back.
+//
+// They catch the shape that was there: a missing-config check that exits.
+// They do not prove the builder never exits. A fatal that fires only on a set
+// or malformed value (an unparsable URL, say), or one reached through a
+// function value such as `var die = utils.LogFatal`, passes both. Ruling those
+// out needs a call-graph check, which these are not.
 
-// The text check below sees only the builder's own body, not what it calls,
-// so this one runs the builder. It does so in a child process, where an exit
-// shows up as a failed child instead of killing the test binary, and with
-// common.Config zeroed (testutil's init loads .env into it): every config
-// check fails there, so a fatal one anywhere under the builder exits.
+// Runs the builder in a child process, where an exit shows up as a failed
+// child instead of killing the test binary, with common.Config zeroed
+// (testutil's init loads .env into it). Every missing-config check fails
+// there, so one that exits, in the builder or anything it calls, fails this.
 func TestTheChargeBuilderReturnsWithEmptyConfig(t *testing.T) {
 	if os.Getenv("CHARGE_BUILDER_CHILD") == "1" {
 		config := reflect.ValueOf(common.Config).Elem()

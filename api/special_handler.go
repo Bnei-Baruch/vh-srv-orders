@@ -169,12 +169,10 @@ func (o *OrdersAPI) handleSpecialGetByKeycloakId(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": special, "success": true})
 }
 
-// The default is not the house 10, so an admin table that asks for no page
-// still gets the whole list; the maximum is what actually bounds the read.
-const (
-	defaultSpecialsPageSize = 1000
-	maxSpecialsPageSize     = 5000
-)
+// vh-payment-bo, the only consumer, asks for no page and shows every row, so
+// leaving limit out still returns the whole table; paging is opt-in. A given
+// limit must be positive and is clamped to the maximum.
+const maxSpecialsPageSize = 5000
 
 func (o *OrdersAPI) handleSpecialGetAll(c *gin.Context) {
 	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
@@ -185,28 +183,21 @@ func (o *OrdersAPI) handleSpecialGetAll(c *gin.Context) {
 	if skip == "" {
 		skip = "0"
 	}
-	limit := c.Query("limit")
-	if limit == "" {
-		limit = strconv.Itoa(defaultSpecialsPageSize)
-	}
-
 	intSkip, err := strconv.Atoi(skip)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid skip value! Accepted value is INTEGER", "success": false})
+	if err != nil || intSkip < 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid skip value! Accepted value is a non-negative INTEGER", "success": false})
 		return
 	}
 
-	intLimit, err := strconv.Atoi(limit)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit value! Accepted value is INTEGER", "success": false})
-		return
-	}
-	if intSkip < 0 || intLimit < 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "skip and limit must not be negative", "success": false})
-		return
-	}
-	if intLimit == 0 || intLimit > maxSpecialsPageSize {
-		intLimit = maxSpecialsPageSize
+	// 0 asks GetAllSpecials for every row.
+	intLimit := 0
+	if limit := c.Query("limit"); limit != "" {
+		intLimit, err = strconv.Atoi(limit)
+		if err != nil || intLimit < 1 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit value! Accepted value is a positive INTEGER", "success": false})
+			return
+		}
+		intLimit = min(intLimit, maxSpecialsPageSize)
 	}
 
 	special, err := o.repo.GetAllSpecials(c.Request.Context(), intSkip, intLimit)
@@ -225,6 +216,10 @@ func (o *OrdersAPI) handleSpecialGetAll(c *gin.Context) {
 		return
 	}
 
+	var pageLimit any
+	if intLimit > 0 {
+		pageLimit = intLimit
+	}
 	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": special, "total": total,
-		"skip": intSkip, "limit": intLimit, "success": true})
+		"skip": intSkip, "limit": pageLimit, "success": true})
 }

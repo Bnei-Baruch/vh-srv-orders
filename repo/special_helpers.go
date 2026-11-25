@@ -24,8 +24,7 @@ func (o *OrdersDB) DeleteSpecialById(ctx context.Context, id int) error {
 	}
 	// vh-srv-profile revokes by email only, so ending a special that has none
 	// would leave the membership active there. Refuse, and leave the row as is.
-	// '' as well as NULL: older rows stored the empty string for "absent".
-	if email.String == "" {
+	if !email.Valid {
 		return fmt.Errorf("special %d has no email to revoke by: %w", id, common.ErrInvalidValues)
 	}
 	res, errUpdate := o.pool.Exec(ctx, `UPDATE  specials SET end_date = now(), updated_at = now() WHERE  id = $1`, id)
@@ -144,10 +143,15 @@ func (o *OrdersDB) GetSpecialsByKeycloakId(ctx context.Context, keycloakID strin
 
 // GetAllSpecials returns a page of specials, newest first. The table only
 // grows (revoking rewrites end_date), so the listing has to be bounded.
+// GetAllSpecials returns every row when limit is 0.
 func (o *OrdersDB) GetAllSpecials(ctx context.Context, skip, limit int) ([]*Special, error) {
 	var specials []*Special
+	var limitArg any // LIMIT NULL is no limit
+	if limit > 0 {
+		limitArg = limit
+	}
 	rows, err := o.pool.Query(ctx, `SELECT id, keycloak_id, email, start_date,end_date,category,subcategory from specials
-		 ORDER BY created_at DESC, id DESC LIMIT $1 OFFSET $2`, limit, skip)
+		 ORDER BY created_at DESC, id DESC LIMIT $1::int OFFSET $2`, limitArg, skip)
 	if err != nil {
 		return specials, err
 	}

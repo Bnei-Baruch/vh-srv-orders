@@ -125,6 +125,21 @@ func TestDoTask_GroupsMergeWhicheverRowArrivesFirst(t *testing.T) {
 	assert.Equal(t, withBoth.EndDate, emitter.emitted[0].Payload["end_date"])
 }
 
+// The only order that joins two existing groups: one person's keycloak-only
+// and email-only rows arrive first as strangers, and a later row naming both
+// says they are the same person.
+func TestDoTask_TwoGroupsMergeWhenTheRowNamingBothArrivesLast(t *testing.T) {
+	keycloakOnly := specialFor("kc-alice", "", 30*24*time.Hour)
+	emailOnly := specialFor("", "a@x.com", 365*24*time.Hour)
+	withBoth := specialFor("kc-alice", "a@x.com", 60*24*time.Hour)
+	w, emitter := workerWithSpecials(t, keycloakOnly, emailOnly, withBoth)
+
+	require.NoError(t, w.DoTask())
+	require.Len(t, emitter.emitted, 1, "one person, one activation")
+	assert.Equal(t, emailOnly.EndDate, emitter.emitted[0].Payload["end_date"], "the longest window wins")
+	assert.Equal(t, "a@x.com", emitter.emitted[0].Payload["email"])
+}
+
 func TestDoTask_EmailsGroupCaseInsensitively(t *testing.T) {
 	w, emitter := workerWithSpecials(t,
 		specialFor("", "A@X.com", 30*24*time.Hour),

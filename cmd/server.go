@@ -1,7 +1,12 @@
 package cmd
 
 import (
+	"context"
+	"errors"
 	"log/slog"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -25,8 +30,41 @@ func serverFn(cmd *cobra.Command, args []string) {
 		utils.LogFatal("pricing.ValidateConfig", slog.Any("err", err))
 	}
 
-	app := api.NewApp()
-	app.Initialize()
+	// Before anything is built, so a signal during Initialize is caught too.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	runServer(ctx, stop, api.NewApp(), utils.FatalAfter)
+}
+
+// server is what runServer needs of *api.App, so its order can be tested.
+type server interface {
+	Initialize(ctx context.Context, stop func()) error
+	Run(ctx context.Context)
+	Shutdown()
+}
+
+// runServer starts the app and drains it on every way out. fatal is
+// utils.FatalAfter outside tests, and does not return there.
+func runServer(ctx context.Context, stop func(), app server, fatal func(cleanup func(), msg string, args ...any)) {
+	// Before Initialize, so a failed startup still drains what was built.
 	defer app.Shutdown()
-	app.Run()
+
+	if err := app.Initialize(ctx, stop); err != nil {
+		// Restore default signal handling before draining, so a second Ctrl-C
+		// can cut a slow drain short.
+		stop()
+
+		// A signal during startup is a clean stop (exit 0), not a crash.
+		if errors.Is(err, context.Canceled) {
+			slog.Info("signal received during startup, shutting down")
+			return
+		}
+
+		fatal(app.Shutdown, "app.Initialize", slog.Any("err", err))
+		return
+	}
+
+	app.Run(ctx)
+	stop()
 }

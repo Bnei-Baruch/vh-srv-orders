@@ -350,8 +350,7 @@ func (el *EventListener) waitFor(what string, ch <-chan struct{}, grace time.Dur
 
 // Close's budget. natsFlushTimeout is nats.go's fixed FlushTimeout(5s), run
 // after the DrainTimeout-bounded subscription phase and before the close that
-// fires ncClosed. CloseGrace is exported for the server's shutdown, which does
-// not call Close yet at this commit (fix/server-graceful-shutdown wires it).
+// fires ncClosed. CloseGrace is exported for api.App.Shutdown.
 //
 // runnerShare is less than one slow handler can take (two 30s profile calls),
 // so with a slow profile service a handler can outlive the wait and meet a

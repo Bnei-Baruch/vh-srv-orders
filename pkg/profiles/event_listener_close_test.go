@@ -61,15 +61,14 @@ func newListener() *EventListener {
 	}
 }
 
-// Close is meant for the server's shutdown (not wired at this commit), which
-// fatal paths reach too — including the one where Run itself failed. None of
-// the fields it touches exist then.
+// Close is called from api.App.Shutdown, which the fatal paths reach — including
+// the one where Run itself failed. None of the fields it touches exist then.
 func TestCloseBeforeRun(t *testing.T) {
 	new(EventListener).Close()
 }
 
-// Close must not return until the runner has stopped, because the shutdown
-// that calls it closes the repo next and these handlers write through it.
+// Close must not return until the runner has stopped, because App.Shutdown
+// closes the repo next and these handlers write through it.
 func TestCloseWaitsForTheRunnerAndDrainsWhatIsBuffered(t *testing.T) {
 	listener := newListener()
 

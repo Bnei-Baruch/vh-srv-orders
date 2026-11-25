@@ -151,18 +151,20 @@ func parseSpecialRows(values [][]any) ([]*SpecialRecord, int) {
 			SheetRow:  sheetRow,
 		}
 
-		// Set only when non-empty: null.StringFrom("") is Valid, which would
-		// defeat createSpecial's identifier checks.
-		if email := cell(row, 0); email != "" {
-			record.Email = null.StringFrom(email)
-		}
-		if keycloakID := cell(row, 1); keycloakID != "" {
-			record.KeycloakID = null.StringFrom(keycloakID)
-		}
-		if !record.Email.Valid && !record.KeycloakID.Valid {
-			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "email/keycloak_id"), slog.String("reason", "both empty"))
+		// createSpecial needs an email (vh-srv-profile revokes by email), so a
+		// row without one is malformed here, where it reaches the drop report,
+		// rather than failing in createSpecial on every run.
+		email := strings.TrimSpace(cell(row, 0))
+		if email == "" {
+			slog.Warn("malformed row", slog.Int("row", sheetRow), slog.String("column", "email"), slog.String("reason", "empty"))
 			dropped++
 			continue
+		}
+		record.Email = null.StringFrom(email)
+		// Set only when non-empty: null.StringFrom("") is Valid and would be
+		// stored as '' instead of NULL.
+		if keycloakID := strings.TrimSpace(cell(row, 1)); keycloakID != "" {
+			record.KeycloakID = null.StringFrom(keycloakID)
 		}
 
 		// Always '', never NULL and never decided by len(row): trailing cells

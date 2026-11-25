@@ -76,20 +76,21 @@ func TestParseSpecialRows_SkipsMissingCategory(t *testing.T) {
 	assert.Equal(t, "ok@example.com", records[0].Email.String)
 }
 
-func TestParseSpecialRows_SkipsRowWithNeitherIdentifier(t *testing.T) {
+// createSpecial refuses a row with no email, so the parser drops it and the
+// drop report sees it; a keycloak id alone is not enough.
+func TestParseSpecialRows_DropsRowWithNoEmail(t *testing.T) {
 	records, dropped := parseSpecialRows([][]any{
 		specialHeader,
 		{"", "", "2026-01-01", "2026-12-31", "membership"},
-		{"", "kc-2", "2026-01-01", "2026-12-31", "membership"},
+		{"", "kc-2", "2026-01-01", "2026-12-31", "membership", "x"},
+		{"   ", "kc-3", "2026-01-01", "2026-12-31", "membership"},
 		{"ok@example.com", "", "2026-02-01", "2026-11-30", "membership"},
 	})
-	require.Len(t, records, 2)
-	assert.Equal(t, 1, dropped)
+	require.Len(t, records, 1)
+	assert.Equal(t, 3, dropped)
 
-	assert.False(t, records[0].Email.Valid, "an empty cell leaves Email unset, not valid-and-empty")
-	assert.Equal(t, "kc-2", records[0].KeycloakID.String)
-	assert.Equal(t, "ok@example.com", records[1].Email.String)
-	assert.False(t, records[1].KeycloakID.Valid)
+	assert.Equal(t, "ok@example.com", records[0].Email.String)
+	assert.False(t, records[0].KeycloakID.Valid, "an empty cell leaves KeycloakID unset, not valid-and-empty")
 }
 
 // A trailing comment makes the row longer; it must not change how a blank

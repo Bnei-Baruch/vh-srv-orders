@@ -93,44 +93,59 @@ func (w *Worker) Close() {
 	w.eventEmitter.Close(ctx)
 }
 
+// DoTask emits one activation per person whose special begins today. It reads
+// specials by start date rather than by distinct email: a special may have no
+// email, and an email-keyed loop missed or merged those.
 func (w *Worker) DoTask() error {
-
-	emails, err := w.repo.GetUniqueEmailsFromSpecial(context.Background())
+	now := time.Now()
+	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	// A day either side; isBeginsToday decides on the local date.
+	specials, err := w.repo.GetSpecialsStartingBetween(context.Background(),
+		dayStart.AddDate(0, 0, -1), dayStart.AddDate(0, 0, 2))
 	if err != nil {
-		return fmt.Errorf("repo.GetUniqueEmailsFromSpecial: %w", err)
+		return fmt.Errorf("repo.GetSpecialsStartingBetween: %w", err)
 	}
-	for _, email := range emails {
 
-		specials, err := w.repo.GetAllSpecialsByEmail(context.Background(), email)
-		if err != nil {
-			return fmt.Errorf("repo.GetAllSpecials: %w", err)
+	beginningToday := make([]*repo.Special, 0, len(specials))
+	for _, special := range specials {
+		if !isBeginsToday(special) {
+			continue
 		}
-		var actualSpecial *repo.Special
-		for _, special := range specials {
-			if isBeginsToday(special) {
-				if actualSpecial == nil {
-					actualSpecial = special
-					continue
-				}
-				if special.EndDate.Time.After(actualSpecial.EndDate.Time) {
-					actualSpecial = special
-				}
+		// Revoking moves end_date into the past; without this the next tick
+		// re-activates a special revoked today.
+		if !special.EndDate.Time.After(now) {
+			slog.Info("special already ended, not activating",
+				slog.Int("special_id", special.Id.Int), slog.Time("end_date", special.EndDate.Time))
+			continue
+		}
+		if len(identifiersOf(special)) == 0 {
+			slog.Warn("special with no identifier cannot be activated", slog.Int("special_id", special.Id.Int))
+			continue
+		}
+		beginningToday = append(beginningToday, special)
+	}
+
+	ctx := context.WithValue(context.Background(), common.CtxEventBuilder, w)
+	activated := 0
+	for _, group := range groupByPerson(beginningToday) {
+		longest := group[0]
+		for _, special := range group[1:] {
+			if special.EndDate.Time.After(longest.EndDate.Time) {
+				longest = special
 			}
 		}
-		if actualSpecial != nil {
-			ctx := context.WithValue(context.Background(), common.CtxEventBuilder, w)
-			w.emitEvent(ctx,
-				events.TypeCreateSpecial,
-				// vh-srv-profile reads both identifiers with unchecked string
-				// assertions, so an absent one goes out as "", never null.
-				map[string]interface{}{
-					"email":       actualSpecial.Email.String,
-					"keycloak_id": actualSpecial.KeycloakId.String,
-					"start_date":  actualSpecial.StartDate,
-					"end_date":    actualSpecial.EndDate})
-		}
-
+		w.emitEvent(ctx,
+			events.TypeCreateSpecial,
+			// vh-srv-profile reads both identifiers with unchecked string
+			// assertions, so an absent one goes out as "", never null.
+			map[string]interface{}{
+				"email":       longest.Email.String,
+				"keycloak_id": longest.KeycloakId.String,
+				"start_date":  longest.StartDate,
+				"end_date":    longest.EndDate})
+		activated++
 	}
+	slog.Info("activation summary", slog.Int("activated", activated), slog.Int("considered", len(specials)))
 	return nil
 }
 

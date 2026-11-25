@@ -285,27 +285,3 @@ func (o *OrdersDB) GetAllSpecialsByEmail(ctx context.Context, email string) ([]*
 	return specials, nil
 
 }
-
-func (o *OrdersDB) GetUniqueEmailsFromSpecial(ctx context.Context) ([]string, error) {
-	var emails []string
-	rows, err := o.pool.Query(ctx, `SELECT DISTINCT specials.email from specials WHERE specials.email IS NOT NULL`)
-
-	if err != nil {
-		return emails, err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var email string
-		if err := rows.Scan(&email); err != nil {
-			return nil, err
-		}
-		emails = append(emails, email)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	return emails, nil
-}

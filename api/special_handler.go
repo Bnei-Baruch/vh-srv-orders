@@ -169,16 +169,57 @@ func (o *OrdersAPI) handleSpecialGetByKeycloakId(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": special, "success": true})
 }
 
+// vh-payment-bo, the only consumer, asks for no page and shows every row, so
+// leaving limit out still returns the whole table; paging is opt-in. A given
+// limit must be positive and is clamped to the maximum.
+const maxSpecialsPageSize = 5000
+
 func (o *OrdersAPI) handleSpecialGetAll(c *gin.Context) {
 	if !o.HasAnyRole(c, common.RoleRoot, common.RoleAdmin) {
 		return
 	}
 
-	special, err := o.repo.GetAllSpecials(c.Request.Context())
+	skip := c.Query("skip")
+	if skip == "" {
+		skip = "0"
+	}
+	intSkip, err := strconv.Atoi(skip)
+	if err != nil || intSkip < 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid skip value! Accepted value is a non-negative INTEGER", "success": false})
+		return
+	}
+
+	// 0 asks GetAllSpecials for every row.
+	intLimit := 0
+	if limit := c.Query("limit"); limit != "" {
+		intLimit, err = strconv.Atoi(limit)
+		if err != nil || intLimit < 1 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit value! Accepted value is a positive INTEGER", "success": false})
+			return
+		}
+		intLimit = min(intLimit, maxSpecialsPageSize)
+	}
+
+	special, err := o.repo.GetAllSpecials(c.Request.Context(), intSkip, intLimit)
 	if err != nil {
 		c.Status(http.StatusInternalServerError)
 		_ = c.Error(fmt.Errorf("repo.GetAllSpecials: %w", err))
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": special, "success": true})
+
+	// total tells a full page from the whole table; data is unchanged for
+	// existing consumers.
+	total, err := o.repo.CountSpecials(c.Request.Context())
+	if err != nil {
+		c.Status(http.StatusInternalServerError)
+		_ = c.Error(fmt.Errorf("repo.CountSpecials: %w", err))
+		return
+	}
+
+	var pageLimit any
+	if intLimit > 0 {
+		pageLimit = intLimit
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Fetched!", "data": special, "total": total,
+		"skip": intSkip, "limit": pageLimit, "success": true})
 }

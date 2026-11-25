@@ -23,6 +23,14 @@ import (
 	"github.com/Bnei-Baruch/vh-srv-orders/repo"
 )
 
+// paymentCallContext keeps the request's values but not its cancellation: the
+// handler has already written payment rows and checkout may already be opening
+// the page, so a caller going away must not abandon the call. OpenPage's client
+// timeout bounds it instead. Same convention as the renewal path.
+func paymentCallContext(c *gin.Context) context.Context {
+	return context.WithoutCancel(c.Request.Context())
+}
+
 func (o *OrdersAPI) handleTransactionGetByID(c *gin.Context) {
 
 	// transaction.id is int4: a larger id is a bad request, not a 500 from pgx.
@@ -212,7 +220,7 @@ func (o *OrdersAPI) handleTransactionOrderAndPay(c *gin.Context) {
 		return
 	}
 
-	resp, err := o.pages.OpenPage(c.Request.Context(), page, payload)
+	resp, err := o.pages.OpenPage(paymentCallContext(c), page, payload)
 	if err != nil {
 		reportPageFailure(c, page, err)
 		c.JSON(http.StatusOK, gin.H{"url": errorurl})
@@ -331,7 +339,7 @@ func (o *OrdersAPI) handleTransactionNewToken(c *gin.Context) {
 		return
 	}
 
-	resp, err := o.pages.OpenPage(c.Request.Context(), pelecard.PageEmvNewToken, payload)
+	resp, err := o.pages.OpenPage(paymentCallContext(c), pelecard.PageEmvNewToken, payload)
 	if err != nil {
 		reportPageFailure(c, pelecard.PageEmvNewToken, err)
 		c.JSON(http.StatusOK, gin.H{"url": req.ErrorURL})

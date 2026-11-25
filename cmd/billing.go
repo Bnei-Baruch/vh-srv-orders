@@ -90,16 +90,13 @@ func runBillingStart(cmd *cobra.Command, args []string) {
 		utils.LogFatal("Failed to parse flags", slog.Any("error", err))
 	}
 
-	validateChargeConfig()
-
-	eventEmitter, ordersDB, cleanup, err := initBillingInfra()
+	billingService, cleanup, err := initChargeRun(opts.DryRun)
 	if err != nil {
 		sentry.CaptureException(err)
 		utils.LogFatal("Failed to initialize billing infrastructure", slog.Any("error", err))
 	}
 	defer cleanup()
 
-	billingService := buildChargeableBillingService(ordersDB, eventEmitter, opts.DryRun)
 	ctx := context.WithValue(context.Background(), common.CtxEventBuilder, new(BillingWorkflowEventBuilder))
 	if err := billingService.RunBillingWorkflow(ctx, month, year, opts); err != nil {
 		sentry.CaptureException(err)
@@ -120,18 +117,13 @@ func runBillingRetryPricingErrors(cmd *cobra.Command, args []string) {
 		utils.LogFatal("Failed to parse flags", slog.Any("error", err))
 	}
 
-	// Must stay before wiring: no test catches its removal, since the tests
-	// cover only what chargeConfigError returns.
-	validateChargeConfig()
-
-	eventEmitter, ordersDB, cleanup, err := initBillingInfra()
+	billingService, cleanup, err := initChargeRun(dryRun)
 	if err != nil {
 		sentry.CaptureException(err)
 		utils.LogFatal("Failed to initialize billing infrastructure", slog.Any("error", err))
 	}
 	defer cleanup()
 
-	billingService := buildChargeableBillingService(ordersDB, eventEmitter, dryRun)
 	ctx := context.WithValue(context.Background(), common.CtxEventBuilder, new(BillingWorkflowEventBuilder))
 	count, err := billingService.RetryPricingErrors(ctx, maxWorkers)
 	if err != nil {
@@ -250,10 +242,6 @@ func initBillingInfra() (events.EventEmitter, *repo.OrdersDB, func(), error) {
 
 // validateChargeConfig checks everything a charging run needs before it runs.
 //
-// Called by the commands, not from buildChargeableBillingService: the builder
-// runs after their `defer cleanup()`, so a fatal inside it would exit without
-// closing the pool or draining NATS.
-//
 // The credential is checked even for a dry run, which builds the same service
 // and differs only in the executor — a dry run passing on a host without the
 // secret would say the real run will work. And the muhlafim step's own check
@@ -272,25 +260,52 @@ func chargeConfigError() error {
 	return errors.Join(pricing.ValidateConfig(), keycloakConfigError())
 }
 
-// buildChargeableBillingService wires a BillingService with charge executor and pricing resolver.
-// Used by commands that perform charging (start, retry-pricing-errors).
-func buildChargeableBillingService(ordersDB *repo.OrdersDB, eventEmitter events.EventEmitter, dryRun bool) *billing.BillingService {
+// initChargeRun builds a charging BillingService for start and
+// retry-pricing-errors. Everything that reads config or constructs an external
+// client runs before initBillingInfra, while there is nothing to drain yet, so
+// an exit there loses nothing. After it, chargeParts.service only assigns
+// fields. The order lives here, not in each command, so a command cannot open
+// the pool first.
+func initChargeRun(dryRun bool) (*billing.BillingService, func(), error) {
+	validateChargeConfig()
+	parts := newChargeParts(dryRun)
+
+	eventEmitter, ordersDB, cleanup, err := initBillingInfra()
+	if err != nil {
+		return nil, nil, err
+	}
+	return parts.service(ordersDB, eventEmitter), cleanup, nil
+}
+
+// chargeParts is the part of a charging BillingService that needs no
+// database or event emitter.
+type chargeParts struct {
+	pelecardClient *pelecard.Client
+	chargeExecutor pelecard.ChargeExecutor
+	resolver       *pricing.PriceResolver
+}
+
+func newChargeParts(dryRun bool) chargeParts {
 	pelecardClient := pelecard.NewClient()
-	var chargeExecutor pelecard.ChargeExecutor
+	var chargeExecutor pelecard.ChargeExecutor = pelecardClient
 	if dryRun {
 		chargeExecutor = pelecard.NewDryRunChargeExecutor()
-	} else {
-		chargeExecutor = pelecardClient
 	}
 	profileService := profiles.NewProfileServiceAPI(keycloak.NewClient())
 	priorityClient := priority.NewClient()
 	accountingClient := accounting.NewAccountingServiceAPI(keycloak.NewClient())
 	accountingClient.SetCacheEnabled(true)
 	resolver := pricing.NewPriceResolver(profileService, priorityClient, accountingClient, common.Config.QuickbooksCompanyID)
-	resolver.SetManualDiscountProvider(ordersDB)
-	resolver.SetHHGrantProvider(ordersDB)
-	resolver.SetCouponProvider(ordersDB)
-	return billing.NewBillingService(ordersDB, pelecardClient, eventEmitter, resolver, chargeExecutor)
+	return chargeParts{pelecardClient: pelecardClient, chargeExecutor: chargeExecutor, resolver: resolver}
+}
+
+// service runs after initBillingInfra, inside its callers' cleanup, so it
+// only assigns fields: nothing here may exit.
+func (p chargeParts) service(ordersDB *repo.OrdersDB, eventEmitter events.EventEmitter) *billing.BillingService {
+	p.resolver.SetManualDiscountProvider(ordersDB)
+	p.resolver.SetHHGrantProvider(ordersDB)
+	p.resolver.SetCouponProvider(ordersDB)
+	return billing.NewBillingService(ordersDB, p.pelecardClient, eventEmitter, p.resolver, p.chargeExecutor)
 }
 
 // parseSharedBillingFlags reads the dry-run and max-workers flags common to all charge commands.

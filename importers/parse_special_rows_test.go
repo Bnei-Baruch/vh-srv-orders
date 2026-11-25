@@ -93,6 +93,22 @@ func TestParseSpecialRows_DropsRowWithNoEmail(t *testing.T) {
 	assert.False(t, records[0].KeycloakID.Valid, "an empty cell leaves KeycloakID unset, not valid-and-empty")
 }
 
+// keycloak_id's CHECK only rejects the empty string, which a padded cell is
+// not, so it must be trimmed to unset here or it is stored as a blank id
+// instead of NULL.
+func TestParseSpecialRows_BlankKeycloakIDIsUnset(t *testing.T) {
+	records, dropped := parseSpecialRows([][]any{
+		specialHeader,
+		{"a@example.com", "  ", "2026-01-01", "2026-12-31", "membership", "x"},
+		{"b@example.com", " kc-2 ", "2026-01-01", "2026-12-31", "membership", "x"},
+	})
+	require.Len(t, records, 2)
+	assert.Zero(t, dropped)
+
+	assert.False(t, records[0].KeycloakID.Valid, "a whitespace-only cell is no keycloak id")
+	assert.Equal(t, "kc-2", records[1].KeycloakID.String)
+}
+
 // A trailing comment makes the row longer; it must not change how a blank
 // sub-category is stored, or the dedup key changes with it.
 func TestParseSpecialRows_BlankSubCategoryDoesNotDependOnRowLength(t *testing.T) {

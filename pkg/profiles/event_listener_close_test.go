@@ -1,0 +1,573 @@
+package profiles
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"log/slog"
+	"os"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
+)
+
+// stubMsg is a delivered message that records its own acknowledgement. Only the
+// three methods this package touches do anything.
+type stubMsg struct {
+	data          string
+	acks          atomic.Int64
+	naks          atomic.Int64
+	inProgress    atomic.Int64
+	inProgressErr error
+	ackPanics     bool
+}
+
+func (m *stubMsg) Data() []byte { return []byte(m.data) }
+func (m *stubMsg) Ack() error {
+	m.acks.Add(1)
+	if m.ackPanics {
+		panic("ack exploded")
+	}
+	return nil
+}
+func (m *stubMsg) Nak() error                       { m.naks.Add(1); return nil }
+func (m *stubMsg) NakWithDelay(time.Duration) error { return nil }
+func (m *stubMsg) DoubleAck(context.Context) error  { return nil }
+func (m *stubMsg) InProgress() error {
+	m.inProgress.Add(1)
+	return m.inProgressErr
+}
+func (m *stubMsg) Term() error                               { return nil }
+func (m *stubMsg) TermWithReason(string) error               { return nil }
+func (m *stubMsg) Metadata() (*jetstream.MsgMetadata, error) { return nil, nil }
+func (m *stubMsg) Headers() nats.Header                      { return nil }
+func (m *stubMsg) Subject() string                           { return "" }
+func (m *stubMsg) Reply() string                             { return "" }
+
+// Compile-time check that the stub still satisfies what the listener is handed.
+var _ jetstream.Msg = (*stubMsg)(nil)
+
+func newListener() *EventListener {
+	return &EventListener{
+		queue:         make(chan queued, queueCapacity),
+		quit:          make(chan struct{}),
+		done:          make(chan struct{}),
+		ncClosed:      make(chan struct{}),
+		runnerStarted: true,
+	}
+}
+
+// Close is meant for the server's shutdown (not wired at this commit), which
+// fatal paths reach too — including the one where Run itself failed. None of
+// the fields it touches exist then.
+func TestCloseBeforeRun(t *testing.T) {
+	new(EventListener).Close()
+}
+
+// Close must not return until the runner has stopped, because the shutdown
+// that calls it closes the repo next and these handlers write through it.
+func TestCloseWaitsForTheRunnerAndDrainsWhatIsBuffered(t *testing.T) {
+	listener := newListener()
+
+	var handled, afterStop atomic.Int64
+	var stopped atomic.Bool
+	listener.RegisterHandler(func(Event) {
+		if stopped.Load() {
+			afterStop.Add(1)
+		}
+		handled.Add(1)
+	})
+
+	go listener.runQueue()
+	for i := 0; i < 4; i++ {
+		listener.queue <- queued{event: Event{}}
+	}
+
+	listener.Close()
+	stopped.Store(true)
+	time.Sleep(20 * time.Millisecond)
+
+	if handled.Load() != 4 {
+		t.Errorf("handled %d of 4 buffered events", handled.Load())
+	}
+	if afterStop.Load() != 0 {
+		t.Errorf("%d handlers ran after Close returned, so the repo could be closed underneath them",
+			afterStop.Load())
+	}
+}
+
+// The runner's wait is bounded, and bounded by its own share rather than by the
+// whole of Close.
+func TestCloseGivesUpOnAStuckRunner(t *testing.T) {
+	listener := newListener()
+
+	release := make(chan struct{})
+	listener.RegisterHandler(func(Event) { <-release })
+	defer close(release)
+
+	go listener.runQueue()
+	listener.queue <- queued{event: Event{}}
+	time.Sleep(30 * time.Millisecond) // let the handler block
+
+	start := time.Now()
+	closed := make(chan struct{})
+	go func() {
+		defer close(closed)
+		listener.Close()
+	}()
+
+	// Bounded here too, so a regression reports itself instead of hanging until
+	// the package times out and prints a goroutine dump.
+	select {
+	case <-closed:
+	case <-time.After(CloseGrace + 5*time.Second):
+		t.Fatalf("Close did not return within %v of its budget: the wait is unbounded", CloseGrace)
+	}
+
+	waited := time.Since(start)
+	if waited < runnerShare {
+		t.Fatalf("Close returned after %v, before the runner's own share of %v — the wait is "+
+			"not happening", waited, runnerShare)
+	}
+	if waited > runnerShare+3*time.Second {
+		t.Fatalf("Close spent %v on a runner allowed %v: the wait is against the whole budget "+
+			"rather than its share", waited, runnerShare)
+	}
+}
+
+// Nothing is acknowledged until a handler has run: an event acked without being
+// handled is neither redelivered nor processed. It goes in through
+// handleMessage, where the old code acked on enqueue.
+func TestTheAckFollowsTheHandlers(t *testing.T) {
+	listener := newListener()
+
+	release := make(chan struct{})
+	msg := &stubMsg{data: `{"type":"update_profile"}`}
+	listener.RegisterHandler(func(Event) { <-release })
+
+	go listener.runQueue()
+	listener.handleMessage(msg)
+
+	if msg.acks.Load() != 0 {
+		t.Error("the message was acked when it was queued, before any handler finished")
+	}
+	close(release)
+	listener.Close()
+
+	if msg.acks.Load() != 1 {
+		t.Errorf("acked %d times, want once", msg.acks.Load())
+	}
+}
+
+// An ack can land between touchHeld's copy of the held set and its InProgress
+// call. That is not an error worth an Error log on every race.
+func TestTouchHeldIgnoresAMessageAckedMeanwhile(t *testing.T) {
+	var logged bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, nil)))
+	defer slog.SetDefault(prev)
+
+	listener := newListener()
+	acked := &stubMsg{inProgressErr: jetstream.ErrMsgAlreadyAckd}
+	failing := &stubMsg{inProgressErr: errors.New("connection closed")}
+	listener.hold(acked)
+	listener.hold(failing)
+
+	listener.touchHeld()
+
+	if acked.inProgress.Load() != 1 || failing.inProgress.Load() != 1 {
+		t.Fatalf("InProgress calls: acked %d, failing %d; want one each",
+			acked.inProgress.Load(), failing.inProgress.Load())
+	}
+	if strings.Contains(logged.String(), "already acknowledged") {
+		t.Errorf("an already-acked message was logged as an error:\n%s", logged.String())
+	}
+	if !strings.Contains(logged.String(), "connection closed") {
+		t.Errorf("a real InProgress failure was not logged:\n%s", logged.String())
+	}
+}
+
+// A dead instance's held messages stay blocked for AckWait, so AckWait is
+// short, and a held message is kept alive with InProgress instead. Each one,
+// queued or being handled, is touched until it is acked, and not after.
+func TestKeepAliveTouchesEveryHeldMessageUntilItsAck(t *testing.T) {
+	restore := progressInterval
+	progressInterval = 10 * time.Millisecond
+	defer func() { progressInterval = restore }()
+
+	listener := newListener()
+	release := make(chan struct{})
+	listener.RegisterHandler(func(Event) { <-release })
+
+	go listener.runQueue()
+	go listener.keepAlive()
+
+	handling := &stubMsg{data: `{"type":"update_profile"}`}
+	queuedMsg := &stubMsg{data: `{"type":"update_profile"}`}
+	listener.handleMessage(handling)
+	listener.handleMessage(queuedMsg)
+	time.Sleep(80 * time.Millisecond)
+
+	for name, msg := range map[string]*stubMsg{"handling": handling, "queued": queuedMsg} {
+		if msg.inProgress.Load() < 2 {
+			t.Errorf("the %s message got %d InProgress in 8 intervals: its AckWait runs out "+
+				"under a slow handler", name, msg.inProgress.Load())
+		}
+	}
+
+	release <- struct{}{} // the first is acked, the second is now being handled
+	time.Sleep(20 * time.Millisecond)
+	afterAck := handling.inProgress.Load()
+	time.Sleep(50 * time.Millisecond)
+	if handling.acks.Load() != 1 || handling.inProgress.Load() != afterAck {
+		t.Errorf("acked %d times, and InProgress went %d -> %d after the ack",
+			handling.acks.Load(), afterAck, handling.inProgress.Load())
+	}
+
+	close(release)
+	listener.Close()
+}
+
+// A handler panic costs one event, not the listener.
+func TestAHandlerPanicDoesNotStopTheRunner(t *testing.T) {
+	listener := newListener()
+
+	var handled atomic.Int64
+	listener.RegisterHandler(func(e Event) {
+		handled.Add(1)
+		if e.Type == "boom" {
+			panic("handler exploded")
+		}
+	})
+
+	go listener.runQueue()
+	poison := &stubMsg{}
+	listener.queue <- queued{event: Event{Type: "boom"}, msg: poison}
+	listener.queue <- queued{event: Event{Type: "fine"}}
+	listener.Close()
+
+	if handled.Load() != 2 {
+		t.Errorf("handled %d events, want 2 — the panic stopped the runner", handled.Load())
+	}
+	if poison.acks.Load() != 1 {
+		t.Errorf("the event that panicked was acked %d times, want once: unacked it would be "+
+			"redelivered and panic again for ever", poison.acks.Load())
+	}
+}
+
+// The delivery callback must never be able to send into a closed queue.
+func TestCloseDoesNotCloseTheQueue(t *testing.T) {
+	listener := &EventListener{
+		queue: make(chan queued, 1),
+		quit:  make(chan struct{}),
+		done:  make(chan struct{}),
+	}
+
+	listener.Close()
+
+	select {
+	case listener.queue <- queued{}:
+	default:
+		t.Fatal("the queue is full or closed after Close")
+	}
+}
+
+// One handler panicking must not cost the others their event.
+func TestAPanicInOneHandlerDoesNotSkipTheNext(t *testing.T) {
+	listener := newListener()
+
+	var second atomic.Int64
+	listener.RegisterHandler(func(Event) { panic("first handler exploded") })
+	listener.RegisterHandler(func(Event) { second.Add(1) })
+
+	go listener.runQueue()
+	msg := &stubMsg{}
+	listener.queue <- queued{event: Event{Type: "update_profile"}, msg: msg}
+	listener.Close()
+
+	if second.Load() != 1 {
+		t.Errorf("the second handler ran %d times, want once", second.Load())
+	}
+	if msg.acks.Load() != 1 {
+		t.Errorf("acked %d times, want once", msg.acks.Load())
+	}
+}
+
+// AckWait is how long a crashed instance's events stay blocked, so it is
+// short; keepAlive's interval has to fit inside it with room to miss a beat.
+func TestConsumerBoundsItsRedelivery(t *testing.T) {
+	config := consumerConfig()
+
+	if config.AckWait <= 0 || config.AckWait > 30*time.Second {
+		t.Errorf("AckWait is %v: after a crash or kill, the events that instance held "+
+			"wait that long before anyone gets them", config.AckWait)
+	}
+	if progressInterval > config.AckWait/2 {
+		t.Errorf("progressInterval %v leaves no missed heartbeat inside AckWait %v",
+			progressInterval, config.AckWait)
+	}
+	// MaxDeliver is deliberately unset: capping deliveries without something
+	// consuming the MAX_DELIVERIES advisory discards the message instead of
+	// containing it, and a lost create_profile is worse than a visible retry.
+	if config.MaxDeliver != 0 {
+		t.Errorf("MaxDeliver is %d, which drops the message on that delivery — there is no dead "+
+			"letter to catch it", config.MaxDeliver)
+	}
+}
+
+// The runner has to survive a panic anywhere it goes, not only inside a
+// handler.
+func TestARunnerPanicOutsideAHandlerDoesNotKillTheProcess(t *testing.T) {
+	listener := newListener()
+
+	var handled atomic.Int64
+	listener.RegisterHandler(func(Event) { handled.Add(1) })
+
+	go listener.runQueue()
+	listener.queue <- queued{event: Event{}, msg: &stubMsg{ackPanics: true}}
+	listener.queue <- queued{event: Event{}, msg: &stubMsg{}}
+	listener.Close()
+
+	if handled.Load() != 2 {
+		t.Errorf("handled %d events, want 2 — the panic in the ack stopped the runner", handled.Load())
+	}
+}
+
+// An event dropped because shutdown began is naked, not just left silent.
+func TestADroppedEventIsNakedForPromptRedelivery(t *testing.T) {
+	listener := newListener()
+	listener.quitOnce.Do(func() { close(listener.quit) })
+
+	msg := &stubMsg{data: `{"type":"update_profile"}`}
+	listener.handleMessage(msg)
+
+	if msg.naks.Load() != 1 {
+		t.Errorf("naked %d times, want once — it waits out AckWait instead", msg.naks.Load())
+	}
+	if msg.acks.Load() != 0 {
+		t.Errorf("acked %d times: nothing handled it", msg.acks.Load())
+	}
+}
+
+// The profile client's timeout is what the listener's drain rests on: an
+// unbounded call turns Close's wait into the whole grace, every time.
+func TestTheProfileClientIsBounded(t *testing.T) {
+	timeout := NewProfileServiceAPI(nil).client.GetClient().Timeout
+
+	if timeout == 0 {
+		t.Error("the profile client has no timeout, so a handler can outlast any shutdown grace")
+	}
+}
+
+// The cap on delivered-unacknowledged messages matches the queue, so the
+// Consume callback never blocks with messages left in the client's buffer,
+// where keepAlive cannot reach them.
+func TestTheConsumerCapsWhatCanBeWaitingForAnAck(t *testing.T) {
+	config := consumerConfig()
+
+	if config.MaxAckPending != queueCapacity {
+		t.Errorf("MaxAckPending is %d, want %d (unset means the server's 1000)",
+			config.MaxAckPending, queueCapacity)
+	}
+}
+
+// stubConn records what Close does with the connection, and lets the test
+// decide when the drain reports itself finished.
+type stubConn struct {
+	drains   atomic.Int64
+	closes   atomic.Int64
+	drained  chan struct{}
+	drainErr error
+}
+
+func (c *stubConn) Drain() error {
+	c.drains.Add(1)
+	if c.drained != nil {
+		close(c.drained)
+	}
+	return c.drainErr
+}
+
+func (c *stubConn) Close() { c.closes.Add(1) }
+
+// Close drains the connection and waits for it, rather than closing it
+// outright.
+func TestCloseDrainsTheConnectionAndWaitsForIt(t *testing.T) {
+	listener := newListener()
+	listener.runnerStarted = false
+	conn := &stubConn{drained: make(chan struct{})}
+	listener.nc = conn
+
+	returned := make(chan struct{})
+	go func() {
+		defer close(returned)
+		listener.Close()
+	}()
+
+	// It has to ask for the drain...
+	select {
+	case <-conn.drained:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close never asked the connection to drain")
+	}
+
+	// ...and then wait for it to report itself finished.
+	select {
+	case <-returned:
+		t.Fatal("Close returned without waiting for the drain to finish")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	listener.connectionClosed(nil)
+	select {
+	case <-returned:
+	case <-time.After(CloseGrace + 2*time.Second):
+		t.Fatal("Close did not return once the drain reported closed")
+	}
+
+	if conn.closes.Load() != 0 {
+		t.Errorf("the connection was closed outright %d times, which skips the drain",
+			conn.closes.Load())
+	}
+}
+
+// A drain that cannot be started is not a reason to leave the connection open.
+func TestCloseFallsBackToClosingWhenTheDrainFails(t *testing.T) {
+	listener := newListener()
+	listener.runnerStarted = false
+	conn := &stubConn{drainErr: errors.New("connection closed")}
+	listener.nc = conn
+
+	listener.Close()
+
+	if conn.closes.Load() != 1 {
+		t.Errorf("closed %d times after a failed drain, want once", conn.closes.Load())
+	}
+}
+
+// Close as a whole stays within CloseGrace.
+func TestCloseIsBoundedAsAWhole(t *testing.T) {
+	listener := newListener()
+	listener.RegisterHandler(func(Event) { time.Sleep(time.Hour) })
+	listener.nc = &stubConn{}
+
+	go listener.runQueue()
+	listener.queue <- queued{event: Event{}}
+	time.Sleep(50 * time.Millisecond) // let the handler start
+
+	start := time.Now()
+	listener.Close()
+	waited := time.Since(start)
+
+	if waited > CloseGrace+2*time.Second {
+		t.Fatalf("Close took %v against a %v grace: its waits are being spent one after another",
+			waited, CloseGrace)
+	}
+	if waited < CloseGrace/2 {
+		t.Fatalf("Close returned after %v, so nothing was waited on", waited)
+	}
+}
+
+// Anything still queued when the runner stops is handed back, not left to
+// expire.
+func TestCloseNaksWhatIsStillQueued(t *testing.T) {
+	listener := newListener()
+	listener.runnerStarted = false
+
+	stragglers := []*stubMsg{{}, {}}
+	for _, msg := range stragglers {
+		listener.queue <- queued{event: Event{}, msg: msg}
+	}
+
+	listener.Close()
+
+	for i, msg := range stragglers {
+		if msg.naks.Load() != 1 {
+			t.Errorf("straggler %d naked %d times, want once — it waits out ackWait instead",
+				i, msg.naks.Load())
+		}
+	}
+}
+
+// stubConsumeCtx records which way Close shuts the consumer.
+type stubConsumeCtx struct {
+	drains, stops atomic.Int64
+}
+
+func (c *stubConsumeCtx) Drain() { c.drains.Add(1) }
+func (c *stubConsumeCtx) Stop()  { c.stops.Add(1) }
+
+var _ jetstream.ConsumeContext = (*stubConsumeCtx)(nil)
+
+// Close must Drain the consumer, not Stop it: Stop discards the prefetched
+// buffer, so those events wait out ackWait instead of being naked back.
+func TestCloseDrainsTheConsumerRatherThanStoppingIt(t *testing.T) {
+	listener := newListener()
+	consumer := &stubConsumeCtx{}
+	listener.consumerCtx = consumer
+	go listener.runQueue()
+
+	listener.Close()
+
+	if consumer.drains.Load() != 1 {
+		t.Errorf("Close drained the consumer %d times, want once", consumer.drains.Load())
+	}
+	if consumer.stops.Load() != 0 {
+		t.Errorf("Close stopped the consumer %d times, discarding its buffer", consumer.stops.Load())
+	}
+}
+
+// The connection is published to its interface field only after the error is
+// checked.
+func TestTheConnectionIsPublishedOnlyOnSuccess(t *testing.T) {
+	source, err := os.ReadFile("event_listener.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assign := bytes.Index(source, []byte("el.nc = conn"))
+	check := bytes.Index(source, []byte(`return nil, fmt.Errorf("nats.Connect`))
+	switch {
+	case assign < 0:
+		t.Fatal("the connection assignment was not found: check this test before the code")
+	case check < 0:
+		t.Fatal("nats.Connect's error branch was not found")
+	case assign < check:
+		t.Error("el.nc is assigned before nats.Connect's error is checked, which leaves a typed " +
+			"nil in an interface field on failure")
+	}
+}
+
+// A slow runner must not spend the connection drain's share.
+func TestASlowRunnerDoesNotSpendTheDrainsGrace(t *testing.T) {
+	listener := newListener()
+	listener.RegisterHandler(func(Event) { time.Sleep(time.Hour) })
+	conn := &stubConn{}
+	listener.nc = conn
+
+	go listener.runQueue()
+	listener.queue <- queued{event: Event{}}
+	time.Sleep(50 * time.Millisecond) // let the handler block
+
+	start := time.Now()
+	listener.Close()
+	waited := time.Since(start)
+
+	// The runner overshoots its share, and the drain still gets asked for and
+	// waited on afterwards.
+	if conn.drains.Load() != 1 {
+		t.Errorf("the connection was drained %d times: the runner consumed the drain's turn",
+			conn.drains.Load())
+	}
+	if waited < runnerShare+connDrainTimeout {
+		t.Errorf("Close returned after %v, which is less than the runner's %v plus the drain's "+
+			"own wait — one of them was skipped", waited, runnerShare)
+	}
+	if waited > CloseGrace+2*time.Second {
+		t.Errorf("Close took %v against a %v budget", waited, CloseGrace)
+	}
+}

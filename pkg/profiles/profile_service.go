@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/go-resty/resty/v2"
 
@@ -23,9 +24,14 @@ type ProfileServiceAPI struct {
 	tokenSource keycloak.TokenSource
 }
 
+// requestTimeout bounds one call to the profile service.
+const requestTimeout = 30 * time.Second
+
 func NewProfileServiceAPI(tokenSource keycloak.TokenSource) *ProfileServiceAPI {
 	client := resty.New()
 	client.SetBaseURL(common.Config.ProfileServiceUrl)
+	// The listener's shutdown waits on handlers that call through here.
+	client.SetTimeout(requestTimeout)
 	client.SetHeaders(map[string]string{
 		"Content-Type": "application/json",
 		"User-Agent":   common.ServiceName,

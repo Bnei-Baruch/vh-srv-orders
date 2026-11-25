@@ -10,11 +10,37 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Bnei-Baruch/vh-srv-orders/common"
 	"github.com/Bnei-Baruch/vh-srv-orders/internal/mocks"
 	pkgmocks "github.com/Bnei-Baruch/vh-srv-orders/internal/mocks/pkg"
 	"github.com/Bnei-Baruch/vh-srv-orders/pkg/profiles"
 	"github.com/Bnei-Baruch/vh-srv-orders/repo"
 )
+
+// withFailingDB makes Init fail at the repo step: CreateEmitter still succeeds
+// with an empty NatsUrl, and nothing listens on port 1.
+func withFailingDB(t *testing.T) {
+	t.Helper()
+
+	// The value, not the pointer: common.Config is *envConfig.
+	saved := *common.Config
+	t.Cleanup(func() { *common.Config = saved })
+
+	common.Config.NatsUrl = ""
+	common.Config.PgHost, common.Config.PgPort = "127.0.0.1", "1"
+}
+
+// Close runs on the Init failure path, so it has to survive a real partial Init.
+func TestBaseImporterCloseAfterFailedInit(t *testing.T) {
+	withFailingDB(t)
+
+	im := NewBaseImporter()
+	require.Error(t, im.Init(), "the repo step must fail for this test to mean anything")
+	// == nil, not require.Nil, which reports a boxed nil pointer as nil.
+	require.True(t, im.repo == nil, "a failed Init must leave no typed nil behind")
+
+	im.Close()
+}
 
 // The account is looked up by email, but an email can be stale while the
 // profile's keycloak id already has an account. A plain insert would then hit

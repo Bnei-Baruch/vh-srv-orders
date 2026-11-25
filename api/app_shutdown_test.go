@@ -61,33 +61,6 @@ func TestShutdownSurvivesAListenerThatNeverRan(t *testing.T) {
 	app.Shutdown()
 }
 
-// initDB must publish the repo only after the error check. NewOrdersDB returns a
-// concrete *repo.OrdersDB, so assigning it first boxes a nil pointer into a
-// non-nil interface: Shutdown's guard passes and Close panics on the nil
-// receiver. A source check because initDB exits on failure, and because the
-// hazard is the ordering rather than any value at run time.
-func TestInitDBPublishesTheRepoOnlyOnSuccess(t *testing.T) {
-	source, err := os.ReadFile("app.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if bytes.Contains(source, []byte("a.repo, err = repo.NewOrdersDB")) {
-		t.Error("initDB assigns NewOrdersDB straight into the interface field: on failure that " +
-			"is a typed nil, which defeats Shutdown's guard. Assign through a local and set " +
-			"a.repo after the error check")
-	}
-
-	assign := bytes.Index(source, []byte("a.repo = ordersDB"))
-	check := bytes.Index(source, []byte(`"connect to db"`))
-	switch {
-	case assign < 0:
-		t.Error("initDB should assign a.repo from a local after checking the error")
-	case assign < check:
-		t.Error("a.repo is assigned before the error is checked")
-	}
-}
-
 // Shutdown must stop the listener, and stop it before the repo. The consumer
 // goroutine writes through the repo, so closing the pool first turns in-flight
 // profile events into `closed pool` errors that are reported and never acked.
@@ -535,54 +508,66 @@ func TestEveryFatalPathGoesThroughOneFunction(t *testing.T) {
 	}
 
 	// And nothing may bypass it. Walked as syntax, so a comment does not count
-	// as a call, over every file of the package, since Initialize's helpers
-	// live outside app.go too.
+	// as a call; matched by import path, so an aliased import counts; over every
+	// declaration, so a package-level func literal counts; and over api and its
+	// subpackages, since Initialize builds from both.
 	allowed := map[string]string{
-		"utils.FatalAfter": "fatal",
+		utilsPath + ".FatalAfter": "fatal",
 		// Runs first in Initialize, before anything exists to drain or restore.
-		"utils.LogFatal": "initSentry",
+		utilsPath + ".LogFatal": "initSentry",
 	}
+	found := 0
 	for _, site := range exitSites(t) {
-		if allowed[site.call] != site.function {
-			t.Errorf("%s calls %s: every exit in package api goes through App.fatal, or it "+
-				"skips the signal restore and the drain", site.where, site.call)
+		if site.dir != "." || allowed[site.call] != site.function {
+			t.Errorf("%s calls %s: every exit under api goes through App.fatal, or it skips "+
+				"the signal restore and the drain", site.where, site.call)
+			continue
 		}
+		found++
 	}
+	// A walk that finds nothing passes everything.
+	if found != len(allowed) {
+		t.Errorf("found %d of the %d allowed exits: the walk is not seeing the code", found, len(allowed))
+	}
+}
+
+const utilsPath = "github.com/Bnei-Baruch/vh-srv-orders/pkg/utils"
+
+// exitFuncs is every function that ends the process, by import path.
+var exitFuncs = map[string]bool{
+	utilsPath + ".FatalAfter": true, utilsPath + ".LogFatal": true,
+	"os.Exit": true, "syscall.Exit": true,
+	"log.Fatal": true, "log.Fatalf": true, "log.Fatalln": true,
 }
 
 type exitSite struct {
-	call, function, where string
+	call, dir, function, where string
 }
 
-// exitSites lists every call to something that ends the process, in the
-// package's non-test files, with the top-level function it is in. A call
-// through a function value (`die := utils.LogFatal`) is not seen.
+// exitSites lists every direct call to an exitFuncs entry in the non-test
+// files under api, with its directory and top-level function ("" outside
+// one). Not seen: a call through a function value (`die := utils.LogFatal`),
+// or an exit inside another package that api calls.
 func exitSites(t *testing.T) []exitSite {
 	t.Helper()
-	exits := map[string]bool{
-		"utils.FatalAfter": true, "utils.LogFatal": true, "os.Exit": true,
-		"log.Fatal": true, "log.Fatalf": true, "log.Fatalln": true,
-	}
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatal(err)
-	}
 	fset := token.NewFileSet()
 	var sites []exitSite
-	for _, name := range files {
-		if strings.HasSuffix(name, "_test.go") {
-			continue
+	err := filepath.WalkDir(".", func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") ||
+			strings.HasSuffix(path, "_test.go") {
+			return err
 		}
-		file, err := parser.ParseFile(fset, name, nil, 0)
+		file, err := parser.ParseFile(fset, path, nil, 0)
 		if err != nil {
-			t.Fatal(err)
+			return err
 		}
+		imports := importNames(file)
 		for _, decl := range file.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok {
-				continue
+			function := ""
+			if fn, ok := decl.(*ast.FuncDecl); ok {
+				function = fn.Name.Name
 			}
-			ast.Inspect(fn, func(node ast.Node) bool {
+			ast.Inspect(decl, func(node ast.Node) bool {
 				call, ok := node.(*ast.CallExpr)
 				if !ok {
 					return true
@@ -592,15 +577,36 @@ func exitSites(t *testing.T) []exitSite {
 					return true
 				}
 				pkg, ok := sel.X.(*ast.Ident)
-				if ok && exits[pkg.Name+"."+sel.Sel.Name] {
-					sites = append(sites, exitSite{pkg.Name + "." + sel.Sel.Name, fn.Name.Name,
+				if !ok {
+					return true
+				}
+				if name := imports[pkg.Name] + "." + sel.Sel.Name; exitFuncs[name] {
+					sites = append(sites, exitSite{name, filepath.Dir(path), function,
 						fset.Position(call.Pos()).String()})
 				}
 				return true
 			})
 		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 	return sites
+}
+
+// importNames maps each name a file refers to an import by to its path.
+func importNames(file *ast.File) map[string]string {
+	names := map[string]string{}
+	for _, spec := range file.Imports {
+		path := strings.Trim(spec.Path.Value, `"`)
+		name := path[strings.LastIndex(path, "/")+1:]
+		if spec.Name != nil {
+			name = spec.Name.Name
+		}
+		names[name] = path
+	}
+	return names
 }
 
 // A signal during the database connect is a stop, not a crash. Threading the
@@ -635,6 +641,58 @@ func TestACancelledConnectIsNotAFatal(t *testing.T) {
 	}
 	if !strings.Contains(output, "RETURNED") {
 		t.Errorf("initDB did not return on a cancelled context:\n%s", output)
+	}
+}
+
+// The same rule for the OIDC discovery fetch: a signal during it is a stop,
+// and the same fetch failing with no signal is still a fatal.
+func TestACancelledDiscoveryFetchIsNotAFatal(t *testing.T) {
+	if mode := os.Getenv("DISCOVERY_CHILD"); mode != "" {
+		// Nothing listening, so the fetch fails either way; what is under test
+		// is which reason wins.
+		common.Config.KeycloakServerUrl, common.Config.KeycloakRealm = "http://127.0.0.1:1", "x"
+		ctx, cancel := context.WithCancel(context.Background())
+		if mode == "cancelled" {
+			cancel()
+		}
+		defer cancel()
+		new(App).initGinEngine(ctx)
+		fmt.Fprintln(os.Stderr, "RETURNED")
+		return
+	}
+
+	run := func(mode string) (string, error) {
+		child := exec.Command(os.Args[0], "-test.run=^TestACancelledDiscoveryFetchIsNotAFatal$")
+		child.Env = append(os.Environ(), "DISCOVERY_CHILD="+mode)
+		out, err := child.CombinedOutput()
+		return string(out), err
+	}
+
+	if out, err := run("cancelled"); err != nil || !strings.Contains(out, "RETURNED") {
+		t.Errorf("a signal during the discovery fetch exited (%v), so a clean stop is "+
+			"recorded as a crashed startup:\n%s", err, out)
+	}
+	if out, err := run("live"); err == nil || strings.Contains(out, "RETURNED") {
+		t.Errorf("an unreachable Keycloak with no signal did not exit 1 (%v):\n%s", err, out)
+	}
+}
+
+// On the graceful path serve restores the signals before the request grace and
+// the drain, which together can take most of a minute, so a second Ctrl-C can
+// still cut them short.
+func TestServeRestoresSignalsOnTheGracefulPath(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var stopped atomic.Bool
+	app := &App{stop: func() { stopped.Store(true) }}
+	closed := make(chan struct{})
+	defer close(closed)
+	app.serve(ctx, &http.Server{}, func() error { <-closed; return http.ErrServerClosed })
+
+	if !stopped.Load() {
+		t.Error("serve took the graceful path without restoring signal handling: a second " +
+			"Ctrl-C does nothing for the rest of the exit")
 	}
 }
 

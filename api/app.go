@@ -100,9 +100,6 @@ func (a *App) initDB(ctx context.Context) {
 	connectCtx, cancel := context.WithTimeout(ctx, dbConnectTimeout)
 	defer cancel()
 
-	// Through a local: NewOrdersDB returns a concrete *repo.OrdersDB, and on
-	// failure that nil pointer boxes into a non-nil interface — Shutdown's guard
-	// would pass and its Close would panic on the nil receiver.
 	ordersDB, err := repo.NewOrdersDB(connectCtx, a.eventEmitter)
 	if err != nil {
 		// The parent, not connectCtx: a connect that times out is a failure,

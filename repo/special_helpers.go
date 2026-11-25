@@ -141,9 +141,8 @@ func (o *OrdersDB) GetSpecialsByKeycloakId(ctx context.Context, keycloakID strin
 	return specials, nil
 }
 
-// GetAllSpecials returns a page of specials, newest first. The table only
-// grows (revoking rewrites end_date), so the listing has to be bounded.
-// GetAllSpecials returns every row when limit is 0.
+// GetAllSpecials returns specials newest first: a page of at most limit rows,
+// or every row when limit is 0.
 func (o *OrdersDB) GetAllSpecials(ctx context.Context, skip, limit int) ([]*Special, error) {
 	var specials []*Special
 	var limitArg any // LIMIT NULL is no limit

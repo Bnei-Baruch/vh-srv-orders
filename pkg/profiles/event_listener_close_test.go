@@ -4,8 +4,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"os"
-	"regexp"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -17,11 +18,12 @@ import (
 // stubMsg is a delivered message that records its own acknowledgement. Only the
 // three methods this package touches do anything.
 type stubMsg struct {
-	data       string
-	acks       atomic.Int64
-	naks       atomic.Int64
-	inProgress atomic.Int64
-	ackPanics  bool
+	data          string
+	acks          atomic.Int64
+	naks          atomic.Int64
+	inProgress    atomic.Int64
+	inProgressErr error
+	ackPanics     bool
 }
 
 func (m *stubMsg) Data() []byte { return []byte(m.data) }
@@ -32,10 +34,13 @@ func (m *stubMsg) Ack() error {
 	}
 	return nil
 }
-func (m *stubMsg) Nak() error                                { m.naks.Add(1); return nil }
-func (m *stubMsg) NakWithDelay(time.Duration) error          { return nil }
-func (m *stubMsg) DoubleAck(context.Context) error           { return nil }
-func (m *stubMsg) InProgress() error                         { m.inProgress.Add(1); return nil }
+func (m *stubMsg) Nak() error                       { m.naks.Add(1); return nil }
+func (m *stubMsg) NakWithDelay(time.Duration) error { return nil }
+func (m *stubMsg) DoubleAck(context.Context) error  { return nil }
+func (m *stubMsg) InProgress() error {
+	m.inProgress.Add(1)
+	return m.inProgressErr
+}
 func (m *stubMsg) Term() error                               { return nil }
 func (m *stubMsg) TermWithReason(string) error               { return nil }
 func (m *stubMsg) Metadata() (*jetstream.MsgMetadata, error) { return nil, nil }
@@ -155,6 +160,34 @@ func TestTheAckFollowsTheHandlers(t *testing.T) {
 
 	if msg.acks.Load() != 1 {
 		t.Errorf("acked %d times, want once", msg.acks.Load())
+	}
+}
+
+// An ack can land between touchHeld's copy of the held set and its InProgress
+// call. That is not an error worth an Error log on every race.
+func TestTouchHeldIgnoresAMessageAckedMeanwhile(t *testing.T) {
+	var logged bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, nil)))
+	defer slog.SetDefault(prev)
+
+	listener := newListener()
+	acked := &stubMsg{inProgressErr: jetstream.ErrMsgAlreadyAckd}
+	failing := &stubMsg{inProgressErr: errors.New("connection closed")}
+	listener.hold(acked)
+	listener.hold(failing)
+
+	listener.touchHeld()
+
+	if acked.inProgress.Load() != 1 || failing.inProgress.Load() != 1 {
+		t.Fatalf("InProgress calls: acked %d, failing %d; want one each",
+			acked.inProgress.Load(), failing.inProgress.Load())
+	}
+	if strings.Contains(logged.String(), "already acknowledged") {
+		t.Errorf("an already-acked message was logged as an error:\n%s", logged.String())
+	}
+	if !strings.Contains(logged.String(), "connection closed") {
+		t.Errorf("a real InProgress failure was not logged:\n%s", logged.String())
 	}
 }
 
@@ -283,25 +316,6 @@ func TestConsumerBoundsItsRedelivery(t *testing.T) {
 	if config.MaxDeliver != 0 {
 		t.Errorf("MaxDeliver is %d, which drops the message on that delivery — there is no dead "+
 			"letter to catch it", config.MaxDeliver)
-	}
-}
-
-// The prefetch has to be bounded to the queue.
-func TestTheConsumeCallBoundsItsPrefetch(t *testing.T) {
-	source, err := os.ReadFile("event_listener.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	consume := regexp.MustCompile(`(?s)el\.consumer\.Consume\((.*?)\)\n`).FindSubmatch(source)
-	if consume == nil {
-		t.Fatal("the Consume call was not found in event_listener.go")
-	}
-
-	if !bytes.Contains(consume[1], []byte("jetstream.PullMaxMessages(queueCapacity)")) {
-		t.Error("Consume must bound its prefetch with jetstream.PullMaxMessages(queueCapacity): " +
-			"the default is 500 messages, all of them counting against AckWait while they wait " +
-			"for a runner that handles them one at a time")
 	}
 }
 

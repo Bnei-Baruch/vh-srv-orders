@@ -3,6 +3,7 @@ package profiles
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"runtime/debug"
@@ -162,7 +163,8 @@ func consumerConfig() jetstream.ConsumerConfig {
 
 func (el *EventListener) Run() error {
 	var err error
-	// Prefetch bounded to the queue: delivered messages start their AckWait clock.
+	// MaxAckPending is what bounds delivery; this only keeps the client from
+	// asking for the default 500 it cannot be given.
 	el.consumerCtx, err = el.consumer.Consume(el.handleMessage,
 		jetstream.PullMaxMessages(queueCapacity))
 	if err != nil {
@@ -201,7 +203,8 @@ func (el *EventListener) touchHeld() {
 	el.heldMu.Unlock()
 
 	for _, msg := range msgs {
-		if err := msg.InProgress(); err != nil {
+		// The ack can land between the copy above and this call.
+		if err := msg.InProgress(); err != nil && !errors.Is(err, jetstream.ErrMsgAlreadyAckd) {
 			slog.Error("EventListener in-progress", slog.Any("err", err))
 		}
 	}

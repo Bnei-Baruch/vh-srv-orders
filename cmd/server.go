@@ -34,7 +34,19 @@ func serverFn(cmd *cobra.Command, args []string) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	app := api.NewApp()
+	runServer(ctx, stop, api.NewApp(), utils.FatalAfter)
+}
+
+// server is what runServer needs of *api.App, so its order can be tested.
+type server interface {
+	Initialize(ctx context.Context, stop func()) error
+	Run(ctx context.Context)
+	Shutdown()
+}
+
+// runServer starts the app and drains it on every way out. fatal is
+// utils.FatalAfter outside tests, and does not return there.
+func runServer(ctx context.Context, stop func(), app server, fatal func(cleanup func(), msg string, args ...any)) {
 	// Before Initialize, so a failed startup still drains what was built.
 	defer app.Shutdown()
 
@@ -49,7 +61,8 @@ func serverFn(cmd *cobra.Command, args []string) {
 			return
 		}
 
-		utils.FatalAfter(app.Shutdown, "app.Initialize", slog.Any("err", err))
+		fatal(app.Shutdown, "app.Initialize", slog.Any("err", err))
+		return
 	}
 
 	app.Run(ctx)

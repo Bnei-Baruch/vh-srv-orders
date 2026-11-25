@@ -361,10 +361,15 @@ func (a *App) Run(ctx context.Context) {
 		Addr:    ":" + common.Config.Port,
 		Handler: a.gEngine,
 	}
+	a.serve(ctx, server, server.ListenAndServe)
+}
 
+// serve is Run with the listen call injected, so a test can make the bind fail
+// after a signal has already sent it down the graceful path.
+func (a *App) serve(ctx context.Context, server *http.Server, listen func() error) {
 	listenErr := make(chan error, 1)
 	go func() {
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := listen(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			listenErr <- err
 		}
 	}()

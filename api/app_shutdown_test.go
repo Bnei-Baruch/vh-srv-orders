@@ -5,11 +5,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -470,28 +474,31 @@ func TestALateListenErrorStillExitsNonZero(t *testing.T) {
 }
 
 // Run has to consult that channel on the graceful path. Testing the reporting
-// alone leaves the call site unpinned, and the call site is the whole point.
+// alone leaves the call site unpinned, and the call site is the whole point:
+// here the signal is already in when the bind fails, so serve takes the
+// graceful branch and only that check turns the failure into exit 1.
 func TestRunChecksForALateListenErrorOnTheGracefulPath(t *testing.T) {
-	source, err := os.ReadFile("app.go")
-	if err != nil {
-		t.Fatal(err)
+	if os.Getenv("GRACEFUL_LISTEN_CHILD") == "1" {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		failLate := func() error {
+			time.Sleep(50 * time.Millisecond)
+			return errors.New("listen tcp :8185: bind: address already in use")
+		}
+		new(App).serve(ctx, &http.Server{}, failLate)
+		fmt.Fprintln(os.Stderr, "RETURNED")
+		return
 	}
 
-	body := regexp.MustCompile(`(?s)func \(a \*App\) Run\([^\n]*\) \{(.*?)\n\}`).
-		FindSubmatch(source)
-	if body == nil {
-		t.Fatal("Run was not found in app.go")
+	child := exec.Command(os.Args[0], "-test.run=^TestRunChecksForALateListenErrorOnTheGracefulPath$")
+	child.Env = append(os.Environ(), "GRACEFUL_LISTEN_CHILD=1")
+	out, err := child.CombinedOutput()
+	if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 1 {
+		t.Errorf("a bind failure after the signal must exit 1, got %v — the graceful path does "+
+			"not check for it:\n%s", err, out)
 	}
-
-	graceful := bytes.Index(body[1], []byte("case <-ctx.Done():"))
-	report := bytes.Index(body[1], []byte("a.reportLateListenError("))
-	switch {
-	case report < 0:
-		t.Error("Run does not check for a listen failure after the graceful path, so a signal " +
-			"racing a bind failure exits 0")
-	case report < graceful:
-		t.Error("the check runs before the graceful branch, where it cannot see a failure that " +
-			"arrives during the shutdown")
+	if strings.Contains(string(out), "RETURNED") {
+		t.Errorf("serve returned, so main would exit 0 for a server that never listened:\n%s", out)
 	}
 }
 
@@ -527,36 +534,73 @@ func TestEveryFatalPathGoesThroughOneFunction(t *testing.T) {
 		t.Error("App.fatal drains before restoring signals, so the drain cannot be interrupted")
 	}
 
-	// And nothing may bypass it. Counting rather than locating, so a new fatal
-	// anywhere in the file fails this regardless of which function it is in.
-	if calls := bytes.Count(source, []byte("utils.FatalAfter(")); calls != 1 {
-		t.Errorf("app.go calls utils.FatalAfter %d times, want 1 — inside App.fatal. A direct "+
-			"call skips the signal restore, which is exactly how six sites in Initialize were "+
-			"missed", calls)
+	// And nothing may bypass it. Walked as syntax, so a comment does not count
+	// as a call, over every file of the package, since Initialize's helpers
+	// live outside app.go too.
+	allowed := map[string]string{
+		"utils.FatalAfter": "fatal",
+		// Runs first in Initialize, before anything exists to drain or restore.
+		"utils.LogFatal": "initSentry",
+	}
+	for _, site := range exitSites(t) {
+		if allowed[site.call] != site.function {
+			t.Errorf("%s calls %s: every exit in package api goes through App.fatal, or it "+
+				"skips the signal restore and the drain", site.where, site.call)
+		}
 	}
 }
 
-// serverFn defers the drain before it starts building, and treats a signal
-// during startup as a stop rather than a crash.
-func TestServerFnDefersTheDrainAndDistinguishesACancelledStartup(t *testing.T) {
-	source, err := os.ReadFile("../cmd/server.go")
+type exitSite struct {
+	call, function, where string
+}
+
+// exitSites lists every call to something that ends the process, in the
+// package's non-test files, with the top-level function it is in. A call
+// through a function value (`die := utils.LogFatal`) is not seen.
+func exitSites(t *testing.T) []exitSite {
+	t.Helper()
+	exits := map[string]bool{
+		"utils.FatalAfter": true, "utils.LogFatal": true, "os.Exit": true,
+		"log.Fatal": true, "log.Fatalf": true, "log.Fatalln": true,
+	}
+	files, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	deferShutdown := bytes.Index(source, []byte("defer app.Shutdown()"))
-	initialize := bytes.Index(source, []byte("app.Initialize("))
-	switch {
-	case deferShutdown < 0 || initialize < 0:
-		t.Fatal("serverFn does not look like it did: check this test before the code")
-	case deferShutdown > initialize:
-		t.Error("the drain is deferred after Initialize, so a failure during startup drains nothing")
+	fset := token.NewFileSet()
+	var sites []exitSite
+	for _, name := range files {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			ast.Inspect(fn, func(node ast.Node) bool {
+				call, ok := node.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				sel, ok := call.Fun.(*ast.SelectorExpr)
+				if !ok {
+					return true
+				}
+				pkg, ok := sel.X.(*ast.Ident)
+				if ok && exits[pkg.Name+"."+sel.Sel.Name] {
+					sites = append(sites, exitSite{pkg.Name + "." + sel.Sel.Name, fn.Name.Name,
+						fset.Position(call.Pos()).String()})
+				}
+				return true
+			})
+		}
 	}
-
-	if !bytes.Contains(source, []byte("errors.Is(err, context.Canceled)")) {
-		t.Error("serverFn does not distinguish a cancelled startup from a failed one, so a " +
-			"signal during Initialize exits 1")
-	}
+	return sites
 }
 
 // A signal during the database connect is a stop, not a crash. Threading the

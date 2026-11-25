@@ -561,7 +561,7 @@ func exitSites(t *testing.T) []exitSite {
 		if err != nil {
 			return err
 		}
-		imports := importNames(file)
+		imports, dotImports := importNames(file)
 		for _, decl := range file.Decls {
 			function := ""
 			if fn, ok := decl.(*ast.FuncDecl); ok {
@@ -572,17 +572,11 @@ func exitSites(t *testing.T) []exitSite {
 				if !ok {
 					return true
 				}
-				sel, ok := call.Fun.(*ast.SelectorExpr)
-				if !ok {
-					return true
-				}
-				pkg, ok := sel.X.(*ast.Ident)
-				if !ok {
-					return true
-				}
-				if name := imports[pkg.Name] + "." + sel.Sel.Name; exitFuncs[name] {
-					sites = append(sites, exitSite{name, filepath.Dir(path), function,
-						fset.Position(call.Pos()).String()})
+				for _, name := range calledNames(call, imports, dotImports) {
+					if exitFuncs[name] {
+						sites = append(sites, exitSite{name, filepath.Dir(path), function,
+							fset.Position(call.Pos()).String()})
+					}
 				}
 				return true
 			})
@@ -595,18 +589,41 @@ func exitSites(t *testing.T) []exitSite {
 	return sites
 }
 
-// importNames maps each name a file refers to an import by to its path.
-func importNames(file *ast.File) map[string]string {
-	names := map[string]string{}
+// importNames maps each name a file refers to an import by to its path, and
+// lists the dot imports, whose functions are called by bare name.
+func importNames(file *ast.File) (names map[string]string, dot []string) {
+	names = map[string]string{}
 	for _, spec := range file.Imports {
 		path := strings.Trim(spec.Path.Value, `"`)
 		name := path[strings.LastIndex(path, "/")+1:]
 		if spec.Name != nil {
 			name = spec.Name.Name
 		}
+		if name == "." {
+			dot = append(dot, path)
+			continue
+		}
 		names[name] = path
 	}
-	return names
+	return names, dot
+}
+
+// calledNames is what a call can resolve to, as "importpath.Func": pkg.Func
+// through the file's imports, or a bare Func through any of its dot imports.
+func calledNames(call *ast.CallExpr, imports map[string]string, dotImports []string) []string {
+	switch fun := call.Fun.(type) {
+	case *ast.SelectorExpr:
+		if pkg, ok := fun.X.(*ast.Ident); ok {
+			return []string{imports[pkg.Name] + "." + fun.Sel.Name}
+		}
+	case *ast.Ident:
+		names := make([]string, 0, len(dotImports))
+		for _, path := range dotImports {
+			names = append(names, path+"."+fun.Name)
+		}
+		return names
+	}
+	return nil
 }
 
 // A signal during the database connect is a stop, not a crash. Threading the
@@ -679,20 +696,46 @@ func TestACancelledDiscoveryFetchIsNotAFatal(t *testing.T) {
 
 // On the graceful path serve restores the signals before the request grace and
 // the drain, which together can take most of a minute, so a second Ctrl-C can
-// still cut them short.
-func TestServeRestoresSignalsOnTheGracefulPath(t *testing.T) {
+// still cut them short. The request here is held open until stop runs: called
+// first, it lets the grace end at once; called after, the grace runs its 15s.
+func TestServeRestoresSignalsBeforeTheRequestGrace(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stopped := make(chan struct{})
+	var stopOnce sync.Once
+	release := func() { stopOnce.Do(func() { close(stopped) }) }
+	defer release()
+
+	inHandler := make(chan struct{})
+	server := &http.Server{Handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		close(inHandler)
+		<-stopped
+	})}
+	app := &App{stop: release}
+
 	ctx, cancel := context.WithCancel(context.Background())
+	served := make(chan struct{})
+	go func() {
+		defer close(served)
+		app.serve(ctx, server, func() error { return server.Serve(listener) })
+	}()
+	go func() { _, _ = http.Get("http://" + listener.Addr().String()) }()
+
+	select {
+	case <-inHandler:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the request never reached the handler")
+	}
 	cancel()
 
-	var stopped atomic.Bool
-	app := &App{stop: func() { stopped.Store(true) }}
-	closed := make(chan struct{})
-	defer close(closed)
-	app.serve(ctx, &http.Server{}, func() error { <-closed; return http.ErrServerClosed })
-
-	if !stopped.Load() {
-		t.Error("serve took the graceful path without restoring signal handling: a second " +
-			"Ctrl-C does nothing for the rest of the exit")
+	select {
+	case <-served:
+	case <-time.After(3 * time.Second):
+		t.Fatal("serve is still in the request grace with the signal still trapped: stop must " +
+			"run before stopServer, or a second Ctrl-C does nothing during it")
 	}
 }
 

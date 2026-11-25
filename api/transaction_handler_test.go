@@ -450,6 +450,32 @@ func Test_new_token_page_call_survives_the_caller_going_away(t *testing.T) {
 	a := NewTestApp(t)
 	defer CloseTestApp(a)
 
+	assertPageCallSurvivesTheCaller(t, a, "/v2/transaction/new_token", `{}`)
+}
+
+// The main pay path: by the page call, the order and payment rows exist.
+func Test_order_and_pay_page_call_survives_the_caller_going_away(t *testing.T) {
+	a := newCheckoutTestApp(t, emptyPriority)
+	createCheckoutAccount(t, a, "IL")
+
+	req := membershipCheckout(1, common.CurrencyUSD)
+	req.ProductType = null.StringFrom("ticket")
+	req.Type = null.StringFrom("regular")
+	req.TerminalId = null.StringFrom("")
+	body, err := json.Marshal(req)
+	require.NoError(t, err)
+
+	assertPageCallSurvivesTheCaller(t, a, "/v2/transaction/", string(body))
+}
+
+// assertPageCallSurvivesTheCaller posts body to path as root, cancels the
+// request once the page call has reached checkout, and asserts checkout's
+// request was not cancelled with it. Every wait is bounded, so a handler that
+// never makes the call fails here by name instead of hanging the package.
+func assertPageCallSurvivesTheCaller(t *testing.T, a *App, path, body string) {
+	t.Helper()
+	const wait = 5 * time.Second
+
 	received := make(chan struct{})
 	outboundCancelled := make(chan bool, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -470,17 +496,35 @@ func Test_new_token_page_call_survives_the_caller_going_away(t *testing.T) {
 	a.ordersAPI.pages = &pelecard.Client{Client: resty.New(), BaseURL: srv.URL, Tokens: keycloak.StaticTokenSource("tok")}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	claims := &middleware.IDTokenClaims{Sub: USER_KEY, RealmAccess: middleware.Roles{Roles: []string{common.RoleRoot}}}
-	r := httptest.NewRequest(http.MethodPost, "/v2/transaction/new_token", strings.NewReader(`{}`)).
+	r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body)).
 		WithContext(context.WithValue(ctx, common.CtxAuthClaims, claims))
+	recorder := httptest.NewRecorder()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		a.gEngine.ServeHTTP(httptest.NewRecorder(), r)
+		a.gEngine.ServeHTTP(recorder, r)
 	}()
 
-	<-received
+	select {
+	case <-received:
+	case <-done:
+		t.Fatalf("%s returned without calling checkout's page: %d %s", path, recorder.Code, recorder.Body)
+	case <-time.After(wait):
+		t.Fatalf("%s did not call checkout's page within %v", path, wait)
+	}
 	cancel()
-	assert.False(t, <-outboundCancelled, "the page request was cancelled with the caller")
-	<-done
+
+	select {
+	case cancelled := <-outboundCancelled:
+		assert.False(t, cancelled, "%s: the page request was cancelled with the caller", path)
+	case <-time.After(wait):
+		t.Fatalf("checkout's stub never answered for %s", path)
+	}
+	select {
+	case <-done:
+	case <-time.After(wait):
+		t.Fatalf("%s did not return after the page call", path)
+	}
 }

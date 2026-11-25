@@ -434,7 +434,7 @@ func (o *OrdersAPI) handleTransactionNewTokenNoCVV(c *gin.Context) {
 		return
 	}
 
-	body, reused, err := o.renewCardPages.open(paymentCallContext(c), reference, payload,
+	body, reused, err := o.renewCardPages.open(c.Request.Context(), reference, payload,
 		func(ctx context.Context) ([]byte, bool, error) {
 			resp, err := o.pages.OpenPage(ctx, pelecard.PageRenewCard, payload)
 			if err != nil {
